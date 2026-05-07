@@ -6,7 +6,9 @@ Repository bootstrap en cours.
 
 T002 (lifecycle PR IA et artefacts `runs/TXXX/`) est livré et sert désormais de protocole GitHub officiel.
 
-T003 (agent local minimal) est maintenant livré dans une première version fonctionnelle.
+T003 (agent local minimal) est livré.
+
+T004 (state machine locale minimale) est maintenant livré.
 
 Artefacts T002 disponibles :
 - `runs/T002/plan.md`
@@ -14,11 +16,12 @@ Artefacts T002 disponibles :
 - `runs/T002/tests/test-report.md`
 - `runs/T002/memory/memory-update.md`
 
-Composants T003 disponibles :
+Composants disponibles :
 - `tools/agent_runner/run_step.py`
 - `tools/agent_runner/README.md`
 - prompts T003
 - structure `runs/T003/`
+- state machine workflow minimale
 
 Le runner local minimal sait désormais :
 - créer automatiquement `runs/TXXX/`
@@ -27,6 +30,9 @@ Le runner local minimal sait désormais :
 - afficher un prompt
 - écrire des artefacts depuis stdin
 - maintenir `workflow-status.md`
+- déterminer la prochaine étape d’un ticket
+- afficher le prochain prompt attendu
+- afficher le prochain artefact attendu
 - protéger les chemins dangereux
 
 Le workflow chat-driven complet a été testé :
@@ -48,10 +54,11 @@ Le workflow chat-driven complet a été testé :
 - Les snapshots d’exécution vivent sous `runs/TXXX/`.
 - Le runner local minimal reste volontairement non autonome.
 - Les prompts restent conçus par ChatGPT/conversation et non générés par l’agent.
+- T004 introduit une state machine locale simple basée sur `workflow-status.md`.
 
 ## Next Topics
 
-- orchestration automatique des étapes
+- orchestration automatique réelle des étapes
 - watcher GitHub local
 - intégration LLM future
 - pipeline mémoire automatisé
@@ -60,8 +67,9 @@ Le workflow chat-driven complet a été testé :
 
 ## Dette / limitations connues
 
-- T003 reste manuel : pas de boucle autonome.
+- Pas encore d’exécution automatique des prompts.
 - Aucun appel API LLM.
 - Aucun merge automatique.
 - Aucun watcher GitHub.
 - Aucun système multi-agent avancé.
+- State machine volontairement simplifiée.
