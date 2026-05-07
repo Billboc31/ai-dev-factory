@@ -17,6 +17,7 @@ It only:
 - creates `runs/TXXX/`
 - stores execution artifacts
 - maintains a minimal workflow status file
+- exposes a minimal workflow state machine
 
 ## Usage
 
@@ -42,6 +43,20 @@ python tools/agent_runner/run_step.py T002 review --write-output runs/T002/revie
 
 ```bash
 python tools/agent_runner/run_step.py T002 review --set-status IMPLEMENTATION_APPROVED
+```
+
+### Show the next workflow step
+
+```bash
+python tools/agent_runner/run_step.py T002 --next
+```
+
+Example output:
+
+```text
+Next step: coder
+Prompt: prompts/T002-coder.md
+Expected output: runs/T002/implementation-output.md
 ```
 
 ## Standard run tree
