@@ -87,14 +87,20 @@ def execute_once(ticket_id: str, step: str, command: str) -> int:
 def checkout_branch(ticket_id: str, slug: str | None) -> int:
     name = branch_name(ticket_id, slug)
     print(f"checkout branch: {name}")
-    return run_git(["checkout", "-B", name])
+    exists = run_command(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{name}"])
+    if exists.returncode == 0:
+        return run_git(["checkout", name])
+    return run_git(["checkout", "-b", name])
 
 
 def commit_ticket(ticket_id: str, message: str | None) -> int:
     default_message = f"{ticket_id}: update agent workflow artifacts"
     commit_message = message or default_message
 
-    add_result = run_command(["git", "add", "."])
+    run_dir = f"runs/{ticket_id}/"
+    print(f"staging: {run_dir}")
+    print("note: only runs/ artifacts are auto-staged — stage other changes manually before running --commit")
+    add_result = run_command(["git", "add", run_dir])
     print_result(add_result)
     if add_result.returncode != 0:
         return add_result.returncode
