@@ -10,6 +10,8 @@ This runner remains intentionally explicit:
 from __future__ import annotations
 
 import argparse
+import datetime
+import json
 import re
 import subprocess
 import sys
@@ -18,6 +20,38 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 RUN_STEP = ROOT / "run_step.py"
+
+VALID_STATES = frozenset({
+    "INIT",
+    "PLAN_REVIEW_NEEDED",
+    "PLAN_FIX_REQUIRED",
+    "PLAN_APPROVED",
+    "IMPLEMENTATION_REVIEW_NEEDED",
+    "IMPLEMENTATION_FIX_REQUIRED",
+    "IMPLEMENTATION_APPROVED",
+    "TEST_COMPLETE",
+})
+
+# Maps state -> (step, is_deterministic, possible_next_states_in_order)
+# None marks a terminal state with no further transitions.
+TRANSITIONS: dict[str, tuple[str, bool, list[str]] | None] = {
+    "INIT":                         ("planner", True,  ["PLAN_REVIEW_NEEDED"]),
+    "PLAN_REVIEW_NEEDED":           ("review",  False, ["PLAN_APPROVED", "PLAN_FIX_REQUIRED"]),
+    "PLAN_FIX_REQUIRED":            ("planner", True,  ["PLAN_REVIEW_NEEDED"]),
+    "PLAN_APPROVED":                ("coder",   True,  ["IMPLEMENTATION_REVIEW_NEEDED"]),
+    "IMPLEMENTATION_REVIEW_NEEDED": ("review",  False, ["IMPLEMENTATION_APPROVED", "IMPLEMENTATION_FIX_REQUIRED"]),
+    "IMPLEMENTATION_FIX_REQUIRED":  ("coder",   True,  ["IMPLEMENTATION_REVIEW_NEEDED"]),
+    "IMPLEMENTATION_APPROVED":      ("tester",  True,  ["TEST_COMPLETE"]),
+    "TEST_COMPLETE":                None,
+}
+
+# Must stay in sync with run_step.py DEFAULT_OUTPUTS
+DEFAULT_OUTPUTS: dict[str, str] = {
+    "planner": "plan.md",
+    "coder": "implementation-output.md",
+    "review": "reviews/review.md",
+    "tester": "tests/test-report.md",
+}
 
 
 class TicketRunnerError(Exception):
@@ -115,6 +149,230 @@ def push_branch(ticket_id: str, slug: str | None) -> int:
     return run_git(["push", "-u", "origin", name])
 
 
+# ── state machine helpers ─────────────────────────────────────────────────────
+
+def _state_path(ticket_id: str) -> Path:
+    return Path("runs") / ticket_id / "state.json"
+
+
+def _runtime_log_path(ticket_id: str) -> Path:
+    return Path("runs") / ticket_id / "runtime.log"
+
+
+def _now_iso() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _log_runtime(ticket_id: str, message: str) -> None:
+    log_path = _runtime_log_path(ticket_id)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(f"[{_now_iso()}] {message}\n")
+
+
+def load_state(ticket_id: str) -> dict:
+    path = _state_path(ticket_id)
+    if not path.exists():
+        raise TicketRunnerError("state.json not found — run --auto-init first")
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        raise TicketRunnerError("state.json is corrupted")
+    state_value = data.get("state")
+    if not state_value or state_value not in VALID_STATES:
+        raise TicketRunnerError(f"unknown state: {state_value!r}")
+    return data
+
+
+def save_state(ticket_id: str, state_dict: dict) -> None:
+    path = _state_path(ticket_id)
+    updated = {**state_dict, "updated_at": _now_iso()}
+    tmp = path.parent / (path.name + ".tmp")
+    tmp.write_text(json.dumps(updated, indent=2), encoding="utf-8")
+    tmp.rename(path)  # atomic on same filesystem
+
+
+def _get_current_branch() -> str:
+    result = run_command(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    if result.returncode != 0:
+        raise TicketRunnerError("failed to determine current git branch")
+    return result.stdout.strip()
+
+
+def _check_working_tree_clean() -> None:
+    result = run_command(["git", "status", "--porcelain"])
+    if result.returncode != 0:
+        raise TicketRunnerError("failed to check git status")
+    if result.stdout.strip():
+        raise TicketRunnerError(
+            "working tree is not clean — commit or stash changes before running --auto"
+        )
+
+
+def _determine_next_state(
+    is_deterministic: bool,
+    output: str,
+    possible_next: list[str],
+) -> str | None:
+    if is_deterministic:
+        return possible_next[0]
+    found = [kw for kw in possible_next if re.search(rf"^{re.escape(kw)}$", output, re.MULTILINE)]
+    if not found:
+        return None
+    if len(found) > 1:
+        print(
+            f"warning: multiple review keywords found {found!r} — using first: {found[0]!r}",
+            file=sys.stderr,
+        )
+    return found[0]
+
+
+def _call_run_step(ticket_id: str, step: str, exec_cmd: str) -> tuple[int, str]:
+    """Invoke run_step.py for one step; return (exit_code, output_file_content)."""
+    result = run_command([
+        sys.executable,
+        str(RUN_STEP),
+        ticket_id,
+        step,
+        "--exec-cmd",
+        exec_cmd,
+    ])
+    if result.stdout:
+        print(result.stdout, end="")
+    if result.stderr:
+        print(result.stderr, end="", file=sys.stderr)
+
+    output_rel = DEFAULT_OUTPUTS.get(step, f"{step}-output.md")
+    output_path = Path("runs") / ticket_id / output_rel
+    if output_path.exists():
+        output_content = output_path.read_text(encoding="utf-8")
+    else:
+        output_content = ""
+        if result.returncode == 0:
+            print(f"warning: expected output file {output_path} not found", file=sys.stderr)
+            _log_runtime(ticket_id, f"auto-run: output file missing: {output_path}")
+    return result.returncode, output_content
+
+
+def _append_workflow_journal(ticket_id: str, prev_state: str, step: str, next_state: str) -> None:
+    run_dir = Path("runs") / ticket_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    journal_path = run_dir / "workflow-status.md"
+    entry = f"\n## {_now_iso()}\n\n- prev: {prev_state}\n- step: {step}\n- next: {next_state}\n"
+    with journal_path.open("a", encoding="utf-8") as fh:
+        fh.write(entry)
+
+
+# ── --auto-init ───────────────────────────────────────────────────────────────
+
+def init_auto(ticket_id: str, branch_slug: str | None) -> int:
+    if not branch_slug:
+        print("error: --branch-slug is required with --auto-init", file=sys.stderr)
+        return 2
+
+    try:
+        current_branch = _get_current_branch()
+    except TicketRunnerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    expected = branch_name(ticket_id, branch_slug)
+    if current_branch != expected:
+        print(
+            f"error: current branch '{current_branch}' does not match expected '{expected}'",
+            file=sys.stderr,
+        )
+        return 2
+
+    path = _state_path(ticket_id)
+    if path.exists():
+        print(
+            f"error: state.json already exists at {path} — delete it first to re-initialize",
+            file=sys.stderr,
+        )
+        return 2
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    state = {
+        "ticket_id": ticket_id,
+        "state": "INIT",
+        "branch": current_branch,
+        "updated_at": _now_iso(),
+    }
+    path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    print(f"initialized state.json for {ticket_id}: state=INIT branch={current_branch}")
+    _log_runtime(ticket_id, f"auto-init: state=INIT branch={current_branch}")
+    return 0
+
+
+# ── --auto ────────────────────────────────────────────────────────────────────
+
+def auto_run(ticket_id: str, exec_cmd: str) -> int:
+    try:
+        state = load_state(ticket_id)
+    except TicketRunnerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+
+    current_state = state["state"]
+    _log_runtime(ticket_id, f"auto-run start: state={current_state}")
+
+    # Gate 3: terminal state
+    if current_state == "TEST_COMPLETE":
+        print("workflow complete — no automatic merge")
+        _log_runtime(ticket_id, "auto-run: workflow complete (TEST_COMPLETE)")
+        return 0
+
+    # Gate 4: branch matches; Gate 5: working tree clean
+    try:
+        current_branch = _get_current_branch()
+        if current_branch != state["branch"]:
+            raise TicketRunnerError(
+                f"current branch '{current_branch}' does not match state branch '{state['branch']}'"
+            )
+        _check_working_tree_clean()
+    except TicketRunnerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        _log_runtime(ticket_id, f"auto-run gate failed: {exc}")
+        return 2
+
+    transition = TRANSITIONS[current_state]
+    if transition is None:
+        # Unreachable after TEST_COMPLETE guard above, but kept for safety
+        print("workflow complete — no automatic merge")
+        return 0
+
+    step, is_deterministic, possible_next = transition
+    print(f"[auto] state={current_state} step={step}")
+    _log_runtime(ticket_id, f"auto-run: running step={step}")
+
+    rc, output_content = _call_run_step(ticket_id, step, exec_cmd)
+    _log_runtime(ticket_id, f"auto-run: step={step} done rc={rc}")
+
+    if rc != 0:
+        print(f"error: step '{step}' exited with code {rc} — state unchanged ({current_state})", file=sys.stderr)
+        _log_runtime(ticket_id, f"auto-run: step={step} failed rc={rc}, state unchanged={current_state}")
+        return 2
+
+    next_state = _determine_next_state(is_deterministic, output_content, possible_next)
+
+    if next_state is None:
+        print(
+            f"warning: no review keyword found in output of step '{step}' — state unchanged ({current_state})",
+            file=sys.stderr,
+        )
+        _log_runtime(ticket_id, f"auto-run: no keyword found, state unchanged={current_state}")
+        return 1
+
+    save_state(ticket_id, {**state, "state": next_state})
+    _append_workflow_journal(ticket_id, current_state, step, next_state)
+    _log_runtime(ticket_id, f"auto-run: transition {current_state} → {next_state}")
+    print(f"[auto] {current_state} → {next_state}")
+    return 0
+
+
+# ── CLI ───────────────────────────────────────────────────────────────────────
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Sequential ai-dev-factory ticket runner")
     parser.add_argument("ticket_id")
@@ -125,6 +383,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--commit", action="store_true", help="Commit current repo changes")
     parser.add_argument("--commit-message", help="Custom commit message")
     parser.add_argument("--push", action="store_true", help="Push the ticket branch")
+    parser.add_argument("--auto", action="store_true", help="Execute next workflow step (reads state.json)")
+    parser.add_argument("--auto-init", action="store_true", help="Initialize state.json for --auto mode")
     return parser.parse_args(argv)
 
 
@@ -134,6 +394,9 @@ def main(argv: list[str]) -> int:
     try:
         ticket_id = validate_ticket_id(args.ticket_id)
 
+        if args.auto_init:
+            return init_auto(ticket_id, args.branch_slug)
+
         if args.branch:
             return checkout_branch(ticket_id, args.branch_slug)
 
@@ -142,6 +405,12 @@ def main(argv: list[str]) -> int:
 
         if args.push:
             return push_branch(ticket_id, args.branch_slug)
+
+        if args.auto:
+            if not args.exec_cmd:
+                print("error: --exec-cmd is required with --auto", file=sys.stderr)
+                return 2
+            return auto_run(ticket_id, args.exec_cmd)
 
         if args.once:
             if not args.exec_cmd:
