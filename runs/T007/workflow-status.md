@@ -3,6 +3,7 @@
 ## Current Status
 
 - PLAN_APPROVED
+- IMPLEMENTATION_APPROVED (pending re-review after branch correction)
 
 ## Risk Level
 
@@ -17,4 +18,4 @@ Documentation créée : docs/ai/git-workflow.md.
 
 ## Last Update
 
-PLAN_APPROVED — implementation started by Coder
+CHANGES_REQUESTED — branch ticket/T007-git-ticket-branch-workflow créée, corrections review appliquées

@@ -61,7 +61,7 @@ python tools/agent_runner/run_ticket.py TXXX --push --branch-slug <slug>
 ## Workflow type
 
 ```
-1. git checkout main && git pull
+1. git checkout main && git pull          # étape manuelle — hors runner intentionnellement
 2. python run_ticket.py TXXX --branch --branch-slug <slug>
 3. <travail sur le ticket>
 4. git add <fichiers modifiés hors runs/>
@@ -69,6 +69,8 @@ python tools/agent_runner/run_ticket.py TXXX --push --branch-slug <slug>
 6. python run_ticket.py TXXX --push --branch-slug <slug>
 7. Ouvrir la PR manuellement sur GitHub
 ```
+
+L'étape 1 est intentionnellement manuelle : le runner n'automatise pas le retour sur `main` ni le pull, car cela interférerait avec un workflow déjà en cours.
 
 ## Liens
 
