@@ -8,12 +8,15 @@ It only:
 - shows the prompt when requested
 - writes stdin to a target artifact when requested
 - exposes a minimal workflow state machine
+- optionally sends a prompt to an explicit external command
 """
 
 from __future__ import annotations
 
 import argparse
 import re
+import shlex
+import subprocess
 import sys
 from pathlib import Path
 
@@ -75,9 +78,7 @@ def ensure_safe_relative_path(path_text: str) -> Path:
 
 
 def prompt_candidates(ticket_id: str, step: str) -> list[Path]:
-    names = [
-        f"{ticket_id}-{step}.md",
-    ]
+    names = [f"{ticket_id}-{step}.md"]
     if step == "review":
         names.append(f"{ticket_id}-reviewer.md")
     if step == "memory-updater":
@@ -123,13 +124,10 @@ def read_next_step(ticket_id: str) -> str:
     status_path = Path("runs") / ticket_id / "workflow-status.md"
     if not status_path.exists():
         return "planner"
-
     content = status_path.read_text(encoding="utf-8")
-
     for status, next_step in WORKFLOW_SEQUENCE:
         if status in content:
             return next_step
-
     return "planner"
 
 
@@ -151,16 +149,28 @@ def update_status(ticket_id: str, status: str) -> None:
     status_path.write_text(existing.rstrip() + f"\n\n## Last Update\n\n{status}\n", encoding="utf-8")
 
 
+def execute_external_command(command_text: str, prompt_content: str) -> tuple[str, str, int]:
+    command = shlex.split(command_text)
+    if not command:
+        raise RunnerError("external command must not be empty")
+    completed = subprocess.run(
+        command,
+        input=prompt_content,
+        text=True,
+        capture_output=True,
+        shell=False,
+        check=False,
+    )
+    return completed.stdout, completed.stderr, completed.returncode
+
+
 def show_next(ticket_id: str) -> None:
     step = read_next_step(ticket_id)
-
     if step == "done":
         print("Workflow complete.")
         return
-
     prompt_path = find_prompt(ticket_id, step)
     output_path = default_output_path(ticket_id, step)
-
     print(f"Next step: {step}")
     print(f"Prompt: {prompt_path}")
     print(f"Expected output: {output_path}")
@@ -172,6 +182,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("step", nargs="?", help="Step, for example planner, coder, review")
     parser.add_argument("--show-prompt", action="store_true", help="Print the canonical prompt to stdout")
     parser.add_argument("--next", action="store_true", help="Show the next workflow step")
+    parser.add_argument("--exec-cmd", help="Run an explicit external command, passing the prompt on stdin")
+    parser.add_argument("--stderr-log", help="Relative path where stderr should be written")
     parser.add_argument(
         "--write-output",
         nargs="?",
@@ -197,9 +209,23 @@ def main(argv: list[str]) -> int:
 
         step = normalize_step(args.step)
         prompt_path = find_prompt(ticket_id, step)
+        prompt_content = prompt_path.read_text(encoding="utf-8")
 
         if args.show_prompt:
-            print(prompt_path.read_text(encoding="utf-8"))
+            print(prompt_content)
+
+        if args.exec_cmd:
+            stdout, stderr, return_code = execute_external_command(args.exec_cmd, prompt_content)
+            output_path = default_output_path(ticket_id, step)
+            write_output(output_path, stdout)
+            if args.stderr_log:
+                stderr_path = ensure_safe_relative_path(args.stderr_log)
+                write_output(stderr_path, stderr)
+            print(f"command exit code: {return_code}")
+            print(f"stdout written to: {output_path}")
+            if args.stderr_log:
+                print(f"stderr written to: {args.stderr_log}")
+            return return_code
 
         if args.write_output is not None:
             if args.write_output == "__DEFAULT__":
@@ -214,10 +240,10 @@ def main(argv: list[str]) -> int:
             update_status(ticket_id, args.set_status)
             print(f"updated runs/{ticket_id}/workflow-status.md")
 
-        if not args.show_prompt and args.write_output is None and not args.set_status:
+        if not args.show_prompt and args.write_output is None and not args.set_status and not args.exec_cmd:
             print(f"prompt: {prompt_path}")
             print(f"run dir: runs/{ticket_id}")
-            print("Use --show-prompt, --write-output or --next to perform an action.")
+            print("Use --show-prompt, --write-output, --exec-cmd or --next to perform an action.")
 
     except RunnerError as exc:
         print(f"error: {exc}", file=sys.stderr)
