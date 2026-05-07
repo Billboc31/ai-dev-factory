@@ -8,7 +8,13 @@ T002 (lifecycle PR IA et artefacts `runs/TXXX/`) est livré et sert désormais d
 
 T003 (agent local minimal) est livré.
 
-T004 (state machine locale minimale) est maintenant livré.
+T004 (state machine locale minimale) est livré.
+
+T005 (external command execution) est livré.
+
+T006 (sequential ticket runner) est livré.
+
+T007 (git ticket branch workflow) est maintenant livré.
 
 Artefacts T002 disponibles :
 - `runs/T002/plan.md`
@@ -18,10 +24,13 @@ Artefacts T002 disponibles :
 
 Composants disponibles :
 - `tools/agent_runner/run_step.py`
+- `tools/agent_runner/run_ticket.py`
 - `tools/agent_runner/README.md`
-- prompts T003
-- structure `runs/T003/`
+- prompts T003/T007
+- structures `runs/TXXX/`
 - state machine workflow minimale
+- exécution externe contrôlée
+- workflow Git ticket branch
 
 Le runner local minimal sait désormais :
 - créer automatiquement `runs/TXXX/`
@@ -33,6 +42,10 @@ Le runner local minimal sait désormais :
 - déterminer la prochaine étape d’un ticket
 - afficher le prochain prompt attendu
 - afficher le prochain artefact attendu
+- exécuter une commande externe explicite
+- créer/switch une branche ticket
+- commit les changements
+- push explicitement une branche ticket
 - protéger les chemins dangereux
 
 Le workflow chat-driven complet a été testé :
@@ -55,20 +68,23 @@ Le workflow chat-driven complet a été testé :
 - Le runner local minimal reste volontairement non autonome.
 - Les prompts restent conçus par ChatGPT/conversation et non générés par l’agent.
 - T004 introduit une state machine locale simple basée sur `workflow-status.md`.
+- T005 introduit l’exécution externe contrôlée via stdin/stdout.
+- T007 introduit le workflow Git ticket branch (`ticket/TXXX-*`).
 
 ## Next Topics
 
+- review distante automatique
 - orchestration automatique réelle des étapes
 - watcher GitHub local
 - intégration LLM future
 - pipeline mémoire automatisé
-- reviews automatiques
 - extraction/migration depuis ai-dev-team
 
 ## Dette / limitations connues
 
-- Pas encore d’exécution automatique des prompts.
-- Aucun appel API LLM.
+- Pas encore de review distante automatique.
+- Pas encore d’exécution full-auto multi-étapes.
+- Aucun appel API LLM direct.
 - Aucun merge automatique.
 - Aucun watcher GitHub.
 - Aucun système multi-agent avancé.
