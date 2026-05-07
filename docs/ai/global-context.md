@@ -12,6 +12,8 @@ Le système doit permettre :
 - maintenance automatique de la mémoire projet
 - workflow GitHub-centric basé sur PR
 
+Détails lifecycle PR, branches et artefacts : [pr-lifecycle.md](./pr-lifecycle.md).
+
 ## Principes
 
 - GitHub = source de vérité workflow
