@@ -18,6 +18,8 @@ It only:
 - stores execution artifacts
 - maintains a minimal workflow status file
 - exposes a minimal workflow state machine
+- supports controlled external command execution
+- provides a sequential ticket runner
 
 ## Usage
 
@@ -27,36 +29,25 @@ It only:
 python tools/agent_runner/run_step.py T002 planner --show-prompt
 ```
 
-### Write a planner output
-
-```bash
-python tools/agent_runner/run_step.py T002 planner --write-output < /tmp/plan.md
-```
-
-### Write a review artifact
-
-```bash
-python tools/agent_runner/run_step.py T002 review --write-output runs/T002/reviews/review.md < /tmp/review.md
-```
-
-### Update workflow status
-
-```bash
-python tools/agent_runner/run_step.py T002 review --set-status IMPLEMENTATION_APPROVED
-```
-
 ### Show the next workflow step
 
 ```bash
 python tools/agent_runner/run_step.py T002 --next
 ```
 
-Example output:
+### Execute a single step through the sequential runner
 
-```text
-Next step: coder
-Prompt: prompts/T002-coder.md
-Expected output: runs/T002/implementation-output.md
+```bash
+python tools/agent_runner/run_ticket.py T002 \
+  --once planner \
+  --exec-cmd "claude"
+```
+
+### Execute a direct external command
+
+```bash
+python tools/agent_runner/run_step.py T002 planner \
+  --exec-cmd "claude"
 ```
 
 ## Standard run tree
