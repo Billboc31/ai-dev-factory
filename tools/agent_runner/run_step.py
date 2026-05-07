@@ -7,6 +7,7 @@ It only:
 - creates the standard runs/TXXX folders
 - shows the prompt when requested
 - writes stdin to a target artifact when requested
+- exposes a minimal workflow state machine
 """
 
 from __future__ import annotations
@@ -39,14 +40,15 @@ DEFAULT_OUTPUTS = {
     "memory-updater": "memory/memory-update.md",
     "memory-apply": "memory/memory-apply.md",
 }
+WORKFLOW_SEQUENCE = [
+    ("PLAN_APPROVED", "coder"),
+    ("IMPLEMENTATION_APPROVED", "memory-updater"),
+    ("MEMORY_APPROVED", "done"),
+]
 
 
 class RunnerError(Exception):
     pass
-
-
-def repo_root() -> Path:
-    return Path.cwd().resolve()
 
 
 def validate_ticket_id(ticket_id: str) -> str:
@@ -117,6 +119,20 @@ def ensure_run_tree(ticket_id: str) -> Path:
     return run_dir
 
 
+def read_next_step(ticket_id: str) -> str:
+    status_path = Path("runs") / ticket_id / "workflow-status.md"
+    if not status_path.exists():
+        return "planner"
+
+    content = status_path.read_text(encoding="utf-8")
+
+    for status, next_step in WORKFLOW_SEQUENCE:
+        if status in content:
+            return next_step
+
+    return "planner"
+
+
 def default_output_path(ticket_id: str, step: str) -> Path:
     return Path("runs") / ticket_id / DEFAULT_OUTPUTS[step]
 
@@ -135,11 +151,27 @@ def update_status(ticket_id: str, status: str) -> None:
     status_path.write_text(existing.rstrip() + f"\n\n## Last Update\n\n{status}\n", encoding="utf-8")
 
 
+def show_next(ticket_id: str) -> None:
+    step = read_next_step(ticket_id)
+
+    if step == "done":
+        print("Workflow complete.")
+        return
+
+    prompt_path = find_prompt(ticket_id, step)
+    output_path = default_output_path(ticket_id, step)
+
+    print(f"Next step: {step}")
+    print(f"Prompt: {prompt_path}")
+    print(f"Expected output: {output_path}")
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one ai-dev-factory ticket step locally.")
     parser.add_argument("ticket_id", help="Ticket id, for example T002")
-    parser.add_argument("step", help="Step, for example planner, coder, review, tester, memory-updater")
+    parser.add_argument("step", nargs="?", help="Step, for example planner, coder, review")
     parser.add_argument("--show-prompt", action="store_true", help="Print the canonical prompt to stdout")
+    parser.add_argument("--next", action="store_true", help="Show the next workflow step")
     parser.add_argument(
         "--write-output",
         nargs="?",
@@ -154,8 +186,16 @@ def main(argv: list[str]) -> int:
     args = parse_args(argv)
     try:
         ticket_id = validate_ticket_id(args.ticket_id)
-        step = normalize_step(args.step)
         ensure_run_tree(ticket_id)
+
+        if args.next:
+            show_next(ticket_id)
+            return 0
+
+        if not args.step:
+            raise RunnerError("a step is required unless using --next")
+
+        step = normalize_step(args.step)
         prompt_path = find_prompt(ticket_id, step)
 
         if args.show_prompt:
@@ -177,7 +217,7 @@ def main(argv: list[str]) -> int:
         if not args.show_prompt and args.write_output is None and not args.set_status:
             print(f"prompt: {prompt_path}")
             print(f"run dir: runs/{ticket_id}")
-            print("Use --show-prompt or --write-output to perform an action.")
+            print("Use --show-prompt, --write-output or --next to perform an action.")
 
     except RunnerError as exc:
         print(f"error: {exc}", file=sys.stderr)
