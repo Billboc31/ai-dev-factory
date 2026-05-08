@@ -191,6 +191,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         help="Write stdin to an artifact path. If no path is provided, use the default for the step.",
     )
     parser.add_argument("--set-status", help="Append a workflow status to runs/TXXX/workflow-status.md")
+    parser.add_argument(
+        "--extra-context-file",
+        help="Relative path to a file appended to the canonical prompt when using --exec-cmd",
+    )
     return parser.parse_args(argv)
 
 
@@ -215,7 +219,18 @@ def main(argv: list[str]) -> int:
             print(prompt_content)
 
         if args.exec_cmd:
-            stdout, stderr, return_code = execute_external_command(args.exec_cmd, prompt_content)
+            effective_prompt = prompt_content
+            if args.extra_context_file:
+                extra_path = ensure_safe_relative_path(args.extra_context_file)
+                if not extra_path.exists():
+                    raise RunnerError(f"extra-context-file not found: {extra_path}")
+                extra_content = extra_path.read_text(encoding="utf-8")
+                effective_prompt = (
+                    prompt_content
+                    + "\n\n---\n\n## Contexte de retry injecté par run_ticket.py\n\n"
+                    + extra_content
+                )
+            stdout, stderr, return_code = execute_external_command(args.exec_cmd, effective_prompt)
             output_path = default_output_path(ticket_id, step)
             write_output(output_path, stdout)
             if args.stderr_log:
