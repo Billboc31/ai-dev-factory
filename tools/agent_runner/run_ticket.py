@@ -227,16 +227,19 @@ def _determine_next_state(
     return found[0]
 
 
-def _call_run_step(ticket_id: str, step: str, exec_cmd: str) -> tuple[int, str]:
+def _call_run_step(ticket_id: str, step: str, exec_cmd: str, extra_context_file: Path | None = None) -> tuple[int, str]:
     """Invoke run_step.py for one step; return (exit_code, output_file_content)."""
-    result = run_command([
+    cmd = [
         sys.executable,
         str(RUN_STEP),
         ticket_id,
         step,
         "--exec-cmd",
         exec_cmd,
-    ])
+    ]
+    if extra_context_file is not None:
+        cmd += ["--extra-context-file", str(extra_context_file)]
+    result = run_command(cmd)
     if result.stdout:
         print(result.stdout, end="")
     if result.stderr:
@@ -252,6 +255,66 @@ def _call_run_step(ticket_id: str, step: str, exec_cmd: str) -> tuple[int, str]:
             print(f"warning: expected output file {output_path} not found", file=sys.stderr)
             _log_runtime(ticket_id, f"auto-run: output file missing: {output_path}")
     return result.returncode, output_content
+
+
+def _collect_fix_artifacts(ticket_id: str, state: dict) -> dict:
+    """Return paths for previous_output, review, fix_instructions for the current fix state.
+
+    Raises TicketRunnerError with the expected path if any artifact is missing.
+    """
+    current_state = state["state"]
+    run_dir = Path("runs") / ticket_id
+
+    if current_state == "PLAN_FIX_REQUIRED":
+        previous_output_rel = DEFAULT_OUTPUTS["planner"]
+        review_glob = "reviews/plan-review*.md"
+        fix_glob = "fixes/plan-fix-*.md"
+    else:  # IMPLEMENTATION_FIX_REQUIRED
+        previous_output_rel = DEFAULT_OUTPUTS["coder"]
+        review_glob = "reviews/implementation-review*.md"
+        fix_glob = "fixes/implementation-fix-*.md"
+
+    previous_output = run_dir / previous_output_rel
+    if not previous_output.exists():
+        raise TicketRunnerError(f"fix artifact missing: {previous_output}")
+
+    review_candidates = sorted(run_dir.glob(review_glob), key=lambda p: p.stat().st_mtime)
+    if not review_candidates:
+        raise TicketRunnerError(f"fix artifact missing: no file matching {run_dir / review_glob}")
+    review = review_candidates[-1]
+
+    fix_candidates = [
+        p for p in sorted(run_dir.glob(fix_glob), key=lambda p: p.stat().st_mtime)
+        if not p.name.startswith("context-")
+    ]
+    if not fix_candidates:
+        raise TicketRunnerError(f"fix artifact missing: no file matching {run_dir / fix_glob}")
+    fix_instructions = fix_candidates[-1]
+
+    return {
+        "previous_output": previous_output,
+        "review": review,
+        "fix_instructions": fix_instructions,
+    }
+
+
+def _build_fix_context_file(ticket_id: str, artifacts: dict) -> Path:
+    """Concatenate fix artifacts into a timestamped context file; return its path."""
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    context_path = Path("runs") / ticket_id / "fixes" / f"context-{ts}.md"
+    context_path.parent.mkdir(parents=True, exist_ok=True)
+
+    sections = []
+    for key, label in [
+        ("previous_output", "## Output précédent"),
+        ("review", "## Review"),
+        ("fix_instructions", "## Instructions de fix"),
+    ]:
+        content = artifacts[key].read_text(encoding="utf-8")
+        sections.append(f"{label}\n\n{content.strip()}")
+
+    context_path.write_text("\n\n---\n\n".join(sections), encoding="utf-8")
+    return context_path
 
 
 def _append_workflow_journal(ticket_id: str, prev_state: str, step: str, next_state: str) -> None:
@@ -346,7 +409,20 @@ def auto_run(ticket_id: str, exec_cmd: str) -> int:
     print(f"[auto] state={current_state} step={step}")
     _log_runtime(ticket_id, f"auto-run: running step={step}")
 
-    rc, output_content = _call_run_step(ticket_id, step, exec_cmd)
+    extra_context_file: Path | None = None
+    if current_state in {"PLAN_FIX_REQUIRED", "IMPLEMENTATION_FIX_REQUIRED"}:
+        try:
+            artifacts = _collect_fix_artifacts(ticket_id, state)
+        except TicketRunnerError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            _log_runtime(ticket_id, f"auto-run: {exc}")
+            return 2
+        extra_context_file = _build_fix_context_file(ticket_id, artifacts)
+        for key, path in artifacts.items():
+            _log_runtime(ticket_id, f"auto-run: fix context: {key}={path}")
+        _log_runtime(ticket_id, f"auto-run: fix context: context_file={extra_context_file}")
+
+    rc, output_content = _call_run_step(ticket_id, step, exec_cmd, extra_context_file)
     _log_runtime(ticket_id, f"auto-run: step={step} done rc={rc}")
 
     if rc != 0:
