@@ -183,6 +183,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--show-prompt", action="store_true", help="Print the canonical prompt to stdout")
     parser.add_argument("--next", action="store_true", help="Show the next workflow step")
     parser.add_argument("--exec-cmd", help="Run an explicit external command, passing the prompt on stdin")
+    parser.add_argument("--output-path", help="Override output path when using --exec-cmd (relative to repo root)")
     parser.add_argument("--stderr-log", help="Relative path where stderr should be written")
     parser.add_argument(
         "--write-output",
@@ -231,7 +232,10 @@ def main(argv: list[str]) -> int:
                     + extra_content
                 )
             stdout, stderr, return_code = execute_external_command(args.exec_cmd, effective_prompt)
-            output_path = default_output_path(ticket_id, step)
+            if args.output_path:
+                output_path = ensure_safe_relative_path(args.output_path)
+            else:
+                output_path = default_output_path(ticket_id, step)
             write_output(output_path, stdout)
             if args.stderr_log:
                 stderr_path = ensure_safe_relative_path(args.stderr_log)
