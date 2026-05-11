@@ -282,7 +282,7 @@ def _check_working_tree_clean() -> None:
         raise TicketRunnerError("failed to check git status")
     if result.stdout.strip():
         raise TicketRunnerError(
-            "working tree is not clean — commit or stash changes before running --auto"
+            "working tree is not clean — commit or stash changes first"
         )
 
 
