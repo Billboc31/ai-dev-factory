@@ -57,6 +57,8 @@ Produit un plan court, concret et borné.
 
 Le planner ne code pas.
 
+Un retry planner doit produire un plan complet autonome — jamais un résumé ou delta du plan précédent.
+
 ### Plan Reviewer
 
 Valide ou refuse le plan.
@@ -210,6 +212,30 @@ Escalader vers une review chat si :
 - le ticket touche plusieurs composants
 - le ticket introduit une automatisation autonome
 - le ticket est ambigu ou stratégique
+
+## Modes de review
+
+### Review agent (automatique)
+
+Déclenchée par `--auto` avec `--exec-cmd`.
+
+Le keyword (`PLAN_APPROVED`, `PLAN_FIX_REQUIRED`, `IMPLEMENTATION_APPROVED`, `IMPLEMENTATION_FIX_REQUIRED`) doit apparaître seul sur sa propre ligne dans l'output du step review.
+
+Le fichier de review est écrit automatiquement dans :
+- `reviews/plan-review.md` si état `PLAN_REVIEW_NEEDED`
+- `reviews/implementation-review.md` si état `IMPLEMENTATION_REVIEW_NEEDED`
+
+### Review humaine
+
+Utiliser :
+
+```
+python tools/agent_runner/run_ticket.py TXXX --set-state PLAN_APPROVED
+```
+
+Ne pas éditer `state.json` directement.
+
+Cette commande valide l'état, met à jour `state.json`, et produit une entrée explicite dans `runtime.log` avec la mention `(human)`.
 
 ## Règle de fallback
 

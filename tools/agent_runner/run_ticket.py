@@ -227,8 +227,29 @@ def _determine_next_state(
     return found[0]
 
 
-def _call_run_step(ticket_id: str, step: str, exec_cmd: str, extra_context_file: Path | None = None) -> tuple[int, str]:
-    """Invoke run_step.py for one step; return (exit_code, output_file_content)."""
+def _review_output_rel(current_state: str) -> str:
+    if current_state == "PLAN_REVIEW_NEEDED":
+        return "reviews/plan-review.md"
+    if current_state == "IMPLEMENTATION_REVIEW_NEEDED":
+        return "reviews/implementation-review.md"
+    return DEFAULT_OUTPUTS["review"]
+
+
+def _call_run_step(
+    ticket_id: str,
+    step: str,
+    exec_cmd: str,
+    extra_context_file: Path | None = None,
+    current_state: str | None = None,
+) -> tuple[int, str, Path]:
+    """Invoke run_step.py for one step; return (exit_code, output_file_content, output_path)."""
+    if step == "review" and current_state is not None:
+        output_rel = _review_output_rel(current_state)
+    else:
+        output_rel = DEFAULT_OUTPUTS.get(step, f"{step}-output.md")
+
+    output_path = Path("runs") / ticket_id / output_rel
+
     cmd = [
         sys.executable,
         str(RUN_STEP),
@@ -236,6 +257,8 @@ def _call_run_step(ticket_id: str, step: str, exec_cmd: str, extra_context_file:
         step,
         "--exec-cmd",
         exec_cmd,
+        "--output-path",
+        str(output_path),
     ]
     if extra_context_file is not None:
         cmd += ["--extra-context-file", str(extra_context_file)]
@@ -245,8 +268,6 @@ def _call_run_step(ticket_id: str, step: str, exec_cmd: str, extra_context_file:
     if result.stderr:
         print(result.stderr, end="", file=sys.stderr)
 
-    output_rel = DEFAULT_OUTPUTS.get(step, f"{step}-output.md")
-    output_path = Path("runs") / ticket_id / output_rel
     if output_path.exists():
         output_content = output_path.read_text(encoding="utf-8")
     else:
@@ -254,7 +275,7 @@ def _call_run_step(ticket_id: str, step: str, exec_cmd: str, extra_context_file:
         if result.returncode == 0:
             print(f"warning: expected output file {output_path} not found", file=sys.stderr)
             _log_runtime(ticket_id, f"auto-run: output file missing: {output_path}")
-    return result.returncode, output_content
+    return result.returncode, output_content, output_path
 
 
 def _collect_fix_artifacts(ticket_id: str, state: dict) -> dict:
@@ -324,6 +345,25 @@ def _append_workflow_journal(ticket_id: str, prev_state: str, step: str, next_st
     entry = f"\n## {_now_iso()}\n\n- prev: {prev_state}\n- step: {step}\n- next: {next_state}\n"
     with journal_path.open("a", encoding="utf-8") as fh:
         fh.write(entry)
+
+
+# ── --set-state ───────────────────────────────────────────────────────────────
+
+def set_workflow_state(ticket_id: str, new_state: str) -> int:
+    if new_state not in VALID_STATES:
+        allowed = ", ".join(sorted(VALID_STATES))
+        print(f"error: unknown state {new_state!r}. Allowed: {allowed}", file=sys.stderr)
+        return 2
+    try:
+        state = load_state(ticket_id)
+    except TicketRunnerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    old_state = state["state"]
+    save_state(ticket_id, {**state, "state": new_state})
+    _log_runtime(ticket_id, f"set-state: {old_state} → {new_state} (human)")
+    print(f"state updated: {old_state} → {new_state}")
+    return 0
 
 
 # ── --auto-init ───────────────────────────────────────────────────────────────
@@ -422,13 +462,16 @@ def auto_run(ticket_id: str, exec_cmd: str) -> int:
             _log_runtime(ticket_id, f"auto-run: fix context: {key}={path}")
         _log_runtime(ticket_id, f"auto-run: fix context: context_file={extra_context_file}")
 
-    rc, output_content = _call_run_step(ticket_id, step, exec_cmd, extra_context_file)
+    rc, output_content, output_path = _call_run_step(ticket_id, step, exec_cmd, extra_context_file, current_state)
     _log_runtime(ticket_id, f"auto-run: step={step} done rc={rc}")
 
     if rc != 0:
         print(f"error: step '{step}' exited with code {rc} — state unchanged ({current_state})", file=sys.stderr)
         _log_runtime(ticket_id, f"auto-run: step={step} failed rc={rc}, state unchanged={current_state}")
         return 2
+
+    if not is_deterministic:
+        _log_runtime(ticket_id, f"auto-run: review parsed from: {output_path}")
 
     next_state = _determine_next_state(is_deterministic, output_content, possible_next)
 
@@ -437,8 +480,11 @@ def auto_run(ticket_id: str, exec_cmd: str) -> int:
             f"warning: no review keyword found in output of step '{step}' — state unchanged ({current_state})",
             file=sys.stderr,
         )
-        _log_runtime(ticket_id, f"auto-run: no keyword found, state unchanged={current_state}")
+        _log_runtime(ticket_id, f"auto-run: no keyword found in {output_path}")
         return 1
+
+    if not is_deterministic:
+        _log_runtime(ticket_id, f"auto-run: keyword detected: {next_state}")
 
     save_state(ticket_id, {**state, "state": next_state})
     _append_workflow_journal(ticket_id, current_state, step, next_state)
@@ -461,6 +507,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--push", action="store_true", help="Push the ticket branch")
     parser.add_argument("--auto", action="store_true", help="Execute next workflow step (reads state.json)")
     parser.add_argument("--auto-init", action="store_true", help="Initialize state.json for --auto mode")
+    parser.add_argument("--set-state", help="Manually set workflow state (human review path)")
     return parser.parse_args(argv)
 
 
@@ -469,6 +516,9 @@ def main(argv: list[str]) -> int:
 
     try:
         ticket_id = validate_ticket_id(args.ticket_id)
+
+        if args.set_state:
+            return set_workflow_state(ticket_id, args.set_state)
 
         if args.auto_init:
             return init_auto(ticket_id, args.branch_slug)
