@@ -14,6 +14,7 @@ It only:
 from __future__ import annotations
 
 import argparse
+import datetime
 import re
 import shlex
 import subprocess
@@ -48,6 +49,39 @@ WORKFLOW_SEQUENCE = [
     ("IMPLEMENTATION_APPROVED", "memory-updater"),
     ("MEMORY_APPROVED", "done"),
 ]
+
+GLOBAL_CONTEXT_FILE = "docs/ai/global-context.md"
+
+STEP_ROLE_FILES: dict[str, str] = {
+    "planner": "ai/roles/planner.md",
+    "coder": "ai/roles/coder.md",
+    "review": "ai/roles/reviewer.md",
+    "tester": "ai/roles/tester.md",
+}
+
+STEP_SKILL_FILES: dict[str, list[str]] = {
+    "planner": ["workflow-discipline", "architecture-discipline", "documentation"],
+    "coder": ["workflow-discipline", "git-discipline", "code-quality", "refactor-safety", "security"],
+    "review": ["workflow-discipline", "code-quality", "refactor-safety", "security"],
+    "tester": ["workflow-discipline", "testing", "debugging"],
+}
+
+_FORBIDDEN_PHRASES = [
+    "implémentation terminée",
+    "syntaxe valide",
+    "changements appliqués",
+    "all changes are in place",
+]
+
+_REQUIRED_SECTIONS = [
+    "contexte",
+    "objectif",
+    "inclus",
+    "hors scope",
+    "critères d'acceptation",
+]
+
+_MIN_WORD_COUNT = 100
 
 
 class RunnerError(Exception):
@@ -164,6 +198,73 @@ def execute_external_command(command_text: str, prompt_content: str) -> tuple[st
     return completed.stdout, completed.stderr, completed.returncode
 
 
+def _now_iso() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _log_runtime(ticket_id: str, message: str) -> None:
+    log_path = Path("runs") / ticket_id / "runtime.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a", encoding="utf-8") as fh:
+        fh.write(f"[{_now_iso()}] {message}\n")
+
+
+def compose_runtime_prompt(ticket_id: str, step: str, task_content: str) -> str:
+    """Compose full runtime prompt: GLOBAL CONTEXT + ROLE + SKILLS + TASK."""
+    sections: list[tuple[str, str]] = []
+
+    global_ctx_path = Path(GLOBAL_CONTEXT_FILE)
+    if global_ctx_path.exists():
+        sections.append(("GLOBAL CONTEXT", global_ctx_path.read_text(encoding="utf-8")))
+        _log_runtime(ticket_id, f"compose: global-context={global_ctx_path}")
+    else:
+        _log_runtime(ticket_id, f"compose: global-context not found at {global_ctx_path} — skipped")
+
+    role_file = STEP_ROLE_FILES.get(step)
+    if role_file:
+        role_path = Path(role_file)
+        if role_path.exists():
+            sections.append(("ROLE", role_path.read_text(encoding="utf-8")))
+            _log_runtime(ticket_id, f"compose: role={role_path}")
+        else:
+            _log_runtime(ticket_id, f"compose: role not found at {role_path} — skipped")
+
+    for skill_name in STEP_SKILL_FILES.get(step, []):
+        skill_path = Path("ai/skills") / f"{skill_name}.md"
+        if skill_path.exists():
+            sections.append((f"SKILL: {skill_name}", skill_path.read_text(encoding="utf-8")))
+            _log_runtime(ticket_id, f"compose: skill={skill_path}")
+        else:
+            _log_runtime(ticket_id, f"compose: skill not found at {skill_path} — skipped")
+
+    sections.append(("TASK", task_content))
+    _log_runtime(ticket_id, "compose: task (canonical prompt)")
+
+    parts = [f"# {label}\n\n{content.strip()}" for label, content in sections]
+    return "\n\n---\n\n".join(parts)
+
+
+def validate_planner_output(content: str) -> list[str]:
+    """Return rejection reasons; empty list means the output is valid."""
+    reasons: list[str] = []
+    stripped = content.strip()
+
+    word_count = len(stripped.split())
+    if word_count < _MIN_WORD_COUNT:
+        reasons.append(f"plan trop court ({word_count} mots, minimum {_MIN_WORD_COUNT})")
+
+    lower = stripped.lower()
+    for phrase in _FORBIDDEN_PHRASES:
+        if phrase in lower:
+            reasons.append(f"phrase interdite: «{phrase}»")
+
+    for section in _REQUIRED_SECTIONS:
+        if section not in lower:
+            reasons.append(f"section manquante: «{section}»")
+
+    return reasons
+
+
 def show_next(ticket_id: str) -> None:
     step = read_next_step(ticket_id)
     if step == "done":
@@ -220,17 +321,18 @@ def main(argv: list[str]) -> int:
             print(prompt_content)
 
         if args.exec_cmd:
-            effective_prompt = prompt_content
+            effective_prompt = compose_runtime_prompt(ticket_id, step, prompt_content)
             if args.extra_context_file:
                 extra_path = ensure_safe_relative_path(args.extra_context_file)
                 if not extra_path.exists():
                     raise RunnerError(f"extra-context-file not found: {extra_path}")
                 extra_content = extra_path.read_text(encoding="utf-8")
                 effective_prompt = (
-                    prompt_content
+                    effective_prompt
                     + "\n\n---\n\n## Contexte de retry injecté par run_ticket.py\n\n"
                     + extra_content
                 )
+                _log_runtime(ticket_id, f"compose: extra-context={args.extra_context_file}")
             stdout, stderr, return_code = execute_external_command(args.exec_cmd, effective_prompt)
             if args.output_path:
                 output_path = ensure_safe_relative_path(args.output_path)

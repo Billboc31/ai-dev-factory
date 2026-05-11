@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import importlib.util
 import json
 import re
 import subprocess
@@ -20,6 +21,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 RUN_STEP = ROOT / "run_step.py"
+
+_spec = importlib.util.spec_from_file_location("_run_step", RUN_STEP)
+_mod = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
+_spec.loader.exec_module(_mod)  # type: ignore[union-attr]
+validate_planner_output = _mod.validate_planner_output
+del _spec, _mod
 
 VALID_STATES = frozenset({
     "INIT",
@@ -469,6 +476,16 @@ def auto_run(ticket_id: str, exec_cmd: str) -> int:
         print(f"error: step '{step}' exited with code {rc} — state unchanged ({current_state})", file=sys.stderr)
         _log_runtime(ticket_id, f"auto-run: step={step} failed rc={rc}, state unchanged={current_state}")
         return 2
+
+    if step == "planner":
+        reasons = validate_planner_output(output_content)
+        if reasons:
+            for reason in reasons:
+                _log_runtime(ticket_id, f"planner validation failed: {reason}")
+                print(f"error: planner output invalid: {reason}", file=sys.stderr)
+            _log_runtime(ticket_id, "planner validation: rejected — state unchanged")
+            return 2
+        _log_runtime(ticket_id, "planner validation success")
 
     if not is_deterministic:
         _log_runtime(ticket_id, f"auto-run: review parsed from: {output_path}")
