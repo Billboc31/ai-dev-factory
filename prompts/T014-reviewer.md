@@ -42,8 +42,8 @@ Le passage planner vers review doit fonctionner sans dépendre de titres exacts.
 
 Le review doit contenir explicitement :
 
-`PLAN_APPROVED`
+`IMPLEMENTATION_APPROVED`
 
 ou
 
-`PLAN_FIX_REQUIRED`
+`IMPLEMENTATION_FIX_REQUIRED`
