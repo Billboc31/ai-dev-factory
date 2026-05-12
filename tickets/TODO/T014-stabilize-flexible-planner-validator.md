@@ -13,7 +13,9 @@ Le runner officiel `tools/agent_runner/run_ticket.py` importe directement `valid
 - `validate_planner_output()` valide déjà par groupes de synonymes
 - `run_ticket.py` appelle déjà `validate_planner_output(output_content)` après une exécution planner
 
-Il faut maintenant stabiliser ce comportement par un ticket dédié, car le bug initial était que le planner ne passait jamais à cause d’une validation trop rigide des titres Markdown.
+Le bug initial était que le planner ne passait jamais à cause d’une validation trop rigide des titres Markdown.
+
+Un second bug vient d’être observé en runtime réel : le planner peut être rejeté parce qu’il mentionne une phrase interdite comme exemple de garde-fou, alors qu’il ne déclare pas avoir terminé une implémentation. Le validator doit donc distinguer une vraie revendication de fin d’implémentation d’une simple mention explicative dans un plan.
 
 Avant, le système validait uniquement des sections exactes :
 
@@ -40,7 +42,7 @@ Le validator doit :
 - accepter des synonymes raisonnables de sections
 - rester strict sur la structure minimale attendue
 - continuer à détecter les faux plans
-- éviter les outputs déguisés en implémentation terminée
+- éviter les faux positifs quand un plan mentionne des garde-fous de validation
 - être couvert par des tests ciblés
 - permettre au workflow de passer correctement de `INIT` à `PLAN_REVIEW_NEEDED`
 
@@ -84,10 +86,12 @@ Exemples de variantes acceptables :
 Conserver les protections contre :
 
 - plan trop court
-- phrases interdites
-- output de type “implémentation terminée”
-- output de type “syntaxe valide”
+- phrases de complétion interdites lorsqu’elles sont utilisées comme revendication réelle de fin de travail
+- output déclarant que le code est déjà modifié
+- output déclarant seulement que la syntaxe est correcte
 - résumé déguisé d’implémentation
+
+Le validator ne doit pas rejeter un plan uniquement parce qu’il décrit ces garde-fous comme règles à tester.
 
 ### 4. Tests ciblés
 
@@ -97,7 +101,8 @@ Ajouter ou mettre à jour des tests pour couvrir :
 - un plan valide avec des synonymes
 - un plan trop court
 - un plan sans section obligatoire
-- un output contenant une phrase interdite
+- un output contenant une phrase interdite comme revendication réelle
+- un plan valide mentionnant les garde-fous interdits comme objets de test
 
 ### 5. Test runtime minimal
 
@@ -148,8 +153,12 @@ Le validator continue à rejeter :
 
 - les plans trop courts
 - les plans sans groupe obligatoire
-- les outputs déguisés en implémentation terminée
-- les outputs contenant des phrases interdites
+- les outputs déclarant que le travail est déjà fini
+- les outputs contenant des phrases interdites comme revendications réelles
+
+### Pas de faux positif sur les garde-fous
+
+Un plan qui parle des phrases interdites comme règles de validation ou cas de test ne doit pas être rejeté uniquement pour cette mention.
 
 ### Tests présents
 
@@ -164,7 +173,7 @@ INIT
 → PLAN_REVIEW_NEEDED
 ```
 
-sans blocage dû au format exact des titres.
+sans blocage dû au format exact des titres ni à une simple mention explicative des garde-fous.
 
 ### Aucun impact architecture
 
