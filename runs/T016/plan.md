@@ -2,18 +2,20 @@ Le plan est écrit dans `runs/T016/plan.md`. Voici le résumé :
 
 ---
 
-**Diagnostic précis**
+**Diagnostic**
 
-Le `effective_prompt` est entièrement assemblé dans `run_step.py:main()` — après l'appel à `compose_runtime_prompt()` (ligne 351) et l'éventuel append de l'extra-context (ligne 357). Il est ensuite passé à `execute_external_command()` (ligne 365) mais jamais persisté.
+`effective_prompt` est assemblé entièrement dans `run_step.py:main()` — `compose_runtime_prompt()` puis append de l'extra context (lignes 346–353). Il est ensuite passé à `execute_external_command()` (ligne 360) mais jamais persisté. Le dossier `prompts/` est créé par `ensure_run_tree()` mais toujours vide.
 
 ---
 
-**Plan en 3 étapes, un seul fichier modifié**
+**Plan : 2 fonctions + 1 appel + 1 fichier de tests**
 
-1. **`_write_prompt_snapshot(ticket_id, step, prompt) → Path`** dans `run_step.py` : compte les fichiers `{step}-attempt-*.md` existants dans `runs/TXXX/prompts/` pour déterminer le numéro de tentative, puis écrit le snapshot.
+1. **`_next_attempt_number(ticket_id, step)`** : compte les fichiers `{step}-attempt-*.md` existants dans `runs/TXXX/prompts/`, retourne `n+1`.
 
-2. **Appel dans `main()`**, dans le bloc `if args.exec_cmd:`, après l'assemblage complet de `effective_prompt` et avant `execute_external_command()`. Suivi d'un `_log_runtime()` avec le chemin du snapshot.
+2. **`_write_prompt_snapshot(ticket_id, step, prompt)`** : détermine le numéro de tentative, écrit le snapshot, log dans `runtime.log`.
 
-3. **`tests/test_prompt_snapshot.py`** : tests directs sur `_write_prompt_snapshot()` (création, nommage, incrémentation, contenu, extra-context) + tests d'intégration via `main()`.
+3. **Appel dans `main()`** : premier appel dans `if args.exec_cmd:`, avant `execute_external_command()`. À ce point, `effective_prompt` inclut déjà l'extra context.
 
-**`run_ticket.py` n'est pas modifié** : il appelle déjà `run_step.py --exec-cmd`, donc le snapshot sera écrit automatiquement à chaque step.
+4. **`tests/test_run_step_snapshots.py`** : 6 tests ciblés (création, nommage, incrémentation, extra-context, contenu exact, absence de snapshot sans `--exec-cmd`).
+
+**`run_ticket.py` n'est pas modifié** — il appelle `run_step.py` en subprocess, les snapshots sont gérés automatiquement dans chaque invocation.
