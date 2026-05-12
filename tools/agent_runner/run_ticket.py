@@ -540,9 +540,29 @@ def set_workflow_state(ticket_id: str, new_state: str) -> int:
     return 0
 
 
+# ── --ticket-source ───────────────────────────────────────────────────────────
+
+def _copy_ticket_source(ticket_id: str, source: str) -> None:
+    """Copy a local ticket file to runs/TXXX/ticket.md.
+
+    Raises TicketRunnerError on path traversal, missing file, or directory.
+    """
+    if ".." in Path(source).parts:
+        raise TicketRunnerError(f"ticket-source path must not contain '..': {source!r}")
+    src = Path(source)
+    if not src.exists():
+        raise TicketRunnerError(f"ticket-source not found: {source!r}")
+    if src.is_dir():
+        raise TicketRunnerError(f"ticket-source must be a file, not a directory: {source!r}")
+    dest = Path("runs") / ticket_id / "ticket.md"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    dest.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
+    _log_runtime(ticket_id, f"ticket-source: copied {source!r} → {dest}")
+
+
 # ── --auto-init ───────────────────────────────────────────────────────────────
 
-def init_auto(ticket_id: str, branch_slug: str | None) -> int:
+def init_auto(ticket_id: str, branch_slug: str | None, ticket_source: str | None = None) -> int:
     if not branch_slug:
         print("error: --branch-slug is required with --auto-init", file=sys.stderr)
         return 2
@@ -579,6 +599,16 @@ def init_auto(ticket_id: str, branch_slug: str | None) -> int:
     path.write_text(json.dumps(state, indent=2), encoding="utf-8")
     print(f"initialized state.json for {ticket_id}: state=INIT branch={current_branch}")
     _log_runtime(ticket_id, f"auto-init: state=INIT branch={current_branch}")
+
+    if ticket_source:
+        try:
+            _copy_ticket_source(ticket_id, ticket_source)
+            print(f"ticket source snapshot created: runs/{ticket_id}/ticket.md")
+        except TicketRunnerError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            _log_runtime(ticket_id, f"auto-init: ticket-source failed: {exc}")
+            return 2
+
     return 0
 
 
@@ -713,6 +743,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--push", action="store_true", help="Push the ticket branch (verified against state.json)")
     parser.add_argument("--auto", action="store_true", help="Execute next workflow step (reads state.json)")
     parser.add_argument("--auto-init", action="store_true", help="Initialize state.json for --auto mode")
+    parser.add_argument("--ticket-source", help="Path to local ticket file to snapshot into runs/TXXX/ticket.md (use with --auto-init)")
     parser.add_argument("--auto-commit", action="store_true", help="After each successful --auto step, commit runs/ artifacts")
     parser.add_argument("--auto-push", action="store_true", help="After each successful --auto-commit, push the ticket branch")
     parser.add_argument("--set-state", help="Manually set workflow state (human review path)")
@@ -729,7 +760,7 @@ def main(argv: list[str]) -> int:
             return set_workflow_state(ticket_id, args.set_state)
 
         if args.auto_init:
-            return init_auto(ticket_id, args.branch_slug)
+            return init_auto(ticket_id, args.branch_slug, getattr(args, "ticket_source", None))
 
         if args.branch or args.ensure_branch:
             return checkout_branch(ticket_id, args.branch_slug)
