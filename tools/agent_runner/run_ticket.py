@@ -71,6 +71,16 @@ DEFAULT_OUTPUTS: dict[str, str] = {
     "tester": "tests/test-report.md",
 }
 
+# Allowed paths for --include-code staging — never extended to "." or "*"
+COMMIT_SCOPE: tuple[str, ...] = (
+    "tools/",
+    "tests/",
+    "prompts/",
+    "tickets/",
+    "docs/",
+    "ai/",
+)
+
 
 class TicketRunnerError(Exception):
     pass
@@ -159,10 +169,55 @@ def checkout_branch(ticket_id: str, slug: str | None) -> int:
     return rc
 
 
-def commit_ticket(ticket_id: str, message: str | None) -> int:
-    run_dir = f"runs/{ticket_id}/"
+def _warn_out_of_scope(ticket_id: str, run_dir: str) -> None:
+    """Print and log files modified outside run_dir and COMMIT_SCOPE — never stages them."""
+    allowed = (run_dir,) + COMMIT_SCOPE
+    result = run_command(["git", "status", "--porcelain"])
+    if result.returncode != 0:
+        return
+    out_of_scope = []
+    for line in result.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:]
+        if " -> " in path:
+            path = path.split(" -> ")[-1]
+        if not any(path.startswith(prefix) for prefix in allowed):
+            out_of_scope.append(path)
+    if out_of_scope:
+        print(f"warning: {len(out_of_scope)} file(s) modified outside commit scope — not staged:")
+        for p in out_of_scope:
+            print(f"  {p}")
+        _log_runtime(ticket_id, f"commit-checkpoint: out-of-scope skipped: {out_of_scope!r}")
 
-    status_result = run_command(["git", "status", "--porcelain", run_dir])
+
+def commit_ticket(ticket_id: str, message: str | None, include_code: bool = False) -> int:
+    # Validate branch against state.json before touching anything
+    try:
+        state = load_state(ticket_id)
+        current_state = state.get("state", "unknown")
+        expected_branch = state.get("branch")
+    except TicketRunnerError:
+        current_state = "unknown"
+        expected_branch = None
+
+    if expected_branch:
+        try:
+            current_branch = _get_current_branch()
+        except TicketRunnerError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            _log_runtime(ticket_id, f"commit-checkpoint: refused — {exc}")
+            return 2
+        if current_branch != expected_branch:
+            msg = f"current branch '{current_branch}' does not match state branch '{expected_branch}'"
+            print(f"error: {msg}", file=sys.stderr)
+            _log_runtime(ticket_id, f"commit-checkpoint: refused — {msg}")
+            return 2
+
+    run_dir = f"runs/{ticket_id}/"
+    stage_paths = [run_dir] + (list(COMMIT_SCOPE) if include_code else [])
+
+    status_result = run_command(["git", "status", "--porcelain"] + stage_paths)
     if status_result.returncode != 0:
         print("error: failed to check git status", file=sys.stderr)
         _log_runtime(ticket_id, "commit-checkpoint: failed to check git status")
@@ -176,20 +231,24 @@ def commit_ticket(ticket_id: str, message: str | None) -> int:
         return 1
 
     if message is None:
-        try:
-            state = load_state(ticket_id)
-            current_state = state.get("state", "unknown")
-        except TicketRunnerError:
-            current_state = "unknown"
         message = f"{ticket_id}: checkpoint [{current_state}] — update workflow artifacts"
 
+    if include_code:
+        _warn_out_of_scope(ticket_id, run_dir)
+
     print(f"staging: {run_dir}")
-    print("note: only runs/ artifacts are auto-staged — stage other changes manually before running --commit")
-    add_result = run_command(["git", "add", run_dir])
-    print_result(add_result)
-    if add_result.returncode != 0:
-        _log_runtime(ticket_id, "commit-checkpoint: failed to stage runs/")
-        return add_result.returncode
+    if include_code:
+        print(f"staging (include-code): {', '.join(COMMIT_SCOPE)}")
+        print("note: staging runs/ and allowed scope paths — never git add .")
+    else:
+        print("note: only runs/ artifacts are auto-staged — stage other changes manually before running --commit")
+
+    for path in stage_paths:
+        add_result = run_command(["git", "add", path])
+        print_result(add_result)
+        if add_result.returncode != 0:
+            _log_runtime(ticket_id, f"commit-checkpoint: failed to stage {path}")
+            return add_result.returncode
 
     commit_result = run_command(["git", "commit", "-m", message])
     rc = print_result(commit_result)
@@ -226,6 +285,12 @@ def push_branch(ticket_id: str, slug: str | None) -> int:
         push_target = expected_branch
     else:
         push_target = branch_name(ticket_id, slug)
+
+    # Non-blocking warning if working tree is dirty
+    wt_result = run_command(["git", "status", "--porcelain"])
+    if wt_result.returncode == 0 and wt_result.stdout.strip():
+        print("warning: working tree has uncommitted changes — push proceeds", file=sys.stderr)
+        _log_runtime(ticket_id, "push: warning — working tree dirty")
 
     print(f"push branch: {push_target}")
     _log_runtime(ticket_id, f"push: pushing branch={push_target}")
@@ -636,6 +701,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--branch-slug", help="Branch suffix after TXXX")
     parser.add_argument("--commit", action="store_true", help="Commit runs/ artifacts as a checkpoint")
     parser.add_argument("--commit-message", help="Custom commit message")
+    parser.add_argument("--include-code", action="store_true", help="With --commit, also stage COMMIT_SCOPE paths (tools/, tests/, prompts/, tickets/, docs/, ai/)")
     parser.add_argument("--push", action="store_true", help="Push the ticket branch (verified against state.json)")
     parser.add_argument("--auto", action="store_true", help="Execute next workflow step (reads state.json)")
     parser.add_argument("--auto-init", action="store_true", help="Initialize state.json for --auto mode")
@@ -661,7 +727,7 @@ def main(argv: list[str]) -> int:
             return checkout_branch(ticket_id, args.branch_slug)
 
         if args.commit:
-            return commit_ticket(ticket_id, args.commit_message)
+            return commit_ticket(ticket_id, args.commit_message, include_code=args.include_code)
 
         if args.push:
             return push_branch(ticket_id, args.branch_slug)
