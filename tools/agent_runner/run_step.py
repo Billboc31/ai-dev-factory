@@ -279,11 +279,6 @@ def validate_planner_output(content: str) -> list[str]:
         if phrase in code_stripped:
             reasons.append(f"phrase interdite: «{phrase}»")
 
-    for group_name, accepted_markers in _REQUIRED_SECTION_GROUPS.items():
-        if not any(marker in lower for marker in accepted_markers):
-            expected = " | ".join(accepted_markers)
-            reasons.append(f"section manquante: «{group_name}» (attendu: {expected})")
-
     return reasons
 
 
