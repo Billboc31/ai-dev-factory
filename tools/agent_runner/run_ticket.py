@@ -128,32 +128,102 @@ def execute_once(ticket_id: str, step: str, command: str) -> int:
 def checkout_branch(ticket_id: str, slug: str | None) -> int:
     name = branch_name(ticket_id, slug)
     print(f"checkout branch: {name}")
+    try:
+        _check_working_tree_clean()
+    except TicketRunnerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        _log_runtime(ticket_id, f"ensure-branch: refused — {exc}")
+        return 2
     exists = run_command(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{name}"])
     if exists.returncode == 0:
-        return run_git(["checkout", name])
-    return run_git(["checkout", "-b", name])
+        _log_runtime(ticket_id, f"ensure-branch: switching to existing branch {name}")
+        rc = run_git(["checkout", name])
+    else:
+        _log_runtime(ticket_id, f"ensure-branch: creating new branch {name}")
+        rc = run_git(["checkout", "-b", name])
+    if rc == 0:
+        _log_runtime(ticket_id, f"ensure-branch: done branch={name}")
+    else:
+        _log_runtime(ticket_id, f"ensure-branch: failed branch={name}")
+    return rc
 
 
 def commit_ticket(ticket_id: str, message: str | None) -> int:
-    default_message = f"{ticket_id}: update agent workflow artifacts"
-    commit_message = message or default_message
-
     run_dir = f"runs/{ticket_id}/"
+
+    status_result = run_command(["git", "status", "--porcelain", run_dir])
+    if status_result.returncode != 0:
+        print("error: failed to check git status", file=sys.stderr)
+        _log_runtime(ticket_id, "commit-checkpoint: failed to check git status")
+        return 2
+    if not status_result.stdout.strip():
+        print(
+            "nothing to commit in runs/ artifacts — stage other changes manually or check status",
+            file=sys.stderr,
+        )
+        _log_runtime(ticket_id, "commit-checkpoint: refused — nothing to commit in runs/")
+        return 1
+
+    if message is None:
+        try:
+            state = load_state(ticket_id)
+            current_state = state.get("state", "unknown")
+        except TicketRunnerError:
+            current_state = "unknown"
+        message = f"{ticket_id}: checkpoint [{current_state}] — update workflow artifacts"
+
     print(f"staging: {run_dir}")
     print("note: only runs/ artifacts are auto-staged — stage other changes manually before running --commit")
     add_result = run_command(["git", "add", run_dir])
     print_result(add_result)
     if add_result.returncode != 0:
+        _log_runtime(ticket_id, "commit-checkpoint: failed to stage runs/")
         return add_result.returncode
 
-    commit_result = run_command(["git", "commit", "-m", commit_message])
-    return print_result(commit_result)
+    commit_result = run_command(["git", "commit", "-m", message])
+    rc = print_result(commit_result)
+    if rc == 0:
+        sha_result = run_command(["git", "rev-parse", "--short", "HEAD"])
+        sha = sha_result.stdout.strip() if sha_result.returncode == 0 else "unknown"
+        _log_runtime(ticket_id, f"commit-checkpoint: sha={sha} message={message!r}")
+    else:
+        _log_runtime(ticket_id, "commit-checkpoint: failed")
+    return rc
 
 
 def push_branch(ticket_id: str, slug: str | None) -> int:
-    name = branch_name(ticket_id, slug)
-    print(f"push branch: {name}")
-    return run_git(["push", "-u", "origin", name])
+    try:
+        state = load_state(ticket_id)
+        expected_branch = state.get("branch")
+    except TicketRunnerError:
+        print("warning: state.json not found — skipping branch verification", file=sys.stderr)
+        _log_runtime(ticket_id, "push: warning — state.json absent, branch not verified")
+        expected_branch = None
+
+    if expected_branch:
+        try:
+            current_branch = _get_current_branch()
+        except TicketRunnerError as exc:
+            print(f"error: {exc}", file=sys.stderr)
+            _log_runtime(ticket_id, f"push: refused — {exc}")
+            return 2
+        if current_branch != expected_branch:
+            msg = f"current branch '{current_branch}' does not match state branch '{expected_branch}'"
+            print(f"error: {msg}", file=sys.stderr)
+            _log_runtime(ticket_id, f"push: refused — {msg}")
+            return 2
+        push_target = expected_branch
+    else:
+        push_target = branch_name(ticket_id, slug)
+
+    print(f"push branch: {push_target}")
+    _log_runtime(ticket_id, f"push: pushing branch={push_target}")
+    rc = run_git(["push", "-u", "origin", push_target])
+    if rc == 0:
+        _log_runtime(ticket_id, f"push: done branch={push_target}")
+    else:
+        _log_runtime(ticket_id, f"push: failed branch={push_target}")
+    return rc
 
 
 # ── state machine helpers ─────────────────────────────────────────────────────
@@ -212,7 +282,7 @@ def _check_working_tree_clean() -> None:
         raise TicketRunnerError("failed to check git status")
     if result.stdout.strip():
         raise TicketRunnerError(
-            "working tree is not clean — commit or stash changes before running --auto"
+            "working tree is not clean — commit or stash changes first"
         )
 
 
@@ -417,7 +487,7 @@ def init_auto(ticket_id: str, branch_slug: str | None) -> int:
 
 # ── --auto ────────────────────────────────────────────────────────────────────
 
-def auto_run(ticket_id: str, exec_cmd: str) -> int:
+def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push: bool = False) -> int:
     try:
         state = load_state(ticket_id)
     except TicketRunnerError as exc:
@@ -507,6 +577,20 @@ def auto_run(ticket_id: str, exec_cmd: str) -> int:
     _append_workflow_journal(ticket_id, current_state, step, next_state)
     _log_runtime(ticket_id, f"auto-run: transition {current_state} → {next_state}")
     print(f"[auto] {current_state} → {next_state}")
+
+    if auto_commit:
+        _log_runtime(ticket_id, "auto-run: auto-commit triggered")
+        commit_rc = commit_ticket(ticket_id, None)
+        if commit_rc == 0 and auto_push:
+            _log_runtime(ticket_id, "auto-run: auto-push triggered")
+            push_rc = push_branch(ticket_id, None)
+            if push_rc != 0:
+                print(f"warning: auto-push failed (rc={push_rc}) — state saved", file=sys.stderr)
+                _log_runtime(ticket_id, f"auto-run: auto-push failed rc={push_rc}")
+        elif commit_rc not in (0, 1):
+            print(f"warning: auto-commit failed (rc={commit_rc}) — state saved, push skipped", file=sys.stderr)
+            _log_runtime(ticket_id, f"auto-run: auto-commit failed rc={commit_rc}")
+
     return 0
 
 
@@ -517,13 +601,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("ticket_id")
     parser.add_argument("--once", help="Execute a single explicit step")
     parser.add_argument("--exec-cmd", help="External command to execute")
-    parser.add_argument("--branch", action="store_true", help="Create or switch to the ticket branch")
+    parser.add_argument("--branch", action="store_true", help="Create or switch to the ticket branch (with working-tree guard)")
+    parser.add_argument("--ensure-branch", action="store_true", help="Alias for --branch")
     parser.add_argument("--branch-slug", help="Branch suffix after TXXX")
-    parser.add_argument("--commit", action="store_true", help="Commit current repo changes")
+    parser.add_argument("--commit", action="store_true", help="Commit runs/ artifacts as a checkpoint")
     parser.add_argument("--commit-message", help="Custom commit message")
-    parser.add_argument("--push", action="store_true", help="Push the ticket branch")
+    parser.add_argument("--push", action="store_true", help="Push the ticket branch (verified against state.json)")
     parser.add_argument("--auto", action="store_true", help="Execute next workflow step (reads state.json)")
     parser.add_argument("--auto-init", action="store_true", help="Initialize state.json for --auto mode")
+    parser.add_argument("--auto-commit", action="store_true", help="After each successful --auto step, commit runs/ artifacts")
+    parser.add_argument("--auto-push", action="store_true", help="After each successful --auto-commit, push the ticket branch")
     parser.add_argument("--set-state", help="Manually set workflow state (human review path)")
     return parser.parse_args(argv)
 
@@ -540,7 +627,7 @@ def main(argv: list[str]) -> int:
         if args.auto_init:
             return init_auto(ticket_id, args.branch_slug)
 
-        if args.branch:
+        if args.branch or args.ensure_branch:
             return checkout_branch(ticket_id, args.branch_slug)
 
         if args.commit:
@@ -553,7 +640,7 @@ def main(argv: list[str]) -> int:
             if not args.exec_cmd:
                 print("error: --exec-cmd is required with --auto", file=sys.stderr)
                 return 2
-            return auto_run(ticket_id, args.exec_cmd)
+            return auto_run(ticket_id, args.exec_cmd, auto_commit=args.auto_commit, auto_push=args.auto_push)
 
         if args.once:
             if not args.exec_cmd:

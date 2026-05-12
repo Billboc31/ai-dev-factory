@@ -1,15 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal local runner for ai-dev-factory ticket steps.
-
-This script does not call any LLM and does not modify canonical prompts.
-It only:
-- resolves a canonical prompt for a ticket/step
-- creates the standard runs/TXXX folders
-- shows the prompt when requested
-- writes stdin to a target artifact when requested
-- exposes a minimal workflow state machine
-- optionally sends a prompt to an explicit external command
-"""
+"""Minimal local runner for ai-dev-factory ticket steps."""
 
 from __future__ import annotations
 
@@ -23,6 +13,7 @@ from pathlib import Path
 
 
 RUN_SUBDIRS = ["prompts", "reviews", "fixes", "tests", "memory"]
+
 STEP_ALIASES = {
     "planner": "planner",
     "plan": "planner",
@@ -36,6 +27,7 @@ STEP_ALIASES = {
     "memory": "memory-updater",
     "memory-apply": "memory-apply",
 }
+
 DEFAULT_OUTPUTS = {
     "planner": "plan.md",
     "coder": "implementation-output.md",
@@ -44,6 +36,7 @@ DEFAULT_OUTPUTS = {
     "memory-updater": "memory/memory-update.md",
     "memory-apply": "memory/memory-apply.md",
 }
+
 WORKFLOW_SEQUENCE = [
     ("PLAN_APPROVED", "coder"),
     ("IMPLEMENTATION_APPROVED", "memory-updater"),
@@ -68,18 +61,39 @@ STEP_SKILL_FILES: dict[str, list[str]] = {
 
 _FORBIDDEN_PHRASES = [
     "implémentation terminée",
+    "implementation complete",
+    "implementation completed",
     "syntaxe valide",
-    "changements appliqués",
+    "syntax clean",
     "all changes are in place",
+    "changements appliqués",
+    "changes applied",
+    "voici ce qui a été fait",
+    "résumé des changements",
+    "modifications effectuées",
 ]
 
-_REQUIRED_SECTIONS = [
-    "contexte",
-    "objectif",
-    "inclus",
-    "hors scope",
-    "critères d'acceptation",
-]
+_REQUIRED_SECTION_GROUPS = {
+    "contexte": ["## contexte", "## diagnostic", "## contexte et diagnostic"],
+    "objectif": ["## objectif", "## objectifs", "## but"],
+    "inclus": [
+        "## inclus",
+        "## périmètre",
+        "## scope",
+        "## changements prévus",
+        "## plan",
+        "## étapes",
+        "## étapes d’implémentation",
+        "## étapes d'implémentation",
+    ],
+    "hors scope": ["## hors scope", "## hors périmètre", "## non inclus", "## exclusions"],
+    "critères d'acceptation": [
+        "## critères d'acceptation",
+        "## critères",
+        "## validation",
+        "## critères de validation",
+    ],
+}
 
 _MIN_WORD_COUNT = 100
 
@@ -133,6 +147,7 @@ def ensure_run_tree(ticket_id: str) -> Path:
     run_dir.mkdir(parents=True, exist_ok=True)
     for subdir in RUN_SUBDIRS:
         (run_dir / subdir).mkdir(parents=True, exist_ok=True)
+
     status_path = run_dir / "workflow-status.md"
     if not status_path.exists():
         status_path.write_text(
@@ -158,6 +173,7 @@ def read_next_step(ticket_id: str) -> str:
     status_path = Path("runs") / ticket_id / "workflow-status.md"
     if not status_path.exists():
         return "planner"
+
     content = status_path.read_text(encoding="utf-8")
     for status, next_step in WORKFLOW_SEQUENCE:
         if status in content:
@@ -177,6 +193,7 @@ def write_output(output_path: Path, content: str) -> None:
 def update_status(ticket_id: str, status: str) -> None:
     if not re.fullmatch(r"[A-Z_]+", status):
         raise RunnerError("status must contain only uppercase letters and underscores")
+
     run_dir = ensure_run_tree(ticket_id)
     status_path = run_dir / "workflow-status.md"
     existing = status_path.read_text(encoding="utf-8") if status_path.exists() else "# Workflow Status\n"
@@ -187,6 +204,7 @@ def execute_external_command(command_text: str, prompt_content: str) -> tuple[st
     command = shlex.split(command_text)
     if not command:
         raise RunnerError("external command must not be empty")
+
     completed = subprocess.run(
         command,
         input=prompt_content,
@@ -248,19 +266,20 @@ def validate_planner_output(content: str) -> list[str]:
     """Return rejection reasons; empty list means the output is valid."""
     reasons: list[str] = []
     stripped = content.strip()
+    lower = stripped.lower()
 
     word_count = len(stripped.split())
     if word_count < _MIN_WORD_COUNT:
         reasons.append(f"plan trop court ({word_count} mots, minimum {_MIN_WORD_COUNT})")
 
-    lower = stripped.lower()
     for phrase in _FORBIDDEN_PHRASES:
         if phrase in lower:
             reasons.append(f"phrase interdite: «{phrase}»")
 
-    for section in _REQUIRED_SECTIONS:
-        if section not in lower:
-            reasons.append(f"section manquante: «{section}»")
+    for group_name, accepted_markers in _REQUIRED_SECTION_GROUPS.items():
+        if not any(marker in lower for marker in accepted_markers):
+            expected = " | ".join(accepted_markers)
+            reasons.append(f"section manquante: «{group_name}» (attendu: {expected})")
 
     return reasons
 
@@ -270,6 +289,7 @@ def show_next(ticket_id: str) -> None:
     if step == "done":
         print("Workflow complete.")
         return
+
     prompt_path = find_prompt(ticket_id, step)
     output_path = default_output_path(ticket_id, step)
     print(f"Next step: {step}")
@@ -281,7 +301,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run one ai-dev-factory ticket step locally.")
     parser.add_argument("ticket_id", help="Ticket id, for example T002")
     parser.add_argument("step", nargs="?", help="Step, for example planner, coder, review")
-    parser.add_argument("--show-prompt", action="store_true", help="Print the canonical prompt to stdout")
+    parser.add_argument("--show-prompt", action="store_true", help="Print the runtime prompt to stdout")
     parser.add_argument("--next", action="store_true", help="Show the next workflow step")
     parser.add_argument("--exec-cmd", help="Run an explicit external command, passing the prompt on stdin")
     parser.add_argument("--output-path", help="Override output path when using --exec-cmd (relative to repo root)")
@@ -295,13 +315,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--set-status", help="Append a workflow status to runs/TXXX/workflow-status.md")
     parser.add_argument(
         "--extra-context-file",
-        help="Relative path to a file appended to the canonical prompt when using --exec-cmd",
+        help="Relative path to a file appended to the runtime prompt when using --show-prompt or --exec-cmd",
     )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
+
     try:
         ticket_id = validate_ticket_id(args.ticket_id)
         ensure_run_tree(ticket_id)
@@ -317,35 +338,46 @@ def main(argv: list[str]) -> int:
         prompt_path = find_prompt(ticket_id, step)
         prompt_content = prompt_path.read_text(encoding="utf-8")
 
+        extra_content = None
+        if args.extra_context_file:
+            extra_path = ensure_safe_relative_path(args.extra_context_file)
+            if not extra_path.exists():
+                raise RunnerError(f"extra-context-file not found: {extra_path}")
+            extra_content = extra_path.read_text(encoding="utf-8")
+
+        effective_prompt = compose_runtime_prompt(ticket_id, step, prompt_content)
+        if extra_content:
+            effective_prompt = (
+                effective_prompt
+                + "\n\n---\n\n## Contexte de retry injecté par run_ticket.py\n\n"
+                + extra_content
+            )
+            _log_runtime(ticket_id, f"compose: extra-context={args.extra_context_file}")
+
         if args.show_prompt:
-            print(prompt_content)
+            _log_runtime(ticket_id, "compose: show-prompt runtime rendering")
+            print(effective_prompt)
 
         if args.exec_cmd:
-            effective_prompt = compose_runtime_prompt(ticket_id, step, prompt_content)
-            if args.extra_context_file:
-                extra_path = ensure_safe_relative_path(args.extra_context_file)
-                if not extra_path.exists():
-                    raise RunnerError(f"extra-context-file not found: {extra_path}")
-                extra_content = extra_path.read_text(encoding="utf-8")
-                effective_prompt = (
-                    effective_prompt
-                    + "\n\n---\n\n## Contexte de retry injecté par run_ticket.py\n\n"
-                    + extra_content
-                )
-                _log_runtime(ticket_id, f"compose: extra-context={args.extra_context_file}")
             stdout, stderr, return_code = execute_external_command(args.exec_cmd, effective_prompt)
+
             if args.output_path:
                 output_path = ensure_safe_relative_path(args.output_path)
             else:
                 output_path = default_output_path(ticket_id, step)
+
             write_output(output_path, stdout)
+
             if args.stderr_log:
                 stderr_path = ensure_safe_relative_path(args.stderr_log)
                 write_output(stderr_path, stderr)
+
             print(f"command exit code: {return_code}")
             print(f"stdout written to: {output_path}")
+
             if args.stderr_log:
                 print(f"stderr written to: {args.stderr_log}")
+
             return return_code
 
         if args.write_output is not None:
@@ -353,6 +385,7 @@ def main(argv: list[str]) -> int:
                 output_path = default_output_path(ticket_id, step)
             else:
                 output_path = ensure_safe_relative_path(args.write_output)
+
             content = sys.stdin.read()
             write_output(output_path, content)
             print(f"wrote {output_path}")
@@ -369,6 +402,7 @@ def main(argv: list[str]) -> int:
     except RunnerError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
+
     return 0
 
 
