@@ -52,6 +52,17 @@ TRANSITIONS: dict[str, tuple[str, bool, list[str]] | None] = {
     "TEST_COMPLETE":                None,
 }
 
+REVIEW_DECISION_KEYWORDS: dict[str, dict[str, str]] = {
+    "PLAN_REVIEW_NEEDED": {
+        "approve": "PLAN_APPROVED",
+        "fix": "PLAN_FIX_REQUIRED",
+    },
+    "IMPLEMENTATION_REVIEW_NEEDED": {
+        "approve": "IMPLEMENTATION_APPROVED",
+        "fix": "IMPLEMENTATION_FIX_REQUIRED",
+    },
+}
+
 # Must stay in sync with run_step.py DEFAULT_OUTPUTS
 DEFAULT_OUTPUTS: dict[str, str] = {
     "planner": "plan.md",
@@ -415,6 +426,21 @@ def _build_fix_context_file(ticket_id: str, artifacts: dict) -> Path:
     return context_path
 
 
+def _build_review_decision_context_file(ticket_id: str, current_state: str) -> Path:
+    """Write review decision keywords to a reviewable artifact; return its path."""
+    keywords = REVIEW_DECISION_KEYWORDS[current_state]
+    context_path = Path("runs") / ticket_id / "reviews" / f"review-decision-context-{current_state}.md"
+    context_path.parent.mkdir(parents=True, exist_ok=True)
+    content = (
+        "## Review decision keywords\n\n"
+        "The review must end with exactly one valid workflow keyword on its own line.\n\n"
+        f"Approval keyword:\n{keywords['approve']}\n\n"
+        f"Fix required keyword:\n{keywords['fix']}\n"
+    )
+    context_path.write_text(content, encoding="utf-8")
+    return context_path
+
+
 def _append_workflow_journal(ticket_id: str, prev_state: str, step: str, next_state: str) -> None:
     run_dir = Path("runs") / ticket_id
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -538,6 +564,10 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
         for key, path in artifacts.items():
             _log_runtime(ticket_id, f"auto-run: fix context: {key}={path}")
         _log_runtime(ticket_id, f"auto-run: fix context: context_file={extra_context_file}")
+
+    if step == "review" and current_state in REVIEW_DECISION_KEYWORDS:
+        extra_context_file = _build_review_decision_context_file(ticket_id, current_state)
+        _log_runtime(ticket_id, f"auto-run: review decision context: context_file={extra_context_file}")
 
     rc, output_content, output_path = _call_run_step(ticket_id, step, exec_cmd, extra_context_file, current_state)
     _log_runtime(ticket_id, f"auto-run: step={step} done rc={rc}")
