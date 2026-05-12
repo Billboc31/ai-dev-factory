@@ -74,7 +74,7 @@ _FORBIDDEN_PHRASES = [
 ]
 
 _REQUIRED_SECTION_GROUPS = {
-    "contexte": ["## contexte", "## diagnostic", "## contexte et diagnostic"],
+    "contexte": ["## contexte", "## diagnostic", "## contexte et diagnostic", "## contexte technique"],
     "objectif": ["## objectif", "## objectifs", "## but"],
     "inclus": [
         "## inclus",
@@ -84,14 +84,14 @@ _REQUIRED_SECTION_GROUPS = {
         "## plan",
         "## étapes",
         "## étapes d’implémentation",
-        "## étapes d'implémentation",
     ],
     "hors scope": ["## hors scope", "## hors périmètre", "## non inclus", "## exclusions"],
-    "critères d'acceptation": [
-        "## critères d'acceptation",
+    "critères d’acceptation": [
+        "## critères d’acceptation",
         "## critères",
         "## validation",
         "## critères de validation",
+        "## acceptance criteria",
     ],
 }
 
@@ -272,8 +272,11 @@ def validate_planner_output(content: str) -> list[str]:
     if word_count < _MIN_WORD_COUNT:
         reasons.append(f"plan trop court ({word_count} mots, minimum {_MIN_WORD_COUNT})")
 
+    code_stripped = re.sub(r"```[\s\S]*?```", "", lower)
+    code_stripped = re.sub(r"`[^`\n]+`", "", code_stripped)
+
     for phrase in _FORBIDDEN_PHRASES:
-        if phrase in lower:
+        if phrase in code_stripped:
             reasons.append(f"phrase interdite: «{phrase}»")
 
     for group_name, accepted_markers in _REQUIRED_SECTION_GROUPS.items():
