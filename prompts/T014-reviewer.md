@@ -40,10 +40,6 @@ Le passage planner vers review doit fonctionner sans dépendre de titres exacts.
 
 ## Sortie attendue
 
-Le review doit contenir explicitement :
+Le review doit se terminer avec exactement un keyword de décision sur sa propre ligne.
 
-`IMPLEMENTATION_APPROVED`
-
-ou
-
-`IMPLEMENTATION_FIX_REQUIRED`
+Les keywords valides pour l'état courant sont injectés par le runtime dans le contexte de cette review. Ne hardcode pas PLAN_APPROVED, PLAN_FIX_REQUIRED, IMPLEMENTATION_APPROVED ou IMPLEMENTATION_FIX_REQUIRED dans ce prompt : utilise uniquement les keywords fournis par le runtime.
