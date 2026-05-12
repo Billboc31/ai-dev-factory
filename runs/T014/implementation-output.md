@@ -1,10 +1,10 @@
-The write permissions haven't been approved yet. You should be seeing permission prompts in the UI — please approve them to let me edit `run_step.py` and create the test file.
+Les permissions d'écriture sur `run_step.py` ne sont pas accordées dans l'UI. Veuillez approuver l'accès en écriture à ce fichier (et idéalement au répertoire `tests/` pour le fichier de test). 
 
-If you'd prefer to review the full diffs before approving, here they are:
+En attendant, voici les diffs complets pour revue :
 
 ---
 
-**`tools/agent_runner/run_step.py` — diff of `_REQUIRED_SECTION_GROUPS` (lines 76–96):**
+**Diff 1 — `tools/agent_runner/run_step.py` : `_REQUIRED_SECTION_GROUPS`**
 
 ```diff
  _REQUIRED_SECTION_GROUPS = {
@@ -19,7 +19,7 @@ If you'd prefer to review the full diffs before approving, here they are:
          "## plan",
          "## étapes",
          "## étapes d'implémentation",
--        "## étapes d'implémentation",   ← duplicate removed
+-        "## étapes d'implémentation",
      ],
      "hors scope": ["## hors scope", "## hors périmètre", "## non inclus", "## exclusions"],
      "critères d'acceptation": [
@@ -32,10 +32,12 @@ If you'd prefer to review the full diffs before approving, here they are:
  }
 ```
 
-**`tools/agent_runner/run_step.py` — diff of `validate_planner_output()` (forbidden phrase check):**
+---
+
+**Diff 2 — `tools/agent_runner/run_step.py` : `validate_planner_output()` (lignes 275–277)**
 
 ```diff
-+    # Remove code fences and inline code before checking forbidden phrases
++    # Strip code fences and inline code before checking forbidden phrases
 +    # to avoid false positives when a plan cites guard phrases as examples.
 +    code_stripped = re.sub(r"```[\s\S]*?```", "", lower)
 +    code_stripped = re.sub(r"`[^`\n]+`", "", code_stripped)
@@ -46,4 +48,75 @@ If you'd prefer to review the full diffs before approving, here they are:
              reasons.append(f"phrase interdite: «{phrase}»")
 ```
 
-Once you approve the write permissions (or if you want to adjust settings to auto-approve writes in this directory), I can execute all the edits and run the tests.
+---
+
+**Diff 3 — `tests/test_validate_planner_output.py` (nouveau fichier)**
+
+```python
+"""Tests unitaires pour validate_planner_output()."""
+
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "tools" / "agent_runner"))
+
+from run_step import validate_planner_output
+
+
+def _make_plan(sections: list[str], extra: str = "") -> str:
+    body = " word" * 120
+    return "\n\n".join(sections) + "\n\n" + body + "\n\n" + extra
+
+
+CANONICAL = [
+    "## contexte",
+    "## objectif",
+    "## inclus",
+    "## hors scope",
+    "## critères d'acceptation",
+]
+
+SYNONYMS = [
+    "## contexte technique",
+    "## objectifs",
+    "## scope",
+    "## non inclus",
+    "## acceptance criteria",
+]
+
+
+def test_valid_canonical():
+    assert validate_planner_output(_make_plan(CANONICAL)) == []
+
+
+def test_valid_synonyms():
+    assert validate_planner_output(_make_plan(SYNONYMS)) == []
+
+
+def test_too_short():
+    short = "\n\n".join(CANONICAL) + "\n\ncourt"
+    reasons = validate_planner_output(short)
+    assert any("plan trop court" in r for r in reasons)
+
+
+def test_missing_section():
+    sections = [s for s in CANONICAL if "hors scope" not in s]
+    reasons = validate_planner_output(_make_plan(sections))
+    assert any("hors scope" in r for r in reasons)
+
+
+def test_forbidden_phrase_real():
+    plan = _make_plan(CANONICAL, extra="implémentation terminée")
+    reasons = validate_planner_output(plan)
+    assert any("phrase interdite" in r for r in reasons)
+
+
+def test_forbidden_phrase_in_code_block():
+    # A plan that cites a forbidden phrase inside a code fence must not be rejected.
+    plan = _make_plan(CANONICAL, extra="```\nimplémentation terminée\n```")
+    assert validate_planner_output(plan) == []
+```
+
+---
+
+Une fois que vous approuvez l'écriture dans l'UI, je peux appliquer ces 3 changements et lancer les tests.
