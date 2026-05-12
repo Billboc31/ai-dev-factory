@@ -26,6 +26,7 @@ _spec = importlib.util.spec_from_file_location("_run_step", RUN_STEP)
 _mod = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
 _spec.loader.exec_module(_mod)  # type: ignore[union-attr]
 validate_planner_output = _mod.validate_planner_output
+classify_runtime_failure = _mod.classify_runtime_failure
 del _spec, _mod
 
 VALID_STATES = frozenset({
@@ -428,6 +429,11 @@ def _call_run_step(
         if result.returncode == 0:
             print(f"warning: expected output file {output_path} not found", file=sys.stderr)
             _log_runtime(ticket_id, f"auto-run: output file missing: {output_path}")
+
+    if result.returncode != 0:
+        failure_class = classify_runtime_failure(result.returncode, output_content, result.stderr)
+        _log_runtime(ticket_id, f"auto-run: runtime failure: {failure_class} (rc={result.returncode})")
+
     return result.returncode, output_content, output_path
 
 
@@ -638,6 +644,8 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
     _log_runtime(ticket_id, f"auto-run: step={step} done rc={rc}")
 
     if rc != 0:
+        failure_class = classify_runtime_failure(rc, output_content, "")
+        _log_runtime(ticket_id, f"auto-run: runtime failure: {failure_class} (rc={rc})")
         print(f"error: step '{step}' exited with code {rc} — state unchanged ({current_state})", file=sys.stderr)
         _log_runtime(ticket_id, f"auto-run: step={step} failed rc={rc}, state unchanged={current_state}")
         return 2

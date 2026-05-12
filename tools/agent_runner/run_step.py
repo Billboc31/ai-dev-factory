@@ -97,6 +97,35 @@ _REQUIRED_SECTION_GROUPS = {
 
 _MIN_WORD_COUNT = 100
 
+_QUOTA_PATTERNS: tuple[str, ...] = (
+    "rate limit",
+    "ratelimit",
+    "quota exceeded",
+    "too many requests",
+    "usage limit",
+    "ratelimiterror",
+)
+
+_WRITE_PERMISSION_PATTERNS: tuple[str, ...] = (
+    "write permission",
+    "please grant",
+    r"grant.{0,20}permission",
+    r"need.{0,20}permission",
+    "auto-accept edit",
+)
+
+_PROVIDER_ERROR_PATTERNS: tuple[str, ...] = (
+    "internal server error",
+    "service unavailable",
+    "bad gateway",
+    "overloaded_error",
+    "overloaded",
+    "apierror",
+    "anthropicerror",
+    r"\b502\b",
+    r"\b503\b",
+)
+
 
 class RunnerError(Exception):
     pass
@@ -298,6 +327,39 @@ def validate_planner_output(content: str) -> list[str]:
     return reasons
 
 
+def classify_runtime_failure(return_code: int, stdout: str, stderr: str) -> str:
+    """Return the most likely failure category for a step execution.
+
+    Categories in priority order:
+      process_crashed, quota_exceeded, write_permission_missing,
+      provider_error, empty_output, process_failed, unknown
+    """
+    combined = (stdout + "\n" + stderr).lower()
+
+    if return_code < 0:
+        return "process_crashed"
+
+    for pattern in _QUOTA_PATTERNS:
+        if re.search(pattern, combined):
+            return "quota_exceeded"
+
+    for pattern in _WRITE_PERMISSION_PATTERNS:
+        if re.search(pattern, combined):
+            return "write_permission_missing"
+
+    for pattern in _PROVIDER_ERROR_PATTERNS:
+        if re.search(pattern, combined):
+            return "provider_error"
+
+    if not stdout.strip():
+        return "empty_output"
+
+    if return_code != 0:
+        return "process_failed"
+
+    return "unknown"
+
+
 def show_next(ticket_id: str) -> None:
     step = read_next_step(ticket_id)
     if step == "done":
@@ -375,6 +437,12 @@ def main(argv: list[str]) -> int:
         if args.exec_cmd:
             _write_prompt_snapshot(ticket_id, step, effective_prompt)
             stdout, stderr, return_code = execute_external_command(args.exec_cmd, effective_prompt)
+
+            failure_class = classify_runtime_failure(return_code, stdout, stderr)
+            if return_code != 0:
+                _log_runtime(ticket_id, f"runtime failure: {failure_class} (rc={return_code})")
+            elif failure_class in ("write_permission_missing", "empty_output"):
+                _log_runtime(ticket_id, f"runtime warning: {failure_class} (rc=0, non-blocking)")
 
             if args.output_path:
                 output_path = ensure_safe_relative_path(args.output_path)
