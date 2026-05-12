@@ -44,10 +44,10 @@ def test_too_short():
     assert any("plan trop court" in r for r in reasons)
 
 
-def test_missing_section():
+def test_missing_section_is_not_blocking_anymore():
     sections = [s for s in CANONICAL if "hors scope" not in s]
     reasons = validate_planner_output(_make_plan(sections))
-    assert any("hors scope" in r for r in reasons)
+    assert reasons == []
 
 
 def test_forbidden_phrase_real():

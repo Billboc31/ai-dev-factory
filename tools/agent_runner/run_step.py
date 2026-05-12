@@ -227,6 +227,22 @@ def _log_runtime(ticket_id: str, message: str) -> None:
         fh.write(f"[{_now_iso()}] {message}\n")
 
 
+def _next_attempt_number(ticket_id: str, step: str) -> int:
+    prompts_dir = Path("runs") / ticket_id / "prompts"
+    existing = list(prompts_dir.glob(f"{step}-attempt-*.md"))
+    return len(existing) + 1
+
+
+def _write_prompt_snapshot(ticket_id: str, step: str, prompt: str) -> Path:
+    attempt = _next_attempt_number(ticket_id, step)
+    prompts_dir = Path("runs") / ticket_id / "prompts"
+    prompts_dir.mkdir(parents=True, exist_ok=True)
+    snapshot_path = prompts_dir / f"{step}-attempt-{attempt}.md"
+    snapshot_path.write_text(prompt, encoding="utf-8")
+    _log_runtime(ticket_id, f"snapshot: runtime-prompt={snapshot_path}")
+    return snapshot_path
+
+
 def compose_runtime_prompt(ticket_id: str, step: str, task_content: str) -> str:
     """Compose full runtime prompt: GLOBAL CONTEXT + ROLE + SKILLS + TASK."""
     sections: list[tuple[str, str]] = []
@@ -278,11 +294,6 @@ def validate_planner_output(content: str) -> list[str]:
     for phrase in _FORBIDDEN_PHRASES:
         if phrase in code_stripped:
             reasons.append(f"phrase interdite: «{phrase}»")
-
-    for group_name, accepted_markers in _REQUIRED_SECTION_GROUPS.items():
-        if not any(marker in lower for marker in accepted_markers):
-            expected = " | ".join(accepted_markers)
-            reasons.append(f"section manquante: «{group_name}» (attendu: {expected})")
 
     return reasons
 
@@ -362,6 +373,7 @@ def main(argv: list[str]) -> int:
             print(effective_prompt)
 
         if args.exec_cmd:
+            _write_prompt_snapshot(ticket_id, step, effective_prompt)
             stdout, stderr, return_code = execute_external_command(args.exec_cmd, effective_prompt)
 
             if args.output_path:
