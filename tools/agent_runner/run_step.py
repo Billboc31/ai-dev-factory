@@ -160,13 +160,17 @@ def prompt_candidates(ticket_id: str, step: str) -> list[Path]:
         names.append(f"{ticket_id}-reviewer.md")
     if step == "memory-updater":
         names.append(f"{ticket_id}-memory.md")
-    return [Path("prompts") / name for name in names]
+    candidates = [Path("prompts") / name for name in names]
+    candidates.append(Path("prompts") / "generic" / f"{step}.md")
+    return candidates
 
 
-def find_prompt(ticket_id: str, step: str) -> Path:
+def find_prompt(ticket_id: str, step: str) -> tuple[Path, str]:
     for candidate in prompt_candidates(ticket_id, step):
         if candidate.exists():
-            return candidate
+            source = "generic" if candidate.parent.name == "generic" else "ticket-specific"
+            _log_runtime(ticket_id, f"prompt: resolved={candidate} source={source}")
+            return candidate, source
     attempted = ", ".join(str(p) for p in prompt_candidates(ticket_id, step))
     raise RunnerError(f"prompt not found. Tried: {attempted}")
 
@@ -366,7 +370,7 @@ def show_next(ticket_id: str) -> None:
         print("Workflow complete.")
         return
 
-    prompt_path = find_prompt(ticket_id, step)
+    prompt_path, _ = find_prompt(ticket_id, step)
     output_path = default_output_path(ticket_id, step)
     print(f"Next step: {step}")
     print(f"Prompt: {prompt_path}")
@@ -411,8 +415,18 @@ def main(argv: list[str]) -> int:
             raise RunnerError("a step is required unless using --next")
 
         step = normalize_step(args.step)
-        prompt_path = find_prompt(ticket_id, step)
+        prompt_path, prompt_source = find_prompt(ticket_id, step)
         prompt_content = prompt_path.read_text(encoding="utf-8")
+
+        if prompt_source == "generic":
+            ticket_md_path = Path("runs") / ticket_id / "ticket.md"
+            if not ticket_md_path.exists():
+                raise RunnerError(
+                    f"generic prompt requires runs/{ticket_id}/ticket.md — file not found"
+                )
+            ticket_content = ticket_md_path.read_text(encoding="utf-8")
+            prompt_content = prompt_content + "\n\n" + ticket_content
+            _log_runtime(ticket_id, f"prompt: generic fallback — injecting {ticket_md_path}")
 
         extra_content = None
         if args.extra_context_file:
