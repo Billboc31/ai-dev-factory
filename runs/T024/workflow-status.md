@@ -1,0 +1,30 @@
+# Workflow Status
+
+## Current Status
+
+- PLAN_APPROVED
+- PLAN_FIX_REQUIRED
+- IMPLEMENTATION_APPROVED
+- IMPLEMENTATION_FIX_REQUIRED
+- MEMORY_APPROVED
+- MEMORY_FIX_REQUIRED
+
+## Risk Level
+
+- AUTO_SAFE
+- CHAT_REVIEW_REQUIRED
+- HIGH_RISK
+
+## Notes
+
+## 2026-05-14T22:28:56Z
+
+- prev: INIT
+- step: planner
+- next: PLAN_REVIEW_NEEDED
+
+## 2026-05-14T22:30:23Z
+
+- prev: PLAN_REVIEW_NEEDED
+- step: approve-plan
+- next: PLAN_APPROVED
