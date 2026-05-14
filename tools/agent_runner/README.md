@@ -63,6 +63,33 @@ runs/TXXX/
   memory/
 ```
 
+## Issue intake
+
+Transform a GitHub Issue into a local run directory, then hand off to `run_ticket.py`.
+
+```bash
+python tools/agent_runner/run_issue_intake.py \
+  --issue 123 \
+  --ticket-id T023 \
+  --branch-slug github-issue-intake
+```
+
+Optional `--repo owner/repo` overrides the auto-detected GitHub remote.
+
+The script:
+1. validates `--ticket-id` (must match `T\d{3,}`)
+2. refuses if `state.json` already exists or the working tree is dirty
+3. fetches the issue title and body via `gh issue view`
+4. creates the branch `ticket/TXXX-<slug>`
+5. writes `runs/TXXX/ticket.md`, `state.json` (state=INIT) and `runtime.log`
+
+`run_ticket.py` remains the canonical workflow engine — run it next:
+
+```bash
+python tools/agent_runner/run_ticket.py T023 \
+  --auto --exec-cmd "claude --dangerously-skip-permissions -p"
+```
+
 ## Prompt resolution
 
 Canonical prompts are resolved from `prompts/TXXX-*.md`.
