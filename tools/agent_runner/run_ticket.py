@@ -521,6 +521,39 @@ def _append_workflow_journal(ticket_id: str, prev_state: str, step: str, next_st
         fh.write(entry)
 
 
+# ── human approval ───────────────────────────────────────────────────────────
+
+# Maps CLI command name → (required_current_state, target_state)
+HUMAN_APPROVAL_TRANSITIONS: dict[str, tuple[str, str]] = {
+    "approve-plan":               ("PLAN_REVIEW_NEEDED",           "PLAN_APPROVED"),
+    "request-plan-fix":           ("PLAN_REVIEW_NEEDED",           "PLAN_FIX_REQUIRED"),
+    "approve-implementation":     ("IMPLEMENTATION_REVIEW_NEEDED", "IMPLEMENTATION_APPROVED"),
+    "request-implementation-fix": ("IMPLEMENTATION_REVIEW_NEEDED", "IMPLEMENTATION_FIX_REQUIRED"),
+}
+
+
+def apply_human_approval(ticket_id: str, command: str) -> int:
+    required_state, target_state = HUMAN_APPROVAL_TRANSITIONS[command]
+    try:
+        state = load_state(ticket_id)
+    except TicketRunnerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    current_state = state["state"]
+    if current_state != required_state:
+        print(
+            f"error: --{command} requires state {required_state!r}, current state is {current_state!r}",
+            file=sys.stderr,
+        )
+        _log_runtime(ticket_id, f"human-approval: refused {command!r} — expected {required_state!r}, got {current_state!r}")
+        return 2
+    save_state(ticket_id, {**state, "state": target_state})
+    _append_workflow_journal(ticket_id, current_state, command, target_state)
+    _log_runtime(ticket_id, f"human-approval: {command} — {current_state} → {target_state}")
+    print(f"approved: {current_state} → {target_state}")
+    return 0
+
+
 # ── --set-state ───────────────────────────────────────────────────────────────
 
 def set_workflow_state(ticket_id: str, new_state: str) -> int:
@@ -747,6 +780,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--auto-commit", action="store_true", help="After each successful --auto step, commit runs/ artifacts")
     parser.add_argument("--auto-push", action="store_true", help="After each successful --auto-commit, push the ticket branch")
     parser.add_argument("--set-state", help="Manually set workflow state (human review path)")
+    parser.add_argument("--approve-plan", action="store_true", help="Approve plan (PLAN_REVIEW_NEEDED → PLAN_APPROVED)")
+    parser.add_argument("--request-plan-fix", action="store_true", help="Request plan fix (PLAN_REVIEW_NEEDED → PLAN_FIX_REQUIRED)")
+    parser.add_argument("--approve-implementation", action="store_true", help="Approve implementation (IMPLEMENTATION_REVIEW_NEEDED → IMPLEMENTATION_APPROVED)")
+    parser.add_argument("--request-implementation-fix", action="store_true", help="Request implementation fix (IMPLEMENTATION_REVIEW_NEEDED → IMPLEMENTATION_FIX_REQUIRED)")
     return parser.parse_args(argv)
 
 
@@ -758,6 +795,15 @@ def main(argv: list[str]) -> int:
 
         if args.set_state:
             return set_workflow_state(ticket_id, args.set_state)
+
+        for cmd, attr in (
+            ("approve-plan",               "approve_plan"),
+            ("request-plan-fix",           "request_plan_fix"),
+            ("approve-implementation",     "approve_implementation"),
+            ("request-implementation-fix", "request_implementation_fix"),
+        ):
+            if getattr(args, attr):
+                return apply_human_approval(ticket_id, cmd)
 
         if args.auto_init:
             return init_auto(ticket_id, args.branch_slug, getattr(args, "ticket_source", None))
