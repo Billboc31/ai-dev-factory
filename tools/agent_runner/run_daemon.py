@@ -810,10 +810,6 @@ def poll_github_issues(
     max_active_tickets: int = 1,
 ) -> None:
     """Detect ready GitHub issues and create local runs for new ones."""
-    if not _sync_main_before_intake():
-        _log("issue intake aborted — git sync failed")
-        return
-
     issues = fetch_ready_issues(label, repo)
     if not issues:
         _log(f"no issues found with label={label!r}")
@@ -849,6 +845,10 @@ def poll_github_issues(
     ticket_id = next_ticket_id(runs_dir, reserved=set(index.values()))
     slug = slugify_title(title)
     _log(f"ingesting issue #{number} ({title!r}) as {ticket_id} slug={slug!r}")
+
+    if not _sync_main_before_intake():
+        _log("issue intake aborted — git sync failed")
+        return
 
     if call_issue_intake(int(number), ticket_id, slug, repo, push=True):
         index[number] = ticket_id
