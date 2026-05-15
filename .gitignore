@@ -9,9 +9,3 @@ runs/daemon.pid
 runs/daemon.log
 runs/*/workflow-status.md
 runs/*/daemon.lock
-
-
-runs/daemon.log
-runs/daemon.pid
-runs/*/daemon.lock
-runs/*/workflow-status.md

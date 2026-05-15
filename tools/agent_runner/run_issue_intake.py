@@ -102,6 +102,35 @@ def write_ticket_md(ticket_id: str, issue_number: int, title: str, body: str) ->
     dest.write_text(content, encoding="utf-8")
 
 
+def commit_bootstrap(ticket_id: str, push: bool = False) -> None:
+    """Stage runs/TXXX/ticket.md and commit as bootstrap checkpoint."""
+    ticket_path = f"runs/{ticket_id}/ticket.md"
+    add_result = _run(["git", "add", ticket_path])
+    if add_result.returncode != 0:
+        stderr = add_result.stderr.strip()
+        _log(ticket_id, f"bootstrap checkpoint: failed to stage {ticket_path}: {stderr}")
+        print(f"warning: bootstrap checkpoint: failed to stage {ticket_path}", file=sys.stderr)
+        return
+    message = f"{ticket_id}: bootstrap checkpoint"
+    commit_result = _run(["git", "commit", "-m", message])
+    if commit_result.returncode != 0:
+        stderr = (commit_result.stderr or commit_result.stdout).strip()
+        _log(ticket_id, f"bootstrap checkpoint: commit failed: {stderr}")
+        print(f"warning: bootstrap checkpoint commit failed: {stderr}", file=sys.stderr)
+        return
+    _log(ticket_id, "bootstrap checkpoint completed")
+    print(f"bootstrap checkpoint completed for {ticket_id}")
+    if push:
+        push_result = _run(["git", "push", "-u", "origin", "HEAD"])
+        if push_result.returncode != 0:
+            stderr = push_result.stderr.strip()
+            _log(ticket_id, f"checkpoint push for {ticket_id}: failed: {stderr}")
+            print(f"warning: checkpoint push failed: {stderr}", file=sys.stderr)
+        else:
+            _log(ticket_id, f"checkpoint push for {ticket_id}")
+            print(f"checkpoint push for {ticket_id}")
+
+
 def write_state_json(ticket_id: str, branch: str, issue_number: int) -> None:
     path = Path("runs") / ticket_id / "state.json"
     state = {
@@ -121,6 +150,7 @@ def run_intake(
     issue_number: int,
     branch_slug: str,
     repo: str | None,
+    push: bool = False,
 ) -> int:
     try:
         validate_ticket_id(ticket_id)
@@ -168,6 +198,8 @@ def run_intake(
     _log(ticket_id, f"intake: issue=#{issue_number} title={title!r} branch={branch}")
     _log(ticket_id, "intake: done")
 
+    commit_bootstrap(ticket_id, push=push)
+
     print(f"\nrun workflow with:")
     print(
         f"  python tools/agent_runner/run_ticket.py {ticket_id}"
@@ -187,12 +219,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--repo", help="GitHub repo (owner/repo) — auto-detected from git remote if omitted"
     )
+    parser.add_argument(
+        "--push", action="store_true", help="Push branch after bootstrap checkpoint commit"
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    return run_intake(args.ticket_id, args.issue, args.branch_slug, args.repo)
+    return run_intake(args.ticket_id, args.issue, args.branch_slug, args.repo, push=args.push)
 
 
 if __name__ == "__main__":
