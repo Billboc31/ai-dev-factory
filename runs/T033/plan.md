@@ -13,3 +13,8 @@ Le plan est écrit dans `runs/T033/plan.md`. Voici un résumé des points clés 
 5. **Tests** — Nouveau `test_intake_checkpoint.py` + extension de `test_daemon_checkpoint.py`.
 
 **Aucune modification** de `run_ticket.py`, `run_step.py`, ou des agents. Le système canonique de commit existant est réutilisé tel quel.
+
+PLAN_APPROVED
+
+Note:
+Le bootstrap checkpoint doit garantir que les artefacts workflow persistants (`state.json`, `runs/.issue-intake.json`) sont commités avant toute exécution auto suivante du daemon.
