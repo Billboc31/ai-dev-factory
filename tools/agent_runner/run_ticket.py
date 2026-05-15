@@ -647,7 +647,7 @@ def init_auto(ticket_id: str, branch_slug: str | None, ticket_source: str | None
 
 # ── --auto ────────────────────────────────────────────────────────────────────
 
-def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push: bool = False) -> int:
+def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push: bool = False, include_code: bool = False) -> int:
     try:
         state = load_state(ticket_id)
     except TicketRunnerError as exc:
@@ -746,7 +746,7 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
 
     if auto_commit:
         _log_runtime(ticket_id, "auto-run: auto-commit triggered")
-        commit_rc = commit_ticket(ticket_id, None)
+        commit_rc = commit_ticket(ticket_id, None, include_code=include_code)
         if commit_rc == 0 and auto_push:
             _log_runtime(ticket_id, "auto-run: auto-push triggered")
             push_rc = push_branch(ticket_id, None)
@@ -779,6 +779,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--ticket-source", help="Path to local ticket file to snapshot into runs/TXXX/ticket.md (use with --auto-init)")
     parser.add_argument("--auto-commit", action="store_true", help="After each successful --auto step, commit runs/ artifacts")
     parser.add_argument("--auto-push", action="store_true", help="After each successful --auto-commit, push the ticket branch")
+    parser.add_argument("--auto-include-code", action="store_true", help="With --auto-commit, also stage COMMIT_SCOPE paths (tools/, tests/, prompts/, tickets/, docs/, ai/)")
     parser.add_argument("--set-state", help="Manually set workflow state (human review path)")
     parser.add_argument("--approve-plan", action="store_true", help="Approve plan (PLAN_REVIEW_NEEDED → PLAN_APPROVED)")
     parser.add_argument("--request-plan-fix", action="store_true", help="Request plan fix (PLAN_REVIEW_NEEDED → PLAN_FIX_REQUIRED)")
@@ -821,7 +822,7 @@ def main(argv: list[str]) -> int:
             if not args.exec_cmd:
                 print("error: --exec-cmd is required with --auto", file=sys.stderr)
                 return 2
-            return auto_run(ticket_id, args.exec_cmd, auto_commit=args.auto_commit, auto_push=args.auto_push)
+            return auto_run(ticket_id, args.exec_cmd, auto_commit=args.auto_commit, auto_push=args.auto_push, include_code=args.auto_include_code)
 
         if args.once:
             if not args.exec_cmd:
