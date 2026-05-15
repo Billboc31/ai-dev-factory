@@ -31,6 +31,7 @@ export default function TicketDetailPage() {
   const [tabContent, setTabContent] = useState({})
   const [tabLoading, setTabLoading] = useState(false)
   const prevStateRef = useRef(null)
+  const activeTabRef = useRef(tab)
 
   // Reset on ticket navigation
   useEffect(() => {
@@ -42,12 +43,16 @@ export default function TicketDetailPage() {
     prevStateRef.current = null
   }, [id])
 
+  useEffect(() => { activeTabRef.current = tab }, [tab])
+
   const fetchTicket = useCallback(() => {
     api.getTicket(id)
       .then(res => {
         const newTicket = res.data
         if (prevStateRef.current !== null && prevStateRef.current !== newTicket.state) {
           setTabContent({})
+        } else if (activeTabRef.current === 'logs') {
+          setTabContent(prev => { const n = { ...prev }; delete n.logs; return n })
         }
         prevStateRef.current = newTicket.state
         setTicket(newTicket)

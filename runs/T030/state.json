@@ -1,7 +1,7 @@
 {
   "ticket_id": "T030",
-  "state": "IMPLEMENTATION_FIX_REQUIRED",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T030-t030-live-daemon-activity-feed-and-auto-refresh",
   "issue_number": 30,
-  "updated_at": "2026-05-15T12:17:27Z"
+  "updated_at": "2026-05-15T12:27:33Z"
 }

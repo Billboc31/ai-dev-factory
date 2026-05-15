@@ -1,33 +1,16 @@
-All tests pass. Here's a summary of what was implemented:
+289/289 Python tests pass. Both fixes are complete and all tests are green.
 
 ---
 
-## Files created/modified
+## Summary of changes
 
-### Backend
-| File | Change |
-|---|---|
-| `services/control_api/models/schemas.py` | Added `last_heartbeat`, `current_ticket` to `DaemonStatus`; added `DaemonActivity` model |
-| `services/control_api/services/daemon_manager.py` | Redirects daemon stdout to `runs/daemon.log`; adds `get_activity()`; enriches `get_status()` with `last_heartbeat` (from log mtime) and `current_ticket` (scanned from runs/) |
-| `services/control_api/routes/daemon.py` | Added `GET /daemon/activity?lines=N` endpoint |
+**Fix 1 — Logs tab continuous refresh (`TicketDetailPage.jsx`)**
 
-### Frontend
-| File | Change |
-|---|---|
-| `apps/dashboard/src/hooks/usePolling.js` | **New** — `setInterval`/`clearInterval` hook; calls immediately on mount; restarts on key change; no zombie leaks |
-| `apps/dashboard/src/api/daemon.js` | Added `getDaemonActivity(lines)` |
-| `apps/dashboard/src/components/DaemonActivityFeed.jsx` | **New** — polls `GET /daemon/activity` every 5s; renders log lines with terminal-style styling |
-| `apps/dashboard/src/pages/TicketsPage.jsx` | Replaced manual `useEffect` with `usePolling(5s)`; shows "Updated at HH:MM:SS" indicator |
-| `apps/dashboard/src/pages/TicketDetailPage.jsx` | Polls ticket state every 5s; invalidates tab cache on state change; restarts polling on ticket navigation |
-| `apps/dashboard/src/pages/DaemonPage.jsx` | Reduced polling from 30s → 5s via `usePolling`; added `DaemonActivityFeed`; displays `current_ticket` and `last_heartbeat` |
+Added `activeTabRef` (a ref that tracks the current tab) and a `useEffect` to keep it updated. In `fetchTicket`, added an `else if (activeTabRef.current === 'logs')` branch that deletes `tabContent.logs` on every poll cycle when the logs tab is active — regardless of whether the ticket state changed. This triggers the existing tab content `useEffect` to re-fetch logs on the next render.
 
-### Tests
-| File | Change |
-|---|---|
-| `apps/dashboard/tests/usePolling.test.js` | **New** — 7 tests covering lifecycle, cleanup, key-restart, no-zombie |
-| `apps/dashboard/tests/DaemonActivityFeed.test.jsx` | **New** — 4 tests covering rendering, empty state, error handling |
-| `apps/dashboard/tests/DaemonPage.test.jsx` | Added `getDaemonActivity` mock to existing `beforeEach` |
-| `tests/test_control_api_endpoints.py` | 3 new tests for `GET /daemon/activity` |
-| `tests/test_control_api_subprocess.py` | 5 new tests for `get_activity()` and enriched `get_status()` |
+**Fix 2 — Runtime state change tests (`tests/TicketDetailPage.test.jsx`)** (new file)
 
-**Results: 34/34 Python tests pass, 49/49 JS tests pass.**
+3 tests with a mocked `usePolling` (capturing the callback without calling it, to avoid double-fetches on re-renders):
+- **invalidates tab content when ticket state changes** — verifies `getTicketState` is re-called after a state transition
+- **preserves tab content when ticket state is unchanged** — verifies `getTicketState` call count doesn't increase after a same-state poll
+- **re-fetches logs on each poll when logs tab is active** — verifies `getTicketLogs` is called again on every poll when the logs tab is active, even with no state change
