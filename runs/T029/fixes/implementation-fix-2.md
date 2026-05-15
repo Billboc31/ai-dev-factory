@@ -1,0 +1,85 @@
+# Fix artifact — IMPLEMENTATION_FIX_REQUIRED
+
+- decision: IMPLEMENTATION_FIX_REQUIRED
+- review source: runs/T029/reviews/implementation-review.md
+- generated at: 2026-05-15T10:47:46Z
+
+---
+
+I now have everything needed to write the review.
+
+---
+
+## Review — T029 Minimal dashboard UI
+
+### Scope and intent
+
+Second review cycle. The first review flagged two blocking issues (missing artifacts tab, missing `last_log` column). The coder added both to the frontend. This review assesses whether the fixes are complete and whether additional issues remain.
+
+---
+
+### Architecture compliance
+
+All UI calls go through `baseURL: '/api'` (Vite proxy → `http://localhost:8080`). No direct access to `state.json`, Git, or runtime scripts. The module is fully isolated in `apps/dashboard/`. This requirement is satisfied.
+
+---
+
+### Blocking issues
+
+#### 1. `last_log` column is permanently empty — backend does not supply the field
+
+`TicketsPage.jsx:69` renders `{t.last_log || '—'}`. The ticket explicitly requires a "dernier log" column.
+
+The backend never produces this value:
+
+- `TicketSummary` schema (`schemas.py:26-31`) has five fields: `ticket_id`, `state`, `branch`, `issue_number`, `updated_at`. No `last_log`.
+- `artifact_reader.list_tickets()` (`artifact_reader.py:38-44`) constructs `TicketSummary` from those five fields only.
+- The API response will never include `last_log`. The column will permanently show `—` for every ticket.
+
+The fix is partial — the frontend column was added but the backend change was not made. The column needs to be populated: read the last non-empty line of `runs/{ticket_id}/runtime.log` in `artifact_reader.list_tickets()`, add `last_log: str | None = None` to `TicketSummary`, and populate it.
+
+#### 2. Overview tab shows a 5-field API subset, not `state.json`
+
+`TicketDetailPage.jsx:110-113` renders `JSON.stringify(ticket, null, 2)` where `ticket` is the `TicketSummary` API response — only the five schema fields above.
+
+The ticket requirement states: _"Afficher state.json"_. The actual `state.json` file may contain step history, coder output, error details, last step attempted, and other fields critical to understanding ticket progress. Showing 5 schema fields is not the same as showing `state.json`.
+
+Fix requires a new read endpoint, e.g. `GET /tickets/{id}/state` returning the raw JSON content of `runs/{ticket_id}/state.json`, which the overview tab then fetches via `TAB_FETCHERS`.
+
+---
+
+### Minor observations (not blocking)
+
+**Stale tab cache on ticket navigation** — `TicketDetailPage.jsx:56-61`, `refreshTicket()` clears `tabContent`, but the `useEffect` on `[id]` (`line 32-37`) does not. Navigating from ticket A to ticket B will show ticket A's tab content until the user switches tabs or triggers an action. Fix: `setTabContent({})` inside the `[id]` effect.
+
+**Silent error suppression in `refreshTicket()`** — `.catch(() => {})` at `line 60` silently discards errors that occur when refreshing ticket state after a workflow action. If the ticket state refresh fails, the UI becomes stale with no user feedback. Pass `setError` to the catch handler.
+
+**Commit and Push don't refresh ticket state** — `TicketDetailPage.jsx:137-138`, both buttons lack `onSuccess={refreshTicket}`. Since these operations may update `state.json` (e.g., checkpoint timestamp), the displayed state doesn't update. Low severity because these actions are less likely to change the visible state than workflow transitions, but the inconsistency is notable.
+
+**Uptime shown as absolute timestamp instead of duration** — `DaemonPage.jsx:43-47` displays `Started: {new Date(status.started_at).toLocaleString()}`. The ticket says _"uptime si disponible"_, which implies a duration (e.g., "3h 42m"). A computed duration from `started_at` to `Date.now()` would satisfy the requirement.
+
+---
+
+### What is working correctly
+
+- All three routes (`/`, `/tickets/:id`, `/daemon`) are present and correctly linked
+- All five workflow action buttons present (Run Next, Approve Plan, Request Plan Fix, Approve Implementation, Request Impl Fix)
+- All three git/runtime buttons present (Commit, Push, Checkpoint)
+- Daemon Start, Stop, Restart controls wired correctly with post-action status refresh
+- Tab-based detail view with 6 tabs (overview, logs, plan, review, tests, artifacts), lazy-loaded and cached per session
+- `ErrorBanner` with dismissal on all pages
+- State badge color coding for COMPLETE, RUNNING, FAILED states
+- 37 tests across 4 files, all passing
+- API layer fully proxied, no direct runtime access
+
+---
+
+### Verdict
+
+Two acceptance criteria are not met end-to-end:
+1. The "dernier log" column is always empty because the backend never provides the field.
+2. The detail view does not show `state.json` — it shows a 5-field API projection.
+
+Both require backend changes that were not made in this cycle.
+
+IMPLEMENTATION_FIX_REQUIRED
