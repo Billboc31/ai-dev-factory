@@ -8,3 +8,4 @@ apps/dashboard/node_modules/
 runs/daemon.pid
 runs/daemon.log
 runs/*/workflow-status.md
+runs/*/daemon.lock
