@@ -879,6 +879,26 @@ def poll_github_issues(
         slug = slugify_title(title)
         _log(f"ingesting issue #{number} ({title!r}) as {ticket_id} slug={slug!r}")
 
+        checkout_main = subprocess.run(
+            ["git", "checkout", "main"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if checkout_main.returncode != 0:
+            _log(f"issue #{number}: failed checkout main before intake: {checkout_main.stderr.strip()}")
+            continue
+
+        pull_main = subprocess.run(
+            ["git", "pull", "--ff-only", "origin", "main"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if pull_main.returncode != 0:
+            _log(f"issue #{number}: failed pull main before intake: {pull_main.stderr.strip()}")
+            continue
+
         if call_issue_intake(int(number), ticket_id, slug, repo, push=True):
             index[number] = ticket_id
             save_issue_index(runs_dir, index)
