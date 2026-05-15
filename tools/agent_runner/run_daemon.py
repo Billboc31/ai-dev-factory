@@ -830,6 +830,7 @@ def poll_github_issues(
         return
 
     _log(f"found {len(candidates)} candidate issue(s)")
+    candidates = candidates[:1]  # V1: one intake per daemon cycle to avoid switching across ticket branches.
 
     for issue in candidates:
         number = str(issue["number"])
