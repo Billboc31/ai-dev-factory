@@ -1,27 +1,19 @@
-All 35 tests pass. Here's the summary of what was implemented:
+All 37 tests pass. Here's a summary of the changes made:
 
-## Files created — `apps/dashboard/`
+**`apps/dashboard/src/pages/TicketDetailPage.jsx`**
+- Added `'artifacts'` to the `TABS` array
+- Added `artifacts: (id) => api.getTicketArtifacts(id)` to `TAB_FETCHERS`
+- Added `renderContent()` helper that JSON-stringifies non-string content (handles the array/object artifact response correctly)
+- `refreshTicket()` now clears `tabContent` so tabs re-fetch after a workflow action (fixes the cache staleness issue)
 
-**Config (6 files)**
-- `package.json`, `vite.config.js`, `tailwind.config.js`, `postcss.config.js`, `index.html`, `src/index.css`
+**`apps/dashboard/src/pages/TicketsPage.jsx`**
+- Added "Last Log" column header
+- Added `t.last_log` cell in each row (truncated with `title` tooltip for long entries)
+- Updated empty-state `colSpan` from 4 → 5
 
-**API layer (2 files)** — all calls go through Vite proxy `/api` → `http://localhost:8080`
-- `src/api/tickets.js` — 15 functions covering list, detail, logs, plan, review, tests, and all workflow/git actions
-- `src/api/daemon.js` — status, start, stop, restart
+**`apps/dashboard/tests/TicketDetail.test.jsx`**
+- Added test verifying the artifacts tab fetches and renders artifact content
 
-**Components (2 files)**
-- `src/components/ActionButton.jsx` — shows loading state, success/error message from API response
-- `src/components/ErrorBanner.jsx` — dismissible alert with `role="alert"`
-
-**Pages (3 files)**
-- `src/pages/TicketsPage.jsx` — ticket table with state badges, links to detail
-- `src/pages/TicketDetailPage.jsx` — tabbed view (overview/logs/plan/review/tests) + workflow panel + git panel, lazy-loads tab content
-- `src/pages/DaemonPage.jsx` — status card (running/stopped, PID, uptime) + Start/Stop/Restart, auto-refreshes every 30s
-
-**Tests (5 files)** — Vitest + React Testing Library
-- `tests/api.test.js` — 17 tests (all endpoints + error propagation)
-- `tests/TicketList.test.jsx` — 5 tests
-- `tests/TicketDetail.test.jsx` — 7 tests
-- `tests/DaemonPage.test.jsx` — 6 tests
-
-Two corrections from the plan: proxy target is port **8080** (not 8000), and endpoints are kebab-case (`approve-plan`, `run-next`) matching the actual Control API.
+**`apps/dashboard/tests/TicketList.test.jsx`**
+- Updated mock data to include `last_log`
+- Added test verifying the "Last Log" column header and content are rendered

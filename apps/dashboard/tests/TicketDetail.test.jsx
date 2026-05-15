@@ -76,6 +76,15 @@ describe('TicketDetailPage', () => {
     expect(await screen.findByText('Step failed')).toBeInTheDocument()
   })
 
+  it('loads and displays artifacts when artifacts tab is clicked', async () => {
+    ticketsApi.getTicketArtifacts.mockResolvedValue({ data: ['runs/T028/plan.md', 'runs/T028/state.json'] })
+    renderPage()
+    const artifactsTab = await screen.findByRole('button', { name: /artifacts/i })
+    await userEvent.click(artifactsTab)
+    expect(ticketsApi.getTicketArtifacts).toHaveBeenCalledWith('T028')
+    expect(await screen.findByText(/plan\.md/)).toBeInTheDocument()
+  })
+
   it('has a back link to the tickets list', async () => {
     renderPage()
     const link = await screen.findByRole('link', { name: /back to tickets/i })

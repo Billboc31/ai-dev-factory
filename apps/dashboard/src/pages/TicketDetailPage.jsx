@@ -4,13 +4,20 @@ import * as api from '../api/tickets'
 import ActionButton from '../components/ActionButton'
 import ErrorBanner from '../components/ErrorBanner'
 
-const TABS = ['overview', 'logs', 'plan', 'review', 'tests']
+const TABS = ['overview', 'logs', 'plan', 'review', 'tests', 'artifacts']
 
 const TAB_FETCHERS = {
   logs: (id) => api.getTicketLogs(id),
   plan: (id) => api.getTicketPlan(id),
   review: (id) => api.getTicketReview(id),
-  tests: (id) => api.getTicketTests(id)
+  tests: (id) => api.getTicketTests(id),
+  artifacts: (id) => api.getTicketArtifacts(id)
+}
+
+function renderContent(content) {
+  if (content === undefined || content === null) return ''
+  if (typeof content === 'string') return content
+  return JSON.stringify(content, null, 2)
 }
 
 export default function TicketDetailPage() {
@@ -47,6 +54,7 @@ export default function TicketDetailPage() {
   }, [tab, id])
 
   const refreshTicket = () => {
+    setTabContent({})
     api.getTicket(id)
       .then(res => setTicket(res.data))
       .catch(() => {})
@@ -107,7 +115,7 @@ export default function TicketDetailPage() {
           tabLoading
             ? <p className="text-gray-500 text-sm">Loading…</p>
             : <pre className="bg-white border border-gray-200 rounded p-4 text-xs overflow-auto whitespace-pre-wrap max-h-96">
-                {tabContent[tab] || 'No content available.'}
+                {renderContent(tabContent[tab]) || 'No content available.'}
               </pre>
         )}
       </div>

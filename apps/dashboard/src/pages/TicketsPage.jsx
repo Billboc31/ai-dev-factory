@@ -43,6 +43,7 @@ export default function TicketsPage() {
               <th className="p-3 font-medium">State</th>
               <th className="p-3 font-medium">Branch</th>
               <th className="p-3 font-medium">Last Update</th>
+              <th className="p-3 font-medium">Last Log</th>
             </tr>
           </thead>
           <tbody>
@@ -65,11 +66,14 @@ export default function TicketsPage() {
                 <td className="p-3 text-gray-500 text-xs">
                   {t.updated_at ? new Date(t.updated_at).toLocaleString() : '—'}
                 </td>
+                <td className="p-3 text-gray-500 text-xs max-w-xs truncate" title={t.last_log || ''}>
+                  {t.last_log || '—'}
+                </td>
               </tr>
             ))}
             {tickets.length === 0 && (
               <tr>
-                <td colSpan={4} className="p-6 text-center text-gray-400">No tickets found</td>
+                <td colSpan={5} className="p-6 text-center text-gray-400">No tickets found</td>
               </tr>
             )}
           </tbody>

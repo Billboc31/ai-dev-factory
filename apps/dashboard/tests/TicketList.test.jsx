@@ -6,8 +6,8 @@ import * as ticketsApi from '../src/api/tickets'
 vi.mock('../src/api/tickets')
 
 const MOCK_TICKETS = [
-  { ticket_id: 'T028', state: 'TEST_COMPLETE', branch: 'ticket/T028-control-api', updated_at: '2026-05-15T09:00:00Z' },
-  { ticket_id: 'T029', state: 'PLAN_APPROVED', branch: 'ticket/T029-dashboard', updated_at: '2026-05-15T10:00:00Z' }
+  { ticket_id: 'T028', state: 'TEST_COMPLETE', branch: 'ticket/T028-control-api', updated_at: '2026-05-15T09:00:00Z', last_log: 'All tests passed' },
+  { ticket_id: 'T029', state: 'PLAN_APPROVED', branch: 'ticket/T029-dashboard', updated_at: '2026-05-15T10:00:00Z', last_log: null }
 ]
 
 function renderPage() {
@@ -45,6 +45,13 @@ describe('TicketsPage', () => {
     ticketsApi.listTickets.mockRejectedValue({ message: 'Network Error' })
     renderPage()
     expect(await screen.findByRole('alert')).toHaveTextContent('Network Error')
+  })
+
+  it('shows the last log column header and content', async () => {
+    ticketsApi.listTickets.mockResolvedValue({ data: MOCK_TICKETS })
+    renderPage()
+    expect(await screen.findByRole('columnheader', { name: /last log/i })).toBeInTheDocument()
+    expect(await screen.findByText('All tests passed')).toBeInTheDocument()
   })
 
   it('links each ticket to its detail page', async () => {
