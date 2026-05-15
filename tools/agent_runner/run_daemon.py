@@ -743,6 +743,14 @@ def next_ticket_id(runs_dir: Path, reserved: set[str] | None = None) -> str:
     return f"T{max_num + 1:03d}"
 
 
+def extract_ticket_id_from_title(title: str) -> str | None:
+    """Return explicit TXXX from an issue title, if present."""
+    match = re.search(r"\bT\d{3,}\b", title or "", re.IGNORECASE)
+    if not match:
+        return None
+    return match.group(0).upper()
+
+
 def slugify_title(title: str) -> str:
     """Convert an issue title to a URL-safe branch slug."""
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
@@ -818,7 +826,13 @@ def poll_github_issues(
     for issue in candidates:
         number = str(issue["number"])
         title = issue.get("title", "")
-        ticket_id = next_ticket_id(runs_dir, reserved=set(index.values()))
+        ticket_id = extract_ticket_id_from_title(title)
+        if ticket_id is None:
+            ticket_id = next_ticket_id(runs_dir, reserved=set(index.values()))
+        elif (runs_dir / ticket_id).exists() or ticket_id in index.values():
+            _log(f"issue #{number}: ticket {ticket_id} already exists — skipping intake")
+            continue
+
         slug = slugify_title(title)
         _log(f"ingesting issue #{number} ({title!r}) as {ticket_id} slug={slug!r}")
 
