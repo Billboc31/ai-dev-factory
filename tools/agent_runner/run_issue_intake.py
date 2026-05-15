@@ -102,12 +102,13 @@ def write_ticket_md(ticket_id: str, issue_number: int, title: str, body: str) ->
     dest.write_text(content, encoding="utf-8")
 
 
-def write_state_json(ticket_id: str, branch: str) -> None:
+def write_state_json(ticket_id: str, branch: str, issue_number: int) -> None:
     path = Path("runs") / ticket_id / "state.json"
     state = {
         "ticket_id": ticket_id,
         "state": "INIT",
         "branch": branch,
+        "issue_number": issue_number,
         "updated_at": _now_iso(),
     }
     tmp = path.parent / (path.name + ".tmp")
@@ -161,8 +162,8 @@ def run_intake(
     write_ticket_md(ticket_id, issue_number, title, body)
     print(f"ticket.md created: runs/{ticket_id}/ticket.md")
 
-    write_state_json(ticket_id, branch)
-    print(f"state.json initialized: state=INIT branch={branch}")
+    write_state_json(ticket_id, branch, issue_number)
+    print(f"state.json initialized: state=INIT branch={branch} issue={issue_number}")
 
     _log(ticket_id, f"intake: issue=#{issue_number} title={title!r} branch={branch}")
     _log(ticket_id, "intake: done")

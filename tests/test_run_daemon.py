@@ -103,7 +103,7 @@ def test_run_once_calls_launch_for_auto_runnable_state(tmp_path):
     _write_state(runs, "T001", "PLAN_APPROVED")
     with patch("run_daemon.launch_ticket") as mock_launch:
         run_once("test-cmd", False, runs)
-    mock_launch.assert_called_once_with("T001", "test-cmd", False, runs)
+    mock_launch.assert_called_once_with("T001", "test-cmd", False, runs, auto_commit=False, auto_push=False, auto_include_code=False)
 
 
 def test_run_once_skips_human_gate_state(tmp_path):

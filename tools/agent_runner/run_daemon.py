@@ -229,6 +229,177 @@ def _is_blocked_by_retry(ticket_id: str, retry_state: dict) -> bool:
     return False
 
 
+# ── state json helpers ────────────────────────────────────────────────────────
+
+def _load_state_json(run_dir: Path) -> dict:
+    path = run_dir / "state.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_state_json(run_dir: Path, data: dict) -> None:
+    path = run_dir / "state.json"
+    updated = {**data, "updated_at": _now_iso()}
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(updated, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+# ── PR lifecycle ──────────────────────────────────────────────────────────────
+
+def _pr_title(ticket_id: str, run_dir: Path) -> str:
+    ticket_path = run_dir / "ticket.md"
+    if ticket_path.exists():
+        for line in ticket_path.read_text(encoding="utf-8").splitlines():
+            if line.startswith("# "):
+                return line[2:].strip()
+    return f"{ticket_id} — workflow complete"
+
+
+def _pr_body(ticket_id: str, issue_number: int | None) -> str:
+    lines = [
+        f"## {ticket_id}",
+        "",
+        "Workflow reached `TEST_COMPLETE`.",
+        "",
+        "### Gates",
+        "- [ ] PLAN_APPROVED",
+        "- [ ] IMPLEMENTATION_APPROVED",
+        "- [ ] MEMORY_APPROVED",
+    ]
+    if issue_number:
+        lines += ["", f"Closes #{issue_number}"]
+    return "\n".join(lines)
+
+
+def create_or_update_pr(ticket_id: str, run_dir: Path, repo: str | None) -> None:
+    """Create or update the GitHub PR for a ticket at TEST_COMPLETE. Non-blocking on gh failure."""
+    state = _load_state_json(run_dir)
+    branch = state.get("branch")
+    issue_number = state.get("issue_number")
+    pr_number = state.get("pr_number")
+
+    if not branch:
+        _log(f"{ticket_id}: create_or_update_pr: no branch in state — skipping")
+        return
+
+    title = _pr_title(ticket_id, run_dir)
+    body = _pr_body(ticket_id, issue_number)
+
+    if pr_number is None:
+        list_cmd = ["gh", "pr", "list", "--head", branch, "--json", "number", "--state", "open"]
+        if repo:
+            list_cmd += ["--repo", repo]
+        try:
+            list_result = subprocess.run(list_cmd, capture_output=True, text=True, check=False)
+            if list_result.returncode == 0 and list_result.stdout.strip():
+                existing = json.loads(list_result.stdout)
+                if existing:
+                    pr_number = existing[0]["number"]
+                    _log(f"{ticket_id}: found existing PR #{pr_number} — will update")
+                    state["pr_number"] = pr_number
+                    _save_state_json(run_dir, state)
+        except (json.JSONDecodeError, FileNotFoundError, OSError):
+            _log(f"{ticket_id}: gh pr list failed — proceeding with create")
+
+    if pr_number is not None:
+        edit_cmd = ["gh", "pr", "edit", str(pr_number), "--body", body]
+        if repo:
+            edit_cmd += ["--repo", repo]
+        try:
+            result = subprocess.run(edit_cmd, capture_output=True, text=True, check=False)
+            if result.returncode == 0:
+                _log(f"{ticket_id}: PR #{pr_number} updated")
+            else:
+                _log(f"{ticket_id}: gh pr edit failed (rc={result.returncode}): {result.stderr.strip()}")
+        except FileNotFoundError:
+            _log(f"{ticket_id}: gh not found — cannot update PR #{pr_number}")
+    else:
+        create_cmd = ["gh", "pr", "create", "--head", branch, "--title", title, "--body", body]
+        if repo:
+            create_cmd += ["--repo", repo]
+        try:
+            result = subprocess.run(create_cmd, capture_output=True, text=True, check=False)
+            if result.returncode == 0:
+                pr_url = result.stdout.strip()
+                m = re.search(r"/pull/(\d+)", pr_url)
+                if m:
+                    pr_number = int(m.group(1))
+                    state["pr_number"] = pr_number
+                    _save_state_json(run_dir, state)
+                    _log(f"{ticket_id}: PR #{pr_number} created: {pr_url}")
+                else:
+                    _log(f"{ticket_id}: PR created but number not parsed from: {pr_url!r}")
+            else:
+                _log(f"{ticket_id}: gh pr create failed (rc={result.returncode}): {result.stderr.strip()}")
+        except FileNotFoundError:
+            _log(f"{ticket_id}: gh not found — cannot create PR")
+
+
+def check_and_close_issue(ticket_id: str, run_dir: Path, repo: str | None) -> None:
+    """Detect merged PR, close the source issue, and remove ai-ready label. Non-blocking."""
+    state = _load_state_json(run_dir)
+    pr_number = state.get("pr_number")
+    issue_number = state.get("issue_number")
+
+    if not pr_number:
+        return
+
+    check_cmd = ["gh", "pr", "view", str(pr_number), "--json", "state"]
+    if repo:
+        check_cmd += ["--repo", repo]
+    try:
+        result = subprocess.run(check_cmd, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            _log(f"{ticket_id}: gh pr view failed (rc={result.returncode}): {result.stderr.strip()}")
+            return
+        pr_data = json.loads(result.stdout)
+    except (json.JSONDecodeError, FileNotFoundError):
+        _log(f"{ticket_id}: gh pr view failed or gh not found")
+        return
+
+    if pr_data.get("state") != "MERGED":
+        return
+
+    _log(f"{ticket_id}: PR #{pr_number} merged — handling issue closure")
+
+    if not issue_number:
+        return
+
+    close_cmd = ["gh", "issue", "close", str(issue_number)]
+    if repo:
+        close_cmd += ["--repo", repo]
+    try:
+        close_result = subprocess.run(close_cmd, capture_output=True, text=True, check=False)
+        if close_result.returncode == 0:
+            _log(f"{ticket_id}: issue #{issue_number} closed")
+        else:
+            _log(f"{ticket_id}: gh issue close failed (rc={close_result.returncode}): {close_result.stderr.strip()}")
+    except FileNotFoundError:
+        _log(f"{ticket_id}: gh not found — cannot close issue #{issue_number}")
+
+    label_cmd = ["gh", "issue", "edit", str(issue_number), "--remove-label", "ai-ready"]
+    if repo:
+        label_cmd += ["--repo", repo]
+    try:
+        label_result = subprocess.run(label_cmd, capture_output=True, text=True, check=False)
+        if label_result.returncode == 0:
+            _log(f"{ticket_id}: label 'ai-ready' removed from issue #{issue_number}")
+        else:
+            _log(f"{ticket_id}: gh issue edit label failed (rc={label_result.returncode}): {label_result.stderr.strip()}")
+    except FileNotFoundError:
+        _log(f"{ticket_id}: gh not found — cannot remove label from issue #{issue_number}")
+
+
+def handle_test_complete(ticket_id: str, run_dir: Path, repo: str | None) -> None:
+    """Orchestrate PR lifecycle for a ticket at TEST_COMPLETE. Non-blocking."""
+    _log(f"{ticket_id}: TEST_COMPLETE PR lifecycle")
+    create_or_update_pr(ticket_id, run_dir, repo)
+    check_and_close_issue(ticket_id, run_dir, repo)
+
+
 def scan_tickets(runs_dir: Path) -> list[tuple[str, str]]:
     """Return (ticket_id, state) for all readable state.json files, sorted by ticket_id."""
     results = []
@@ -244,7 +415,15 @@ def scan_tickets(runs_dir: Path) -> list[tuple[str, str]]:
     return results
 
 
-def launch_ticket(ticket_id: str, exec_cmd: str, dry_run: bool, runs_dir: Path) -> None:
+def launch_ticket(
+    ticket_id: str,
+    exec_cmd: str,
+    dry_run: bool,
+    runs_dir: Path,
+    auto_commit: bool = False,
+    auto_push: bool = False,
+    auto_include_code: bool = False,
+) -> None:
     """Launch run_ticket.py --auto for one ticket. No-op in dry_run mode."""
     run_dir = runs_dir / ticket_id
 
@@ -258,8 +437,15 @@ def launch_ticket(ticket_id: str, exec_cmd: str, dry_run: bool, runs_dir: Path) 
 
     try:
         _log(f"launching {ticket_id} --auto")
+        cmd = [sys.executable, str(RUN_TICKET), ticket_id, "--auto", "--exec-cmd", exec_cmd]
+        if auto_commit:
+            cmd.append("--auto-commit")
+        if auto_push:
+            cmd.append("--auto-push")
+        if auto_include_code:
+            cmd.append("--auto-include-code")
         result = subprocess.run(
-            [sys.executable, str(RUN_TICKET), ticket_id, "--auto", "--exec-cmd", exec_cmd],
+            cmd,
             text=True,
             capture_output=True,
             check=False,
@@ -392,7 +578,15 @@ def poll_github_issues(runs_dir: Path, label: str, repo: str | None) -> None:
             _log(f"intake failed for issue #{number} — will retry next cycle")
 
 
-def run_once(exec_cmd: str, dry_run: bool, runs_dir: Path) -> None:
+def run_once(
+    exec_cmd: str,
+    dry_run: bool,
+    runs_dir: Path,
+    auto_commit: bool = False,
+    auto_push: bool = False,
+    auto_include_code: bool = False,
+    repo: str | None = None,
+) -> None:
     """Scan all tickets and process auto-runnable ones."""
     tickets = scan_tickets(runs_dir)
     if not tickets:
@@ -405,7 +599,14 @@ def run_once(exec_cmd: str, dry_run: bool, runs_dir: Path) -> None:
             retry_state = _load_retry_state(run_dir)
             if _is_blocked_by_retry(ticket_id, retry_state):
                 continue
-            launch_ticket(ticket_id, exec_cmd, dry_run, runs_dir)
+            launch_ticket(ticket_id, exec_cmd, dry_run, runs_dir, auto_commit=auto_commit, auto_push=auto_push, auto_include_code=auto_include_code)
+        elif state == "TEST_COMPLETE":
+            _log(f"detected {ticket_id} state=TEST_COMPLETE (human gate — PR lifecycle)")
+            run_dir = runs_dir / ticket_id
+            if not dry_run:
+                handle_test_complete(ticket_id, run_dir, repo)
+            else:
+                _log(f"dry-run: would handle {ticket_id} TEST_COMPLETE PR lifecycle")
         elif state in HUMAN_GATE_STATES:
             _log(f"skipping {ticket_id} state={state} (human gate)")
         else:
@@ -422,6 +623,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--poll-issues", action="store_true", help="Enable GitHub issue polling")
     parser.add_argument("--issue-label", default="ai-ready", help="GitHub label to filter issues (default: ai-ready)")
     parser.add_argument("--issue-repo", default=None, help="GitHub repo (owner/repo) — defaults to current repo")
+    parser.add_argument("--auto-commit", action="store_true", help="After each successful step, commit runs/ artifacts")
+    parser.add_argument("--auto-push", action="store_true", help="After each successful auto-commit, push the ticket branch")
+    parser.add_argument("--auto-include-code", action="store_true", help="With --auto-commit, also stage COMMIT_SCOPE paths (tools/, tests/, prompts/, tickets/, docs/, ai/)")
     return parser.parse_args(argv)
 
 
@@ -436,18 +640,20 @@ def main(argv: list[str]) -> int:
     _log(f"starting daemon exec-cmd={args.exec_cmd!r} interval={args.interval}s dry-run={args.dry_run}")
     if args.poll_issues:
         _log(f"issue polling enabled label={args.issue_label!r} repo={args.issue_repo!r}")
+    if args.auto_commit:
+        _log(f"auto-commit enabled auto-push={args.auto_push} auto-include-code={args.auto_include_code}")
 
     if args.once:
         if args.poll_issues:
             poll_github_issues(runs_dir, args.issue_label, args.issue_repo)
-        run_once(args.exec_cmd, args.dry_run, runs_dir)
+        run_once(args.exec_cmd, args.dry_run, runs_dir, auto_commit=args.auto_commit, auto_push=args.auto_push, auto_include_code=args.auto_include_code, repo=args.issue_repo)
         return 0
 
     try:
         while True:
             if args.poll_issues:
                 poll_github_issues(runs_dir, args.issue_label, args.issue_repo)
-            run_once(args.exec_cmd, args.dry_run, runs_dir)
+            run_once(args.exec_cmd, args.dry_run, runs_dir, auto_commit=args.auto_commit, auto_push=args.auto_push, auto_include_code=args.auto_include_code, repo=args.issue_repo)
             _log(f"sleeping {args.interval}s")
             time.sleep(args.interval)
     except KeyboardInterrupt:
