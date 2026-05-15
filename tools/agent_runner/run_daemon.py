@@ -230,6 +230,102 @@ def _is_blocked_by_retry(ticket_id: str, retry_state: dict) -> bool:
     return False
 
 
+# ── pre-flight dirty tree check ───────────────────────────────────────────────
+
+def _classify_dirty_files(ticket_id: str) -> tuple[list[str], list[str]]:
+    """Run git status and classify dirty files as workflow artifacts or unknown.
+
+    Workflow artifacts are files under runs/. Unknown files are anything else.
+    Returns (workflow_artifacts, unknown_files).
+    """
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True, text=True, check=False,
+    )
+    workflow_artifacts: list[str] = []
+    unknown_files: list[str] = []
+    if result.returncode != 0:
+        return workflow_artifacts, unknown_files
+    for line in result.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:]
+        if " -> " in path:
+            path = path.split(" -> ")[-1]
+        if path.startswith("runs/"):
+            workflow_artifacts.append(path)
+        else:
+            unknown_files.append(path)
+    return workflow_artifacts, unknown_files
+
+
+def _ensure_clean_working_tree(ticket_id: str, auto_push: bool = False) -> bool:
+    """Ensure working tree is clean before launching a ticket step.
+
+    If dirty files are only workflow artifacts → automatic checkpoint commit.
+    If any unknown files are dirty → abort safely.
+    Returns True if ready to proceed, False to abort.
+    """
+    workflow_artifacts, unknown_files = _classify_dirty_files(ticket_id)
+
+    if not workflow_artifacts and not unknown_files:
+        return True
+
+    if unknown_files:
+        _log(f"{ticket_id}: pre-flight abort — unknown dirty files: {unknown_files!r}")
+        _log(f"{ticket_id}: pre-flight abort — commit or stash unknown files before daemon can proceed")
+        return False
+
+    _log(f"{ticket_id}: pre-flight — dirty workflow artifacts detected — triggering checkpoint commit")
+    commit_result = subprocess.run(
+        [sys.executable, str(RUN_TICKET), ticket_id, "--commit", "--include-code"],
+        capture_output=True, text=True, check=False,
+    )
+    for line in commit_result.stdout.splitlines():
+        _log(f"{ticket_id}: {line}")
+    for line in commit_result.stderr.splitlines():
+        _log(f"{ticket_id} [err]: {line}")
+
+    if commit_result.returncode not in (0, 1):
+        _log(f"{ticket_id}: pre-flight abort — checkpoint commit failed rc={commit_result.returncode}")
+        return False
+
+    if commit_result.returncode == 0:
+        _log(f"checkpoint commit for {ticket_id}")
+        if auto_push:
+            push_result = subprocess.run(
+                [sys.executable, str(RUN_TICKET), ticket_id, "--push"],
+                capture_output=True, text=True, check=False,
+            )
+            for line in push_result.stdout.splitlines():
+                _log(f"{ticket_id}: {line}")
+            if push_result.returncode == 0:
+                _log(f"checkpoint push for {ticket_id}")
+            else:
+                _log(f"{ticket_id}: checkpoint push failed rc={push_result.returncode}")
+
+    return True
+
+
+def _commit_after_intake(ticket_id: str) -> None:
+    """Commit runs/ + COMMIT_SCOPE after issue intake to include .issue-intake.json."""
+    _log(f"checkpoint commit for {ticket_id}")
+    result = subprocess.run(
+        [sys.executable, str(RUN_TICKET), ticket_id, "--commit", "--include-code"],
+        capture_output=True, text=True, check=False,
+    )
+    for line in result.stdout.splitlines():
+        _log(f"{ticket_id}: {line}")
+    for line in result.stderr.splitlines():
+        _log(f"{ticket_id} [err]: {line}")
+    if result.returncode == 0:
+        _log(f"bootstrap checkpoint completed for {ticket_id}")
+    elif result.returncode == 1:
+        _log(f"{ticket_id}: nothing new to commit after intake")
+    else:
+        _log(f"{ticket_id}: intake checkpoint commit failed rc={result.returncode}")
+
+
 # ── state json helpers ────────────────────────────────────────────────────────
 
 def _load_state_json(run_dir: Path) -> dict:
@@ -482,6 +578,9 @@ def launch_ticket(
         return
 
     try:
+        if not _ensure_clean_working_tree(ticket_id, auto_push=auto_push):
+            return
+
         cmd = build_run_ticket_command(ticket_id, exec_cmd, auto_commit, auto_push, auto_include_code)
         _log(f"Running ticket command: {shlex.join(cmd)}")
         result = subprocess.run(
@@ -570,7 +669,7 @@ def fetch_ready_issues(label: str, repo: str | None) -> list[dict]:
         return []
 
 
-def call_issue_intake(issue_number: int, ticket_id: str, branch_slug: str, repo: str | None) -> bool:
+def call_issue_intake(issue_number: int, ticket_id: str, branch_slug: str, repo: str | None, push: bool = False) -> bool:
     """Run run_issue_intake.py for one issue. Returns True on success."""
     cmd = [
         sys.executable, str(RUN_ISSUE_INTAKE),
@@ -580,6 +679,8 @@ def call_issue_intake(issue_number: int, ticket_id: str, branch_slug: str, repo:
     ]
     if repo:
         cmd += ["--repo", repo]
+    if push:
+        cmd.append("--push")
     result = subprocess.run(cmd, capture_output=True, text=True, check=False)
     for line in result.stdout.splitlines():
         _log(f"intake {ticket_id}: {line}")
@@ -610,10 +711,11 @@ def poll_github_issues(runs_dir: Path, label: str, repo: str | None) -> None:
         slug = slugify_title(title)
         _log(f"ingesting issue #{number} ({title!r}) as {ticket_id} slug={slug!r}")
 
-        if call_issue_intake(int(number), ticket_id, slug, repo):
+        if call_issue_intake(int(number), ticket_id, slug, repo, push=True):
             index[number] = ticket_id
             save_issue_index(runs_dir, index)
             _log(f"issue #{number} ingested as {ticket_id}")
+            _commit_after_intake(ticket_id)
         else:
             _log(f"intake failed for issue #{number} — will retry next cycle")
 

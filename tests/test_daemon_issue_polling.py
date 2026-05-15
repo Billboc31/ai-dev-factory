@@ -219,6 +219,22 @@ def test_call_issue_intake_passes_repo_when_set():
     assert "owner/repo" in cmd
 
 
+def test_call_issue_intake_passes_push_flag_when_set():
+    mock_result = MagicMock(returncode=0, stdout="", stderr="")
+    with patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
+        call_issue_intake(42, "T025", "my-feature", None, push=True)
+    cmd = mock_sub.call_args[0][0]
+    assert "--push" in cmd
+
+
+def test_call_issue_intake_omits_push_flag_by_default():
+    mock_result = MagicMock(returncode=0, stdout="", stderr="")
+    with patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
+        call_issue_intake(42, "T025", "my-feature", None)
+    cmd = mock_sub.call_args[0][0]
+    assert "--push" not in cmd
+
+
 # ── poll_github_issues ────────────────────────────────────────────────────────
 
 def test_poll_github_issues_ingests_new_issue(tmp_path):
@@ -227,7 +243,8 @@ def test_poll_github_issues_ingests_new_issue(tmp_path):
 
     with patch("run_daemon.fetch_ready_issues", return_value=issues):
         with patch("run_daemon.call_issue_intake", return_value=True):
-            poll_github_issues(runs, "ai-ready", None)
+            with patch("run_daemon._commit_after_intake"):
+                poll_github_issues(runs, "ai-ready", None)
 
     index = load_issue_index(runs)
     assert "42" in index
@@ -285,7 +302,8 @@ def test_poll_github_issues_assigns_correct_next_ticket_id(tmp_path):
 
     with patch("run_daemon.fetch_ready_issues", return_value=issues):
         with patch("run_daemon.call_issue_intake", return_value=True) as mock_intake:
-            poll_github_issues(runs, "ai-ready", None)
+            with patch("run_daemon._commit_after_intake"):
+                poll_github_issues(runs, "ai-ready", None)
 
     _, ticket_id, _, _ = mock_intake.call_args[0]
     assert ticket_id == "T004"
@@ -300,11 +318,36 @@ def test_poll_github_issues_multiple_issues_sequential_ids(tmp_path):
 
     with patch("run_daemon.fetch_ready_issues", return_value=issues):
         with patch("run_daemon.call_issue_intake", return_value=True):
-            poll_github_issues(runs, "ai-ready", None)
+            with patch("run_daemon._commit_after_intake"):
+                poll_github_issues(runs, "ai-ready", None)
 
     index = load_issue_index(runs)
     assert index["1"] == "T001"
     assert index["2"] == "T002"
+
+
+def test_poll_github_issues_calls_commit_after_intake_on_success(tmp_path):
+    runs = _make_runs(tmp_path)
+    issues = [{"number": 42, "title": "Add feature"}]
+
+    with patch("run_daemon.fetch_ready_issues", return_value=issues):
+        with patch("run_daemon.call_issue_intake", return_value=True):
+            with patch("run_daemon._commit_after_intake") as mock_commit:
+                poll_github_issues(runs, "ai-ready", None)
+
+    mock_commit.assert_called_once_with("T001")
+
+
+def test_poll_github_issues_does_not_call_commit_after_intake_on_failure(tmp_path):
+    runs = _make_runs(tmp_path)
+    issues = [{"number": 42, "title": "Add feature"}]
+
+    with patch("run_daemon.fetch_ready_issues", return_value=issues):
+        with patch("run_daemon.call_issue_intake", return_value=False):
+            with patch("run_daemon._commit_after_intake") as mock_commit:
+                poll_github_issues(runs, "ai-ready", None)
+
+    mock_commit.assert_not_called()
 
 
 # ── main CLI integration ──────────────────────────────────────────────────────
