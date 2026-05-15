@@ -396,9 +396,14 @@ def _get_current_branch() -> str:
 
 def _check_working_tree_clean() -> None:
     result = run_command(["git", "status", "--porcelain"])
+
     if result.returncode != 0:
         raise TicketRunnerError("failed to check git status")
+
     if result.stdout.strip():
+        print("DEBUG dirty working tree:")
+        print(result.stdout)
+
         raise TicketRunnerError(
             "working tree is not clean — commit or stash changes first"
         )
