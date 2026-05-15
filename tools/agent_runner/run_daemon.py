@@ -536,8 +536,8 @@ def check_and_close_issue(ticket_id: str, run_dir: Path, repo: str | None) -> No
     _save_state_json(run_dir, state)
 
 
-def _checkpoint_and_push_before_pr(ticket_id: str) -> None:
-    """Checkpoint commit + push before PR creation. Non-blocking — logs failure but does not abort."""
+def _checkpoint_and_push_before_pr(ticket_id: str) -> bool:
+    """Checkpoint commit + push before PR creation. Returns False if commit or push failed."""
     _log(f"{ticket_id}: pre-PR checkpoint commit")
     commit_result = subprocess.run(
         [sys.executable, str(RUN_TICKET), ticket_id, "--commit", "--include-code"],
@@ -549,7 +549,7 @@ def _checkpoint_and_push_before_pr(ticket_id: str) -> None:
         _log(f"{ticket_id} [err]: {line}")
     if commit_result.returncode not in (0, 1):
         _log(f"{ticket_id}: pre-PR checkpoint failed rc={commit_result.returncode}")
-        return
+        return False
     if commit_result.returncode == 0:
         _log(f"{ticket_id}: pre-PR checkpoint committed — pushing")
         push_result = subprocess.run(
@@ -560,16 +560,19 @@ def _checkpoint_and_push_before_pr(ticket_id: str) -> None:
             _log(f"{ticket_id}: {line}")
         if push_result.returncode != 0:
             _log(f"{ticket_id}: pre-PR push failed rc={push_result.returncode}")
-        else:
-            _log(f"{ticket_id}: pre-PR push ok")
+            return False
+        _log(f"{ticket_id}: pre-PR push ok")
     else:
         _log(f"{ticket_id}: pre-PR checkpoint — nothing to commit, skipping push")
+    return True
 
 
 def handle_test_complete(ticket_id: str, run_dir: Path, repo: str | None) -> None:
-    """Orchestrate PR lifecycle for a ticket at TEST_COMPLETE. Non-blocking."""
+    """Orchestrate PR lifecycle for a ticket at TEST_COMPLETE."""
     _log(f"{ticket_id}: TEST_COMPLETE PR lifecycle")
-    _checkpoint_and_push_before_pr(ticket_id)
+    if not _checkpoint_and_push_before_pr(ticket_id):
+        _log(f"{ticket_id}: pre-PR push failed — PR skipped")
+        return
     create_or_update_pr(ticket_id, run_dir, repo)
     check_and_close_issue(ticket_id, run_dir, repo)
 

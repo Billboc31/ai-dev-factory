@@ -182,11 +182,26 @@ def test_handle_test_complete_orchestrates_pr_and_issue(tmp_path):
 def test_handle_test_complete_checkpoints_before_pr(tmp_path):
     call_order = []
     run_dir = _make_run_dir(tmp_path)
-    with patch("run_daemon._checkpoint_and_push_before_pr", side_effect=lambda *a: call_order.append("ckpt")), \
+
+    def ckpt_side(*a):
+        call_order.append("ckpt")
+        return True
+
+    with patch("run_daemon._checkpoint_and_push_before_pr", side_effect=ckpt_side), \
          patch("run_daemon.create_or_update_pr", side_effect=lambda *a: call_order.append("pr")), \
          patch("run_daemon.check_and_close_issue"):
         handle_test_complete("T001", run_dir, None)
     assert call_order.index("ckpt") < call_order.index("pr")
+
+
+def test_handle_test_complete_skips_pr_when_push_fails(tmp_path):
+    run_dir = _make_run_dir(tmp_path)
+    with patch("run_daemon._checkpoint_and_push_before_pr", return_value=False), \
+         patch("run_daemon.create_or_update_pr") as mock_pr, \
+         patch("run_daemon.check_and_close_issue") as mock_close:
+        handle_test_complete("T001", run_dir, None)
+    mock_pr.assert_not_called()
+    mock_close.assert_not_called()
 
 
 def test_checkpoint_and_push_before_pr_calls_commit_with_include_code(tmp_path):
