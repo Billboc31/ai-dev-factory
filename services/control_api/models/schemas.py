@@ -13,6 +13,12 @@ class DaemonStatus(BaseModel):
     running: bool
     pid: int | None = None
     started_at: str | None = None
+    last_heartbeat: str | None = None
+    current_ticket: str | None = None
+
+
+class DaemonActivity(BaseModel):
+    lines: list[str]
 
 
 class ActionResult(BaseModel):

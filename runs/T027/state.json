@@ -1,0 +1,8 @@
+{
+  "ticket_id": "T027",
+  "state": "TEST_COMPLETE",
+  "branch": "ticket/T027-robust-review-fix-loop",
+  "issue_number": 23,
+  "updated_at": "2026-05-15T09:02:45Z",
+  "daemon_archived": true
+}

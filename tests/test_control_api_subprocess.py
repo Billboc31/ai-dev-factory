@@ -136,3 +136,61 @@ def test_daemon_stop_not_running(tmp_path):
     result = daemon_manager.stop(tmp_path)
     assert result.ok is False
     assert "not running" in result.message
+
+
+# ── daemon get_activity ───────────────────────────────────────────────────────
+
+def test_get_activity_no_log(tmp_path):
+    (tmp_path / "runs").mkdir()
+    from services.control_api.services import daemon_manager
+    assert daemon_manager.get_activity(tmp_path) == []
+
+
+def test_get_activity_with_log(tmp_path):
+    (tmp_path / "runs").mkdir()
+    (tmp_path / "runs" / "daemon.log").write_text("line1\nline2\nline3\n")
+    from services.control_api.services import daemon_manager
+    lines = daemon_manager.get_activity(tmp_path, lines=2)
+    assert lines == ["line2", "line3"]
+
+
+def test_get_activity_filters_empty_lines(tmp_path):
+    (tmp_path / "runs").mkdir()
+    (tmp_path / "runs" / "daemon.log").write_text("line1\n\nline3\n")
+    from services.control_api.services import daemon_manager
+    lines = daemon_manager.get_activity(tmp_path)
+    assert "" not in lines
+    assert len(lines) == 2
+
+
+def test_get_status_includes_current_ticket(tmp_path):
+    import os
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    ticket_dir = runs_dir / "T030"
+    ticket_dir.mkdir()
+    (ticket_dir / "state.json").write_text(
+        json.dumps({"ticket_id": "T030", "state": "CODER_RUNNING"})
+    )
+    pid = os.getpid()
+    (runs_dir / "daemon.pid").write_text(json.dumps({"pid": pid, "started_at": "2026-01-01T00:00:00Z"}))
+    from services.control_api.services import daemon_manager
+    status = daemon_manager.get_status(tmp_path)
+    assert status.running is True
+    assert status.current_ticket == "T030"
+
+
+def test_get_status_current_ticket_none_when_no_running_ticket(tmp_path):
+    import os
+    runs_dir = tmp_path / "runs"
+    runs_dir.mkdir()
+    ticket_dir = runs_dir / "T001"
+    ticket_dir.mkdir()
+    (ticket_dir / "state.json").write_text(
+        json.dumps({"ticket_id": "T001", "state": "PLAN_APPROVED"})
+    )
+    pid = os.getpid()
+    (runs_dir / "daemon.pid").write_text(json.dumps({"pid": pid, "started_at": "2026-01-01T00:00:00Z"}))
+    from services.control_api.services import daemon_manager
+    status = daemon_manager.get_status(tmp_path)
+    assert status.current_ticket is None

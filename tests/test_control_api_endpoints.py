@@ -143,6 +143,39 @@ def test_get_plan_not_found(tmp_path):
     assert r.status_code == 404
 
 
+# ── /daemon/activity ─────────────────────────────────────────────────────────
+
+def test_daemon_activity_empty(tmp_path):
+    (tmp_path / "runs").mkdir()
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/daemon/activity")
+    assert r.status_code == 200
+    assert r.json() == {"lines": []}
+
+
+def test_daemon_activity_with_log(tmp_path):
+    (tmp_path / "runs").mkdir()
+    (tmp_path / "runs" / "daemon.log").write_text(
+        "[10:41:02] daemon started\n[10:41:18] T030 planner started\n"
+    )
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/daemon/activity")
+    assert r.status_code == 200
+    lines = r.json()["lines"]
+    assert len(lines) == 2
+    assert "[10:41:02] daemon started" in lines
+
+
+def test_daemon_activity_lines_limit(tmp_path):
+    (tmp_path / "runs").mkdir()
+    log_content = "\n".join(f"line {i}" for i in range(100)) + "\n"
+    (tmp_path / "runs" / "daemon.log").write_text(log_content)
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/daemon/activity?lines=10")
+    assert r.status_code == 200
+    assert len(r.json()["lines"]) == 10
+
+
 # ── /providers/status ─────────────────────────────────────────────────────────
 
 def test_providers_status(tmp_path):

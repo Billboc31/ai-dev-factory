@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import * as api from '../api/tickets'
 import ActionButton from '../components/ActionButton'
 import ErrorBanner from '../components/ErrorBanner'
+import usePolling from '../hooks/usePolling'
 
 const TABS = ['overview', 'logs', 'plan', 'review', 'tests', 'artifacts']
 
@@ -29,14 +30,40 @@ export default function TicketDetailPage() {
   const [tab, setTab] = useState('overview')
   const [tabContent, setTabContent] = useState({})
   const [tabLoading, setTabLoading] = useState(false)
+  const prevStateRef = useRef(null)
+  const activeTabRef = useRef(tab)
 
+  // Reset on ticket navigation
   useEffect(() => {
+    setLoading(true)
+    setTicket(null)
+    setError(null)
+    setTab('overview')
     setTabContent({})
+    prevStateRef.current = null
+  }, [id])
+
+  useEffect(() => { activeTabRef.current = tab }, [tab])
+
+  const fetchTicket = useCallback(() => {
     api.getTicket(id)
-      .then(res => setTicket(res.data))
+      .then(res => {
+        const newTicket = res.data
+        if (prevStateRef.current !== null && prevStateRef.current !== newTicket.state) {
+          setTabContent({})
+        } else if (activeTabRef.current === 'logs') {
+          setTabContent(prev => { const n = { ...prev }; delete n.logs; return n })
+        }
+        prevStateRef.current = newTicket.state
+        setTicket(newTicket)
+        setError(null)
+      })
       .catch(err => setError(err.response?.data?.detail || err.message))
       .finally(() => setLoading(false))
   }, [id])
+
+  // Restart polling and fetch immediately when id changes
+  usePolling(fetchTicket, 5000, id)
 
   useEffect(() => {
     if (tabContent[tab] !== undefined) return
@@ -52,14 +79,15 @@ export default function TicketDetailPage() {
         [tab]: `Error: ${err.response?.data?.detail || err.message}`
       })))
       .finally(() => setTabLoading(false))
-  }, [tab, id])
+  }, [tab, id, tabContent])
 
-  const refreshTicket = () => {
+  const refreshTicket = useCallback(() => {
+    prevStateRef.current = null
     setTabContent({})
     api.getTicket(id)
       .then(res => setTicket(res.data))
       .catch(err => setError(err.response?.data?.detail || err.message))
-  }
+  }, [id])
 
   if (loading) return <p className="text-gray-500">Loading…</p>
 
