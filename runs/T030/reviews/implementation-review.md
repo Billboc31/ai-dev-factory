@@ -1,89 +1,83 @@
+All 34 Python tests pass. Here is the full structured review.
+
 ---
 
-# PR Review — T030: Live daemon activity feed and auto-refresh
+# PR Review — T030: Live daemon activity feed and auto-refresh (attempt 2)
 
 ## Résumé
 
-L'implémentation couvre l'essentiel du ticket : hook `usePolling` propre, polling sur les trois pages principales, feed d'activité daemon, statut live, et nettoyage correct des intervals. La structure est sobre et correctement scopée.
-
-Deux problèmes bloquants sont identifiés : un gap fonctionnel sur le refresh des logs et un manque de couverture de test explicitement requis par le ticket.
+Cette tentative corrige les deux problèmes bloquants identifiés lors de la review précédente. L'implémentation est complète, correctement scopée, et couvre tous les critères d'acceptation du ticket. Les 52 tests frontend et 34 tests Python passent.
 
 ---
 
-## Vérifications effectuées
+## Corrections des points bloquants précédents
 
-- `usePolling.js` et ses 7 tests
-- `TicketsPage.jsx`, `TicketDetailPage.jsx`, `DaemonPage.jsx`
-- `DaemonActivityFeed.jsx`
-- `daemon_manager.py` (fonctions `get_activity`, `_last_heartbeat`, `_current_ticket`, `start`)
-- `routes/daemon.py` et `schemas.py`
-- Tests `usePolling.test.js` et `DaemonActivityFeed.test.jsx`
+### [RÉSOLU] 1. Logs tab ne se rafraîchissait pas en continu
+
+**Fichier** : `TicketDetailPage.jsx:52-56`
+
+Le branchement `else if` dans `fetchTicket` traite maintenant les deux cas distincts correctement :
+- Si l'état change → `setTabContent({})` (tout vider)
+- Si l'état ne change pas ET qu'on est sur l'onglet logs → `delete n.logs` (invalider uniquement les logs)
+
+```js
+if (prevStateRef.current !== null && prevStateRef.current !== newTicket.state) {
+  setTabContent({})
+} else if (activeTabRef.current === 'logs') {
+  setTabContent(prev => { const n = { ...prev }; delete n.logs; return n })
+}
+```
+
+Le pattern `activeTabRef` — mis à jour synchronement par `useEffect` — est correct : il évite les closures périmées sans redémarrer le polling. La logique correspond exactement à la distinction du ticket ("logs : refresh sans condition" vs "reviews/tests/artifacts : si le ticket change").
+
+### [RÉSOLU] 2. Absence de test pour le changement d'état runtime
+
+**Fichier** : `TicketDetailPage.test.jsx`
+
+Trois tests couvrent maintenant ce comportement :
+- `invalidates tab content when ticket state changes` ✓
+- `preserves tab content when ticket state is unchanged` ✓
+- `re-fetches logs on each poll when logs tab is active` ✓
+
+L'approche — mocker `usePolling` pour capturer le callback et le déclencher explicitement via `simulatePoll()` dans `act()` — est propre et explicite.
 
 ---
 
 ## Points validés
 
-**Hook `usePolling`** — appel immédiat sur mount, `clearInterval` sur unmount, pattern `savedCallback` via ref correct, paramètre `key` pour redémarrer le polling sur navigation. Testé exhaustivement (7 cas).
+**Hook `usePolling`** — appel immédiat, `clearInterval` sur unmount, `savedCallback` via ref évite les restarts inutiles, paramètre `key` pour redémarrer sur navigation. 7 tests couvrent tous les cas de bord (zombie, null delay, key change, callback identity).
 
-**TicketsPage** — polling 5s, badge d'état coloré, timestamp "Updated at HH:MM:SS".
+**TicketsPage** — polling 5s, badge coloré par état, indicateur "Updated at HH:MM:SS" conforme au ticket.
 
-**DaemonPage / DaemonActivityFeed** — statut live complet (running/stopped, PID, uptime, current_ticket, last_heartbeat), feed basé sur `daemon.log`, endpoint `GET /daemon/activity?lines=N` avec validation `ge=1, le=500`.
+**DaemonPage** — statut live (running/stopped, PID, uptime, current_ticket, last_heartbeat), boutons start/stop/restart, feed d'activité intégré.
 
-**Gestion des erreurs** — `OSError`, `json.JSONDecodeError`, `errors="replace"` pour l'encodage, `ErrorBanner` frontend.
+**DaemonActivityFeed** — composant isolé avec son propre polling 5s, gestion erreur, "Aucune activité" sur liste vide.
 
-**Scope** — aucune dérive. Pas de WebSocket, SSE, auth — conforme au hors-scope.
+**Backend** — `get_activity()` lit `daemon.log` avec tail correct, `_last_heartbeat()` via mtime fichier, `_current_ticket()` scan borné par regex `^T\d{3,}$`, endpoint `GET /daemon/activity?lines=N` avec validation `ge=1, le=500`. Schemas Pydantic à jour.
 
----
+**Gestion des erreurs** — OSError, JSONDecodeError, `errors="replace"` pour l'encodage, ErrorBanner frontend.
 
-## Problèmes détectés
-
-### [BLOQUANT] 1. Logs tab ne se rafraîchit pas en continu
-
-**Fichier** : `TicketDetailPage.jsx:49-51`
-
-Le tab content (y compris les logs) n'est invalidé que lorsque `ticket.state` change :
-
-```js
-if (prevStateRef.current !== null && prevStateRef.current !== newTicket.state) {
-  setTabContent({})
-}
-```
-
-Pendant une phase `CODER_RUNNING` prolongée, l'état reste identique pendant plusieurs minutes tandis que les logs s'accumulent. L'utilisateur sur l'onglet "logs" ne verra aucune mise à jour — exactement le cas d'usage central du ticket.
-
-Le ticket distingue clairement :
-- **Logs** : "refresh automatique des logs" — sans condition de changement d'état
-- **Reviews/tests/artefacts** : "refresh automatique [...] si le ticket change" — conditionnel
-
-**Correction** : re-fetcher le tab "logs" à chaque cycle de polling lorsqu'il est actif, indépendamment des changements d'état.
-
-### [BLOQUANT] 2. Absence de test pour le changement d'état runtime
-
-Le ticket exige explicitement :
-> "Ajouter des tests pour : [...] changement d'état runtime"
-
-La logique `prevStateRef` + invalidation de `tabContent` dans `TicketDetailPage` est la partie la plus complexe de l'implémentation et n'a aucune couverture. Aucun test ne vérifie que `tabContent` est vidé quand l'état change ni qu'il est préservé quand il ne change pas.
-
-**Correction** : ajouter `TicketDetailPage.test.jsx` couvrant ce comportement.
+**Scope** — aucune dérive. Pas de WebSocket, SSE, auth.
 
 ---
 
-## Risques éventuels (non bloquants)
+## Observations non bloquantes (inchangées)
 
-- `tabContent` dans le dependency array du `useEffect` (ligne 77) — le guard évite la boucle infinie mais le pattern est fragile
-- `key={i}` comme React key dans `DaemonActivityFeed` — acceptable pour une liste non réordonnée
-- Scan linéaire de `runs/` dans `_current_ticket` — acceptable à l'échelle actuelle
-- "Aucune activité" (français) incohérent avec le reste de l'UI en anglais
+- `tabContent` dans le dependency array du useEffect (ligne 82) — le guard `if (tabContent[tab] !== undefined) return` prévient la boucle infinie mais le pattern reste fragile. Acceptable pour la portée du ticket.
+- `key={i}` dans DaemonActivityFeed — acceptable pour une liste append-only sans réordonnement.
+- "Aucune activité" en français dans une UI majoritairement anglophone — mineur.
+
+---
+
+## Résultat des tests
+
+- Frontend : **52 tests, 0 échec** (`usePolling`, `DaemonActivityFeed`, `DaemonPage`, `TicketDetailPage`, `TicketDetail`, `TicketList`)
+- Python : **34 tests, 0 échec** (endpoints + subprocess_runner)
 
 ---
 
 ## Décision
 
-REQUEST_CHANGES — deux corrections bloquantes avant approbation.
+Les deux corrections bloquantes sont correctement implémentées et couvertes par des tests. Tous les critères d'acceptation du ticket sont remplis.
 
-## Actions demandées
-
-1. **Refresh continu des logs** : dissocier le tab "logs" de l'invalidation par changement d'état dans `TicketDetailPage`. Re-fetcher les logs à chaque cycle de polling quand l'onglet est actif.
-2. **Test changement d'état runtime** : ajouter un test couvrant l'invalidation de `tabContent` sur changement d'état et la préservation sur état stable.
-
-IMPLEMENTATION_FIX_REQUIRED
+IMPLEMENTATION_APPROVED
