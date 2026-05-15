@@ -187,6 +187,23 @@ def _unregister_worker(runs_dir: Path, ticket_id: str) -> None:
     _save_workers_registry(runs_dir, workers)
 
 
+def _cleanup_stale_workers(runs_dir: Path) -> None:
+    """Remove dead PIDs from workers.json — called at daemon startup."""
+    workers = _load_workers_registry(runs_dir)
+    if not workers:
+        return
+    stale = [
+        tid for tid, w in workers.items()
+        if not isinstance(w.get("pid"), int) or not _is_pid_alive(w["pid"])
+    ]
+    if not stale:
+        return
+    for tid in stale:
+        _log(f"removing stale worker entry for {tid} (pid={workers[tid].get('pid')} dead)")
+        del workers[tid]
+    _save_workers_registry(runs_dir, workers)
+
+
 def _read_last_failure_class(run_dir: Path) -> str | None:
     """Return the last failure class logged in runtime.log, or None."""
     log_path = run_dir / "runtime.log"
@@ -1023,6 +1040,7 @@ def run_once(
     auto_push: bool = False,
     auto_include_code: bool = False,
     repo: str | None = None,
+    max_workers: int = 1,
 ) -> None:
     """Scan all tickets and process auto-runnable ones."""
     tickets = sorted(scan_tickets(runs_dir, worktrees_dir), key=lambda t: ticket_sort_key(t[0]))
@@ -1036,6 +1054,10 @@ def run_once(
 
         if state in AUTO_RUNNABLE_STATES:
             _log(f"detected {ticket_id} state={state}")
+            active_count = len(_load_workers_registry(runs_dir))
+            if active_count >= max_workers:
+                _log(f"skipping {ticket_id}: max_workers={max_workers} reached ({active_count} active)")
+                continue
             retry_state = _load_retry_state(run_dir)
             if _is_blocked_by_retry(ticket_id, retry_state):
                 continue
@@ -1100,6 +1122,8 @@ def main(argv: list[str]) -> int:
     if args.auto_commit:
         _log(f"auto-commit enabled auto-push={args.auto_push} auto-include-code={args.auto_include_code}")
 
+    _cleanup_stale_workers(runs_dir)
+
     if args.once:
         if args.poll_issues:
             poll_github_issues(runs_dir, args.issue_label, args.issue_repo, worktrees_dir=worktrees_dir)
@@ -1108,6 +1132,7 @@ def main(argv: list[str]) -> int:
             worktrees_dir=worktrees_dir,
             auto_commit=args.auto_commit, auto_push=args.auto_push,
             auto_include_code=args.auto_include_code, repo=args.issue_repo,
+            max_workers=args.max_workers,
         )
         return 0
 
@@ -1120,6 +1145,7 @@ def main(argv: list[str]) -> int:
                 worktrees_dir=worktrees_dir,
                 auto_commit=args.auto_commit, auto_push=args.auto_push,
                 auto_include_code=args.auto_include_code, repo=args.issue_repo,
+                max_workers=args.max_workers,
             )
             _log(f"sleeping {args.interval}s")
             time.sleep(args.interval)

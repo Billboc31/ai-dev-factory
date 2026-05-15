@@ -116,14 +116,18 @@ def write_ticket_md(ticket_id: str, issue_number: int, title: str, body: str) ->
 
 
 def commit_bootstrap(ticket_id: str, push: bool = False) -> None:
-    """Stage runs/TXXX/ticket.md and commit as bootstrap checkpoint."""
-    ticket_path = f"runs/{ticket_id}/ticket.md"
-    add_result = _run(["git", "add", ticket_path])
-    if add_result.returncode != 0:
-        stderr = add_result.stderr.strip()
-        _log(ticket_id, f"bootstrap checkpoint: failed to stage {ticket_path}: {stderr}")
-        print(f"warning: bootstrap checkpoint: failed to stage {ticket_path}", file=sys.stderr)
-        return
+    """Stage runs/TXXX/ticket.md + state.json and commit as bootstrap checkpoint."""
+    paths_to_stage = [
+        f"runs/{ticket_id}/ticket.md",
+        f"runs/{ticket_id}/state.json",
+    ]
+    for path in paths_to_stage:
+        add_result = _run(["git", "add", path])
+        if add_result.returncode != 0:
+            stderr = add_result.stderr.strip()
+            _log(ticket_id, f"bootstrap checkpoint: failed to stage {path}: {stderr}")
+            print(f"warning: bootstrap checkpoint: failed to stage {path}", file=sys.stderr)
+            return
     message = f"{ticket_id}: bootstrap checkpoint"
     commit_result = _run(["git", "commit", "-m", message])
     if commit_result.returncode != 0:
