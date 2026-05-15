@@ -154,3 +154,46 @@ def test_determine_next_state_wrong_keyword_returns_none():
 def test_determine_next_state_deterministic_ignores_output():
     assert _determine_next_state(True, "", ["PLAN_REVIEW_NEEDED"]) == "PLAN_REVIEW_NEEDED"
     assert _determine_next_state(True, "garbage", ["IMPLEMENTATION_REVIEW_NEEDED"]) == "IMPLEMENTATION_REVIEW_NEEDED"
+
+
+# ── T027 — tolerant review keyword parsing ────────────────────────────────────
+
+def test_determine_next_state_bold_markdown_approved():
+    possible = ["PLAN_APPROVED", "PLAN_FIX_REQUIRED"]
+    assert _determine_next_state(False, "**PLAN_APPROVED**", possible) == "PLAN_APPROVED"
+
+
+def test_determine_next_state_bold_markdown_fix_required():
+    possible = ["IMPLEMENTATION_APPROVED", "IMPLEMENTATION_FIX_REQUIRED"]
+    assert _determine_next_state(False, "**IMPLEMENTATION_FIX_REQUIRED**", possible) == "IMPLEMENTATION_FIX_REQUIRED"
+
+
+def test_determine_next_state_verdict_label():
+    possible = ["IMPLEMENTATION_APPROVED", "IMPLEMENTATION_FIX_REQUIRED"]
+    assert _determine_next_state(False, "Verdict : IMPLEMENTATION_FIX_REQUIRED", possible) == "IMPLEMENTATION_FIX_REQUIRED"
+
+
+def test_determine_next_state_decision_accented_label():
+    possible = ["PLAN_APPROVED", "PLAN_FIX_REQUIRED"]
+    assert _determine_next_state(False, "Décision : PLAN_APPROVED", possible) == "PLAN_APPROVED"
+
+
+def test_determine_next_state_decision_unaccented_label():
+    possible = ["IMPLEMENTATION_APPROVED", "IMPLEMENTATION_FIX_REQUIRED"]
+    assert _determine_next_state(False, "Decision: IMPLEMENTATION_APPROVED", possible) == "IMPLEMENTATION_APPROVED"
+
+
+def test_determine_next_state_verdict_mid_text():
+    possible = ["PLAN_APPROVED", "PLAN_FIX_REQUIRED"]
+    text = "Some review comments here.\n\nVerdict : PLAN_FIX_REQUIRED\n\nSee above."
+    assert _determine_next_state(False, text, possible) == "PLAN_FIX_REQUIRED"
+
+
+def test_determine_next_state_bold_wrong_keyword_ignored():
+    possible = ["IMPLEMENTATION_APPROVED", "IMPLEMENTATION_FIX_REQUIRED"]
+    assert _determine_next_state(False, "**PLAN_APPROVED**", possible) is None
+
+
+def test_determine_next_state_verdict_wrong_keyword_ignored():
+    possible = ["IMPLEMENTATION_APPROVED", "IMPLEMENTATION_FIX_REQUIRED"]
+    assert _determine_next_state(False, "Verdict : PLAN_FIX_REQUIRED", possible) is None

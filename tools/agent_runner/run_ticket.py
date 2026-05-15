@@ -370,7 +370,16 @@ def _determine_next_state(
 ) -> str | None:
     if is_deterministic:
         return possible_next[0]
-    found = [kw for kw in possible_next if re.search(rf"^{re.escape(kw)}$", output, re.MULTILINE)]
+    found = [
+        kw for kw in possible_next
+        if re.search(
+            rf"(?:^{re.escape(kw)}$"
+            rf"|^\*\*{re.escape(kw)}\*\*$"
+            rf"|^(?:Verdict|D[ée]cision|Decision)\s*:\s*{re.escape(kw)}\s*$)",
+            output,
+            re.MULTILINE,
+        )
+    ]
     if not found:
         return None
     if len(found) > 1:
@@ -476,6 +485,33 @@ def _collect_fix_artifacts(ticket_id: str, state: dict) -> dict:
         "review": review,
         "fix_instructions": fix_instructions,
     }
+
+
+def _write_fix_artifact(ticket_id: str, next_state: str, review_path: Path) -> None:
+    """Create the next numbered fix artifact from the review content."""
+    fixes_dir = Path("runs") / ticket_id / "fixes"
+    fixes_dir.mkdir(parents=True, exist_ok=True)
+
+    prefix = "plan-fix" if next_state == "PLAN_FIX_REQUIRED" else "implementation-fix"
+    max_n = 0
+    for p in fixes_dir.glob(f"{prefix}-*.md"):
+        m = re.match(rf"^{re.escape(prefix)}-(\d+)\.md$", p.name)
+        if m:
+            max_n = max(max_n, int(m.group(1)))
+
+    artifact_path = fixes_dir / f"{prefix}-{max_n + 1}.md"
+    review_content = review_path.read_text(encoding="utf-8") if review_path.exists() else ""
+    content = (
+        f"# Fix artifact — {next_state}\n\n"
+        f"- decision: {next_state}\n"
+        f"- review source: {review_path}\n"
+        f"- generated at: {_now_iso()}\n\n"
+        f"---\n\n"
+        f"{review_content.strip()}\n"
+    )
+    artifact_path.write_text(content, encoding="utf-8")
+    print(f"auto-run: fix artifact written: {artifact_path}")
+    _log_runtime(ticket_id, f"auto-run: fix artifact written: {artifact_path}")
 
 
 def _build_fix_context_file(ticket_id: str, artifacts: dict) -> Path:
@@ -737,12 +773,16 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
         return 1
 
     if not is_deterministic:
-        _log_runtime(ticket_id, f"auto-run: keyword detected: {next_state}")
+        print(f"auto-run: review keyword detected: {next_state}")
+        _log_runtime(ticket_id, f"auto-run: review keyword detected: {next_state}")
 
     save_state(ticket_id, {**state, "state": next_state})
     _append_workflow_journal(ticket_id, current_state, step, next_state)
     _log_runtime(ticket_id, f"auto-run: transition {current_state} → {next_state}")
     print(f"[auto] {current_state} → {next_state}")
+
+    if next_state.endswith("_FIX_REQUIRED"):
+        _write_fix_artifact(ticket_id, next_state, output_path)
 
     if auto_commit:
         _log_runtime(ticket_id, "auto-run: auto-commit triggered")
