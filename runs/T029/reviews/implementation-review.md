@@ -1,77 +1,101 @@
-I now have everything needed to write the review.
+I now have everything I need to write the review.
 
 ---
 
-## Review — T029 Minimal dashboard UI
+# PR Review — T029 — Minimal dashboard UI for runtime orchestration
 
-### Scope and intent
+## Résumé
 
-Second review cycle. The first review flagged two blocking issues (missing artifacts tab, missing `last_log` column). The coder added both to the frontend. This review assesses whether the fixes are complete and whether additional issues remain.
+L'implémentation livre un dashboard React/Vite complet dans `apps/dashboard/`, intégré à la Control API via proxy Vite. Toutes les fonctionnalités requises par le ticket sont présentes. Le périmètre est respecté, l'architecture est correcte, et aucune logique workflow ou Git n'est dupliquée côté UI.
 
----
+## Vérifications effectuées
 
-### Architecture compliance
+- Lecture complète de tous les fichiers source : `App.jsx`, `TicketsPage.jsx`, `TicketDetailPage.jsx`, `DaemonPage.jsx`, `ActionButton.jsx`, `ErrorBanner.jsx`, `api/tickets.js`, `api/daemon.js`
+- Lecture du backend modifié : `services/control_api/routes/tickets.py`, `services/control_api/services/artifact_reader.py`, `services/control_api/models/schemas.py`
+- Lecture des fichiers de tests : `api.test.js`, `TicketList.test.jsx`, `TicketDetail.test.jsx`, `DaemonPage.test.jsx`
+- Vérification de `vite.config.js` (proxy) et `package.json` (dépendances)
 
-All UI calls go through `baseURL: '/api'` (Vite proxy → `http://localhost:8080`). No direct access to `state.json`, Git, or runtime scripts. The module is fully isolated in `apps/dashboard/`. This requirement is satisfied.
+## Points validés
 
----
+**Architecture — frontière UI/API strictement respectée**
+- Toutes les actions UI passent par `client.get/post('/api/...')` (Vite proxy → Control API)
+- Aucun accès direct à `state.json`, aux appels Git, aux scripts runtime
+- La Control API est le seul point d'entrée depuis le frontend
 
-### Blocking issues
+**Fonctionnalités — tous les critères d'acceptation couverts**
+- `TicketsPage` : liste avec ID, état (badge coloré), branche, dernier update, dernier log
+- `TicketDetailPage` : 6 onglets (overview/state.json, logs, plan, review, tests, artifacts), tous les boutons workflow et git/runtime
+- `DaemonPage` : statut (running/stopped), PID, uptime calculé, boutons Start/Stop/Restart + polling 30s
+- `ErrorBanner` : affiché sur chaque page en cas d'erreur API, avec dismiss
+- `ActionButton` : loading state, feedback succès/erreur inline par bouton
 
-#### 1. `last_log` column is permanently empty — backend does not supply the field
+**Backend — changements minimaux et corrects**
+- `artifact_reader.py` : `_last_log_line()` lit la dernière ligne non-vide du log — lecture seule, borné au fichier
+- `get_ticket_state()` : renvoie `state.json` brut sans l'exposer directement au client
+- `routes/tickets.py` : nouvel endpoint `GET /{ticket_id}/state` — pattern cohérent avec les autres endpoints existants
+- `schemas.py` : ajout de `last_log: str | None` sur `TicketSummary` — rétrocompatible
 
-`TicketsPage.jsx:69` renders `{t.last_log || '—'}`. The ticket explicitly requires a "dernier log" column.
+**Tests — couverture des cas requis**
+- Rendering principal : ✅ (les trois pages)
+- Appels API : ✅ (api.test.js, 15 tests sur la couche axios)
+- Gestion erreurs API : ✅ (ErrorBanner sur toutes les pages)
+- Boutons d'action : ✅ (approvePlan, runNextStep, startDaemon testés avec clicks)
 
-The backend never produces this value:
+**Qualité code**
+- Composants courts et lisibles, nommage explicite
+- Pas d'abstraction prématurée — `ActionButton` est le seul composant partagé et c'est justifié
+- `renderContent` gère string/objet/null proprement
+- Cache tabs (`tabContent`) correctement invalidé sur changement d'id et après actions
+- `useCallback` + `clearInterval` corrects dans DaemonPage
 
-- `TicketSummary` schema (`schemas.py:26-31`) has five fields: `ticket_id`, `state`, `branch`, `issue_number`, `updated_at`. No `last_log`.
-- `artifact_reader.list_tickets()` (`artifact_reader.py:38-44`) constructs `TicketSummary` from those five fields only.
-- The API response will never include `last_log`. The column will permanently show `—` for every ticket.
+## Problèmes détectés
 
-The fix is partial — the frontend column was added but the backend change was not made. The column needs to be populated: read the last non-empty line of `runs/{ticket_id}/runtime.log` in `artifact_reader.list_tickets()`, add `last_log: str | None = None` to `TicketSummary`, and populate it.
+**Non bloquants — observations uniquement**
 
-#### 2. Overview tab shows a 5-field API subset, not `state.json`
+**1. Dead code dans `run_next` (`routes/tickets.py` lignes 125–133)**
 
-`TicketDetailPage.jsx:110-113` renders `JSON.stringify(ticket, null, 2)` where `ticket` is the `TicketSummary` API response — only the five schema fields above.
+```python
+from fastapi.background import BackgroundTasks   # importé mais jamais utilisé
+result_holder: list[ActionResult] = []           # créé mais jamais lu
+def _bg() -> None:
+    result_holder.append(...)                    # résultat ignoré
+```
 
-The ticket requirement states: _"Afficher state.json"_. The actual `state.json` file may contain step history, coder output, error details, last step attempted, and other fields critical to understanding ticket progress. Showing 5 schema fields is not the same as showing `state.json`.
+L'approche `threading.Thread` fonctionne, mais l'import `BackgroundTasks` et la liste `result_holder` sont des artefacts de refactoring. Ils n'affectent pas le comportement mais dégradent la lisibilité. À nettoyer.
 
-Fix requires a new read endpoint, e.g. `GET /tickets/{id}/state` returning the raw JSON content of `runs/{ticket_id}/state.json`, which the overview tab then fetches via `TAB_FETCHERS`.
+**2. `stateBadgeClass` : correspondance par sous-chaîne (`TicketsPage.jsx` ligne 16)**
 
----
+```js
+const match = Object.entries(STATE_COLORS).find(([k]) => state?.includes(k))
+```
 
-### Minor observations (not blocking)
+Un état futur comme `PLAN_APPROVED_MEMORY` correspondrait à `PLAN_APPROVED` et recevrait sa couleur bleue. Avec les états actuellement définis dans le projet, aucun conflit n'existe. Pas bloquant pour la cible minimale de T029, mais fragile à terme.
 
-**Stale tab cache on ticket navigation** — `TicketDetailPage.jsx:56-61`, `refreshTicket()` clears `tabContent`, but the `useEffect` on `[id]` (`line 32-37`) does not. Navigating from ticket A to ticket B will show ticket A's tab content until the user switches tabs or triggers an action. Fix: `setTabContent({})` inside the `[id]` effect.
+**3. Couverture api.test.js incomplète**
 
-**Silent error suppression in `refreshTicket()`** — `.catch(() => {})` at `line 60` silently discards errors that occur when refreshing ticket state after a workflow action. If the ticket state refresh fails, the UI becomes stale with no user feedback. Pass `setError` to the catch handler.
+Les fonctions `getTicketState`, `getTicketPlan`, `getTicketReview`, `getTicketTests`, `getTicketArtifacts` ne sont pas testées unitairement dans `api.test.js`. Elles sont implicitement exercées via `TicketDetail.test.jsx`, mais la couche API n'est pas vérifiée isolément pour ces endpoints. Acceptable pour un ticket "minimal", mais à noter.
 
-**Commit and Push don't refresh ticket state** — `TicketDetailPage.jsx:137-138`, both buttons lack `onSuccess={refreshTicket}`. Since these operations may update `state.json` (e.g., checkpoint timestamp), the displayed state doesn't update. Low severity because these actions are less likely to change the visible state than workflow transitions, but the inconsistency is notable.
+## Risques éventuels
 
-**Uptime shown as absolute timestamp instead of duration** — `DaemonPage.jsx:43-47` displays `Started: {new Date(status.started_at).toLocaleString()}`. The ticket says _"uptime si disponible"_, which implies a duration (e.g., "3h 42m"). A computed duration from `started_at` to `Date.now()` would satisfy the requirement.
+**Aucun risque bloquant identifié.**
 
----
+- `_last_log_line` lit le fichier entier en mémoire pour extraire la dernière ligne. Pour des logs de développement (< quelques MB), c'est négligeable.
+- Le résultat de `ActionButton` ne s'auto-efface pas, ce qui est un choix UX discutable mais non dangereux et explicitement dans la zone "hors scope" (design avancé).
+- Le workflow existant n'est pas affecté : les changements backend sont additifs et rétrocompatibles.
 
-### What is working correctly
+## Décision
 
-- All three routes (`/`, `/tickets/:id`, `/daemon`) are present and correctly linked
-- All five workflow action buttons present (Run Next, Approve Plan, Request Plan Fix, Approve Implementation, Request Impl Fix)
-- All three git/runtime buttons present (Commit, Push, Checkpoint)
-- Daemon Start, Stop, Restart controls wired correctly with post-action status refresh
-- Tab-based detail view with 6 tabs (overview, logs, plan, review, tests, artifacts), lazy-loaded and cached per session
-- `ErrorBanner` with dismissal on all pages
-- State badge color coding for COMPLETE, RUNNING, FAILED states
-- 37 tests across 4 files, all passing
-- API layer fully proxied, no direct runtime access
+L'implémentation est complète, correcte, et respecte toutes les contraintes d'architecture et de scope du ticket T029. Les trois observations signalées sont non bloquantes — elles relèvent d'un nettoyage de code (dead code) et d'améliorations futures.
 
----
+- APPROVED
 
-### Verdict
+## Actions demandées
 
-Two acceptance criteria are not met end-to-end:
-1. The "dernier log" column is always empty because the backend never provides the field.
-2. The detail view does not show `state.json` — it shows a 5-field API projection.
+Aucune action bloquante requise avant merge.
 
-Both require backend changes that were not made in this cycle.
+Recommandations optionnelles pour un ticket ultérieur :
+1. Supprimer le dead code dans `run_next` (import `BackgroundTasks` + `result_holder`)
+2. Remplacer `state?.includes(k)` par une correspondance exacte dans `stateBadgeClass`
+3. Compléter `api.test.js` avec les tests des endpoints de lecture de tabs
 
-IMPLEMENTATION_FIX_REQUIRED
+IMPLEMENTATION_APPROVED
