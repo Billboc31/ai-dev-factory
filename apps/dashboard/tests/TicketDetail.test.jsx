@@ -21,6 +21,23 @@ const MOCK_STATE = {
   last_run: '2026-05-15T09:00:00Z'
 }
 
+const MOCK_TIMELINE = {
+  ticket_id: 'T028',
+  current_state: 'PLAN_APPROVED',
+  current_agent: 'coder',
+  human_gate: false,
+  last_event: null,
+  steps: [
+    { id: 'issue_intake', label: 'Issue intake', status: 'done', agent: null },
+    { id: 'plan', label: 'Plan', status: 'done', agent: null },
+    { id: 'plan_review', label: 'Plan review', status: 'done', agent: null },
+    { id: 'implementation', label: 'Implementation', status: 'running', agent: 'coder' },
+    { id: 'implementation_review', label: 'Implementation review', status: 'pending', agent: null },
+    { id: 'fix_loop', label: 'Fix loop', status: 'pending', agent: null },
+    { id: 'tests', label: 'Tests', status: 'pending', agent: null },
+  ]
+}
+
 function renderPage(id = 'T028') {
   return render(
     <MemoryRouter initialEntries={[`/tickets/${id}`]}>
@@ -35,6 +52,7 @@ describe('TicketDetailPage', () => {
   beforeEach(() => {
     ticketsApi.getTicket.mockResolvedValue({ data: MOCK_TICKET })
     ticketsApi.getTicketState.mockResolvedValue({ data: MOCK_STATE })
+    ticketsApi.getTicketTimeline.mockResolvedValue({ data: MOCK_TIMELINE })
   })
 
   it('displays the ticket ID and state', async () => {
@@ -88,6 +106,8 @@ describe('TicketDetailPage', () => {
   it('loads and displays state.json in the overview tab', async () => {
     ticketsApi.getTicketState.mockResolvedValue({ data: MOCK_STATE })
     renderPage()
+    const overviewTab = await screen.findByRole('button', { name: /overview/i })
+    await userEvent.click(overviewTab)
     expect(ticketsApi.getTicketState).toHaveBeenCalledWith('T028')
     expect(await screen.findByText(/"step"/)).toBeInTheDocument()
   })
