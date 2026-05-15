@@ -671,9 +671,43 @@ def launch_ticket(
         expected_branch = ticket_state.get("branch")
         if expected_branch:
             current_branch = _get_current_branch()
+
             if current_branch != expected_branch:
-                _log(f"skipping {ticket_id}: branch mismatch current={current_branch!r} expected={expected_branch!r}")
-                return
+                _log(f"{ticket_id}: switching branch from {current_branch!r} to {expected_branch!r}")
+
+                checkout_main = subprocess.run(
+                    ["git", "checkout", "main"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+                if checkout_main.returncode != 0:
+                    _log(f"{ticket_id}: failed checkout main: {checkout_main.stderr.strip()}")
+                    return
+
+                pull_main = subprocess.run(
+                    ["git", "pull", "--ff-only", "origin", "main"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+                if pull_main.returncode != 0:
+                    _log(f"{ticket_id}: failed pull main: {pull_main.stderr.strip()}")
+                    return
+
+                checkout_ticket = subprocess.run(
+                    ["git", "checkout", expected_branch],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+
+                if checkout_ticket.returncode != 0:
+                    _log(f"{ticket_id}: failed checkout ticket branch: {checkout_ticket.stderr.strip()}")
+                    return
+
             if not _sync_ticket_branch(ticket_id, expected_branch):
                 _log(f"skipping {ticket_id}: branch sync failed — diverged from remote")
                 return
