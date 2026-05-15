@@ -155,3 +155,10 @@ def checkpoint(ticket_id: str, request: Request) -> ActionResult:
     logger.info("api: checkpoint requested for %s", ticket_id)
     _get_or_404(_root(request), ticket_id)
     return subprocess_runner.checkpoint_ticket(ticket_id, _root(request))
+
+
+@router.post("/{ticket_id}/archive", response_model=ActionResult)
+def archive(ticket_id: str, request: Request) -> ActionResult:
+    logger.info("api: POST /tickets/%s/archive", ticket_id)
+    _get_or_404(_root(request), ticket_id)
+    return subprocess_runner.archive_ticket(ticket_id, _root(request))

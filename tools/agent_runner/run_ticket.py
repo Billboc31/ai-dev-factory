@@ -82,7 +82,11 @@ COMMIT_SCOPE: tuple[str, ...] = (
     "ai/",
     "services/",
     "runs/",
-    "apps/"
+    "apps/",
+    "README.md",
+    ".gitignore",
+    "package.json",
+    "package-lock.json",
 )
 
 
@@ -219,7 +223,16 @@ def commit_ticket(ticket_id: str, message: str | None, include_code: bool = Fals
             return 2
 
     run_dir = f"runs/{ticket_id}/"
-    stage_paths = [run_dir] + (list(COMMIT_SCOPE) if include_code else [])
+    requested_stage_paths = [run_dir] + (list(COMMIT_SCOPE) if include_code else [])
+
+    stage_paths = [path for path in requested_stage_paths if Path(path).exists()]
+    missing_stage_paths = [path for path in requested_stage_paths if not Path(path).exists()]
+
+    if missing_stage_paths:
+        _log_runtime(
+            ticket_id,
+            "commit-checkpoint: skipped missing scope paths: " + ", ".join(missing_stage_paths),
+        )
 
     status_result = run_command(["git", "status", "--porcelain"] + stage_paths)
     if status_result.returncode != 0:
@@ -242,7 +255,9 @@ def commit_ticket(ticket_id: str, message: str | None, include_code: bool = Fals
 
     print(f"staging: {run_dir}")
     if include_code:
-        print(f"staging (include-code): {', '.join(COMMIT_SCOPE)}")
+        print(f"staging (include-code): {', '.join(stage_paths)}")
+        if missing_stage_paths:
+            print(f"skipping missing scope paths: {', '.join(missing_stage_paths)}")
         print("note: staging runs/ and allowed scope paths — never git add .")
     else:
         print("note: only runs/ artifacts are auto-staged — stage other changes manually before running --commit")
@@ -304,6 +319,29 @@ def push_branch(ticket_id: str, slug: str | None) -> int:
     else:
         _log_runtime(ticket_id, f"push: failed branch={push_target}")
     return rc
+
+
+def archive_daemon(ticket_id: str) -> int:
+    """Write daemon_archived=true to state.json to exclude ticket from daemon cycles."""
+    path = _state_path(ticket_id)
+    if not path.exists():
+        print(f"error: state.json not found for {ticket_id}", file=sys.stderr)
+        _log_runtime(ticket_id, "archive-daemon: refused — state.json not found")
+        return 2
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        print(f"error: state.json corrupted for {ticket_id}", file=sys.stderr)
+        _log_runtime(ticket_id, "archive-daemon: refused — state.json corrupted")
+        return 2
+    data["daemon_archived"] = True
+    updated = {**data, "updated_at": _now_iso()}
+    tmp = path.parent / (path.name + ".tmp")
+    tmp.write_text(json.dumps(updated, indent=2), encoding="utf-8")
+    tmp.rename(path)
+    _log_runtime(ticket_id, "archive-daemon: daemon_archived=true")
+    print(f"archived: {ticket_id} daemon_archived=true")
+    return 0
 
 
 # ── state machine helpers ─────────────────────────────────────────────────────
@@ -814,8 +852,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--ensure-branch", action="store_true", help="Alias for --branch")
     parser.add_argument("--branch-slug", help="Branch suffix after TXXX")
     parser.add_argument("--commit", action="store_true", help="Commit runs/ artifacts as a checkpoint")
+    parser.add_argument("--checkpoint", action="store_true", help="Alias for --commit (checkpoint runs/ artifacts)")
     parser.add_argument("--commit-message", help="Custom commit message")
     parser.add_argument("--include-code", action="store_true", help="With --commit, also stage COMMIT_SCOPE paths (tools/, tests/, prompts/, tickets/, docs/, ai/)")
+    parser.add_argument("--archive-daemon", action="store_true", dest="archive_daemon", help="Mark daemon_archived=true in state.json to skip daemon processing")
     parser.add_argument("--push", action="store_true", help="Push the ticket branch (verified against state.json)")
     parser.add_argument("--auto", action="store_true", help="Execute next workflow step (reads state.json)")
     parser.add_argument("--auto-init", action="store_true", help="Initialize state.json for --auto mode")
@@ -849,13 +889,16 @@ def main(argv: list[str]) -> int:
             if getattr(args, attr):
                 return apply_human_approval(ticket_id, cmd)
 
+        if args.archive_daemon:
+            return archive_daemon(ticket_id)
+
         if args.auto_init:
             return init_auto(ticket_id, args.branch_slug, getattr(args, "ticket_source", None))
 
         if args.branch or args.ensure_branch:
             return checkout_branch(ticket_id, args.branch_slug)
 
-        if args.commit:
+        if args.commit or args.checkpoint:
             return commit_ticket(ticket_id, args.commit_message, include_code=args.include_code)
 
         if args.push:

@@ -17,6 +17,7 @@ from run_daemon import (
     _is_pid_alive,
     _lock_path,
     _release_lock,
+    handle_test_complete,
     launch_ticket,
     main,
     run_once,
@@ -94,6 +95,56 @@ def test_scan_tickets_returns_multiple_sorted(tmp_path):
     _write_state(runs, "T001", "PLAN_APPROVED")
     result = scan_tickets(runs)
     assert [t for t, _ in result] == ["T001", "T002"]
+
+
+def test_scan_tickets_skips_daemon_archived(tmp_path):
+    runs = tmp_path / "runs"
+    run_dir = runs / "T001"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(
+        json.dumps({"ticket_id": "T001", "state": "TEST_COMPLETE", "daemon_archived": True}),
+        encoding="utf-8",
+    )
+    result = scan_tickets(runs)
+    assert result == []
+
+
+def test_scan_tickets_skips_daemon_archived_logs_message(tmp_path, capsys):
+    runs = tmp_path / "runs"
+    run_dir = runs / "T001"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(
+        json.dumps({"ticket_id": "T001", "state": "TEST_COMPLETE", "daemon_archived": True}),
+        encoding="utf-8",
+    )
+    scan_tickets(runs)
+    assert "daemon_archived=true" in capsys.readouterr().out
+
+
+def test_run_once_skips_test_complete_when_issue_closed(tmp_path):
+    runs = tmp_path / "runs"
+    run_dir = runs / "T001"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(
+        json.dumps({"ticket_id": "T001", "state": "TEST_COMPLETE", "issue_closed": True}),
+        encoding="utf-8",
+    )
+    with patch("run_daemon.handle_test_complete") as mock_handle:
+        run_once("test-cmd", False, runs)
+    mock_handle.assert_not_called()
+
+
+def test_run_once_skips_test_complete_when_pr_skipped_no_diff(tmp_path):
+    runs = tmp_path / "runs"
+    run_dir = runs / "T001"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(
+        json.dumps({"ticket_id": "T001", "state": "TEST_COMPLETE", "pr_skipped_no_diff": True}),
+        encoding="utf-8",
+    )
+    with patch("run_daemon.handle_test_complete") as mock_handle:
+        run_once("test-cmd", False, runs)
+    mock_handle.assert_not_called()
 
 
 # ── run_once ──────────────────────────────────────────────────────────────────

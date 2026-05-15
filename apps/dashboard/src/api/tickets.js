@@ -19,3 +19,4 @@ export const requestImplementationFix = (id) => client.post(`/tickets/${id}/requ
 export const commitChanges = (id) => client.post(`/tickets/${id}/commit`)
 export const pushChanges = (id) => client.post(`/tickets/${id}/push`)
 export const createCheckpoint = (id) => client.post(`/tickets/${id}/checkpoint`)
+export const archiveDaemon = (id) => client.post(`/tickets/${id}/archive`)

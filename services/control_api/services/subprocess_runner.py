@@ -95,7 +95,7 @@ def commit_ticket(ticket_id: str, project_root: Path) -> ActionResult:
     _validate_ticket_id(ticket_id)
     logger.info("api: POST /tickets/%s/commit", ticket_id)
     return _run(
-        [sys.executable, str(_RUN_TICKET), ticket_id, "--commit"],
+        [sys.executable, str(_RUN_TICKET), ticket_id, "--commit", "--include-code"],
         cwd=project_root,
     )
 
@@ -113,7 +113,16 @@ def checkpoint_ticket(ticket_id: str, project_root: Path) -> ActionResult:
     _validate_ticket_id(ticket_id)
     logger.info("api: checkpoint requested for %s", ticket_id)
     return _run(
-        [sys.executable, str(_RUN_TICKET), ticket_id, "--checkpoint"],
+        [sys.executable, str(_RUN_TICKET), ticket_id, "--commit", "--include-code"],
+        cwd=project_root,
+    )
+
+
+def archive_ticket(ticket_id: str, project_root: Path) -> ActionResult:
+    _validate_ticket_id(ticket_id)
+    logger.info("api: POST /tickets/%s/archive", ticket_id)
+    return _run(
+        [sys.executable, str(_RUN_TICKET), ticket_id, "--archive-daemon"],
         cwd=project_root,
     )
 
