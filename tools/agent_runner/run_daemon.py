@@ -668,6 +668,62 @@ def launch_ticket(
 
 # ── issue polling ─────────────────────────────────────────────────────────────
 
+def _sync_main_before_intake() -> bool:
+    """Checkout main and pull before issue intake. Returns True if ready to proceed."""
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        _log("sync-main: git status failed — aborting intake")
+        return False
+    unknown_files = []
+    for line in result.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:]
+        if " -> " in path:
+            path = path.split(" -> ")[-1]
+        if not path.startswith("runs/") and not any(path.startswith(p) for p in _CODE_SCOPE_PREFIXES):
+            unknown_files.append(path)
+    if unknown_files:
+        _log(f"sync-main: unknown dirty files detected — aborting intake: {unknown_files!r}")
+        return False
+    _log("syncing main before issue intake")
+    checkout = subprocess.run(
+        ["git", "checkout", "main"],
+        capture_output=True, text=True, check=False,
+    )
+    if checkout.returncode != 0:
+        _log(f"sync-main: git checkout main failed (rc={checkout.returncode}): {checkout.stderr.strip()}")
+        return False
+    _log("checkout main completed")
+    pull = subprocess.run(
+        ["git", "pull", "origin", "main"],
+        capture_output=True, text=True, check=False,
+    )
+    if pull.returncode != 0:
+        _log(f"sync-main: git pull origin main failed (rc={pull.returncode}): {pull.stderr.strip()}")
+        return False
+    _log("pull origin main completed")
+    return True
+
+
+def _count_active_tickets(runs_dir: Path) -> int:
+    """Count non-archived, non-closed tickets with a state."""
+    count = 0
+    for state_path in runs_dir.glob("*/state.json"):
+        try:
+            data = json.loads(state_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        if data.get("daemon_archived") or data.get("issue_closed"):
+            continue
+        if data.get("state"):
+            count += 1
+    return count
+
+
 def load_issue_index(runs_dir: Path) -> dict[str, str]:
     """Load the anti-duplicate index mapping issue numbers to ticket IDs."""
     path = runs_dir / ISSUE_INDEX_FILENAME
@@ -747,7 +803,12 @@ def call_issue_intake(issue_number: int, ticket_id: str, branch_slug: str, repo:
     return result.returncode == 0
 
 
-def poll_github_issues(runs_dir: Path, label: str, repo: str | None) -> None:
+def poll_github_issues(
+    runs_dir: Path,
+    label: str,
+    repo: str | None,
+    max_active_tickets: int = 1,
+) -> None:
     """Detect ready GitHub issues and create local runs for new ones."""
     issues = fetch_ready_issues(label, repo)
     if not issues:
@@ -755,27 +816,47 @@ def poll_github_issues(runs_dir: Path, label: str, repo: str | None) -> None:
         return
 
     index = load_issue_index(runs_dir)
-    _log(f"found {len(issues)} issue(s) with label={label!r}")
+    candidates = sorted(
+        [i for i in issues if str(i["number"]) not in index],
+        key=lambda i: i["number"],
+    )
+    already_ingested = [i for i in issues if str(i["number"]) in index]
+    for issue in already_ingested:
+        _log(f"issue #{issue['number']} already ingested as {index[str(issue['number'])]} — skipping")
 
-    for issue in issues:
-        number = str(issue["number"])
-        title = issue.get("title", "")
+    if not candidates:
+        _log(f"found {len(issues)} issue(s) with label={label!r} — all already ingested")
+        return
 
-        if number in index:
-            _log(f"issue #{number} already ingested as {index[number]} — skipping")
-            continue
+    active = _count_active_tickets(runs_dir)
+    _log(f"found {len(candidates)} candidate issue(s) active_tickets={active} max_active_tickets={max_active_tickets}")
 
-        ticket_id = next_ticket_id(runs_dir, reserved=set(index.values()))
-        slug = slugify_title(title)
-        _log(f"ingesting issue #{number} ({title!r}) as {ticket_id} slug={slug!r}")
+    if active >= max_active_tickets:
+        for issue in candidates:
+            _log(f"issue #{issue['number']} ({issue.get('title', '')!r}) skipped-for-capacity active={active} max={max_active_tickets}")
+        return
 
-        if call_issue_intake(int(number), ticket_id, slug, repo, push=True):
-            index[number] = ticket_id
-            save_issue_index(runs_dir, index)
-            _log(f"issue #{number} ingested as {ticket_id}")
-            _commit_after_intake(ticket_id)
-        else:
-            _log(f"intake failed for issue #{number} — will retry next cycle")
+    issue = candidates[0]
+    for skipped in candidates[1:]:
+        _log(f"issue #{skipped['number']} ({skipped.get('title', '')!r}) queued — capacity reserved for issue #{issue['number']}")
+
+    number = str(issue["number"])
+    title = issue.get("title", "")
+    ticket_id = next_ticket_id(runs_dir, reserved=set(index.values()))
+    slug = slugify_title(title)
+    _log(f"ingesting issue #{number} ({title!r}) as {ticket_id} slug={slug!r}")
+
+    if not _sync_main_before_intake():
+        _log("issue intake aborted — git sync failed")
+        return
+
+    if call_issue_intake(int(number), ticket_id, slug, repo, push=True):
+        index[number] = ticket_id
+        save_issue_index(runs_dir, index)
+        _log(f"issue #{number} ingested as {ticket_id}")
+        _commit_after_intake(ticket_id)
+    else:
+        _log(f"intake failed for issue #{number} — will retry next cycle")
 
 
 def run_once(
@@ -830,6 +911,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--auto-commit", action="store_true", help="After each successful step, commit runs/ artifacts")
     parser.add_argument("--auto-push", action="store_true", help="After each successful auto-commit, push the ticket branch")
     parser.add_argument("--auto-include-code", action="store_true", help="With --auto-commit, also stage COMMIT_SCOPE paths (tools/, tests/, prompts/, tickets/, docs/, ai/)")
+    parser.add_argument("--max-active-tickets", type=int, default=1, help="Maximum active tickets before skipping issue intake (default: 1)")
     return parser.parse_args(argv)
 
 
@@ -843,20 +925,20 @@ def main(argv: list[str]) -> int:
 
     _log(f"starting daemon exec-cmd={args.exec_cmd!r} interval={args.interval}s dry-run={args.dry_run}")
     if args.poll_issues:
-        _log(f"issue polling enabled label={args.issue_label!r} repo={args.issue_repo!r}")
+        _log(f"issue polling enabled label={args.issue_label!r} repo={args.issue_repo!r} max-active-tickets={args.max_active_tickets}")
     if args.auto_commit:
         _log(f"auto-commit enabled auto-push={args.auto_push} auto-include-code={args.auto_include_code}")
 
     if args.once:
         if args.poll_issues:
-            poll_github_issues(runs_dir, args.issue_label, args.issue_repo)
+            poll_github_issues(runs_dir, args.issue_label, args.issue_repo, max_active_tickets=args.max_active_tickets)
         run_once(args.exec_cmd, args.dry_run, runs_dir, auto_commit=args.auto_commit, auto_push=args.auto_push, auto_include_code=args.auto_include_code, repo=args.issue_repo)
         return 0
 
     try:
         while True:
             if args.poll_issues:
-                poll_github_issues(runs_dir, args.issue_label, args.issue_repo)
+                poll_github_issues(runs_dir, args.issue_label, args.issue_repo, max_active_tickets=args.max_active_tickets)
             run_once(args.exec_cmd, args.dry_run, runs_dir, auto_commit=args.auto_commit, auto_push=args.auto_push, auto_include_code=args.auto_include_code, repo=args.issue_repo)
             _log(f"sleeping {args.interval}s")
             time.sleep(args.interval)

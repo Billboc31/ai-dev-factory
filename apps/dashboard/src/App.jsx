@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 import TicketsPage from './pages/TicketsPage'
 import TicketDetailPage from './pages/TicketDetailPage'
 import DaemonPage from './pages/DaemonPage'
+import BoardPage from './pages/BoardPage'
 
 function Nav() {
   const linkClass = ({ isActive }) =>
@@ -12,6 +13,7 @@ function Nav() {
       <span className="font-bold text-lg mr-2">ai-dev-factory</span>
       <NavLink to="/" className={linkClass} end>Tickets</NavLink>
       <NavLink to="/daemon" className={linkClass}>Daemon</NavLink>
+      <NavLink to="/board" className={linkClass}>Board</NavLink>
     </nav>
   )
 }
@@ -26,6 +28,7 @@ export default function App() {
             <Route path="/" element={<TicketsPage />} />
             <Route path="/tickets/:id" element={<TicketDetailPage />} />
             <Route path="/daemon" element={<DaemonPage />} />
+            <Route path="/board" element={<BoardPage />} />
           </Routes>
         </main>
       </div>

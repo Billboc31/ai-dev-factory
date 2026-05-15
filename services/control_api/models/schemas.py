@@ -77,3 +77,21 @@ class ProviderStatus(BaseModel):
     name: str
     available: bool
     detail: str | None = None
+
+
+class BoardItem(BaseModel):
+    ticket_id: str | None = None
+    issue_number: int | None = None
+    title: str | None = None
+    state: str | None = None
+    branch: str | None = None
+
+
+class BoardColumn(BaseModel):
+    id: str
+    label: str
+    items: list[BoardItem]
+
+
+class BoardResponse(BaseModel):
+    columns: list[BoardColumn]
