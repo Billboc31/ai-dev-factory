@@ -1,160 +1,93 @@
+I have now fully reviewed all implementation files. Let me write the review.
+
 ---
 
-## PR Review — T031 : Daemon terminal-ticket skip and commit/checkpoint hardening
+## PR Review — T031 (attempt 2) : Daemon terminal-ticket skip and commit/checkpoint hardening
 
 ### Résumé
 
-L'implémentation couvre correctement les deux problèmes principaux : le spam daemon sur les vieux tickets et le commit/checkpoint sans `--include-code`. L'architecture générale est solide, les gardes de sécurité (pas de `git add .`, validations ticket ID, écritures atomiques) sont en place. Un seul écart bloquant est détecté : `COMMIT_SCOPE` n'inclut pas `package.json` ni `package-lock.json`, comme explicitement requis par le ticket §8 et le plan.
+Les trois blocqueurs remontés par la review précédente sont tous corrigés. L'implémentation est complète, dans le scope, sécurisée, et correctement testée. Aucun nouveau problème bloquant n'est détecté.
 
 ---
 
 ### Vérifications effectuées
 
-- Lecture complète de `tools/agent_runner/run_daemon.py` (logique skip, détection no-diff, TEST_COMPLETE guard)
-- Lecture complète de `tools/agent_runner/run_ticket.py` (COMMIT_SCOPE, `archive_daemon()`, `--archive-daemon`, `--checkpoint` alias)
-- Lecture complète de `services/control_api/services/subprocess_runner.py` (commit, checkpoint, archive endpoints)
-- Lecture de `services/control_api/routes/tickets.py` (route `/archive`)
-- Lecture de `apps/dashboard/src/api/tickets.js` et `TicketDetailPage.jsx`
-- Lecture de `tests/test_run_daemon.py`, `tests/test_daemon_pr_lifecycle.py`, `tests/test_commit_push.py`, `tests/test_control_api_subprocess.py`
-- Lecture de `runs/T031/plan.md`
+- `tools/agent_runner/run_ticket.py` — `COMMIT_SCOPE`, `archive_daemon()`, argparse `--archive-daemon`, `--checkpoint`
+- `tools/agent_runner/run_daemon.py` — `scan_tickets()`, `create_or_update_pr()`, `run_once()` guard TEST_COMPLETE
+- `services/control_api/services/subprocess_runner.py` — `commit_ticket()`, `checkpoint_ticket()`, `archive_ticket()`
+- `services/control_api/routes/tickets.py` — endpoint `POST /tickets/{id}/archive`
+- `apps/dashboard/src/api/tickets.js` — `archiveDaemon()`
+- `apps/dashboard/src/pages/TicketDetailPage.jsx` — bouton "Archive daemon"
+- `tests/test_run_daemon.py`, `tests/test_daemon_pr_lifecycle.py`, `tests/test_commit_push.py`, `tests/test_control_api_subprocess.py`
+
+---
+
+### Résolution des blocqueurs précédents
+
+**[RÉSOLU] COMMIT_SCOPE incomplet** — `run_ticket.py:88-89` inclut désormais `"package.json"` et `"package-lock.json"`. Conforme au ticket §8 et au plan.
+
+**[RÉSOLU] Test manquant `pr_skipped_no_diff` dans `run_once`** — `test_run_daemon.py:137-147` : `test_run_once_skips_test_complete_when_pr_skipped_no_diff` présent, sans `daemon_archived` dans le state (ce qui est correct — force le passage par la garde de `run_once` plutôt que le filtre de `scan_tickets`). ✓
+
+**[RÉSOLU] Test manquant `package.json` dans COMMIT_SCOPE** — `test_commit_push.py:64-66` : `test_commit_scope_contains_package_json` présent et correct. ✓
 
 ---
 
 ### Points validés
 
-**Daemon skip `daemon_archived`** — `scan_tickets()` (run_daemon.py:432-434) filtre immédiatement les tickets avec `daemon_archived=true` avant tout traitement. Log explicite `daemon_archived=true` produit.
+**Daemon skip `daemon_archived`** — `scan_tickets()` (run_daemon.py:432-434) filtre immédiatement les tickets `daemon_archived=true` avec log explicite. ✓
 
-**Détection no-diff + marquage terminal** — `create_or_update_pr()` (run_daemon.py:345-349) détecte `"No commits between"` dans le stderr de `gh pr create` et persiste simultanément `pr_skipped_no_diff=true` + `daemon_archived=true`. Le ticket ne sera plus revu à aucun cycle suivant.
+**Détection no-diff + marquage terminal** — `create_or_update_pr()` (run_daemon.py:345-349) détecte `"No commits between"` dans stderr et persiste simultanément `pr_skipped_no_diff=true` + `daemon_archived=true`. Le ticket ne sera plus retraité à aucun cycle. ✓
 
-**Guard TEST_COMPLETE** — `run_once()` (run_daemon.py:631-633) vérifie `issue_closed` et `pr_skipped_no_diff` avant de déclencher `handle_test_complete()`. Logique correcte.
+**Guard TEST_COMPLETE** — `run_once()` (run_daemon.py:631) vérifie `issue_closed` ou `pr_skipped_no_diff` avant de déclencher `handle_test_complete()`. ✓
 
-**`archive_daemon()`** (run_ticket.py:311-331) — écriture atomique via tmp+rename, log dans `runtime.log`, sortie lisible. Validation de l'existence de `state.json` avant modification.
+**`archive_daemon()`** (run_ticket.py:324-344) — écriture atomique via tmp+rename, log dans `runtime.log`, validation de l'existence de `state.json`. ✓
 
-**`--archive-daemon` CLI** (run_ticket.py:845, 879-880) — dispatche correctement vers `archive_daemon()`.
+**`--archive-daemon` CLI** (run_ticket.py:858, 892-893) — dispatch correct vers `archive_daemon()`. ✓
 
-**`--checkpoint` alias** (run_ticket.py:842, 888) — alias vers `commit_ticket()` ajouté, corrige le bug connexe mentionné dans le plan.
+**`--checkpoint` alias** (run_ticket.py:855, 901) — alias vers `commit_ticket()` ajouté et fonctionnel. ✓
 
-**API archive** — `archive_ticket()` (subprocess_runner.py:121-127) appelle `--archive-daemon` ; endpoint `POST /tickets/{ticket_id}/archive` (routes/tickets.py:160-164) est bien câblé.
+**API archive** — `archive_ticket()` (subprocess_runner.py:121-127) appelle `--archive-daemon` ; endpoint `POST /tickets/{ticket_id}/archive` (routes/tickets.py:160-164) correctement câblé. ✓
 
-**commit/checkpoint avec `--include-code`** — `commit_ticket()` (subprocess_runner.py:98) et `checkpoint_ticket()` (subprocess_runner.py:116) passent tous deux `--commit --include-code`.
+**commit/checkpoint avec `--include-code`** — `commit_ticket()` (subprocess_runner.py:98) et `checkpoint_ticket()` (subprocess_runner.py:116) passent tous deux `--commit --include-code`. ✓
 
-**Dashboard "Archive daemon"** — `archiveDaemon()` (tickets.js:22) et bouton variant `danger` dans `TicketDetailPage.jsx:163`.
+**Dashboard "Archive daemon"** — `archiveDaemon()` (tickets.js:22) et bouton `variant="danger"` dans `TicketDetailPage.jsx:163`. ✓
 
-**Sécurité git** — aucun `git add .` détecté. Les paths stagés sont exclusivement les entrées de `COMMIT_SCOPE` itérées une par une (run_ticket.py:252-257). Pas d'injection possible via les identifiants de ticket (regex `T\d{3,}`).
+**Sécurité git** — aucun `git add .`. Chaque path de `COMMIT_SCOPE` est stagé individuellement (run_ticket.py:265-270). Validation ticket ID avec `re.fullmatch(r"T\d{3,}")` dans run_ticket.py et subprocess_runner.py. ✓
 
-**Tests couverts** :
-- `test_scan_tickets_skips_daemon_archived` + `test_scan_tickets_skips_daemon_archived_logs_message` ✓
+**Couverture tests complète** (ticket §9) :
+- `test_scan_tickets_skips_daemon_archived` ✓
+- `test_scan_tickets_skips_daemon_archived_logs_message` ✓
 - `test_create_or_update_pr_marks_archived_on_no_diff_error` ✓
 - `test_create_or_update_pr_does_not_mark_archived_on_other_error` ✓
 - `test_run_once_skips_test_complete_when_issue_closed` ✓
-- `test_archive_daemon_writes_daemon_archived_flag` + `test_archive_daemon_returns_2_when_state_missing` ✓
-- `test_commit_ticket_includes_include_code_flag` + `test_checkpoint_ticket_uses_commit_with_include_code` ✓
+- `test_run_once_skips_test_complete_when_pr_skipped_no_diff` ✓ *(nouveau)*
+- `test_archive_daemon_writes_daemon_archived_flag` ✓
+- `test_archive_daemon_returns_2_when_state_missing` ✓
+- `test_commit_ticket_includes_include_code_flag` ✓
+- `test_checkpoint_ticket_uses_commit_with_include_code` ✓
 - `test_archive_ticket_calls_archive_daemon_flag` ✓
 - `test_commit_scope_contains_apps_and_services` ✓
+- `test_commit_scope_contains_package_json` ✓ *(nouveau)*
 - `test_commit_never_calls_git_add_dot` ✓
 
 ---
 
-### Problèmes détectés
+### Observations mineures (non-bloquantes)
 
-#### [BLOQUANT] COMMIT_SCOPE ne contient pas `package.json` ni `package-lock.json`
+**`subprocess_runner.checkpoint_ticket()` appelle `--commit` et non `--checkpoint`** — cohérent et correct : l'alias `--checkpoint` existe pour l'usage CLI humain, le runner API peut appeler directement `--commit`. Les deux chemins appellent `commit_ticket()` dans run_ticket.py, le comportement est identique.
 
-**Fichier** : `tools/agent_runner/run_ticket.py`, lignes 76-88
-
-**Constat** :
-```python
-COMMIT_SCOPE: tuple[str, ...] = (
-    "tools/",
-    "tests/",
-    "prompts/",
-    "tickets/",
-    "docs/",
-    "ai/",
-    "services/",
-    "runs/",
-    "apps/",
-    "README.md",
-    ".gitignore"       # <-- s'arrête ici
-)
-```
-
-Le ticket §8 exige explicitement :
-```
-package.json
-package-lock.json
-```
-
-Le plan.md est identique (ligne 22) : *"COMMIT_SCOPE étendu avec README.md, .gitignore, package.json, package-lock.json"*.
-
-**Impact** : un `--commit --include-code` déclenché depuis l'UI ne stage pas `package.json` ni `package-lock.json`. Le workspace reste sale après un commit dashboard si ces fichiers ont été modifiés (install NPM, mise à jour version). Le critère d'acceptation *"le workspace peut rester clean après action UI"* n'est pas satisfait pour ces fichiers.
-
-**Correction requise** :
-```python
-COMMIT_SCOPE: tuple[str, ...] = (
-    "tools/",
-    "tests/",
-    "prompts/",
-    "tickets/",
-    "docs/",
-    "ai/",
-    "services/",
-    "runs/",
-    "apps/",
-    "README.md",
-    ".gitignore",
-    "package.json",
-    "package-lock.json",
-)
-```
-
-#### [BLOQUANT — test manquant] Pas de test `run_once` pour `pr_skipped_no_diff`
-
-**Constat** : `test_run_daemon.py` contient `test_run_once_skips_test_complete_when_issue_closed` (ligne 124) mais aucun test équivalent pour `pr_skipped_no_diff=true`. Le ticket exige explicitement le test *"daemon skip `pr_skipped_no_diff`"*.
-
-Certes, `daemon_archived=true` est toujours co-positionné avec `pr_skipped_no_diff=true` dans l'implémentation actuelle, rendant la garde dans `run_once` (ligne 631) fonctionnellement redondante. Mais (a) la règle est explicitement dans le ticket, (b) l'absence de test laisse la branche `pr_skipped_no_diff` non couverte si les deux flags venaient à être dissociés.
-
-**Correction requise** : ajouter dans `tests/test_run_daemon.py` :
-```python
-def test_run_once_skips_test_complete_when_pr_skipped_no_diff(tmp_path):
-    runs = tmp_path / "runs"
-    run_dir = runs / "T001"
-    run_dir.mkdir(parents=True)
-    (run_dir / "state.json").write_text(
-        json.dumps({"ticket_id": "T001", "state": "TEST_COMPLETE", "pr_skipped_no_diff": True}),
-        encoding="utf-8",
-    )
-    with patch("run_daemon.handle_test_complete") as mock_handle:
-        run_once("test-cmd", False, runs)
-    mock_handle.assert_not_called()
-```
-
-Note : pour que ce test fonctionne correctement, `daemon_archived` ne doit PAS être présent dans le state (sinon `scan_tickets` filtre avant `run_once`).
-
-#### [BLOQUANT — test manquant] `test_commit_scope_contains_expected_paths` ne vérifie pas `package.json` / `package-lock.json`
-
-Les tests existants (`test_commit_scope_contains_expected_paths`, `test_commit_scope_contains_apps_and_services`) ne couvrent pas les deux paths manquants. La correction de COMMIT_SCOPE doit être accompagnée d'un test :
-```python
-def test_commit_scope_contains_package_json():
-    assert "package.json" in COMMIT_SCOPE
-    assert "package-lock.json" in COMMIT_SCOPE
-```
+**`COMMIT_SCOPE` inclut `"runs/"`** — ce path est stagé séparément comme `runs/TXXX/` lors du commit, il n'est donc pas doublé ; la présence dans COMMIT_SCOPE ne cause pas de problème car le code filtre correctement.
 
 ---
 
-### Risques éventuels
+### Risques résiduels
 
-Aucun risque de sécurité identifié. La logique de skip daemon est conservative (rate plutôt qu'excès). Le bouton "Archive daemon" est en variant `danger`, ce qui est approprié. La validation de ticket ID est partagée entre run_ticket.py et subprocess_runner.py avec la même regex.
+Aucun risque de sécurité identifié. La logique de skip est conservative (rate plutôt qu'excès). Le bouton "Archive daemon" est en `variant="danger"`, signalétique adaptée à une action irréversible sur le cycle daemon.
 
 ---
 
 ### Décision
 
-- REQUEST_CHANGES
+Tous les critères d'acceptation du ticket sont satisfaits. Les trois blocqueurs de la review précédente sont corrigés. Aucune dérive de scope. Aucun comportement git dangereux.
 
-### Actions demandées
-
-1. Ajouter `"package.json"` et `"package-lock.json"` dans `COMMIT_SCOPE` (run_ticket.py:87-88).
-2. Ajouter `test_commit_scope_contains_package_json()` dans `tests/test_commit_push.py`.
-3. Ajouter `test_run_once_skips_test_complete_when_pr_skipped_no_diff()` dans `tests/test_run_daemon.py` (avec un state sans `daemon_archived` pour exercer la branche `run_once`).
-
-IMPLEMENTATION_FIX_REQUIRED
+IMPLEMENTATION_APPROVED
