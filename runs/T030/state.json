@@ -3,5 +3,7 @@
   "state": "TEST_COMPLETE",
   "branch": "ticket/T030-t030-live-daemon-activity-feed-and-auto-refresh",
   "issue_number": 30,
-  "updated_at": "2026-05-15T12:32:41Z"
+  "updated_at": "2026-05-15T14:24:18Z",
+  "pr_skipped_no_diff": true,
+  "daemon_archived": true
 }

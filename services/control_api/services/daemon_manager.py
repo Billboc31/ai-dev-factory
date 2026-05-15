@@ -139,7 +139,15 @@ def start(project_root: Path, exec_cmd: str) -> ActionResult:
     try:
         with open(log, "a", encoding="utf-8") as log_fh:
             proc = subprocess.Popen(
-                [sys.executable, str(_RUN_DAEMON), "--exec-cmd", exec_cmd],
+                [
+                    sys.executable,
+                    str(_RUN_DAEMON),
+                    "--exec-cmd",
+                    exec_cmd,
+                    "--poll-issues",
+                    "--issue-label",
+                    "ai-ready",
+                ],
                 cwd=project_root,
                 stdout=log_fh,
                 stderr=log_fh,
