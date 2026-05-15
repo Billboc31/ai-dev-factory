@@ -58,6 +58,19 @@ def check_working_tree_clean() -> None:
         raise IntakeError("working tree is not clean — commit or stash changes first")
 
 
+def get_current_branch() -> str | None:
+    result = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def return_to_branch(branch: str) -> None:
+    result = _run(["git", "checkout", branch])
+    if result.returncode != 0:
+        print(f"warning: failed to return to branch {branch!r}: {result.stderr.strip()}", file=sys.stderr)
+
+
 def fetch_issue(issue_number: int, repo: str | None) -> dict[str, str]:
     cmd = ["gh", "issue", "view", str(issue_number), "--json", "title,body"]
     if repo:
@@ -170,6 +183,8 @@ def run_intake(
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
+    original_branch = get_current_branch()
+
     print(f"fetching GitHub issue #{issue_number}...")
     try:
         issue = fetch_issue(issue_number, repo)
@@ -199,6 +214,11 @@ def run_intake(
     _log(ticket_id, "intake: done")
 
     commit_bootstrap(ticket_id, push=push)
+
+    if original_branch and original_branch != branch:
+        print(f"returning to original branch: {original_branch}")
+        return_to_branch(original_branch)
+        _log(ticket_id, f"intake: returned to branch {original_branch!r}")
 
     print(f"\nrun workflow with:")
     print(

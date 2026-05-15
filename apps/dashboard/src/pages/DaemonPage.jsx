@@ -15,8 +15,42 @@ function formatUptime(startedAt) {
   return `${hours}h ${minutes % 60}m`
 }
 
+function WorkersList({ columns }) {
+  if (!columns) return null
+  const running = columns.find(c => c.id === 'running')
+  if (!running || running.items.length === 0) return null
+  return (
+    <div className="mb-6">
+      <h2 className="text-lg font-semibold mb-2">Workers</h2>
+      <div className="space-y-2">
+        {running.items.map(item => (
+          <div key={item.ticket_id} className="bg-yellow-50 border border-yellow-200 rounded p-3 text-sm">
+            <div className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-yellow-400 flex-shrink-0" aria-hidden="true" />
+              <code className="font-mono font-semibold">{item.ticket_id}</code>
+              {item.state && <span className="text-gray-500 text-xs">{item.state}</span>}
+            </div>
+            {item.branch && (
+              <p className="text-xs text-gray-500 mt-1 font-mono truncate" title={item.branch}>{item.branch}</p>
+            )}
+            {item.worker_cwd && (
+              <p className="text-xs text-gray-400 mt-0.5 font-mono truncate" title={item.worker_cwd}>
+                cwd: {item.worker_cwd}
+              </p>
+            )}
+            {item.worker_pid != null && (
+              <p className="text-xs text-gray-400 mt-0.5 font-mono">pid: {item.worker_pid}</p>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function DaemonPage() {
   const [status, setStatus] = useState(null)
+  const [columns, setColumns] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -27,7 +61,14 @@ export default function DaemonPage() {
       .finally(() => setLoading(false))
   }, [])
 
+  const fetchBoard = useCallback(() => {
+    daemonApi.getBoardData()
+      .then(res => setColumns(res.data.columns))
+      .catch(() => {})
+  }, [])
+
   usePolling(fetchStatus, 5000)
+  usePolling(fetchBoard, 5000)
 
   return (
     <div className="max-w-2xl">
@@ -71,6 +112,8 @@ export default function DaemonPage() {
         <ActionButton label="Stop" action={daemonApi.stopDaemon} variant="danger" onSuccess={fetchStatus} />
         <ActionButton label="Restart" action={daemonApi.restartDaemon} variant="secondary" onSuccess={fetchStatus} />
       </div>
+
+      <WorkersList columns={columns} />
 
       <div>
         <h2 className="text-lg font-semibold mb-2">Activity Feed</h2>
