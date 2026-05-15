@@ -3,3 +3,4 @@ runs/*/runtime.log
 __pycache__/
 *.py[cod]
 .venv/
+apps/dashboard/node_modules/
