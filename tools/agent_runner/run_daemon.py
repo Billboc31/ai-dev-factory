@@ -552,18 +552,18 @@ def _checkpoint_and_push_before_pr(ticket_id: str) -> bool:
         return False
     if commit_result.returncode == 0:
         _log(f"{ticket_id}: pre-PR checkpoint committed — pushing")
-        push_result = subprocess.run(
-            [sys.executable, str(RUN_TICKET), ticket_id, "--push"],
-            capture_output=True, text=True, check=False,
-        )
-        for line in push_result.stdout.splitlines():
-            _log(f"{ticket_id}: {line}")
-        if push_result.returncode != 0:
-            _log(f"{ticket_id}: pre-PR push failed rc={push_result.returncode}")
-            return False
-        _log(f"{ticket_id}: pre-PR push ok")
     else:
-        _log(f"{ticket_id}: pre-PR checkpoint — nothing to commit, skipping push")
+        _log(f"{ticket_id}: pre-PR checkpoint — nothing to commit — pushing prior commits")
+    push_result = subprocess.run(
+        [sys.executable, str(RUN_TICKET), ticket_id, "--push"],
+        capture_output=True, text=True, check=False,
+    )
+    for line in push_result.stdout.splitlines():
+        _log(f"{ticket_id}: {line}")
+    if push_result.returncode != 0:
+        _log(f"{ticket_id}: pre-PR push failed rc={push_result.returncode}")
+        return False
+    _log(f"{ticket_id}: pre-PR push ok")
     return True
 
 
@@ -615,6 +615,37 @@ def build_run_ticket_command(
     return cmd
 
 
+def _sync_ticket_branch(ticket_id: str, branch: str) -> bool:
+    """Pull latest commits from remote with fast-forward only.
+
+    Returns True if in sync or remote branch not yet published.
+    Returns False if diverged (caller should skip the ticket).
+    """
+    result = subprocess.run(
+        ["git", "pull", "--ff-only", "origin", branch],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode == 0:
+        _log(f"{ticket_id}: sync branch {branch!r} ok")
+        return True
+    stderr = result.stderr.strip()
+    if "couldn't find remote ref" in stderr or "no tracking information" in stderr:
+        _log(f"{ticket_id}: sync branch {branch!r} — remote branch not found yet, skipping pull")
+        return True
+    _log(f"{ticket_id}: sync branch {branch!r} failed — diverged or conflict: {stderr}")
+    return False
+
+
+def _get_current_branch() -> str | None:
+    result = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
 def launch_ticket(
     ticket_id: str,
     exec_cmd: str,
@@ -636,6 +667,17 @@ def launch_ticket(
         return
 
     try:
+        ticket_state = _load_state_json(run_dir)
+        expected_branch = ticket_state.get("branch")
+        if expected_branch:
+            current_branch = _get_current_branch()
+            if current_branch != expected_branch:
+                _log(f"skipping {ticket_id}: branch mismatch current={current_branch!r} expected={expected_branch!r}")
+                return
+            if not _sync_ticket_branch(ticket_id, expected_branch):
+                _log(f"skipping {ticket_id}: branch sync failed — diverged from remote")
+                return
+
         if not _ensure_clean_working_tree(ticket_id, auto_push=auto_push):
             return
 
@@ -893,6 +935,12 @@ def run_once(
             else:
                 _log(f"dry-run: would handle {ticket_id} TEST_COMPLETE PR lifecycle")
         elif state in HUMAN_GATE_STATES:
+            if state == "PLAN_REVIEW_NEEDED":
+                _log(f"detected {ticket_id} state=PLAN_REVIEW_NEEDED (human gate — checkpoint for visibility)")
+                if not dry_run:
+                    _checkpoint_and_push_before_pr(ticket_id)
+                else:
+                    _log(f"dry-run: would checkpoint/push {ticket_id} for PLAN_REVIEW_NEEDED")
             _log(f"skipping {ticket_id} state={state} (human gate)")
         else:
             _log(f"skipping {ticket_id} state={state}")
