@@ -7,3 +7,4 @@ export const getDaemonActivity = (lines = 50) => client.get('/daemon/activity', 
 export const startDaemon = () => client.post('/daemon/start')
 export const stopDaemon = () => client.post('/daemon/stop')
 export const restartDaemon = () => client.post('/daemon/restart')
+export const getBoardData = () => client.get('/daemon/board')

@@ -1,6 +1,6 @@
 from fastapi import APIRouter, Query, Request
-from ..models.schemas import ActionResult, DaemonActivity, DaemonStatus
-from ..services import daemon_manager
+from ..models.schemas import ActionResult, DaemonActivity, DaemonStatus, BoardResponse
+from ..services import daemon_manager, board_service
 
 router = APIRouter(prefix="/daemon", tags=["daemon"])
 
@@ -34,3 +34,8 @@ def daemon_restart(request: Request) -> ActionResult:
 @router.get("/activity", response_model=DaemonActivity)
 def daemon_activity(request: Request, lines: int = Query(default=50, ge=1, le=500)) -> DaemonActivity:
     return DaemonActivity(lines=daemon_manager.get_activity(_root(request), lines))
+
+
+@router.get("/board", response_model=BoardResponse)
+def daemon_board(request: Request) -> BoardResponse:
+    return board_service.get_board(_root(request))
