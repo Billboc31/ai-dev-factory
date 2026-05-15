@@ -1,21 +1,25 @@
-Le plan est écrit dans `runs/T103/plan.md`. Voici le résumé des 4 bugs et des corrections planifiées :
+Le plan est écrit dans `runs/T103/plan.md`. Voici le résumé des 6 corrections planifiées, intégrant les 3 points de la review :
 
 ---
 
-## Plan T103 — Résumé
+## Plan T103 v2 — Résumé
 
-### Bug 1 — PR avant push (run_daemon.py:539–567)
-`_checkpoint_and_push_before_pr()` saute le push quand `run_ticket --commit` retourne rc==1 (rien à committer). Si des commits locaux existent mais ne sont pas encore poussés, la PR est créée sans eux. **Correction** : toujours pousser, indépendamment du rc du commit.
+### Bug 1 — PR avant push (`_checkpoint_and_push_before_pr`, ligne 539–567)
+Push systématique que le commit retourne rc=0 ou rc=1 (rien à committer). Les commits locaux précédents doivent toujours être poussés.
 
-### Bug 2 — Mauvaise branche (run_daemon.py:618)
-`launch_ticket()` ne vérifie pas la branche courante avant d'opérer. `_ensure_clean_working_tree()` peut appeler `run_ticket --commit` sur la mauvaise branche. **Correction** : ajouter une fonction `_get_current_branch()` dans run_daemon.py (modèle : run_ticket.py:390) et un guard dans `launch_ticket()` après `_acquire_lock()`.
+### Bug 2 — Mauvaise branche (`launch_ticket`, ligne 618+)
+Ajouter `_get_current_branch()` dans `run_daemon.py` et un guard explicite après `_acquire_lock()` : si `current_branch != expected_branch`, skip sécurisé avec log. Pas de checkout automatique.
 
-### Bug 3 — Classification dirty tree
-`_CODE_SCOPE_PREFIXES` inclut déjà `services/`, `apps/`, `tests/`, `tools/`, `.gitignore`. Le constat est que les listes dans run_daemon.py et run_ticket.py semblent cohérentes. **Action** : vérification visuelle lors de l'implémentation, correction si écart trouvé.
+### Bug 3 — Classification scope dirty tree
+Vérification visuelle de `_CODE_SCOPE_PREFIXES` vs `COMMIT_SCOPE`. La différence `runs/` est intentionnelle. Correction seulement si écart constaté.
 
-### Bug 4 — Fichiers runtime dans git
-- `apps/dashboard/node_modules/` : **6878 fichiers trackés** → `git rm -r --cached apps/dashboard/node_modules/`
-- `runs/.issue-intake.json` : tracké → ajouter au `.gitignore` + `git rm --cached`
-- Seul fichier `.gitignore` est modifié.
+### Bug 4 — Fichiers runtime dans Git
+Le `.gitignore` est déjà correct. Seule action : `git rm -r --cached apps/dashboard/node_modules/`. `runs/.issue-intake.json` reste tracké (registre anti-réingestion — **ne pas ignorer**).
 
-**2 fichiers modifiés** (`run_daemon.py`, `.gitignore`) + 2 opérations `git rm --cached`.
+### Nouveau — Checkpoint/push avant `PLAN_REVIEW_NEEDED`
+Dans `run_once()`, avant de logger "human gate skipping", appeler `_checkpoint_and_push_before_pr()` pour `PLAN_REVIEW_NEEDED` afin que les artefacts planner soient visibles sur GitHub.
+
+### Nouveau — Sync branche distante avant exécution agent
+Nouvelle fonction `_sync_ticket_branch()` dans `launch_ticket()` : `git pull --ff-only origin <branch>`. Abort sécurisé si divergence ; skip silencieux si la branche n'est pas encore sur le remote.
+
+**2 fichiers modifiés** : `run_daemon.py` (tout le code) + `.gitignore` (aucun changement — déjà correct). 1 opération git : `git rm -r --cached apps/dashboard/node_modules/`.
