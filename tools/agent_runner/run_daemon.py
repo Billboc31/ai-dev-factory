@@ -340,7 +340,13 @@ def create_or_update_pr(ticket_id: str, run_dir: Path, repo: str | None) -> None
                 else:
                     _log(f"{ticket_id}: PR created but number not parsed from: {pr_url!r}")
             else:
-                _log(f"{ticket_id}: gh pr create failed (rc={result.returncode}): {result.stderr.strip()}")
+                stderr = result.stderr.strip()
+                _log(f"{ticket_id}: gh pr create failed (rc={result.returncode}): {stderr}")
+                if "No commits between" in stderr:
+                    state["pr_skipped_no_diff"] = True
+                    state["daemon_archived"] = True
+                    _save_state_json(run_dir, state)
+                    _log(f"{ticket_id}: no diff — marked pr_skipped_no_diff=true daemon_archived=true")
         except FileNotFoundError:
             _log(f"{ticket_id}: gh not found — cannot create PR")
 
@@ -423,6 +429,9 @@ def scan_tickets(runs_dir: Path) -> list[tuple[str, str]]:
         ticket_id = state_path.parent.name
         try:
             data = json.loads(state_path.read_text(encoding="utf-8"))
+            if data.get("daemon_archived"):
+                _log(f"skipping {ticket_id}: daemon_archived=true")
+                continue
             state = data.get("state", "")
             if state:
                 results.append((ticket_id, state))
@@ -617,8 +626,12 @@ def run_once(
                 continue
             launch_ticket(ticket_id, exec_cmd, dry_run, runs_dir, auto_commit=auto_commit, auto_push=auto_push, auto_include_code=auto_include_code)
         elif state == "TEST_COMPLETE":
-            _log(f"detected {ticket_id} state=TEST_COMPLETE (human gate — PR lifecycle)")
             run_dir = runs_dir / ticket_id
+            ticket_state = _load_state_json(run_dir)
+            if ticket_state.get("issue_closed") or ticket_state.get("pr_skipped_no_diff"):
+                _log(f"skipping {ticket_id}: TEST_COMPLETE already finalized")
+                continue
+            _log(f"detected {ticket_id} state=TEST_COMPLETE (human gate — PR lifecycle)")
             if not dry_run:
                 handle_test_complete(ticket_id, run_dir, repo)
             else:

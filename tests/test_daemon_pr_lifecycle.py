@@ -174,3 +174,30 @@ def test_handle_test_complete_orchestrates_pr_and_issue(tmp_path):
         handle_test_complete("T001", run_dir, None)
     mock_pr.assert_called_once_with("T001", run_dir, None)
     mock_close.assert_called_once_with("T001", run_dir, None)
+
+
+# ── no-diff PR hardening ──────────────────────────────────────────────────────
+
+def test_create_or_update_pr_marks_archived_on_no_diff_error(tmp_path):
+    run_dir = _make_run_dir(tmp_path)
+    mock_list = MagicMock(returncode=0, stdout="[]")
+    mock_create = MagicMock(
+        returncode=1, stdout="",
+        stderr="No commits between main and ticket/T001-my-feature",
+    )
+    with patch("run_daemon.subprocess.run", side_effect=[mock_list, mock_create]):
+        create_or_update_pr("T001", run_dir, None)
+    saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert saved.get("pr_skipped_no_diff") is True
+    assert saved.get("daemon_archived") is True
+
+
+def test_create_or_update_pr_does_not_mark_archived_on_other_error(tmp_path):
+    run_dir = _make_run_dir(tmp_path)
+    mock_list = MagicMock(returncode=0, stdout="[]")
+    mock_create = MagicMock(returncode=1, stdout="", stderr="some other gh error")
+    with patch("run_daemon.subprocess.run", side_effect=[mock_list, mock_create]):
+        create_or_update_pr("T001", run_dir, None)
+    saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert saved.get("pr_skipped_no_diff") is None
+    assert saved.get("daemon_archived") is None

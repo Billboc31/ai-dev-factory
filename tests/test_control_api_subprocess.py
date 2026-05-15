@@ -96,6 +96,33 @@ def test_issue_intake_calls_script(tmp_path):
     assert "42" in call_args
 
 
+# ── commit / checkpoint include-code ─────────────────────────────────────────
+
+def test_commit_ticket_includes_include_code_flag(tmp_path):
+    with patch("subprocess.run", return_value=_completed(0)) as mock_run:
+        subprocess_runner.commit_ticket("T001", tmp_path)
+    args_str = " ".join(str(a) for a in mock_run.call_args[0][0])
+    assert "--commit" in args_str
+    assert "--include-code" in args_str
+
+
+def test_checkpoint_ticket_uses_commit_with_include_code(tmp_path):
+    with patch("subprocess.run", return_value=_completed(0)) as mock_run:
+        subprocess_runner.checkpoint_ticket("T001", tmp_path)
+    args_str = " ".join(str(a) for a in mock_run.call_args[0][0])
+    assert "--commit" in args_str
+    assert "--include-code" in args_str
+
+
+def test_archive_ticket_calls_archive_daemon_flag(tmp_path):
+    with patch("subprocess.run", return_value=_completed(0)) as mock_run:
+        result = subprocess_runner.archive_ticket("T001", tmp_path)
+    assert result.ok is True
+    args_str = " ".join(str(a) for a in mock_run.call_args[0][0])
+    assert "--archive-daemon" in args_str
+    assert "T001" in args_str
+
+
 # ── daemon action endpoints ───────────────────────────────────────────────────
 
 def test_daemon_start_stop(tmp_path):

@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "tools" / "agent_runner"))
 
 from run_ticket import (
     COMMIT_SCOPE,
+    archive_daemon,
     commit_ticket,
     push_branch,
     _warn_out_of_scope,
@@ -53,6 +54,43 @@ def test_commit_scope_has_no_glob_or_dot():
         assert path != "."
         assert "*" not in path
         assert path != "/"
+
+
+def test_commit_scope_contains_apps_and_services():
+    assert "apps/" in COMMIT_SCOPE
+    assert "services/" in COMMIT_SCOPE
+
+
+# ── archive_daemon ────────────────────────────────────────────────────────────
+
+def test_archive_daemon_writes_daemon_archived_flag(tmp_path):
+    run_dir = tmp_path / "runs" / "T999"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(json.dumps({
+        "ticket_id": "T999",
+        "state": "TEST_COMPLETE",
+        "branch": "ticket/T999-work",
+        "updated_at": "2026-01-01T00:00:00Z",
+    }))
+    orig = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        rc = archive_daemon("T999")
+    finally:
+        os.chdir(orig)
+    assert rc == 0
+    saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert saved["daemon_archived"] is True
+
+
+def test_archive_daemon_returns_2_when_state_missing(tmp_path):
+    orig = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        rc = archive_daemon("T999")
+    finally:
+        os.chdir(orig)
+    assert rc == 2
 
 
 # ── Branch validation in commit_ticket ───────────────────────────────────────

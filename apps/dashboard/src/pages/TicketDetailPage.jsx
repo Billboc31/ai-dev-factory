@@ -160,6 +160,7 @@ export default function TicketDetailPage() {
             <ActionButton label="Commit" action={() => api.commitChanges(id)} variant="secondary" onSuccess={refreshTicket} />
             <ActionButton label="Push" action={() => api.pushChanges(id)} variant="secondary" onSuccess={refreshTicket} />
             <ActionButton label="Checkpoint" action={() => api.createCheckpoint(id)} variant="secondary" onSuccess={refreshTicket} />
+            <ActionButton label="Archive daemon" action={() => api.archiveDaemon(id)} variant="danger" onSuccess={refreshTicket} />
           </div>
         </div>
       </div>
