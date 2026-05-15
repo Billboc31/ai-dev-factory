@@ -1,0 +1,7 @@
+{
+  "ticket_id": "T020",
+  "state": "TEST_COMPLETE",
+  "branch": "ticket/T020-local-workflow-daemon",
+  "updated_at": "2026-05-12T23:03:25Z",
+  "daemon_archived": true
+}
