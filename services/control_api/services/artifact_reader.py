@@ -136,7 +136,7 @@ _STEPS = [
     ("tests", "Tests"),
 ]
 
-_STEP_AGENTS = [None, "planner", None, "coder", None, "coder", "tester"]
+_STEP_AGENTS = [None, "planner", None, "coder", "reviewer", "coder", "tester"]
 
 # Maps state -> (statuses list, human_gate)
 _STATUS_MAP: dict[str, tuple[list[str], bool]] = {
@@ -149,7 +149,7 @@ _STATUS_MAP: dict[str, tuple[list[str], bool]] = {
     "PLAN_APPROVED": (
         ["done", "done", "done", "running", "pending", "pending", "pending"], False),
     "IMPLEMENTATION_REVIEW_NEEDED": (
-        ["done", "done", "done", "done", "waiting_human", "pending", "pending"], True),
+        ["done", "done", "done", "done", "running", "pending", "pending"], False),
     "IMPLEMENTATION_FIX_REQUIRED": (
         ["done", "done", "done", "done", "done", "running", "pending"], False),
     "IMPLEMENTATION_APPROVED": (
@@ -188,7 +188,7 @@ def get_ticket_timeline(project_root: Path, ticket_id: str) -> TimelineResponse 
         fix_status = "done" if has_retry else "skipped"
         statuses = ["done", "done", "done", "done", "done", fix_status, "done"]
         steps, current_agent = _build_steps(statuses)
-        human_gate = False
+        human_gate = True
     elif state in _STATUS_MAP:
         statuses, human_gate = _STATUS_MAP[state]
         steps, current_agent = _build_steps(statuses)

@@ -98,6 +98,37 @@ def test_next_ticket_id_ignores_non_ticket_dirs(tmp_path):
     assert next_ticket_id(runs) == "T004"
 
 
+def test_next_ticket_id_t034_gives_t035(tmp_path):
+    runs = _make_runs(tmp_path, [f"T{i:03d}" for i in range(1, 35)])
+    assert next_ticket_id(runs) == "T035"
+
+
+def test_next_ticket_id_t099_gives_t100(tmp_path):
+    runs = _make_runs(tmp_path, ["T099"])
+    assert next_ticket_id(runs) == "T100"
+
+
+def test_next_ticket_id_lexicographic_trap(tmp_path):
+    # T1, T10, T100 — numeric max is 100, next must be T101 not T11
+    runs = _make_runs(tmp_path, ["T001", "T010", "T100"])
+    assert next_ticket_id(runs) == "T101"
+
+
+def test_next_ticket_id_with_gaps(tmp_path):
+    runs = _make_runs(tmp_path, ["T001", "T005", "T020"])
+    assert next_ticket_id(runs) == "T021"
+
+
+def test_next_ticket_id_respects_reserved_set(tmp_path):
+    runs = _make_runs(tmp_path, ["T003"])
+    assert next_ticket_id(runs, reserved={"T010", "T020"}) == "T021"
+
+
+def test_next_ticket_id_reserved_set_only(tmp_path):
+    runs = _make_runs(tmp_path)
+    assert next_ticket_id(runs, reserved={"T034"}) == "T035"
+
+
 # ── slugify_title ─────────────────────────────────────────────────────────────
 
 def test_slugify_title_basic():

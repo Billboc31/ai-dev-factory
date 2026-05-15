@@ -1,5 +1,9 @@
 runs/*/state.json
+runs/*/state.json.tmp
 runs/*/runtime.log
+runs/*/retry-state.json
+runs/*/retry-state.json.tmp
+runs/.issue-intake.json.tmp
 __pycache__/
 *.py[cod]
 .venv/
@@ -9,5 +13,3 @@ runs/daemon.pid
 runs/daemon.log
 runs/*/workflow-status.md
 runs/*/daemon.lock
-apps/dashboard/node_modules/
-apps/dashboard/node_modules/.vite/

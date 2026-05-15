@@ -232,20 +232,40 @@ def _is_blocked_by_retry(ticket_id: str, retry_state: dict) -> bool:
 
 # ── pre-flight dirty tree check ───────────────────────────────────────────────
 
-def _classify_dirty_files(ticket_id: str) -> tuple[list[str], list[str]]:
-    """Run git status and classify dirty files as workflow artifacts or unknown.
+# Mirrors COMMIT_SCOPE in run_ticket.py — files in these paths are auto-checkpointable
+_CODE_SCOPE_PREFIXES: tuple[str, ...] = (
+    "tools/",
+    "tests/",
+    "prompts/",
+    "tickets/",
+    "docs/",
+    "ai/",
+    "services/",
+    "apps/",
+    "README.md",
+    ".gitignore",
+    "package.json",
+    "package-lock.json",
+)
 
-    Workflow artifacts are files under runs/. Unknown files are anything else.
-    Returns (workflow_artifacts, unknown_files).
+
+def _classify_dirty_files(ticket_id: str) -> tuple[list[str], list[str], list[str]]:
+    """Run git status and classify dirty files into three buckets.
+
+    Returns (workflow_artifacts, code_scope_files, unknown_files).
+    - workflow_artifacts: files under runs/ — auto-checkpointable
+    - code_scope_files: files in COMMIT_SCOPE — auto-checkpointable with --include-code
+    - unknown_files: anything else — trigger safe abort
     """
     result = subprocess.run(
         ["git", "status", "--porcelain"],
         capture_output=True, text=True, check=False,
     )
     workflow_artifacts: list[str] = []
+    code_scope_files: list[str] = []
     unknown_files: list[str] = []
     if result.returncode != 0:
-        return workflow_artifacts, unknown_files
+        return workflow_artifacts, code_scope_files, unknown_files
     for line in result.stdout.splitlines():
         if len(line) < 4:
             continue
@@ -254,21 +274,23 @@ def _classify_dirty_files(ticket_id: str) -> tuple[list[str], list[str]]:
             path = path.split(" -> ")[-1]
         if path.startswith("runs/"):
             workflow_artifacts.append(path)
+        elif any(path.startswith(p) for p in _CODE_SCOPE_PREFIXES):
+            code_scope_files.append(path)
         else:
             unknown_files.append(path)
-    return workflow_artifacts, unknown_files
+    return workflow_artifacts, code_scope_files, unknown_files
 
 
 def _ensure_clean_working_tree(ticket_id: str, auto_push: bool = False) -> bool:
     """Ensure working tree is clean before launching a ticket step.
 
-    If dirty files are only workflow artifacts → automatic checkpoint commit.
+    If dirty files are workflow artifacts or code-scope files → automatic checkpoint commit.
     If any unknown files are dirty → abort safely.
     Returns True if ready to proceed, False to abort.
     """
-    workflow_artifacts, unknown_files = _classify_dirty_files(ticket_id)
+    workflow_artifacts, code_scope_files, unknown_files = _classify_dirty_files(ticket_id)
 
-    if not workflow_artifacts and not unknown_files:
+    if not workflow_artifacts and not code_scope_files and not unknown_files:
         return True
 
     if unknown_files:
@@ -276,7 +298,9 @@ def _ensure_clean_working_tree(ticket_id: str, auto_push: bool = False) -> bool:
         _log(f"{ticket_id}: pre-flight abort — commit or stash unknown files before daemon can proceed")
         return False
 
-    _log(f"{ticket_id}: pre-flight — dirty workflow artifacts detected — triggering checkpoint commit")
+    if code_scope_files:
+        _log(f"{ticket_id}: pre-flight — dirty code-scope files detected: {code_scope_files!r}")
+    _log(f"{ticket_id}: pre-flight — triggering checkpoint commit (--include-code)")
     commit_result = subprocess.run(
         [sys.executable, str(RUN_TICKET), ticket_id, "--commit", "--include-code"],
         capture_output=True, text=True, check=False,
@@ -512,9 +536,40 @@ def check_and_close_issue(ticket_id: str, run_dir: Path, repo: str | None) -> No
     _save_state_json(run_dir, state)
 
 
+def _checkpoint_and_push_before_pr(ticket_id: str) -> None:
+    """Checkpoint commit + push before PR creation. Non-blocking — logs failure but does not abort."""
+    _log(f"{ticket_id}: pre-PR checkpoint commit")
+    commit_result = subprocess.run(
+        [sys.executable, str(RUN_TICKET), ticket_id, "--commit", "--include-code"],
+        capture_output=True, text=True, check=False,
+    )
+    for line in commit_result.stdout.splitlines():
+        _log(f"{ticket_id}: {line}")
+    for line in commit_result.stderr.splitlines():
+        _log(f"{ticket_id} [err]: {line}")
+    if commit_result.returncode not in (0, 1):
+        _log(f"{ticket_id}: pre-PR checkpoint failed rc={commit_result.returncode}")
+        return
+    if commit_result.returncode == 0:
+        _log(f"{ticket_id}: pre-PR checkpoint committed — pushing")
+        push_result = subprocess.run(
+            [sys.executable, str(RUN_TICKET), ticket_id, "--push"],
+            capture_output=True, text=True, check=False,
+        )
+        for line in push_result.stdout.splitlines():
+            _log(f"{ticket_id}: {line}")
+        if push_result.returncode != 0:
+            _log(f"{ticket_id}: pre-PR push failed rc={push_result.returncode}")
+        else:
+            _log(f"{ticket_id}: pre-PR push ok")
+    else:
+        _log(f"{ticket_id}: pre-PR checkpoint — nothing to commit, skipping push")
+
+
 def handle_test_complete(ticket_id: str, run_dir: Path, repo: str | None) -> None:
     """Orchestrate PR lifecycle for a ticket at TEST_COMPLETE. Non-blocking."""
     _log(f"{ticket_id}: TEST_COMPLETE PR lifecycle")
+    _checkpoint_and_push_before_pr(ticket_id)
     create_or_update_pr(ticket_id, run_dir, repo)
     check_and_close_issue(ticket_id, run_dir, repo)
 

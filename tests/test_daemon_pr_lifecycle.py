@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, str(Path(__file__).parent.parent / "tools" / "agent_runner"))
 
 from run_daemon import (
+    _checkpoint_and_push_before_pr,
     _load_state_json,
     _pr_body,
     _save_state_json,
@@ -169,11 +170,67 @@ def test_pr_body_has_approved_gates_checked():
 
 def test_handle_test_complete_orchestrates_pr_and_issue(tmp_path):
     run_dir = _make_run_dir(tmp_path)
-    with patch("run_daemon.create_or_update_pr") as mock_pr, \
+    with patch("run_daemon._checkpoint_and_push_before_pr") as mock_ckpt, \
+         patch("run_daemon.create_or_update_pr") as mock_pr, \
          patch("run_daemon.check_and_close_issue") as mock_close:
         handle_test_complete("T001", run_dir, None)
+    mock_ckpt.assert_called_once_with("T001")
     mock_pr.assert_called_once_with("T001", run_dir, None)
     mock_close.assert_called_once_with("T001", run_dir, None)
+
+
+def test_handle_test_complete_checkpoints_before_pr(tmp_path):
+    call_order = []
+    run_dir = _make_run_dir(tmp_path)
+    with patch("run_daemon._checkpoint_and_push_before_pr", side_effect=lambda *a: call_order.append("ckpt")), \
+         patch("run_daemon.create_or_update_pr", side_effect=lambda *a: call_order.append("pr")), \
+         patch("run_daemon.check_and_close_issue"):
+        handle_test_complete("T001", run_dir, None)
+    assert call_order.index("ckpt") < call_order.index("pr")
+
+
+def test_checkpoint_and_push_before_pr_calls_commit_with_include_code(tmp_path):
+    subprocess_calls = []
+
+    def fake_run(args, **kwargs):
+        subprocess_calls.append(args)
+        return MagicMock(stdout="", stderr="", returncode=0)
+
+    with patch("run_daemon.subprocess.run", side_effect=fake_run):
+        _checkpoint_and_push_before_pr("T001")
+
+    commit_calls = [c for c in subprocess_calls if "--commit" in c]
+    assert len(commit_calls) == 1
+    assert "--include-code" in commit_calls[0]
+
+
+def test_checkpoint_and_push_before_pr_pushes_after_successful_commit(tmp_path):
+    subprocess_calls = []
+
+    def fake_run(args, **kwargs):
+        subprocess_calls.append(args)
+        return MagicMock(stdout="", stderr="", returncode=0)
+
+    with patch("run_daemon.subprocess.run", side_effect=fake_run):
+        _checkpoint_and_push_before_pr("T001")
+
+    push_calls = [c for c in subprocess_calls if "--push" in c]
+    assert len(push_calls) == 1
+
+
+def test_checkpoint_and_push_before_pr_skips_push_when_nothing_to_commit(tmp_path):
+    subprocess_calls = []
+
+    def fake_run(args, **kwargs):
+        subprocess_calls.append(args)
+        # rc=1 means nothing to commit
+        return MagicMock(stdout="", stderr="", returncode=1)
+
+    with patch("run_daemon.subprocess.run", side_effect=fake_run):
+        _checkpoint_and_push_before_pr("T001")
+
+    push_calls = [c for c in subprocess_calls if "--push" in c]
+    assert push_calls == []
 
 
 # ── no-diff PR hardening ──────────────────────────────────────────────────────

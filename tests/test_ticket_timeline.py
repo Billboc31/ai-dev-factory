@@ -93,10 +93,11 @@ def test_timeline_implementation_review_needed(tmp_path):
     r = client.get("/tickets/T001/timeline")
     assert r.status_code == 200
     body = r.json()
-    assert body["human_gate"] is True
-    assert body["current_agent"] is None
+    assert body["human_gate"] is False
+    assert body["current_agent"] == "reviewer"
     assert _step(body["steps"], "implementation")["status"] == "done"
-    assert _step(body["steps"], "implementation_review")["status"] == "waiting_human"
+    assert _step(body["steps"], "implementation_review")["status"] == "running"
+    assert _step(body["steps"], "implementation_review")["agent"] == "reviewer"
     assert _step(body["steps"], "fix_loop")["status"] == "pending"
 
 
@@ -125,7 +126,7 @@ def test_timeline_test_complete_no_retry(tmp_path):
     assert r.status_code == 200
     body = r.json()
     assert body["current_agent"] is None
-    assert body["human_gate"] is False
+    assert body["human_gate"] is True
     assert _step(body["steps"], "tests")["status"] == "done"
     assert _step(body["steps"], "fix_loop")["status"] == "skipped"
 
