@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parent
 RUN_TICKET = ROOT / "run_ticket.py"
 RUN_ISSUE_INTAKE = ROOT / "run_issue_intake.py"
 ISSUE_INDEX_FILENAME = ".issue-intake.json"
+RETRY_STATE_FILENAME = "retry-state.json"
 
 AUTO_RUNNABLE_STATES = frozenset({
     "INIT",
@@ -36,6 +37,18 @@ HUMAN_GATE_STATES = frozenset({
     "PLAN_REVIEW_NEEDED",
     "TEST_COMPLETE",
 })
+
+# Retry/cooldown policies per failure class.
+# Keys match the categories produced by classify_runtime_failure in run_step.py.
+_RETRY_POLICIES: dict[str, dict] = {
+    "quota_exceeded":          {"action": "cooldown",    "cooldown_seconds": 3600},
+    "provider_error":          {"action": "exponential", "base_seconds": 60, "max_retries": 5, "fallback_cooldown_seconds": 3600},
+    "process_crashed":         {"action": "exponential", "base_seconds": 60, "max_retries": 5, "fallback_cooldown_seconds": 3600},
+    "process_failed":          {"action": "fixed_delay", "delay_seconds": 300, "max_retries": 3},
+    "empty_output":            {"action": "fixed_delay", "delay_seconds": 300, "max_retries": 3},
+    "write_permission_missing": {"action": "stop"},
+    "unknown":                 {"action": "stop"},
+}
 
 
 def _now_iso() -> str:
@@ -91,6 +104,131 @@ def _release_lock(run_dir: Path) -> None:
         pass
 
 
+# ── retry / cooldown state ────────────────────────────────────────────────────
+
+def _retry_state_path(run_dir: Path) -> Path:
+    return run_dir / RETRY_STATE_FILENAME
+
+
+def _load_retry_state(run_dir: Path) -> dict:
+    path = _retry_state_path(run_dir)
+    if not path.exists():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def _save_retry_state(run_dir: Path, state: dict) -> None:
+    path = _retry_state_path(run_dir)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    tmp.replace(path)
+
+
+def _clear_retry_state(run_dir: Path) -> None:
+    try:
+        _retry_state_path(run_dir).unlink()
+    except OSError:
+        pass
+
+
+def _read_last_failure_class(run_dir: Path) -> str | None:
+    """Return the last failure class logged in runtime.log, or None."""
+    log_path = run_dir / "runtime.log"
+    if not log_path.exists():
+        return None
+    try:
+        content = log_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    last_class = None
+    for line in content.splitlines():
+        m = re.search(r"runtime failure: (\w+)", line)
+        if m:
+            last_class = m.group(1)
+    return last_class
+
+
+def _cooldown_until(seconds: int) -> str:
+    until = datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(seconds=seconds)
+    return until.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _apply_retry_policy(ticket_id: str, failure_class: str, retry_state: dict) -> dict:
+    """Return an updated retry_state dict after applying the policy for failure_class."""
+    policy = _RETRY_POLICIES.get(failure_class, {"action": "stop"})
+    action = policy["action"]
+    new_state: dict = dict(retry_state)
+    new_state["failure_class"] = failure_class
+    new_state.setdefault("retry_count", 0)
+
+    if action == "stop":
+        new_state["stopped"] = True
+        new_state["stop_reason"] = failure_class
+        _log(f"{ticket_id}: retry policy=stop failure={failure_class} — requires human attention")
+
+    elif action == "cooldown":
+        seconds = policy["cooldown_seconds"]
+        new_state["cooldown_until"] = _cooldown_until(seconds)
+        new_state.pop("stopped", None)
+        _log(f"{ticket_id}: retry policy=cooldown failure={failure_class} cooldown={seconds}s until={new_state['cooldown_until']}")
+
+    elif action == "exponential":
+        count = new_state["retry_count"]
+        max_retries = policy["max_retries"]
+        if count >= max_retries:
+            fallback = policy["fallback_cooldown_seconds"]
+            new_state["cooldown_until"] = _cooldown_until(fallback)
+            new_state.pop("stopped", None)
+            _log(f"{ticket_id}: retry policy=exponential failure={failure_class} max_retries={max_retries} reached — cooldown {fallback}s")
+        else:
+            delay = policy["base_seconds"] * (2 ** count)
+            new_state["cooldown_until"] = _cooldown_until(delay)
+            new_state["retry_count"] = count + 1
+            new_state.pop("stopped", None)
+            _log(f"{ticket_id}: retry policy=exponential failure={failure_class} attempt={count + 1}/{max_retries} delay={delay}s")
+
+    elif action == "fixed_delay":
+        count = new_state["retry_count"]
+        max_retries = policy["max_retries"]
+        if count >= max_retries:
+            new_state["stopped"] = True
+            new_state["stop_reason"] = f"{failure_class}_max_retries"
+            _log(f"{ticket_id}: retry policy=fixed_delay failure={failure_class} max_retries={max_retries} reached — stopped")
+        else:
+            delay = policy["delay_seconds"]
+            new_state["cooldown_until"] = _cooldown_until(delay)
+            new_state["retry_count"] = count + 1
+            new_state.pop("stopped", None)
+            _log(f"{ticket_id}: retry policy=fixed_delay failure={failure_class} attempt={count + 1}/{max_retries} delay={delay}s")
+
+    return new_state
+
+
+def _is_blocked_by_retry(ticket_id: str, retry_state: dict) -> bool:
+    """Return True and log if the ticket must be skipped due to retry/cooldown state."""
+    if retry_state.get("stopped"):
+        reason = retry_state.get("stop_reason", "unknown")
+        _log(f"skipping {ticket_id}: stopped reason={reason} — requires human attention")
+        return True
+    cooldown_until = retry_state.get("cooldown_until")
+    if cooldown_until:
+        try:
+            until_dt = datetime.datetime.strptime(cooldown_until, "%Y-%m-%dT%H:%M:%SZ").replace(
+                tzinfo=datetime.timezone.utc
+            )
+            now = datetime.datetime.now(datetime.timezone.utc)
+            if now < until_dt:
+                remaining = int((until_dt - now).total_seconds())
+                _log(f"skipping {ticket_id}: in cooldown until={cooldown_until} remaining={remaining}s")
+                return True
+        except ValueError:
+            pass
+    return False
+
+
 def scan_tickets(runs_dir: Path) -> list[tuple[str, str]]:
     """Return (ticket_id, state) for all readable state.json files, sorted by ticket_id."""
     results = []
@@ -131,6 +269,16 @@ def launch_ticket(ticket_id: str, exec_cmd: str, dry_run: bool, runs_dir: Path) 
         for line in result.stderr.splitlines():
             _log(f"{ticket_id} [err]: {line}")
         _log(f"{ticket_id}: done rc={result.returncode}")
+        if result.returncode != 0:
+            failure_class = _read_last_failure_class(run_dir)
+            if failure_class:
+                retry_state = _load_retry_state(run_dir)
+                retry_state = _apply_retry_policy(ticket_id, failure_class, retry_state)
+                _save_retry_state(run_dir, retry_state)
+            else:
+                _log(f"{ticket_id}: no failure class in runtime.log — retry policy not applied")
+        else:
+            _clear_retry_state(run_dir)
     finally:
         _release_lock(run_dir)
 
@@ -253,6 +401,10 @@ def run_once(exec_cmd: str, dry_run: bool, runs_dir: Path) -> None:
     for ticket_id, state in tickets:
         if state in AUTO_RUNNABLE_STATES:
             _log(f"detected {ticket_id} state={state}")
+            run_dir = runs_dir / ticket_id
+            retry_state = _load_retry_state(run_dir)
+            if _is_blocked_by_retry(ticket_id, retry_state):
+                continue
             launch_ticket(ticket_id, exec_cmd, dry_run, runs_dir)
         elif state in HUMAN_GATE_STATES:
             _log(f"skipping {ticket_id} state={state} (human gate)")
