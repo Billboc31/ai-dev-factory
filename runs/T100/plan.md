@@ -28,3 +28,8 @@ La timeline est une **projection pure** de `state.json` via une table de mapping
 ### Hors scope
 
 Checkpoint/push/PR comme étapes, WebSocket temps réel, historique de transitions depuis les logs, modification d'artefacts.
+
+PLAN_APPROVED
+
+Note:
+OK pour une V1 basée sur state.json avec étapes fixes. Les checkpoints/push/PR et l’historique fin des transitions restent hors scope de cette itération et devront faire l’objet d’un ticket ultérieur.
