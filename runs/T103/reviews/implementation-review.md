@@ -1,4 +1,4 @@
-I now have enough information to write the complete review.
+I have read all the key implementation sections. Let me now write the formal review.
 
 ---
 
@@ -6,93 +6,70 @@ I now have enough information to write the complete review.
 
 ## Résumé
 
-Deuxième review de l'implémentation T103 sur `ticket/T103-t103-runtime-correctness-hotfixes-for-daemon-check`.  
-Les 4 bugs du ticket et les 2 nouvelles exigences issues de la review de plan sont correctement implémentés dans `run_daemon.py`. Cependant, deux ajouts hors-scope subsistent depuis la première tentative — ils n'ont pas été retirés.
-
-**Note sur les fichiers board** : les fichiers `services/control_api/services/board_service.py`, `apps/dashboard/src/pages/BoardPage.jsx`, `apps/dashboard/src/App.jsx`, `apps/dashboard/src/api/daemon.js`, `services/control_api/models/schemas.py`, `services/control_api/routes/daemon.py` apparaissent dans `git diff main...HEAD` mais ont été introduits par le ticket T102 (commit `a791537`), **non par T103**. Ils ne constituent pas une violation de scope T103.
+Troisième tentative de review sur `ticket/T103-t103-runtime-correctness-hotfixes-for-daemon-check`. Les deux blockers identifiés en review 2 (`_sync_main_before_intake` et `_count_active_tickets`/`--max-active-tickets`) ont été supprimés dans le commit `3fd16e7`. Les 4 bugs du ticket et les 2 additions du plan review sont correctement implémentés et le scope est propre.
 
 ---
 
 ## Vérifications effectuées
 
-- Comparaison ligne à ligne de `run_daemon.py` sur la branche vs sur `main`
-- Vérification de chaque bug ticket contre le code implémenté
-- Audit `git log --oneline` pour tracer l'origine des fichiers board
-- Lecture du plan v2 (résumé dans `runs/T103/plan.md`)
-- Lecture de la première review (`runs/T103/reviews/implementation-review.md`)
+- Lecture complète de `run_daemon.py` sur la branche (930 lignes)
+- Vérification ligne à ligne des 4 zones de correction
+- Grep `_sync_main_before_intake`, `_count_active_tickets`, `max_active_tickets` → aucun match
+- Vérification de `poll_github_issues()` : boucle `for issue in candidates` restaurée (tous les candidats traités)
+- Lecture du `.gitignore`
+- Vérification `git log --name-status` : `apps/dashboard/node_modules/` correctement sorti du tracking en `1a5e379`
 
 ---
 
-## Points validés
+## Bug 1 — PR créée avant push ✅
 
-**Bug 1 — PR créée avant push** ✅  
-`_checkpoint_and_push_before_pr()` (lignes 539–567) : le push s'exécute désormais inconditionnellement, que le commit retourne `rc=0` ou `rc=1`. Sur `main`, le cas `rc=1` faisait un early-return sans push — c'est la régression exacte décrite dans le ticket. Corrigé.
+`_checkpoint_and_push_before_pr()` (lignes 539–567) : push exécuté inconditionnellement que `commit_result.returncode` soit `0` (nouveau commit) ou `1` (rien à committer — flush des commits antérieurs). `handle_test_complete()` (ligne 570–577) appelle cette fonction avant `create_or_update_pr()`. Flux conforme au ticket.
 
-**Bug 2 — Mauvaise branche ticket** ✅  
-`_get_current_branch()` (lignes 639–646) + guard dans `launch_ticket()` (lignes 671–678) : si `current_branch != expected_branch`, le ticket est skippé avec un log explicite. Skip sécurisé, aucun checkout implicite. `_sync_ticket_branch()` est appelé après le guard (ff-only pull, abort sécurisé si divergence).
+## Bug 2 — Mauvaise branche ✅
 
-**Bug 3 — Classification dirty tree scope** ✅  
-`_CODE_SCOPE_PREFIXES` (lignes 236–249) : couvre `.gitignore`, `services/`, `apps/`, `tests/`, `tools/`, `docs/`, `ai/`, `prompts/`, `tickets/`, `README.md`, `package.json`, `package-lock.json`. Tous les chemins cités dans le ticket sont couverts. Pas de `git add .`.
+`_get_current_branch()` (lignes 639–646) via `git rev-parse --abbrev-ref HEAD`. Guard dans `launch_ticket()` (lignes 670–679) : si `current_branch != expected_branch` → skip avec log explicite, aucun checkout implicite. `_sync_ticket_branch()` appelé après le guard avec `git pull --ff-only` ; retourne `False` (skip) en cas de divergence.
 
-**Bug 4 — Fichiers runtime dans Git** ✅  
-`git rm -r --cached apps/dashboard/node_modules/` exécuté et commité (commit `1a5e379`). Le `.gitignore` était déjà correct (aucun diff sur ce fichier). `runs/.issue-intake.json` reste tracké (registre anti-réingestion — conforme à la décision du plan review).
+## Bug 3 — Classification dirty tree ✅
 
-**Nouveau — Checkpoint/push avant PLAN_REVIEW_NEEDED** ✅  
-`run_once()` lignes 938–944 : appel de `_checkpoint_and_push_before_pr()` avant le log "human gate skipping" pour l'état `PLAN_REVIEW_NEEDED`. Les artefacts planner sont ainsi visibles sur GitHub.
+`_CODE_SCOPE_PREFIXES` (lignes 236–249) couvre : `tools/`, `tests/`, `prompts/`, `tickets/`, `docs/`, `ai/`, `services/`, `apps/`, `README.md`, `.gitignore`, `package.json`, `package-lock.json`. Tous les chemins cités dans le ticket sont présents. Aucun `git add .` dans tout le fichier.
 
-**Nouveau — Sync branche distante** ✅  
-`_sync_ticket_branch()` (lignes 618–636) : `git pull --ff-only origin <branch>`. Retourne `True` si synchro ok ou si la branche n'existe pas encore sur le remote. Retourne `False` (skip avec log) en cas de divergence. Appelé après le guard de branche.
+`_classify_dirty_files()` (lignes 252–281) : classification en 3 buckets explicites. Les `unknown_files` déclenchent un abort sécurisé (ligne 297–299).
 
----
+## Bug 4 — Fichiers runtime dans Git ✅
 
-## Problèmes détectés
+`.gitignore` contient les 5 entrées requises (`runs/daemon.pid`, `runs/daemon.log`, `runs/*/workflow-status.md`, `runs/*/daemon.lock`, `apps/dashboard/node_modules/`). `apps/dashboard/node_modules/.vite/` couvert implicitement par `apps/dashboard/node_modules/`. `git rm -r --cached` exécuté dans le commit `1a5e379`.
 
-### 🔴 BLOQUER 1 — `_sync_main_before_intake()` hors-scope (lignes 713–751)
+## Plan additions ✅
 
-Fonction absente de `main` et absente du plan T103. Elle fait :
-```python
-git checkout main
-git pull origin main
-```
-avant chaque issue intake.
+**Checkpoint avant `PLAN_REVIEW_NEEDED`** : `run_once()` lignes 867–874 appelle `_checkpoint_and_push_before_pr()` avant de logger le skip human gate.
 
-**Problème concret** : si `call_issue_intake()` échoue après le `git checkout main`, le daemon reste sur `main` pour le reste du cycle. Les appels suivants dans `run_once()` verront `current_branch = "main"` ≠ `expected_branch = "ticket/T1xx"` et skipperont tous les tickets actifs avec "branch mismatch". Le daemon peut se retrouver bloqué sur `main` indéfiniment si l'intake échoue sur plusieurs cycles consécutifs.
+**Sync branche distante** : `_sync_ticket_branch()` (lignes 618–636) avec `ff-only pull`, appelé après le branch guard dans `launch_ticket()`.
 
-Le plan précise que la synchronisation distante souhaitée est `_sync_ticket_branch()` avec `ff-only` — pas un `checkout main`. Cette fonction dépasse le scope demandé et introduit un nouveau mode de défaillance.
+## Out-of-scope features (review 2) ✅ Supprimées
 
-**Correction** : supprimer `_sync_main_before_intake()` et son appel dans `poll_github_issues()`.
+`_sync_main_before_intake()` : absente (grep confirms). `_count_active_tickets()` + `--max-active-tickets` : absents (grep confirms). `poll_github_issues()` traite bien `for issue in candidates` (toute la liste, pas seulement `candidates[0]`).
 
 ---
 
-### 🔴 BLOQUER 2 — `_count_active_tickets()` + `--max-active-tickets` hors-scope (lignes 754–766, 848–901, 962)
+## Observations mineures (non bloquantes)
 
-Fonction, intégration dans `poll_github_issues()` et argument CLI absents de `main` et absents du plan T103.
+**`_checkpoint_and_push_before_pr()` — nom légèrement trompeur** : la fonction est maintenant aussi appelée pour la visibilité plan (`PLAN_REVIEW_NEEDED`). Nom acceptable mais imprécis. Non bloquant.
 
-**Problème 1 — Nouveau comportement implicite** : `poll_github_issues()` sur `main` traite **tous** les nouveaux issues dans la boucle. La version T103 ne traite plus que **1 candidat par cycle** (`candidates[0]`), les autres étant simplement loggés comme "queued". C'est un changement de comportement silencieux non demandé.
-
-**Problème 2 — Feature non justifiée** : le throttling `max_active_tickets` est une feature pertinente mais hors-scope de ce ticket de hotfixes. Elle doit passer par son propre ticket avec plan, review et tests.
-
-**Correction** : supprimer `_count_active_tickets()`, supprimer `max_active_tickets` de `poll_github_issues()` et de `parse_args()`, restaurer le comportement de boucle de `main` (traitement de tous les nouveaux issues).
+**Branch guard contournable si `branch` absent de `state.json`** : si un ticket en état `INIT` n'a pas encore de champ `branch`, le guard est skippé. Comportement correct pour les premiers états du lifecycle, mais à documenter si le système évolue vers des workers parallèles.
 
 ---
 
-## Risques éventuels
+## Critères d'acceptation
 
-**Minor** — La première review (`runs/T103/reviews/implementation-review.md`) a émis `IMPLEMENTATION_FIX_REQUIRED` via `` **Décision : `IMPLEMENTATION_FIX_REQUIRED`** `` au lieu du keyword brut sur sa propre ligne. Cela a empêché la transition d'état. Le système doit exiger le format strict pour éviter ce type de divergence silencieuse.
-
-**Minor** — `_sync_ticket_branch()` logge `"sync branch {branch!r} ok"` même quand rien n'a changé (branche déjà à jour). Acceptable pour le debugging.
+| Critère | Statut |
+|---|---|
+| PR créée uniquement après checkpoint/push propre | ✅ |
+| Daemon ne tente plus d'agir sur le mauvais ticket/branche | ✅ |
+| Fichiers projet normaux sont checkpointables | ✅ |
+| Vrais fichiers inconnus bloquent le daemon | ✅ |
+| Fichiers runtime ne polluent plus Git | ✅ |
+| Aucun `git add .` | ✅ |
 
 ---
 
-## Décision
-
-Deux blockers hors-scope non corrigés depuis la première review. Le core des 4 bugs est correct ; la correction est chirurgicale (supprimer ~60 lignes ajoutées dans `run_daemon.py`).
-
-**Actions requises** :
-
-1. Supprimer `_sync_main_before_intake()` (lignes 713–751) et retirer son appel dans `poll_github_issues()`.
-2. Supprimer `_count_active_tickets()` (lignes 754–766), retirer `max_active_tickets` de `poll_github_issues()` et de `parse_args()`, restaurer la boucle d'origine qui traite tous les candidats.
-
-Ces deux features peuvent faire l'objet d'un ticket dédié avec plan formel.
-
-IMPLEMENTATION_FIX_REQUIRED
+IMPLEMENTATION_APPROVED
