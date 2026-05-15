@@ -17,6 +17,7 @@ from run_daemon import (
     _is_pid_alive,
     _lock_path,
     _release_lock,
+    build_run_ticket_command,
     handle_test_complete,
     launch_ticket,
     main,
@@ -296,3 +297,33 @@ def test_main_once_returns_zero(tmp_path):
 def test_main_returns_2_when_runs_dir_missing(tmp_path):
     rc = main(["--exec-cmd", "test-cmd", "--once", "--runs-dir", str(tmp_path / "nonexistent")])
     assert rc == 2
+
+
+# ── build_run_ticket_command ──────────────────────────────────────────────────
+
+def test_build_run_ticket_command_positional_structure():
+    cmd = build_run_ticket_command("T032", "claude --dangerously-skip-permissions")
+    assert cmd[2] == "T032"
+    assert "--auto" in cmd
+    assert "--exec-cmd" in cmd
+
+
+def test_build_run_ticket_command_exec_cmd_not_split():
+    cmd = build_run_ticket_command("T032", "claude --dangerously-skip-permissions")
+    idx = cmd.index("--exec-cmd")
+    assert cmd[idx + 1] == "claude --dangerously-skip-permissions"
+    assert "--dangerously-skip-permissions" not in cmd
+
+
+def test_build_run_ticket_command_optional_flags_included():
+    cmd = build_run_ticket_command("T032", "test", auto_commit=True, auto_push=True, auto_include_code=True)
+    assert "--auto-commit" in cmd
+    assert "--auto-push" in cmd
+    assert "--auto-include-code" in cmd
+
+
+def test_build_run_ticket_command_optional_flags_absent_by_default():
+    cmd = build_run_ticket_command("T032", "test")
+    assert "--auto-commit" not in cmd
+    assert "--auto-push" not in cmd
+    assert "--auto-include-code" not in cmd

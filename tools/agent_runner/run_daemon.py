@@ -12,6 +12,7 @@ import datetime
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 import time
@@ -440,6 +441,26 @@ def scan_tickets(runs_dir: Path) -> list[tuple[str, str]]:
     return results
 
 
+def build_run_ticket_command(
+    ticket_id: str,
+    exec_cmd: str | None,
+    auto_commit: bool = False,
+    auto_push: bool = False,
+    auto_include_code: bool = False,
+) -> list[str]:
+    """Build the run_ticket.py command list. exec_cmd is passed as a single string element."""
+    cmd = [sys.executable, str(RUN_TICKET), ticket_id, "--auto"]
+    if exec_cmd:
+        cmd.extend(["--exec-cmd", exec_cmd])
+    if auto_commit:
+        cmd.append("--auto-commit")
+    if auto_push:
+        cmd.append("--auto-push")
+    if auto_include_code:
+        cmd.append("--auto-include-code")
+    return cmd
+
+
 def launch_ticket(
     ticket_id: str,
     exec_cmd: str,
@@ -461,14 +482,8 @@ def launch_ticket(
         return
 
     try:
-        _log(f"launching {ticket_id} --auto")
-        cmd = [sys.executable, str(RUN_TICKET), ticket_id, "--auto", "--exec-cmd", exec_cmd]
-        if auto_commit:
-            cmd.append("--auto-commit")
-        if auto_push:
-            cmd.append("--auto-push")
-        if auto_include_code:
-            cmd.append("--auto-include-code")
+        cmd = build_run_ticket_command(ticket_id, exec_cmd, auto_commit, auto_push, auto_include_code)
+        _log(f"Running ticket command: {shlex.join(cmd)}")
         result = subprocess.run(
             cmd,
             text=True,
