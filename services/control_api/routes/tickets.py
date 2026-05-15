@@ -4,7 +4,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
-from ..models.schemas import ActionResult, TicketSummary
+from ..models.schemas import ActionResult, TicketSummary, TimelineResponse
 from ..services import artifact_reader, subprocess_runner
 
 logger = logging.getLogger("control-api")
@@ -86,6 +86,15 @@ def get_tests(ticket_id: str, request: Request) -> str:
     if content is None:
         raise HTTPException(status_code=404, detail="test report not found")
     return content
+
+
+@router.get("/{ticket_id}/timeline", response_model=TimelineResponse)
+def get_timeline(ticket_id: str, request: Request) -> TimelineResponse:
+    _get_or_404(_root(request), ticket_id)
+    timeline = artifact_reader.get_ticket_timeline(_root(request), ticket_id)
+    if timeline is None:
+        raise HTTPException(status_code=404, detail="timeline not available")
+    return timeline
 
 
 # ── workflow action endpoints ─────────────────────────────────────────────────

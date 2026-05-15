@@ -42,6 +42,22 @@ class TicketDetail(TicketSummary):
     pass
 
 
+class TimelineStep(BaseModel):
+    id: str
+    label: str
+    status: str  # pending | running | done | waiting_human | failed | skipped
+    agent: str | None = None
+
+
+class TimelineResponse(BaseModel):
+    ticket_id: str
+    current_state: str
+    current_agent: str | None = None
+    human_gate: bool = False
+    last_event: str | None = None
+    steps: list[TimelineStep]
+
+
 class IntakeRequest(BaseModel):
     issue_number: int
 

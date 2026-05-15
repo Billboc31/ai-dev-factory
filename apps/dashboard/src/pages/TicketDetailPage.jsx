@@ -3,11 +3,13 @@ import { useParams, Link } from 'react-router-dom'
 import * as api from '../api/tickets'
 import ActionButton from '../components/ActionButton'
 import ErrorBanner from '../components/ErrorBanner'
+import WorkflowTimeline from '../components/WorkflowTimeline'
 import usePolling from '../hooks/usePolling'
 
-const TABS = ['overview', 'logs', 'plan', 'review', 'tests', 'artifacts']
+const TABS = ['timeline', 'overview', 'logs', 'plan', 'review', 'tests', 'artifacts']
 
 const TAB_FETCHERS = {
+  timeline: (id) => api.getTicketTimeline(id),
   overview: (id) => api.getTicketState(id),
   logs: (id) => api.getTicketLogs(id),
   plan: (id) => api.getTicketPlan(id),
@@ -27,7 +29,7 @@ export default function TicketDetailPage() {
   const [ticket, setTicket] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
-  const [tab, setTab] = useState('overview')
+  const [tab, setTab] = useState('timeline')
   const [tabContent, setTabContent] = useState({})
   const [tabLoading, setTabLoading] = useState(false)
   const prevStateRef = useRef(null)
@@ -38,7 +40,7 @@ export default function TicketDetailPage() {
     setLoading(true)
     setTicket(null)
     setError(null)
-    setTab('overview')
+    setTab('timeline')
     setTabContent({})
     prevStateRef.current = null
   }, [id])
@@ -51,8 +53,8 @@ export default function TicketDetailPage() {
         const newTicket = res.data
         if (prevStateRef.current !== null && prevStateRef.current !== newTicket.state) {
           setTabContent({})
-        } else if (activeTabRef.current === 'logs') {
-          setTabContent(prev => { const n = { ...prev }; delete n.logs; return n })
+        } else if (activeTabRef.current === 'logs' || activeTabRef.current === 'timeline') {
+          setTabContent(prev => { const n = { ...prev }; delete n[activeTabRef.current]; return n })
         }
         prevStateRef.current = newTicket.state
         setTicket(newTicket)
@@ -137,9 +139,11 @@ export default function TicketDetailPage() {
       <div className="mb-6 min-h-32">
         {tabLoading
           ? <p className="text-gray-500 text-sm">Loading…</p>
-          : <pre className="bg-white border border-gray-200 rounded p-4 text-xs overflow-auto whitespace-pre-wrap max-h-96">
-              {renderContent(tabContent[tab]) || 'No content available.'}
-            </pre>
+          : tab === 'timeline'
+            ? <WorkflowTimeline timeline={tabContent.timeline} />
+            : <pre className="bg-white border border-gray-200 rounded p-4 text-xs overflow-auto whitespace-pre-wrap max-h-96">
+                {renderContent(tabContent[tab]) || 'No content available.'}
+              </pre>
         }
       </div>
 

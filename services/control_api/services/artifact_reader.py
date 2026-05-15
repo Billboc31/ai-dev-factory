@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ..models.schemas import TicketSummary
+from ..models.schemas import TicketSummary, TimelineStep, TimelineResponse
 
 
 TICKET_ID_RE = re.compile(r"^T\d{3,}$")
@@ -124,6 +124,87 @@ def _read_artifact(project_root: Path, ticket_id: str, filename: str) -> str | N
         return path.read_text(encoding="utf-8")
     except OSError:
         return None
+
+
+_STEPS = [
+    ("issue_intake", "Issue intake"),
+    ("plan", "Plan"),
+    ("plan_review", "Plan review"),
+    ("implementation", "Implementation"),
+    ("implementation_review", "Implementation review"),
+    ("fix_loop", "Fix loop"),
+    ("tests", "Tests"),
+]
+
+_STEP_AGENTS = [None, "planner", None, "coder", None, "coder", "tester"]
+
+# Maps state -> (statuses list, human_gate)
+_STATUS_MAP: dict[str, tuple[list[str], bool]] = {
+    "INIT": (
+        ["done", "running", "pending", "pending", "pending", "pending", "pending"], False),
+    "PLAN_REVIEW_NEEDED": (
+        ["done", "done", "waiting_human", "pending", "pending", "pending", "pending"], True),
+    "PLAN_FIX_REQUIRED": (
+        ["done", "running", "pending", "pending", "pending", "pending", "pending"], False),
+    "PLAN_APPROVED": (
+        ["done", "done", "done", "running", "pending", "pending", "pending"], False),
+    "IMPLEMENTATION_REVIEW_NEEDED": (
+        ["done", "done", "done", "done", "waiting_human", "pending", "pending"], True),
+    "IMPLEMENTATION_FIX_REQUIRED": (
+        ["done", "done", "done", "done", "done", "running", "pending"], False),
+    "IMPLEMENTATION_APPROVED": (
+        ["done", "done", "done", "done", "done", "skipped", "running"], False),
+}
+
+
+def _build_steps(statuses: list[str]) -> tuple[list[TimelineStep], str | None]:
+    steps = []
+    current_agent = None
+    for i, (step_id, label) in enumerate(_STEPS):
+        st = statuses[i]
+        agent = _STEP_AGENTS[i] if st == "running" else None
+        if agent:
+            current_agent = agent
+        steps.append(TimelineStep(id=step_id, label=label, status=st, agent=agent))
+    return steps, current_agent
+
+
+def get_ticket_timeline(project_root: Path, ticket_id: str) -> TimelineResponse | None:
+    validate_ticket_id(ticket_id)
+    run_dir = _runs_root(project_root) / ticket_id
+    state_file = run_dir / "state.json"
+    if not state_file.exists():
+        return None
+    try:
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    state = data.get("state", "UNKNOWN")
+    last_event = _last_log_line(run_dir / "runtime.log")
+
+    if state == "TEST_COMPLETE":
+        has_retry = (run_dir / "retry-state.json").exists()
+        fix_status = "done" if has_retry else "skipped"
+        statuses = ["done", "done", "done", "done", "done", fix_status, "done"]
+        steps, current_agent = _build_steps(statuses)
+        human_gate = False
+    elif state in _STATUS_MAP:
+        statuses, human_gate = _STATUS_MAP[state]
+        steps, current_agent = _build_steps(statuses)
+    else:
+        statuses = ["done"] + ["pending"] * 6
+        steps, current_agent = _build_steps(statuses)
+        human_gate = False
+
+    return TimelineResponse(
+        ticket_id=ticket_id,
+        current_state=state,
+        current_agent=current_agent,
+        human_gate=human_gate,
+        last_event=last_event,
+        steps=steps,
+    )
 
 
 def get_ticket_plan(project_root: Path, ticket_id: str) -> str | None:

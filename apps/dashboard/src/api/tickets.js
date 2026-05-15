@@ -10,6 +10,7 @@ export const getTicketPlan = (id) => client.get(`/tickets/${id}/plan`)
 export const getTicketReview = (id) => client.get(`/tickets/${id}/review`)
 export const getTicketTests = (id) => client.get(`/tickets/${id}/tests`)
 export const getTicketArtifacts = (id) => client.get(`/tickets/${id}/artifacts`)
+export const getTicketTimeline = (id) => client.get(`/tickets/${id}/timeline`)
 
 export const runNextStep = (id) => client.post(`/tickets/${id}/run-next`)
 export const approvePlan = (id) => client.post(`/tickets/${id}/approve-plan`)
