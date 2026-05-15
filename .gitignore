@@ -4,3 +4,6 @@ __pycache__/
 *.py[cod]
 .venv/
 apps/dashboard/node_modules/
+# daemon runtime
+runs/daemon.pid
+runs/daemon.log
