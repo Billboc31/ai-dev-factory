@@ -9,6 +9,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "tools" / "agent_runner"))
 
 from run_daemon import (
     _load_state_json,
+    _pr_body,
     _save_state_json,
     check_and_close_issue,
     create_or_update_pr,
@@ -83,6 +84,15 @@ def test_create_or_update_pr_updates_existing_pr(tmp_path):
     assert "pr" in cmd
     assert "edit" in cmd
     assert "55" in cmd
+    saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert saved.get("pr_synced") is True
+
+
+def test_create_or_update_pr_skips_when_pr_synced(tmp_path):
+    run_dir = _make_run_dir(tmp_path, pr_number=55, pr_synced=True)
+    with patch("run_daemon.subprocess.run") as mock_sub:
+        create_or_update_pr("T001", run_dir, None)
+    mock_sub.assert_not_called()
 
 
 def test_create_or_update_pr_finds_existing_pr_by_head(tmp_path):
@@ -119,6 +129,15 @@ def test_check_and_close_issue_closes_merged_pr(tmp_path):
     close_cmd = mock_sub.call_args_list[1][0][0]
     assert "issue" in close_cmd
     assert "close" in close_cmd
+    saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert saved.get("issue_closed") is True
+
+
+def test_check_and_close_issue_skips_when_already_closed(tmp_path):
+    run_dir = _make_run_dir(tmp_path, pr_number=42, issue_number=21, issue_closed=True)
+    with patch("run_daemon.subprocess.run") as mock_sub:
+        check_and_close_issue("T001", run_dir, None)
+    mock_sub.assert_not_called()
 
 
 def test_check_and_close_issue_skips_open_pr(tmp_path):
@@ -134,6 +153,16 @@ def test_check_and_close_issue_skips_when_no_pr_number(tmp_path):
     with patch("run_daemon.subprocess.run") as mock_sub:
         check_and_close_issue("T001", run_dir, None)
     mock_sub.assert_not_called()
+
+
+# ── _pr_body ─────────────────────────────────────────────────────────────────
+
+def test_pr_body_has_approved_gates_checked():
+    body = _pr_body("T001", 21)
+    assert "- [x] PLAN_APPROVED" in body
+    assert "- [x] IMPLEMENTATION_APPROVED" in body
+    assert "- [ ] MEMORY_APPROVED" in body
+    assert "Closes #21" in body
 
 
 # ── handle_test_complete ──────────────────────────────────────────────────────

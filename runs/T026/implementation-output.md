@@ -1,22 +1,18 @@
-All 217 tests pass. Here's a summary of what was implemented:
+All 220 tests pass (217 original + 3 new). Here's a summary of the changes:
+
+---
 
 **Files modified:**
 
-- `tools/agent_runner/run_issue_intake.py` — `write_state_json()` now accepts `issue_number` and writes it to `state.json` so the daemon can link PR → issue.
+- `tools/agent_runner/run_daemon.py`:
+  - `_pr_body()` — P2 fix: `PLAN_APPROVED` and `IMPLEMENTATION_APPROVED` are now pre-checked (`[x]`) since both gates are validated before `TEST_COMPLETE`; `MEMORY_APPROVED` stays unchecked
+  - `check_and_close_issue()` — P1 fix: reads `issue_closed` from `state.json` at the start and returns immediately if set; after closing the issue and removing the label, writes `issue_closed: True` back to `state.json`
+  - `create_or_update_pr()` — P1 improvement: skips `gh pr edit` entirely if `pr_number` is already set and `pr_synced: True` is in state; writes `pr_synced: True` after a successful create or edit
 
-- `tools/agent_runner/run_ticket.py` — `auto_run()` gains an `include_code` parameter that's forwarded to `commit_ticket()`; new `--auto-include-code` CLI flag wires it up.
-
-- `tools/agent_runner/run_daemon.py` — the main additions:
-  - `_load_state_json()` / `_save_state_json()` — atomic read/write of state.json
-  - `create_or_update_pr()` — finds or creates a PR via `gh pr list/create/edit`, stores `pr_number` in state
-  - `check_and_close_issue()` — detects merged PR via `gh pr view`, closes issue and removes `ai-ready` label
-  - `handle_test_complete()` — orchestrator called from `run_once()` for `TEST_COMPLETE` state
-  - `launch_ticket()` — now accepts `auto_commit`, `auto_push`, `auto_include_code` and passes them to `run_ticket.py`
-  - `run_once()` — handles `TEST_COMPLETE` separately (PR lifecycle) before the human-gate fallthrough; new flags forwarded to `launch_ticket()`
-  - CLI: three new daemon flags `--auto-commit`, `--auto-push`, `--auto-include-code`
-
-- `tests/test_run_daemon.py` — fixed `test_run_once_calls_launch_for_auto_runnable_state` to match the new `launch_ticket` kwargs.
-
-**New test files:**
-- `tests/test_daemon_checkpoint.py` — 5 tests covering the auto-commit/push/include-code flags
-- `tests/test_daemon_pr_lifecycle.py` — 10 tests covering `_load/save_state_json`, `create_or_update_pr`, `check_and_close_issue`, `handle_test_complete`
+- `tests/test_daemon_pr_lifecycle.py`:
+  - Added `_pr_body` to imports
+  - `test_create_or_update_pr_updates_existing_pr` — added assertion that `pr_synced: True` is saved
+  - `test_create_or_update_pr_skips_when_pr_synced` — new: verifies no gh call when already synced
+  - `test_check_and_close_issue_closes_merged_pr` — added assertion that `issue_closed: True` is saved
+  - `test_check_and_close_issue_skips_when_already_closed` — new: verifies no gh call when already closed
+  - `test_pr_body_has_approved_gates_checked` — new: verifies the two gates are pre-checked and `Closes #N` is present

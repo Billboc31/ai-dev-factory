@@ -265,8 +265,8 @@ def _pr_body(ticket_id: str, issue_number: int | None) -> str:
         "Workflow reached `TEST_COMPLETE`.",
         "",
         "### Gates",
-        "- [ ] PLAN_APPROVED",
-        "- [ ] IMPLEMENTATION_APPROVED",
+        "- [x] PLAN_APPROVED",
+        "- [x] IMPLEMENTATION_APPROVED",
         "- [ ] MEMORY_APPROVED",
     ]
     if issue_number:
@@ -283,6 +283,10 @@ def create_or_update_pr(ticket_id: str, run_dir: Path, repo: str | None) -> None
 
     if not branch:
         _log(f"{ticket_id}: create_or_update_pr: no branch in state — skipping")
+        return
+
+    # Skip if PR body is already synced to avoid repeated gh pr edit calls
+    if pr_number is not None and state.get("pr_synced"):
         return
 
     title = _pr_title(ticket_id, run_dir)
@@ -311,6 +315,8 @@ def create_or_update_pr(ticket_id: str, run_dir: Path, repo: str | None) -> None
         try:
             result = subprocess.run(edit_cmd, capture_output=True, text=True, check=False)
             if result.returncode == 0:
+                state["pr_synced"] = True
+                _save_state_json(run_dir, state)
                 _log(f"{ticket_id}: PR #{pr_number} updated")
             else:
                 _log(f"{ticket_id}: gh pr edit failed (rc={result.returncode}): {result.stderr.strip()}")
@@ -328,6 +334,7 @@ def create_or_update_pr(ticket_id: str, run_dir: Path, repo: str | None) -> None
                 if m:
                     pr_number = int(m.group(1))
                     state["pr_number"] = pr_number
+                    state["pr_synced"] = True
                     _save_state_json(run_dir, state)
                     _log(f"{ticket_id}: PR #{pr_number} created: {pr_url}")
                 else:
@@ -341,6 +348,11 @@ def create_or_update_pr(ticket_id: str, run_dir: Path, repo: str | None) -> None
 def check_and_close_issue(ticket_id: str, run_dir: Path, repo: str | None) -> None:
     """Detect merged PR, close the source issue, and remove ai-ready label. Non-blocking."""
     state = _load_state_json(run_dir)
+
+    # Skip if already handled to avoid repeated gh calls on every daemon cycle
+    if state.get("issue_closed"):
+        return
+
     pr_number = state.get("pr_number")
     issue_number = state.get("issue_number")
 
@@ -391,6 +403,10 @@ def check_and_close_issue(ticket_id: str, run_dir: Path, repo: str | None) -> No
             _log(f"{ticket_id}: gh issue edit label failed (rc={label_result.returncode}): {label_result.stderr.strip()}")
     except FileNotFoundError:
         _log(f"{ticket_id}: gh not found — cannot remove label from issue #{issue_number}")
+
+    # Persist so we don't repeat close/label-removal on subsequent daemon cycles
+    state["issue_closed"] = True
+    _save_state_json(run_dir, state)
 
 
 def handle_test_complete(ticket_id: str, run_dir: Path, repo: str | None) -> None:
