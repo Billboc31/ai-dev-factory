@@ -1,7 +1,9 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import * as daemonApi from '../api/daemon'
 import ActionButton from '../components/ActionButton'
+import DaemonActivityFeed from '../components/DaemonActivityFeed'
 import ErrorBanner from '../components/ErrorBanner'
+import usePolling from '../hooks/usePolling'
 
 function formatUptime(startedAt) {
   if (!startedAt) return null
@@ -25,14 +27,10 @@ export default function DaemonPage() {
       .finally(() => setLoading(false))
   }, [])
 
-  useEffect(() => {
-    fetchStatus()
-    const interval = setInterval(fetchStatus, 30000)
-    return () => clearInterval(interval)
-  }, [fetchStatus])
+  usePolling(fetchStatus, 5000)
 
   return (
-    <div className="max-w-md">
+    <div className="max-w-2xl">
       <h1 className="text-2xl font-bold mb-4">Daemon</h1>
       <ErrorBanner message={error} onClose={() => setError(null)} />
 
@@ -55,13 +53,28 @@ export default function DaemonPage() {
               Uptime: {formatUptime(status.started_at)}
             </p>
           )}
+          {status.current_ticket && (
+            <p className="text-sm text-gray-600">
+              Current ticket: <code className="font-mono">{status.current_ticket}</code>
+            </p>
+          )}
+          {status.last_heartbeat && (
+            <p className="text-sm text-gray-400 text-xs">
+              Last activity: {new Date(status.last_heartbeat).toLocaleTimeString()}
+            </p>
+          )}
         </div>
       )}
 
-      <div className="flex gap-2">
+      <div className="flex gap-2 mb-8">
         <ActionButton label="Start" action={daemonApi.startDaemon} onSuccess={fetchStatus} />
         <ActionButton label="Stop" action={daemonApi.stopDaemon} variant="danger" onSuccess={fetchStatus} />
         <ActionButton label="Restart" action={daemonApi.restartDaemon} variant="secondary" onSuccess={fetchStatus} />
+      </div>
+
+      <div>
+        <h2 className="text-lg font-semibold mb-2">Activity Feed</h2>
+        <DaemonActivityFeed />
       </div>
     </div>
   )

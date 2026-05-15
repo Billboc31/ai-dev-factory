@@ -1,5 +1,5 @@
-from fastapi import APIRouter, Request
-from ..models.schemas import ActionResult, DaemonStatus
+from fastapi import APIRouter, Query, Request
+from ..models.schemas import ActionResult, DaemonActivity, DaemonStatus
 from ..services import daemon_manager
 
 router = APIRouter(prefix="/daemon", tags=["daemon"])
@@ -29,3 +29,8 @@ def daemon_stop(request: Request) -> ActionResult:
 def daemon_restart(request: Request) -> ActionResult:
     exec_cmd = getattr(request.app.state, "daemon_exec_cmd", "claude --dangerously-skip-permissions")
     return daemon_manager.restart(_root(request), exec_cmd)
+
+
+@router.get("/activity", response_model=DaemonActivity)
+def daemon_activity(request: Request, lines: int = Query(default=50, ge=1, le=500)) -> DaemonActivity:
+    return DaemonActivity(lines=daemon_manager.get_activity(_root(request), lines))

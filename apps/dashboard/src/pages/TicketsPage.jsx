@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { listTickets } from '../api/tickets'
 import ErrorBanner from '../components/ErrorBanner'
+import usePolling from '../hooks/usePolling'
 
 const STATE_COLORS = {
   COMPLETE: 'bg-green-100 text-green-800',
@@ -21,19 +22,33 @@ export default function TicketsPage() {
   const [tickets, setTickets] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [lastUpdated, setLastUpdated] = useState(null)
 
-  useEffect(() => {
+  const fetchTickets = useCallback(() => {
     listTickets()
-      .then(res => setTickets(res.data))
+      .then(res => {
+        setTickets(res.data)
+        setLastUpdated(new Date())
+        setError(null)
+      })
       .catch(err => setError(err.response?.data?.detail || err.message))
       .finally(() => setLoading(false))
   }, [])
+
+  usePolling(fetchTickets, 5000)
 
   if (loading) return <p className="text-gray-500">Loading tickets…</p>
 
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-4">Tickets</h1>
+      <div className="flex items-baseline gap-3 mb-4">
+        <h1 className="text-2xl font-bold">Tickets</h1>
+        {lastUpdated && (
+          <span className="text-xs text-gray-400">
+            Updated at {lastUpdated.toLocaleTimeString()}
+          </span>
+        )}
+      </div>
       <ErrorBanner message={error} onClose={() => setError(null)} />
       <div className="bg-white rounded shadow border border-gray-200 overflow-hidden">
         <table className="w-full text-sm">
