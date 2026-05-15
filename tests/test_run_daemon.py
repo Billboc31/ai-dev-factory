@@ -134,6 +134,19 @@ def test_run_once_skips_test_complete_when_issue_closed(tmp_path):
     mock_handle.assert_not_called()
 
 
+def test_run_once_skips_test_complete_when_pr_skipped_no_diff(tmp_path):
+    runs = tmp_path / "runs"
+    run_dir = runs / "T001"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(
+        json.dumps({"ticket_id": "T001", "state": "TEST_COMPLETE", "pr_skipped_no_diff": True}),
+        encoding="utf-8",
+    )
+    with patch("run_daemon.handle_test_complete") as mock_handle:
+        run_once("test-cmd", False, runs)
+    mock_handle.assert_not_called()
+
+
 # ── run_once ──────────────────────────────────────────────────────────────────
 
 def test_run_once_calls_launch_for_auto_runnable_state(tmp_path):

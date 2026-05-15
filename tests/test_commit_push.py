@@ -61,6 +61,11 @@ def test_commit_scope_contains_apps_and_services():
     assert "services/" in COMMIT_SCOPE
 
 
+def test_commit_scope_contains_package_json():
+    assert "package.json" in COMMIT_SCOPE
+    assert "package-lock.json" in COMMIT_SCOPE
+
+
 # ── archive_daemon ────────────────────────────────────────────────────────────
 
 def test_archive_daemon_writes_daemon_archived_flag(tmp_path):

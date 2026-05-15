@@ -84,7 +84,9 @@ COMMIT_SCOPE: tuple[str, ...] = (
     "runs/",
     "apps/",
     "README.md",
-    ".gitignore"
+    ".gitignore",
+    "package.json",
+    "package-lock.json",
 )
 
 
@@ -221,7 +223,16 @@ def commit_ticket(ticket_id: str, message: str | None, include_code: bool = Fals
             return 2
 
     run_dir = f"runs/{ticket_id}/"
-    stage_paths = [run_dir] + (list(COMMIT_SCOPE) if include_code else [])
+    requested_stage_paths = [run_dir] + (list(COMMIT_SCOPE) if include_code else [])
+
+    stage_paths = [path for path in requested_stage_paths if Path(path).exists()]
+    missing_stage_paths = [path for path in requested_stage_paths if not Path(path).exists()]
+
+    if missing_stage_paths:
+        _log_runtime(
+            ticket_id,
+            "commit-checkpoint: skipped missing scope paths: " + ", ".join(missing_stage_paths),
+        )
 
     status_result = run_command(["git", "status", "--porcelain"] + stage_paths)
     if status_result.returncode != 0:
@@ -244,7 +255,9 @@ def commit_ticket(ticket_id: str, message: str | None, include_code: bool = Fals
 
     print(f"staging: {run_dir}")
     if include_code:
-        print(f"staging (include-code): {', '.join(COMMIT_SCOPE)}")
+        print(f"staging (include-code): {', '.join(stage_paths)}")
+        if missing_stage_paths:
+            print(f"skipping missing scope paths: {', '.join(missing_stage_paths)}")
         print("note: staging runs/ and allowed scope paths — never git add .")
     else:
         print("note: only runs/ artifacts are auto-staged — stage other changes manually before running --commit")
