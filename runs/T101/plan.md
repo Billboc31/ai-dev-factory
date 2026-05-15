@@ -27,3 +27,8 @@ Le plan est écrit dans `runs/T101/plan.md`. Voici un résumé des 5 bugs et des
 - `git rm --cached` si des fichiers sont déjà trackés
 
 **7 fichiers modifiés, aucun créé.** La state machine `run_ticket.py` n'est pas touchée.
+
+PLAN_APPROVED
+
+Note:
+Ne pas ignorer `runs/.issue-intake.json` sans décision explicite, car c’est un registre d’intake utile pour éviter les réingestions et auditer le lien issue→ticket. Ignorer les `.tmp` oui. Pour `retry-state.json`, acceptable seulement si on le considère explicitement runtime volatile.
