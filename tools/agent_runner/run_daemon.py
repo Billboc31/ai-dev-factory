@@ -743,6 +743,14 @@ def next_ticket_id(runs_dir: Path, reserved: set[str] | None = None) -> str:
     return f"T{max_num + 1:03d}"
 
 
+def ticket_sort_key(ticket_id: str) -> int:
+    """Sort ticket IDs numerically so T104 runs before T105/T106/T107."""
+    match = re.match(r"T(\d+)$", ticket_id)
+    if not match:
+        return 999999
+    return int(match.group(1))
+
+
 def extract_ticket_id_from_title(title: str) -> str | None:
     """Return explicit TXXX from an issue title, if present."""
     match = re.search(r"\bT\d{3,}\b", title or "", re.IGNORECASE)
@@ -855,7 +863,7 @@ def run_once(
     repo: str | None = None,
 ) -> None:
     """Scan all tickets and process auto-runnable ones."""
-    tickets = scan_tickets(runs_dir)
+    tickets = sorted(scan_tickets(runs_dir), key=lambda t: ticket_sort_key(t[0]))
     if not tickets:
         _log("no tickets found")
         return
