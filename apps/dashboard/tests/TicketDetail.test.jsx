@@ -13,6 +13,14 @@ const MOCK_TICKET = {
   updated_at: '2026-05-15T09:00:00Z'
 }
 
+const MOCK_STATE = {
+  ticket_id: 'T028',
+  state: 'PLAN_APPROVED',
+  branch: 'ticket/T028-control-api',
+  step: 'coder',
+  last_run: '2026-05-15T09:00:00Z'
+}
+
 function renderPage(id = 'T028') {
   return render(
     <MemoryRouter initialEntries={[`/tickets/${id}`]}>
@@ -26,6 +34,7 @@ function renderPage(id = 'T028') {
 describe('TicketDetailPage', () => {
   beforeEach(() => {
     ticketsApi.getTicket.mockResolvedValue({ data: MOCK_TICKET })
+    ticketsApi.getTicketState.mockResolvedValue({ data: MOCK_STATE })
   })
 
   it('displays the ticket ID and state', async () => {
@@ -74,6 +83,13 @@ describe('TicketDetailPage', () => {
     await userEvent.click(btn)
 
     expect(await screen.findByText('Step failed')).toBeInTheDocument()
+  })
+
+  it('loads and displays state.json in the overview tab', async () => {
+    ticketsApi.getTicketState.mockResolvedValue({ data: MOCK_STATE })
+    renderPage()
+    expect(ticketsApi.getTicketState).toHaveBeenCalledWith('T028')
+    expect(await screen.findByText(/"step"/)).toBeInTheDocument()
   })
 
   it('loads and displays artifacts when artifacts tab is clicked', async () => {

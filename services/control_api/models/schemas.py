@@ -29,6 +29,7 @@ class TicketSummary(BaseModel):
     branch: str | None = None
     issue_number: int | None = None
     updated_at: str | None = None
+    last_log: str | None = None
 
 
 class TicketDetail(TicketSummary):

@@ -7,6 +7,7 @@ import ErrorBanner from '../components/ErrorBanner'
 const TABS = ['overview', 'logs', 'plan', 'review', 'tests', 'artifacts']
 
 const TAB_FETCHERS = {
+  overview: (id) => api.getTicketState(id),
   logs: (id) => api.getTicketLogs(id),
   plan: (id) => api.getTicketPlan(id),
   review: (id) => api.getTicketReview(id),
@@ -30,6 +31,7 @@ export default function TicketDetailPage() {
   const [tabLoading, setTabLoading] = useState(false)
 
   useEffect(() => {
+    setTabContent({})
     api.getTicket(id)
       .then(res => setTicket(res.data))
       .catch(err => setError(err.response?.data?.detail || err.message))
@@ -37,7 +39,6 @@ export default function TicketDetailPage() {
   }, [id])
 
   useEffect(() => {
-    if (tab === 'overview') return
     if (tabContent[tab] !== undefined) return
 
     const fetcher = TAB_FETCHERS[tab]
@@ -57,7 +58,7 @@ export default function TicketDetailPage() {
     setTabContent({})
     api.getTicket(id)
       .then(res => setTicket(res.data))
-      .catch(() => {})
+      .catch(err => setError(err.response?.data?.detail || err.message))
   }
 
   if (loading) return <p className="text-gray-500">Loading…</p>
@@ -106,18 +107,12 @@ export default function TicketDetailPage() {
       </div>
 
       <div className="mb-6 min-h-32">
-        {tab === 'overview' && ticket && (
-          <pre className="bg-white border border-gray-200 rounded p-4 text-xs overflow-auto">
-            {JSON.stringify(ticket, null, 2)}
-          </pre>
-        )}
-        {tab !== 'overview' && (
-          tabLoading
-            ? <p className="text-gray-500 text-sm">Loading…</p>
-            : <pre className="bg-white border border-gray-200 rounded p-4 text-xs overflow-auto whitespace-pre-wrap max-h-96">
-                {renderContent(tabContent[tab]) || 'No content available.'}
-              </pre>
-        )}
+        {tabLoading
+          ? <p className="text-gray-500 text-sm">Loading…</p>
+          : <pre className="bg-white border border-gray-200 rounded p-4 text-xs overflow-auto whitespace-pre-wrap max-h-96">
+              {renderContent(tabContent[tab]) || 'No content available.'}
+            </pre>
+        }
       </div>
 
       <div className="bg-white border border-gray-200 rounded p-4 space-y-4">
@@ -134,8 +129,8 @@ export default function TicketDetailPage() {
         <div>
           <h2 className="text-sm font-semibold text-gray-700 mb-2">Git / Runtime</h2>
           <div className="flex flex-wrap gap-2">
-            <ActionButton label="Commit" action={() => api.commitChanges(id)} variant="secondary" />
-            <ActionButton label="Push" action={() => api.pushChanges(id)} variant="secondary" />
+            <ActionButton label="Commit" action={() => api.commitChanges(id)} variant="secondary" onSuccess={refreshTicket} />
+            <ActionButton label="Push" action={() => api.pushChanges(id)} variant="secondary" onSuccess={refreshTicket} />
             <ActionButton label="Checkpoint" action={() => api.createCheckpoint(id)} variant="secondary" onSuccess={refreshTicket} />
           </div>
         </div>

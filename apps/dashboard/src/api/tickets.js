@@ -4,6 +4,7 @@ const client = axios.create({ baseURL: '/api' })
 
 export const listTickets = () => client.get('/tickets')
 export const getTicket = (id) => client.get(`/tickets/${id}`)
+export const getTicketState = (id) => client.get(`/tickets/${id}/state`)
 export const getTicketLogs = (id) => client.get(`/tickets/${id}/logs`)
 export const getTicketPlan = (id) => client.get(`/tickets/${id}/plan`)
 export const getTicketReview = (id) => client.get(`/tickets/${id}/review`)

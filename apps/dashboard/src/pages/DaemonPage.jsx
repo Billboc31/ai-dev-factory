@@ -3,6 +3,16 @@ import * as daemonApi from '../api/daemon'
 import ActionButton from '../components/ActionButton'
 import ErrorBanner from '../components/ErrorBanner'
 
+function formatUptime(startedAt) {
+  if (!startedAt) return null
+  const seconds = Math.floor((Date.now() - new Date(startedAt)) / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ${minutes % 60}m`
+}
+
 export default function DaemonPage() {
   const [status, setStatus] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -42,7 +52,7 @@ export default function DaemonPage() {
           )}
           {status.started_at && (
             <p className="text-sm text-gray-600">
-              Started: {new Date(status.started_at).toLocaleString()}
+              Uptime: {formatUptime(status.started_at)}
             </p>
           )}
         </div>

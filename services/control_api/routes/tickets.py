@@ -37,6 +37,15 @@ def get_ticket(ticket_id: str, request: Request) -> TicketSummary:
     return _get_or_404(_root(request), ticket_id)
 
 
+@router.get("/{ticket_id}/state")
+def get_state(ticket_id: str, request: Request) -> dict[str, Any]:
+    _get_or_404(_root(request), ticket_id)
+    state = artifact_reader.get_ticket_state(_root(request), ticket_id)
+    if state is None:
+        raise HTTPException(status_code=404, detail="state.json not found")
+    return state
+
+
 @router.get("/{ticket_id}/logs", response_class=PlainTextResponse)
 def get_logs(ticket_id: str, request: Request) -> str:
     _get_or_404(_root(request), ticket_id)

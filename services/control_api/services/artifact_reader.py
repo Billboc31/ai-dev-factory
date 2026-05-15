@@ -17,6 +17,20 @@ def _runs_root(project_root: Path) -> Path:
     return project_root / "runs"
 
 
+def _last_log_line(log_file: Path) -> str | None:
+    if not log_file.exists():
+        return None
+    try:
+        text = log_file.read_text(encoding="utf-8")
+        for line in reversed(text.splitlines()):
+            stripped = line.strip()
+            if stripped:
+                return stripped
+    except OSError:
+        pass
+    return None
+
+
 def validate_ticket_id(ticket_id: str) -> None:
     if not TICKET_ID_RE.fullmatch(ticket_id):
         raise ValueError(f"invalid ticket_id: {ticket_id!r}")
@@ -41,6 +55,7 @@ def list_tickets(project_root: Path) -> list[TicketSummary]:
                 branch=data.get("branch"),
                 issue_number=data.get("issue_number"),
                 updated_at=data.get("updated_at"),
+                last_log=_last_log_line(entry / "runtime.log"),
             ))
         except (json.JSONDecodeError, OSError):
             continue
@@ -61,6 +76,17 @@ def get_ticket(project_root: Path, ticket_id: str) -> TicketSummary | None:
             issue_number=data.get("issue_number"),
             updated_at=data.get("updated_at"),
         )
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def get_ticket_state(project_root: Path, ticket_id: str) -> dict[str, Any] | None:
+    validate_ticket_id(ticket_id)
+    state_file = _runs_root(project_root) / ticket_id / "state.json"
+    if not state_file.exists():
+        return None
+    try:
+        return json.loads(state_file.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return None
 
