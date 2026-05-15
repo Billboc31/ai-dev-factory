@@ -80,6 +80,8 @@ COMMIT_SCOPE: tuple[str, ...] = (
     "tickets/",
     "docs/",
     "ai/",
+    "services/",
+    "runs/"
 )
 
 
