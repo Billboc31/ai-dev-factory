@@ -1,7 +1,7 @@
 {
   "ticket_id": "T105",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T105-t105-automatic-merge-after-test-complete",
   "issue_number": 47,
-  "updated_at": "2026-05-17T21:53:01Z"
+  "updated_at": "2026-05-17T21:58:05Z"
 }
