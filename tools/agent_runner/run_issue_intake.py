@@ -122,7 +122,7 @@ def commit_bootstrap(ticket_id: str, push: bool = False) -> None:
         f"runs/{ticket_id}/state.json",
     ]
     for path in paths_to_stage:
-        add_result = _run(["git", "add", path])
+        add_result = _run(["git", "add", "-f", path])
         if add_result.returncode != 0:
             stderr = add_result.stderr.strip()
             _log(ticket_id, f"bootstrap checkpoint: failed to stage {path}: {stderr}")
