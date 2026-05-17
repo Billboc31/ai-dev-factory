@@ -58,6 +58,19 @@ def check_working_tree_clean() -> None:
         raise IntakeError("working tree is not clean — commit or stash changes first")
 
 
+def get_current_branch() -> str | None:
+    result = _run(["git", "rev-parse", "--abbrev-ref", "HEAD"])
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def return_to_branch(branch: str) -> None:
+    result = _run(["git", "checkout", branch])
+    if result.returncode != 0:
+        print(f"warning: failed to return to branch {branch!r}: {result.stderr.strip()}", file=sys.stderr)
+
+
 def fetch_issue(issue_number: int, repo: str | None) -> dict[str, str]:
     cmd = ["gh", "issue", "view", str(issue_number), "--json", "title,body"]
     if repo:
@@ -103,14 +116,18 @@ def write_ticket_md(ticket_id: str, issue_number: int, title: str, body: str) ->
 
 
 def commit_bootstrap(ticket_id: str, push: bool = False) -> None:
-    """Stage runs/TXXX/ticket.md and commit as bootstrap checkpoint."""
-    ticket_path = f"runs/{ticket_id}/ticket.md"
-    add_result = _run(["git", "add", ticket_path])
-    if add_result.returncode != 0:
-        stderr = add_result.stderr.strip()
-        _log(ticket_id, f"bootstrap checkpoint: failed to stage {ticket_path}: {stderr}")
-        print(f"warning: bootstrap checkpoint: failed to stage {ticket_path}", file=sys.stderr)
-        return
+    """Stage runs/TXXX/ticket.md + state.json and commit as bootstrap checkpoint."""
+    paths_to_stage = [
+        f"runs/{ticket_id}/ticket.md",
+        f"runs/{ticket_id}/state.json",
+    ]
+    for path in paths_to_stage:
+        add_result = _run(["git", "add", path])
+        if add_result.returncode != 0:
+            stderr = add_result.stderr.strip()
+            _log(ticket_id, f"bootstrap checkpoint: failed to stage {path}: {stderr}")
+            print(f"warning: bootstrap checkpoint: failed to stage {path}", file=sys.stderr)
+            return
     message = f"{ticket_id}: bootstrap checkpoint"
     commit_result = _run(["git", "commit", "-m", message])
     if commit_result.returncode != 0:
@@ -170,6 +187,8 @@ def run_intake(
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
+    original_branch = get_current_branch()
+
     print(f"fetching GitHub issue #{issue_number}...")
     try:
         issue = fetch_issue(issue_number, repo)
@@ -199,6 +218,11 @@ def run_intake(
     _log(ticket_id, "intake: done")
 
     commit_bootstrap(ticket_id, push=push)
+
+    if original_branch and original_branch != branch:
+        print(f"returning to original branch: {original_branch}")
+        return_to_branch(original_branch)
+        _log(ticket_id, f"intake: returned to branch {original_branch!r}")
 
     print(f"\nrun workflow with:")
     print(

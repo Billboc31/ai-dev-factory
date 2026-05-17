@@ -32,6 +32,9 @@ function BoardCard({ item }) {
     : '—'
 
   const subtitle = item.title || item.state || item.branch || null
+  const worktreeName = item.worker_cwd
+    ? item.worker_cwd.split('/').pop()
+    : null
 
   return (
     <div className="bg-white border border-gray-200 rounded p-2 text-sm shadow-sm">
@@ -44,6 +47,12 @@ function BoardCard({ item }) {
       )}
       {subtitle && (
         <p className="text-gray-500 text-xs mt-0.5 truncate" title={subtitle}>{subtitle}</p>
+      )}
+      {item.worker_pid != null && (
+        <p className="text-yellow-700 text-xs mt-0.5 font-mono">
+          pid:{item.worker_pid}
+          {worktreeName && <span className="text-gray-400"> · {worktreeName}</span>}
+        </p>
       )}
     </div>
   )

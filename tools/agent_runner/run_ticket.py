@@ -156,6 +156,14 @@ def execute_once(ticket_id: str, step: str, command: str) -> int:
 
 def checkout_branch(ticket_id: str, slug: str | None) -> int:
     name = branch_name(ticket_id, slug)
+    try:
+        current = _get_current_branch()
+    except TicketRunnerError:
+        current = None
+    if current == name:
+        print(f"already on branch: {name}")
+        _log_runtime(ticket_id, f"ensure-branch: already on branch {name}")
+        return 0
     print(f"checkout branch: {name}")
     try:
         _check_working_tree_clean()
@@ -868,6 +876,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--auto-commit", action="store_true", help="After each successful --auto step, commit runs/ artifacts")
     parser.add_argument("--auto-push", action="store_true", help="After each successful --auto-commit, push the ticket branch")
     parser.add_argument("--auto-include-code", action="store_true", help="With --auto-commit, also stage COMMIT_SCOPE paths (tools/, tests/, prompts/, tickets/, docs/, ai/)")
+    parser.add_argument("--repo-root", help="Path to main repo root (used when running from a worktree)")
     parser.add_argument("--set-state", help="Manually set workflow state (human review path)")
     parser.add_argument("--approve-plan", action="store_true", help="Approve plan (PLAN_REVIEW_NEEDED → PLAN_APPROVED)")
     parser.add_argument("--request-plan-fix", action="store_true", help="Request plan fix (PLAN_REVIEW_NEEDED → PLAN_FIX_REQUIRED)")

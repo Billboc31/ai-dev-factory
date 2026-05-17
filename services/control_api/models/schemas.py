@@ -85,6 +85,8 @@ class BoardItem(BaseModel):
     title: str | None = None
     state: str | None = None
     branch: str | None = None
+    worker_pid: int | None = None
+    worker_cwd: str | None = None
 
 
 class BoardColumn(BaseModel):
