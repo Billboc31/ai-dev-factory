@@ -378,7 +378,7 @@ def test_poll_github_issues_calls_commit_after_intake_on_success(tmp_path):
          patch("run_daemon.subprocess.run", side_effect=_git_ok):
         poll_github_issues(runs, "ai-ready", None)
 
-    mock_commit.assert_called_once_with("T001")
+    mock_commit.assert_called_once_with("T001", runs)
 
 
 def test_poll_github_issues_does_not_call_commit_after_intake_on_failure(tmp_path):
