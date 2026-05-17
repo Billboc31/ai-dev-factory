@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import re
 import subprocess
@@ -9,6 +10,7 @@ import sys
 from pathlib import Path
 
 from ..models.schemas import ActionResult
+from .runtime_resolver import resolve_ticket_cwd, resolve_ticket_run_dir
 
 
 logger = logging.getLogger("control-api")
@@ -46,84 +48,153 @@ def _run(args: list[str], cwd: Path | None = None) -> ActionResult:
         return ActionResult(ok=False, message=str(exc), returncode=-1)
 
 
-def run_next(ticket_id: str, project_root: Path) -> ActionResult:
+def _resolve_action_cwd(
+    ticket_id: str,
+    project_root: Path,
+    worktrees_dir: Path | None,
+) -> tuple[Path, str | None]:
+    """Return (cwd, error_message). error_message is set if the context is unsafe.
+
+    If no worktree exists and the repo is on the wrong branch, refuses with an
+    actionable message instead of letting run_ticket.py fail mid-flight.
+    """
+    cwd = resolve_ticket_cwd(ticket_id, project_root, worktrees_dir)
+
+    if cwd == project_root:
+        # Legacy fallback — verify current branch matches state.branch
+        runs_dir = project_root / "runs"
+        run_dir = resolve_ticket_run_dir(ticket_id, runs_dir, worktrees_dir)
+        state_file = run_dir / "state.json"
+        if state_file.exists():
+            try:
+                state = json.loads(state_file.read_text(encoding="utf-8"))
+                expected_branch = state.get("branch", "")
+                if expected_branch and expected_branch != "main":
+                    result = subprocess.run(
+                        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                        capture_output=True, text=True, check=False,
+                        cwd=str(project_root),
+                    )
+                    if result.returncode == 0:
+                        current = result.stdout.strip()
+                        if current != expected_branch:
+                            return project_root, (
+                                f"no active worktree for {ticket_id} — "
+                                f"current branch {current!r} does not match "
+                                f"state branch {expected_branch!r}; "
+                                f"start a worktree or checkout {expected_branch!r} manually"
+                            )
+            except (json.JSONDecodeError, OSError):
+                pass
+
+    return cwd, None
+
+
+def run_next(ticket_id: str, project_root: Path, worktrees_dir: Path | None = None) -> ActionResult:
     _validate_ticket_id(ticket_id)
     logger.info("api: run-next requested for %s", ticket_id)
+    cwd, error = _resolve_action_cwd(ticket_id, project_root, worktrees_dir)
+    if error:
+        return ActionResult(ok=False, message=error, returncode=-1)
     return _run(
         [sys.executable, str(_RUN_TICKET), ticket_id, "--auto"],
-        cwd=project_root,
+        cwd=cwd,
     )
 
 
-def approve_plan(ticket_id: str, project_root: Path) -> ActionResult:
+def approve_plan(ticket_id: str, project_root: Path, worktrees_dir: Path | None = None) -> ActionResult:
     _validate_ticket_id(ticket_id)
     logger.info("api: POST /tickets/%s/approve-plan", ticket_id)
+    cwd, error = _resolve_action_cwd(ticket_id, project_root, worktrees_dir)
+    if error:
+        return ActionResult(ok=False, message=error, returncode=-1)
     return _run(
         [sys.executable, str(_RUN_TICKET), ticket_id, "--approve-plan"],
-        cwd=project_root,
+        cwd=cwd,
     )
 
 
-def request_plan_fix(ticket_id: str, project_root: Path) -> ActionResult:
+def request_plan_fix(ticket_id: str, project_root: Path, worktrees_dir: Path | None = None) -> ActionResult:
     _validate_ticket_id(ticket_id)
     logger.info("api: POST /tickets/%s/request-plan-fix", ticket_id)
+    cwd, error = _resolve_action_cwd(ticket_id, project_root, worktrees_dir)
+    if error:
+        return ActionResult(ok=False, message=error, returncode=-1)
     return _run(
         [sys.executable, str(_RUN_TICKET), ticket_id, "--request-plan-fix"],
-        cwd=project_root,
+        cwd=cwd,
     )
 
 
-def approve_implementation(ticket_id: str, project_root: Path) -> ActionResult:
+def approve_implementation(ticket_id: str, project_root: Path, worktrees_dir: Path | None = None) -> ActionResult:
     _validate_ticket_id(ticket_id)
     logger.info("api: POST /tickets/%s/approve-implementation", ticket_id)
+    cwd, error = _resolve_action_cwd(ticket_id, project_root, worktrees_dir)
+    if error:
+        return ActionResult(ok=False, message=error, returncode=-1)
     return _run(
         [sys.executable, str(_RUN_TICKET), ticket_id, "--approve-implementation"],
-        cwd=project_root,
+        cwd=cwd,
     )
 
 
-def request_implementation_fix(ticket_id: str, project_root: Path) -> ActionResult:
+def request_implementation_fix(ticket_id: str, project_root: Path, worktrees_dir: Path | None = None) -> ActionResult:
     _validate_ticket_id(ticket_id)
     logger.info("api: POST /tickets/%s/request-implementation-fix", ticket_id)
+    cwd, error = _resolve_action_cwd(ticket_id, project_root, worktrees_dir)
+    if error:
+        return ActionResult(ok=False, message=error, returncode=-1)
     return _run(
         [sys.executable, str(_RUN_TICKET), ticket_id, "--request-implementation-fix"],
-        cwd=project_root,
+        cwd=cwd,
     )
 
 
-def commit_ticket(ticket_id: str, project_root: Path) -> ActionResult:
+def commit_ticket(ticket_id: str, project_root: Path, worktrees_dir: Path | None = None) -> ActionResult:
     _validate_ticket_id(ticket_id)
     logger.info("api: POST /tickets/%s/commit", ticket_id)
+    cwd, error = _resolve_action_cwd(ticket_id, project_root, worktrees_dir)
+    if error:
+        return ActionResult(ok=False, message=error, returncode=-1)
     return _run(
         [sys.executable, str(_RUN_TICKET), ticket_id, "--commit", "--include-code"],
-        cwd=project_root,
+        cwd=cwd,
     )
 
 
-def push_ticket(ticket_id: str, project_root: Path) -> ActionResult:
+def push_ticket(ticket_id: str, project_root: Path, worktrees_dir: Path | None = None) -> ActionResult:
     _validate_ticket_id(ticket_id)
     logger.info("api: POST /tickets/%s/push", ticket_id)
+    cwd, error = _resolve_action_cwd(ticket_id, project_root, worktrees_dir)
+    if error:
+        return ActionResult(ok=False, message=error, returncode=-1)
     return _run(
         [sys.executable, str(_RUN_TICKET), ticket_id, "--push"],
-        cwd=project_root,
+        cwd=cwd,
     )
 
 
-def checkpoint_ticket(ticket_id: str, project_root: Path) -> ActionResult:
+def checkpoint_ticket(ticket_id: str, project_root: Path, worktrees_dir: Path | None = None) -> ActionResult:
     _validate_ticket_id(ticket_id)
     logger.info("api: checkpoint requested for %s", ticket_id)
+    cwd, error = _resolve_action_cwd(ticket_id, project_root, worktrees_dir)
+    if error:
+        return ActionResult(ok=False, message=error, returncode=-1)
     return _run(
         [sys.executable, str(_RUN_TICKET), ticket_id, "--commit", "--include-code"],
-        cwd=project_root,
+        cwd=cwd,
     )
 
 
-def archive_ticket(ticket_id: str, project_root: Path) -> ActionResult:
+def archive_ticket(ticket_id: str, project_root: Path, worktrees_dir: Path | None = None) -> ActionResult:
     _validate_ticket_id(ticket_id)
     logger.info("api: POST /tickets/%s/archive", ticket_id)
+    cwd, error = _resolve_action_cwd(ticket_id, project_root, worktrees_dir)
+    if error:
+        return ActionResult(ok=False, message=error, returncode=-1)
     return _run(
         [sys.executable, str(_RUN_TICKET), ticket_id, "--archive-daemon"],
-        cwd=project_root,
+        cwd=cwd,
     )
 
 

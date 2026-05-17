@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from ..models.schemas import TicketSummary, TimelineStep, TimelineResponse
+from .runtime_resolver import resolve_ticket_run_dir
 
 
 TICKET_ID_RE = re.compile(r"^T\d{3,}$")
@@ -36,35 +37,67 @@ def validate_ticket_id(ticket_id: str) -> None:
         raise ValueError(f"invalid ticket_id: {ticket_id!r}")
 
 
-def list_tickets(project_root: Path) -> list[TicketSummary]:
+def _get_run_dir(project_root: Path, ticket_id: str, worktrees_dir: Path | None) -> Path:
+    return resolve_ticket_run_dir(ticket_id, _runs_root(project_root), worktrees_dir)
+
+
+def list_tickets(project_root: Path, worktrees_dir: Path | None = None) -> list[TicketSummary]:
     runs = _runs_root(project_root)
-    tickets: list[TicketSummary] = []
-    if not runs.exists():
-        return tickets
-    for entry in sorted(runs.iterdir()):
-        if not entry.is_dir() or not TICKET_ID_RE.fullmatch(entry.name):
-            continue
-        state_file = entry / "state.json"
-        if not state_file.exists():
-            continue
-        try:
-            data = json.loads(state_file.read_text(encoding="utf-8"))
-            tickets.append(TicketSummary(
-                ticket_id=data.get("ticket_id", entry.name),
-                state=data.get("state", "UNKNOWN"),
-                branch=data.get("branch"),
-                issue_number=data.get("issue_number"),
-                updated_at=data.get("updated_at"),
-                last_log=_last_log_line(entry / "runtime.log"),
-            ))
-        except (json.JSONDecodeError, OSError):
-            continue
-    return tickets
+    seen: dict[str, TicketSummary] = {}
+
+    # Worktrees first — most current state for active tickets
+    if worktrees_dir and worktrees_dir.exists():
+        for wt_dir in sorted(worktrees_dir.iterdir()):
+            if not wt_dir.is_dir() or not TICKET_ID_RE.fullmatch(wt_dir.name):
+                continue
+            ticket_id = wt_dir.name
+            run_dir = wt_dir / "runs" / ticket_id
+            state_file = run_dir / "state.json"
+            if not state_file.exists():
+                continue
+            try:
+                data = json.loads(state_file.read_text(encoding="utf-8"))
+                seen[ticket_id] = TicketSummary(
+                    ticket_id=data.get("ticket_id", ticket_id),
+                    state=data.get("state", "UNKNOWN"),
+                    branch=data.get("branch"),
+                    issue_number=data.get("issue_number"),
+                    updated_at=data.get("updated_at"),
+                    last_log=_last_log_line(run_dir / "runtime.log"),
+                )
+            except (json.JSONDecodeError, OSError):
+                continue
+
+    # Main repo runs/ — tickets without worktrees
+    if runs.exists():
+        for entry in sorted(runs.iterdir()):
+            if not entry.is_dir() or not TICKET_ID_RE.fullmatch(entry.name):
+                continue
+            if entry.name in seen:
+                continue
+            state_file = entry / "state.json"
+            if not state_file.exists():
+                continue
+            try:
+                data = json.loads(state_file.read_text(encoding="utf-8"))
+                seen[entry.name] = TicketSummary(
+                    ticket_id=data.get("ticket_id", entry.name),
+                    state=data.get("state", "UNKNOWN"),
+                    branch=data.get("branch"),
+                    issue_number=data.get("issue_number"),
+                    updated_at=data.get("updated_at"),
+                    last_log=_last_log_line(entry / "runtime.log"),
+                )
+            except (json.JSONDecodeError, OSError):
+                continue
+
+    return list(seen.values())
 
 
-def get_ticket(project_root: Path, ticket_id: str) -> TicketSummary | None:
+def get_ticket(project_root: Path, ticket_id: str, worktrees_dir: Path | None = None) -> TicketSummary | None:
     validate_ticket_id(ticket_id)
-    state_file = _runs_root(project_root) / ticket_id / "state.json"
+    run_dir = _get_run_dir(project_root, ticket_id, worktrees_dir)
+    state_file = run_dir / "state.json"
     if not state_file.exists():
         return None
     try:
@@ -80,9 +113,10 @@ def get_ticket(project_root: Path, ticket_id: str) -> TicketSummary | None:
         return None
 
 
-def get_ticket_state(project_root: Path, ticket_id: str) -> dict[str, Any] | None:
+def get_ticket_state(project_root: Path, ticket_id: str, worktrees_dir: Path | None = None) -> dict[str, Any] | None:
     validate_ticket_id(ticket_id)
-    state_file = _runs_root(project_root) / ticket_id / "state.json"
+    run_dir = _get_run_dir(project_root, ticket_id, worktrees_dir)
+    state_file = run_dir / "state.json"
     if not state_file.exists():
         return None
     try:
@@ -91,9 +125,10 @@ def get_ticket_state(project_root: Path, ticket_id: str) -> dict[str, Any] | Non
         return None
 
 
-def get_ticket_logs(project_root: Path, ticket_id: str) -> str | None:
+def get_ticket_logs(project_root: Path, ticket_id: str, worktrees_dir: Path | None = None) -> str | None:
     validate_ticket_id(ticket_id)
-    log_file = _runs_root(project_root) / ticket_id / "runtime.log"
+    run_dir = _get_run_dir(project_root, ticket_id, worktrees_dir)
+    log_file = run_dir / "runtime.log"
     if not log_file.exists():
         return None
     try:
@@ -102,9 +137,9 @@ def get_ticket_logs(project_root: Path, ticket_id: str) -> str | None:
         return None
 
 
-def get_ticket_artifacts(project_root: Path, ticket_id: str) -> dict[str, Any]:
+def get_ticket_artifacts(project_root: Path, ticket_id: str, worktrees_dir: Path | None = None) -> dict[str, Any]:
     validate_ticket_id(ticket_id)
-    run_dir = _runs_root(project_root) / ticket_id
+    run_dir = _get_run_dir(project_root, ticket_id, worktrees_dir)
     if not run_dir.exists():
         return {}
     artifacts: dict[str, Any] = {}
@@ -115,9 +150,10 @@ def get_ticket_artifacts(project_root: Path, ticket_id: str) -> dict[str, Any]:
     return artifacts
 
 
-def _read_artifact(project_root: Path, ticket_id: str, filename: str) -> str | None:
+def _read_artifact(project_root: Path, ticket_id: str, filename: str, worktrees_dir: Path | None = None) -> str | None:
     validate_ticket_id(ticket_id)
-    path = _runs_root(project_root) / ticket_id / filename
+    run_dir = _get_run_dir(project_root, ticket_id, worktrees_dir)
+    path = run_dir / filename
     if not path.exists() or not path.is_file():
         return None
     try:
@@ -169,9 +205,9 @@ def _build_steps(statuses: list[str]) -> tuple[list[TimelineStep], str | None]:
     return steps, current_agent
 
 
-def get_ticket_timeline(project_root: Path, ticket_id: str) -> TimelineResponse | None:
+def get_ticket_timeline(project_root: Path, ticket_id: str, worktrees_dir: Path | None = None) -> TimelineResponse | None:
     validate_ticket_id(ticket_id)
-    run_dir = _runs_root(project_root) / ticket_id
+    run_dir = _get_run_dir(project_root, ticket_id, worktrees_dir)
     state_file = run_dir / "state.json"
     if not state_file.exists():
         return None
@@ -207,13 +243,13 @@ def get_ticket_timeline(project_root: Path, ticket_id: str) -> TimelineResponse 
     )
 
 
-def get_ticket_plan(project_root: Path, ticket_id: str) -> str | None:
-    return _read_artifact(project_root, ticket_id, "plan.md")
+def get_ticket_plan(project_root: Path, ticket_id: str, worktrees_dir: Path | None = None) -> str | None:
+    return _read_artifact(project_root, ticket_id, "plan.md", worktrees_dir)
 
 
-def get_ticket_review(project_root: Path, ticket_id: str) -> str | None:
-    return _read_artifact(project_root, ticket_id, "reviews/review.md")
+def get_ticket_review(project_root: Path, ticket_id: str, worktrees_dir: Path | None = None) -> str | None:
+    return _read_artifact(project_root, ticket_id, "reviews/review.md", worktrees_dir)
 
 
-def get_ticket_tests(project_root: Path, ticket_id: str) -> str | None:
-    return _read_artifact(project_root, ticket_id, "tests/test-report.md")
+def get_ticket_tests(project_root: Path, ticket_id: str, worktrees_dir: Path | None = None) -> str | None:
+    return _read_artifact(project_root, ticket_id, "tests/test-report.md", worktrees_dir)

@@ -641,6 +641,71 @@ def _checkpoint_and_push_before_pr(ticket_id: str, cwd: str | None = None) -> bo
     return True
 
 
+def auto_merge_pr(ticket_id: str, run_dir: Path, repo: str | None) -> bool:
+    """Merge the ticket PR automatically if all guards pass. Returns True if merged."""
+    state = _load_state_json(run_dir)
+    pr_number = state.get("pr_number")
+
+    if not pr_number:
+        _log(f"{ticket_id}: auto-merge: no pr_number in state — skipping")
+        return False
+
+    if state.get("pr_merged"):
+        _log(f"{ticket_id}: auto-merge: already merged — skipping")
+        return False
+
+    check_cmd = ["gh", "pr", "view", str(pr_number), "--json", "state,mergeable"]
+    if repo:
+        check_cmd += ["--repo", repo]
+    try:
+        result = subprocess.run(check_cmd, capture_output=True, text=True, check=False)
+        if result.returncode != 0:
+            _log(f"{ticket_id}: auto-merge: gh pr view failed (rc={result.returncode}): {result.stderr.strip()}")
+            return False
+        pr_data = json.loads(result.stdout)
+    except FileNotFoundError:
+        _log(f"{ticket_id}: auto-merge: gh not found")
+        return False
+    except json.JSONDecodeError:
+        _log(f"{ticket_id}: auto-merge: invalid JSON from gh pr view")
+        return False
+
+    pr_state = pr_data.get("state")
+    if pr_state == "MERGED":
+        _log(f"{ticket_id}: auto-merge: PR #{pr_number} already merged — marking state")
+        state["pr_merged"] = True
+        state["daemon_archived"] = True
+        _save_state_json(run_dir, state)
+        return True
+    if pr_state != "OPEN":
+        _log(f"{ticket_id}: auto-merge: PR #{pr_number} state={pr_state!r} — not OPEN, skipping")
+        return False
+
+    mergeable = pr_data.get("mergeable")
+    if mergeable == "CONFLICTING":
+        _log(f"{ticket_id}: auto-merge: PR #{pr_number} has conflicts — skipping")
+        return False
+
+    merge_cmd = ["gh", "pr", "merge", str(pr_number), "--squash", "--delete-branch"]
+    if repo:
+        merge_cmd += ["--repo", repo]
+    try:
+        merge_result = subprocess.run(merge_cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        _log(f"{ticket_id}: auto-merge: gh not found")
+        return False
+
+    if merge_result.returncode != 0:
+        _log(f"{ticket_id}: auto-merge: gh pr merge failed (rc={merge_result.returncode}): {merge_result.stderr.strip()}")
+        return False
+
+    _log(f"{ticket_id}: auto-merge: PR #{pr_number} merged successfully")
+    state["pr_merged"] = True
+    state["daemon_archived"] = True
+    _save_state_json(run_dir, state)
+    return True
+
+
 def handle_test_complete(
     ticket_id: str,
     run_dir: Path,
@@ -653,6 +718,7 @@ def handle_test_complete(
         _log(f"{ticket_id}: pre-PR push failed — PR skipped")
         return
     create_or_update_pr(ticket_id, run_dir, repo)
+    auto_merge_pr(ticket_id, run_dir, repo)
     check_and_close_issue(ticket_id, run_dir, repo)
 
 
