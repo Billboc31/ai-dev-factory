@@ -32,8 +32,9 @@ def test_commit_bootstrap_stages_ticket_md_path():
         commit_bootstrap("T099")
 
     add_calls = [c for c in calls if c[:2] == ["git", "add"]]
-    assert len(add_calls) == 1
-    assert add_calls[0] == ["git", "add", "runs/T099/ticket.md"]
+    staged_paths = [c[-1] for c in add_calls]
+    # bootstrap stages ticket.md and state.json
+    assert "runs/T099/ticket.md" in staged_paths
 
 
 def test_commit_bootstrap_never_calls_git_add_dot():

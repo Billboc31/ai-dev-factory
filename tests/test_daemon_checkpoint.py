@@ -76,7 +76,7 @@ def test_run_once_passes_auto_flags_to_launch_ticket(tmp_path):
         run_once("test-cmd", False, runs, auto_commit=True, auto_push=True, auto_include_code=True)
     mock_launch.assert_called_once_with(
         "T001", "test-cmd", False, runs,
-        auto_commit=True, auto_push=True, auto_include_code=True,
+        worktrees_dir=None, auto_commit=True, auto_push=True, auto_include_code=True,
     )
 
 

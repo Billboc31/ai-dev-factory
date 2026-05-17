@@ -1,0 +1,73 @@
+"""Resolve the correct run_dir and cwd for a ticket — worktree-aware."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+_WORKERS_JSON = "workers.json"
+
+
+def _load_workers(runs_dir: Path) -> dict:
+    path = runs_dir / _WORKERS_JSON
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+
+
+def resolve_ticket_run_dir(
+    ticket_id: str,
+    runs_dir: Path,
+    worktrees_dir: Path | None = None,
+) -> Path:
+    """Return the Path holding the ticket's state files.
+
+    Priority:
+    1. Active worktree from workers.json (most authoritative — ticket is running)
+    2. worktrees_dir/TXXX/runs/TXXX if that state.json exists (ticket ran in worktree)
+    3. runs_dir/TXXX (legacy fallback)
+    """
+    workers = _load_workers(runs_dir)
+    worker = workers.get(ticket_id, {})
+    wt_path = worker.get("worktree_path")
+    if wt_path:
+        candidate = Path(wt_path) / "runs" / ticket_id
+        if candidate.exists():
+            return candidate
+
+    if worktrees_dir:
+        candidate = worktrees_dir / ticket_id / "runs" / ticket_id
+        if (candidate / "state.json").exists():
+            return candidate
+
+    return runs_dir / ticket_id
+
+
+def resolve_ticket_cwd(
+    ticket_id: str,
+    project_root: Path,
+    worktrees_dir: Path | None = None,
+) -> Path:
+    """Return the cwd to use when running run_ticket.py for a ticket.
+
+    Priority:
+    1. Active worktree from workers.json
+    2. worktrees_dir/TXXX if it exists
+    3. project_root (legacy fallback)
+    """
+    runs_dir = project_root / "runs"
+    workers = _load_workers(runs_dir)
+    worker = workers.get(ticket_id, {})
+    wt_path = worker.get("worktree_path")
+    if wt_path:
+        wt = Path(wt_path)
+        if wt.exists():
+            return wt
+
+    if worktrees_dir:
+        candidate = worktrees_dir / ticket_id
+        if candidate.exists():
+            return candidate
+
+    return project_root

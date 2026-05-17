@@ -38,4 +38,5 @@ def daemon_activity(request: Request, lines: int = Query(default=50, ge=1, le=50
 
 @router.get("/board", response_model=BoardResponse)
 def daemon_board(request: Request) -> BoardResponse:
-    return board_service.get_board(_root(request))
+    worktrees_dir = getattr(request.app.state, "worktrees_dir", None)
+    return board_service.get_board(_root(request), worktrees_dir=worktrees_dir)

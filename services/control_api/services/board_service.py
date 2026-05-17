@@ -76,23 +76,35 @@ def _fetch_ai_ready_issues(repo: str | None) -> list[dict]:
         return []
 
 
-def get_board(project_root: Path, repo: str | None = None) -> BoardResponse:
+def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path | None = None) -> BoardResponse:
     runs_dir = project_root / "runs"
     columns: dict[str, list[BoardItem]] = {col_id: [] for col_id, _ in _COLUMN_ORDER}
     workers = _load_workers_registry(runs_dir) if runs_dir.exists() else {}
 
-    # Collect tickets from runs/ and any active worktrees
+    # Collect tickets from runs/ (main repo)
     ticket_dirs: dict[str, Path] = {}
     if runs_dir.exists():
         for ticket_dir in sorted(runs_dir.iterdir()):
             if _TICKET_RE.match(ticket_dir.name):
                 ticket_dirs[ticket_dir.name] = ticket_dir
 
-    # For workers with a worktree, prefer the worktree's run_dir for state
+    # Active workers with a worktree override the main runs/ entry
     for ticket_id, worker in workers.items():
         wt_path = worker.get("worktree_path")
         if wt_path:
             wt_run_dir = Path(wt_path) / "runs" / ticket_id
+            if wt_run_dir.exists():
+                ticket_dirs[ticket_id] = wt_run_dir
+
+    # Scan worktrees_dir for tickets that have a worktree but are not in workers.json
+    if worktrees_dir and worktrees_dir.exists():
+        for wt_dir in sorted(worktrees_dir.iterdir()):
+            if not wt_dir.is_dir() or not _TICKET_RE.match(wt_dir.name):
+                continue
+            ticket_id = wt_dir.name
+            if ticket_id in workers:
+                continue  # already handled via workers entry above
+            wt_run_dir = wt_dir / "runs" / ticket_id
             if wt_run_dir.exists():
                 ticket_dirs[ticket_id] = wt_run_dir
 

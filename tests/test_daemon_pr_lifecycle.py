@@ -12,6 +12,7 @@ from run_daemon import (
     _load_state_json,
     _pr_body,
     _save_state_json,
+    auto_merge_pr,
     check_and_close_issue,
     create_or_update_pr,
     handle_test_complete,
@@ -172,10 +173,12 @@ def test_handle_test_complete_orchestrates_pr_and_issue(tmp_path):
     run_dir = _make_run_dir(tmp_path)
     with patch("run_daemon._checkpoint_and_push_before_pr") as mock_ckpt, \
          patch("run_daemon.create_or_update_pr") as mock_pr, \
+         patch("run_daemon.auto_merge_pr") as mock_merge, \
          patch("run_daemon.check_and_close_issue") as mock_close:
         handle_test_complete("T001", run_dir, None)
-    mock_ckpt.assert_called_once_with("T001")
+    mock_ckpt.assert_called_once_with("T001", cwd=None)
     mock_pr.assert_called_once_with("T001", run_dir, None)
+    mock_merge.assert_called_once_with("T001", run_dir, None)
     mock_close.assert_called_once_with("T001", run_dir, None)
 
 
@@ -183,12 +186,13 @@ def test_handle_test_complete_checkpoints_before_pr(tmp_path):
     call_order = []
     run_dir = _make_run_dir(tmp_path)
 
-    def ckpt_side(*a):
+    def ckpt_side(*a, **kw):
         call_order.append("ckpt")
         return True
 
     with patch("run_daemon._checkpoint_and_push_before_pr", side_effect=ckpt_side), \
          patch("run_daemon.create_or_update_pr", side_effect=lambda *a: call_order.append("pr")), \
+         patch("run_daemon.auto_merge_pr"), \
          patch("run_daemon.check_and_close_issue"):
         handle_test_complete("T001", run_dir, None)
     assert call_order.index("ckpt") < call_order.index("pr")
@@ -198,9 +202,11 @@ def test_handle_test_complete_skips_pr_when_push_fails(tmp_path):
     run_dir = _make_run_dir(tmp_path)
     with patch("run_daemon._checkpoint_and_push_before_pr", return_value=False), \
          patch("run_daemon.create_or_update_pr") as mock_pr, \
+         patch("run_daemon.auto_merge_pr") as mock_merge, \
          patch("run_daemon.check_and_close_issue") as mock_close:
         handle_test_complete("T001", run_dir, None)
     mock_pr.assert_not_called()
+    mock_merge.assert_not_called()
     mock_close.assert_not_called()
 
 
@@ -233,19 +239,24 @@ def test_checkpoint_and_push_before_pr_pushes_after_successful_commit(tmp_path):
     assert len(push_calls) == 1
 
 
-def test_checkpoint_and_push_before_pr_skips_push_when_nothing_to_commit(tmp_path):
+def test_checkpoint_and_push_before_pr_still_pushes_when_nothing_to_commit(tmp_path):
+    # When commit rc=1 (nothing new), we still push prior commits to keep the remote in sync.
     subprocess_calls = []
 
     def fake_run(args, **kwargs):
         subprocess_calls.append(args)
-        # rc=1 means nothing to commit
+        # rc=0 for push so it does not abort
+        if "--push" in args:
+            return MagicMock(stdout="", stderr="", returncode=0)
+        # rc=1 for commit means nothing to commit
         return MagicMock(stdout="", stderr="", returncode=1)
 
     with patch("run_daemon.subprocess.run", side_effect=fake_run):
-        _checkpoint_and_push_before_pr("T001")
+        result = _checkpoint_and_push_before_pr("T001")
 
     push_calls = [c for c in subprocess_calls if "--push" in c]
-    assert push_calls == []
+    assert len(push_calls) == 1
+    assert result is True
 
 
 # ── no-diff PR hardening ──────────────────────────────────────────────────────
@@ -273,3 +284,109 @@ def test_create_or_update_pr_does_not_mark_archived_on_other_error(tmp_path):
     saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved.get("pr_skipped_no_diff") is None
     assert saved.get("daemon_archived") is None
+
+
+# ── auto_merge_pr ─────────────────────────────────────────────────────────────
+
+def test_auto_merge_pr_merges_open_pr(tmp_path):
+    run_dir = _make_run_dir(tmp_path, pr_number=42)
+    mock_view = MagicMock(returncode=0, stdout=json.dumps({"state": "OPEN", "mergeable": "MERGEABLE"}))
+    mock_merge = MagicMock(returncode=0, stdout="", stderr="")
+    with patch("run_daemon.subprocess.run", side_effect=[mock_view, mock_merge]) as mock_sub:
+        result = auto_merge_pr("T001", run_dir, None)
+    assert result is True
+    merge_cmd = mock_sub.call_args_list[1][0][0]
+    assert "pr" in merge_cmd
+    assert "merge" in merge_cmd
+    assert "42" in merge_cmd
+    assert "--squash" in merge_cmd
+    assert "--delete-branch" in merge_cmd
+    saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert saved.get("pr_merged") is True
+    assert saved.get("daemon_archived") is True
+
+
+def test_auto_merge_pr_skips_when_no_pr_number(tmp_path):
+    run_dir = _make_run_dir(tmp_path)
+    with patch("run_daemon.subprocess.run") as mock_sub:
+        result = auto_merge_pr("T001", run_dir, None)
+    assert result is False
+    mock_sub.assert_not_called()
+
+
+def test_auto_merge_pr_skips_when_already_merged(tmp_path):
+    run_dir = _make_run_dir(tmp_path, pr_number=42, pr_merged=True)
+    with patch("run_daemon.subprocess.run") as mock_sub:
+        result = auto_merge_pr("T001", run_dir, None)
+    assert result is False
+    mock_sub.assert_not_called()
+
+
+def test_auto_merge_pr_detects_already_merged_pr(tmp_path):
+    run_dir = _make_run_dir(tmp_path, pr_number=42)
+    mock_view = MagicMock(returncode=0, stdout=json.dumps({"state": "MERGED", "mergeable": "MERGEABLE"}))
+    with patch("run_daemon.subprocess.run", return_value=mock_view):
+        result = auto_merge_pr("T001", run_dir, None)
+    assert result is True
+    saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert saved.get("pr_merged") is True
+    assert saved.get("daemon_archived") is True
+
+
+def test_auto_merge_pr_skips_closed_pr(tmp_path):
+    run_dir = _make_run_dir(tmp_path, pr_number=42)
+    mock_view = MagicMock(returncode=0, stdout=json.dumps({"state": "CLOSED", "mergeable": "MERGEABLE"}))
+    with patch("run_daemon.subprocess.run", return_value=mock_view):
+        result = auto_merge_pr("T001", run_dir, None)
+    assert result is False
+
+
+def test_auto_merge_pr_skips_conflicting_pr(tmp_path):
+    run_dir = _make_run_dir(tmp_path, pr_number=42)
+    mock_view = MagicMock(returncode=0, stdout=json.dumps({"state": "OPEN", "mergeable": "CONFLICTING"}))
+    with patch("run_daemon.subprocess.run", return_value=mock_view):
+        result = auto_merge_pr("T001", run_dir, None)
+    assert result is False
+    saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert saved.get("pr_merged") is None
+
+
+def test_auto_merge_pr_returns_false_when_gh_merge_fails(tmp_path):
+    run_dir = _make_run_dir(tmp_path, pr_number=42)
+    mock_view = MagicMock(returncode=0, stdout=json.dumps({"state": "OPEN", "mergeable": "MERGEABLE"}))
+    mock_merge = MagicMock(returncode=1, stdout="", stderr="merge blocked by required review")
+    with patch("run_daemon.subprocess.run", side_effect=[mock_view, mock_merge]):
+        result = auto_merge_pr("T001", run_dir, None)
+    assert result is False
+    saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert saved.get("pr_merged") is None
+    assert saved.get("daemon_archived") is None
+
+
+def test_auto_merge_pr_returns_false_when_gh_not_found(tmp_path):
+    run_dir = _make_run_dir(tmp_path, pr_number=42)
+    with patch("run_daemon.subprocess.run", side_effect=FileNotFoundError):
+        result = auto_merge_pr("T001", run_dir, None)
+    assert result is False
+
+
+def test_auto_merge_pr_passes_repo_flag(tmp_path):
+    run_dir = _make_run_dir(tmp_path, pr_number=42)
+    mock_view = MagicMock(returncode=0, stdout=json.dumps({"state": "OPEN", "mergeable": "MERGEABLE"}))
+    mock_merge = MagicMock(returncode=0, stdout="", stderr="")
+    with patch("run_daemon.subprocess.run", side_effect=[mock_view, mock_merge]) as mock_sub:
+        auto_merge_pr("T001", run_dir, "owner/repo")
+    view_cmd = mock_sub.call_args_list[0][0][0]
+    merge_cmd = mock_sub.call_args_list[1][0][0]
+    assert "--repo" in view_cmd and "owner/repo" in view_cmd
+    assert "--repo" in merge_cmd and "owner/repo" in merge_cmd
+
+
+def test_auto_merge_pr_does_not_mark_finalized_on_gh_view_failure(tmp_path):
+    run_dir = _make_run_dir(tmp_path, pr_number=42)
+    mock_view = MagicMock(returncode=1, stdout="", stderr="gh API error")
+    with patch("run_daemon.subprocess.run", return_value=mock_view):
+        result = auto_merge_pr("T001", run_dir, None)
+    assert result is False
+    saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert saved.get("pr_merged") is None

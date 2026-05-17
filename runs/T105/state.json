@@ -1,0 +1,9 @@
+{
+  "ticket_id": "T105",
+  "state": "TEST_COMPLETE",
+  "branch": "ticket/T105-t105-automatic-merge-after-test-complete",
+  "issue_number": 47,
+  "updated_at": "2026-05-17T22:46:30Z",
+  "pr_number": 53,
+  "pr_synced": true
+}

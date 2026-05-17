@@ -24,6 +24,7 @@ logger = logging.getLogger("control-api")
 def create_app(
     project_root: Path | None = None,
     daemon_exec_cmd: str = "claude --dangerously-skip-permissions",
+    worktrees_dir: Path | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="ai-dev-factory Control API",
@@ -31,8 +32,10 @@ def create_app(
         version="1.0.0",
     )
 
-    app.state.project_root = project_root or Path.cwd()
+    _root = project_root or Path.cwd()
+    app.state.project_root = _root
     app.state.daemon_exec_cmd = daemon_exec_cmd
+    app.state.worktrees_dir = worktrees_dir or (_root.parent / (_root.name + "-worktrees"))
 
     app.add_middleware(
         CORSMiddleware,
@@ -75,8 +78,10 @@ if __name__ == "__main__":
     parser.add_argument("--port", type=int, default=8080)
     parser.add_argument("--project-root", default=None)
     parser.add_argument("--exec-cmd", default="claude --dangerously-skip-permissions")
+    parser.add_argument("--worktrees-dir", default=None)
     args = parser.parse_args()
 
     root = Path(args.project_root).resolve() if args.project_root else Path.cwd()
-    _app = create_app(project_root=root, daemon_exec_cmd=args.exec_cmd)
+    wt_dir = Path(args.worktrees_dir).resolve() if args.worktrees_dir else None
+    _app = create_app(project_root=root, daemon_exec_cmd=args.exec_cmd, worktrees_dir=wt_dir)
     uvicorn.run(_app, host=args.host, port=args.port)
