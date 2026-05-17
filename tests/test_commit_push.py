@@ -228,6 +228,15 @@ def test_commit_with_include_code_stages_all_scope_paths():
         try:
             _write_state(Path(tmp) / "runs" / "T999", branch="ticket/T999-work")
 
+            # Create scope directories so the implementation does not skip them
+            for scope_path in COMMIT_SCOPE:
+                p = Path(tmp) / scope_path
+                if scope_path.endswith("/"):
+                    p.mkdir(parents=True, exist_ok=True)
+                else:
+                    p.parent.mkdir(parents=True, exist_ok=True)
+                    p.touch()
+
             calls = []
 
             def fake(args):
