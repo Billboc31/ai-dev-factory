@@ -1,7 +1,7 @@
 {
   "ticket_id": "T107",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T107-t107-project-guardian-regression-agent",
   "issue_number": 49,
-  "updated_at": "2026-05-17T22:56:16Z"
+  "updated_at": "2026-05-17T23:01:24Z"
 }
