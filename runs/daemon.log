@@ -232752,3 +232752,62 @@ fatal: Not possible to fast-forward, aborting.
 [2026-05-18T21:30:24Z] [daemon] TTEST2: pre-PR push ok
 [2026-05-18T21:30:24Z] [daemon] skipping TTEST2 state=PLAN_REVIEW_NEEDED (human gate)
 [2026-05-18T21:30:24Z] [daemon] sleeping 30s
+[2026-05-18T21:30:55Z] [daemon] issue #58 already ingested as T111 — skipping
+[2026-05-18T21:30:55Z] [daemon] issue #51 already ingested as T108 — skipping
+[2026-05-18T21:30:55Z] [daemon] issue #49 already ingested as T107 — skipping
+[2026-05-18T21:30:55Z] [daemon] found 3 issue(s) with label='ai-ready' — all already ingested
+[2026-05-18T21:30:55Z] [daemon] skipping T109: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T010: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T013: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T014: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T015: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T016: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T017: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T018: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T019: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T020: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T021: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T022: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T023: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T024: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T025: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T026: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T027: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T028: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T029: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T030: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T031: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T033: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T101: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T103: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T104: daemon_archived=true
+[2026-05-18T21:30:55Z] [daemon] skipping T032: TEST_COMPLETE already finalized
+[2026-05-18T21:30:55Z] [daemon] skipping T100: TEST_COMPLETE already finalized
+[2026-05-18T21:30:55Z] [daemon] skipping T102: TEST_COMPLETE already finalized
+[2026-05-18T21:30:55Z] [daemon] skipping T105: TEST_COMPLETE already finalized
+[2026-05-18T21:30:55Z] [daemon] skipping T106: TEST_COMPLETE already finalized
+[2026-05-18T21:30:55Z] [daemon] detected T107 state=PLAN_REVIEW_NEEDED (human gate — checkpoint for visibility)
+[2026-05-18T21:30:55Z] [daemon] T107: pre-PR checkpoint commit
+[2026-05-18T21:30:55Z] [daemon] T107: pre-PR push ok
+[2026-05-18T21:30:55Z] [daemon] skipping T107 state=PLAN_REVIEW_NEEDED (human gate)
+[2026-05-18T21:30:55Z] [daemon] detected T108 state=PLAN_REVIEW_NEEDED (human gate — checkpoint for visibility)
+[2026-05-18T21:30:55Z] [daemon] T108: pre-PR checkpoint commit
+[2026-05-18T21:30:55Z] [daemon] T108: pre-PR push ok
+[2026-05-18T21:30:55Z] [daemon] skipping T108 state=PLAN_REVIEW_NEEDED (human gate)
+[2026-05-18T21:30:55Z] [daemon] detected T109 state=IMPLEMENTATION_APPROVED
+[2026-05-18T21:30:57Z] [daemon] T109: sync branch 'ticket/T109-t109-atomic-runtime-checkpoint-and-worktree-safe-c' failed — diverged or conflict: From github.com:Billboc31/ai-dev-factory
+ * branch            ticket/T109-t109-atomic-runtime-checkpoint-and-worktree-safe-c -> FETCH_HEAD
+hint: Diverging branches can't be fast-forwarded, you need to either:
+hint:
+hint: 	git merge --no-ff
+hint:
+hint: or:
+hint:
+hint: 	git rebase
+hint:
+hint: Disable this message with "git config set advice.diverging false"
+fatal: Not possible to fast-forward, aborting.
+[2026-05-18T21:30:57Z] [daemon] skipping T109: branch sync failed in worktree
+[2026-05-18T21:30:57Z] [daemon] detected T111 state=INIT
+[2026-05-18T21:30:59Z] [daemon] T111: sync branch 'ticket/T111-t111-sqlite-runtime-state-store-for-daemon-intake' ok
+[2026-05-18T21:30:59Z] [daemon] T111: pre-flight — triggering checkpoint_transition()

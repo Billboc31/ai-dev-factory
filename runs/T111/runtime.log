@@ -32,3 +32,5 @@
 [2026-05-18T21:30:20Z] auto-run start: state=INIT
 [2026-05-18T21:30:20Z] auto-run gate failed: working tree is not clean — commit or stash changes first
 [2026-05-18T21:30:33Z] commit-checkpoint: skipped missing scope paths: package.json, package-lock.json
+[2026-05-18T21:30:33Z] commit-checkpoint: sha=a8157df message='T111: checkpoint [INIT] — update workflow artifacts'
+[2026-05-18T21:30:34Z] push: refused — DIRTY_RUNTIME_CHECKPOINT — uncommitted changes present before push
