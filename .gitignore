@@ -23,14 +23,18 @@ runs/*/workflow-status.md
 runs/*/daemon.lock
 __pycache__/
 *.pyc
+
 runs/daemon.log
 runs/*/runtime.log
 runs/runtime.log
-runs/daemon.log
-runs/daemon.log
-runs/*/runtime.log
-runs/daemon.log
 runs/daemon.pid
+
+# Frontend/runtime caches
+node_modules/
+apps/dashboard/node_modules/
+.vite/
+apps/dashboard/.vite/
+.pytest_cache/
 
 # Frontend/runtime/test caches
 node_modules/
