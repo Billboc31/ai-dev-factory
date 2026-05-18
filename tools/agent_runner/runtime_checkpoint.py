@@ -75,18 +75,23 @@ def resolve_ticket_cwd(ticket_id: str, runs_dir: Path | None = None) -> str | No
 
 
 def collect_runtime_artifacts(ticket_id: str, cwd: str | None = None) -> list[str]:
-    """Return relative paths of all files under runs/{ticket_id}/.
+    """Return relative non-log files under runs/{ticket_id}/.
 
-    Paths are relative to cwd (or current directory when cwd is None).
+    Runtime logs are intentionally excluded because they are local/live state
+    and would make the working tree dirty during checkpoint/push.
     """
     base = Path(cwd) if cwd else Path(".")
     run_dir = base / "runs" / ticket_id
     if not run_dir.exists():
         return []
+
+    excluded_names = {"runtime.log", "daemon.log"}
+
     return sorted(
         str(p.relative_to(base))
         for p in run_dir.rglob("*")
         if p.is_file()
+        and p.name not in excluded_names
     )
 
 
