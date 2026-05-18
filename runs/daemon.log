@@ -231945,3 +231945,37 @@ fatal: Not possible to fast-forward, aborting.
 [2026-05-18T21:23:33Z] [daemon] intake T111 [err]: Please commit your changes or stash them before you switch branches.
 [2026-05-18T21:23:33Z] [daemon] intake T111 [err]: Aborting
 [2026-05-18T21:23:33Z] [daemon] issue #58 ingested as T111
+[2026-05-18T21:23:33Z] [daemon] issue index committed for T111
+[2026-05-18T21:23:33Z] [daemon] T111: worktree creation failed: Preparing worktree (checking out 'ticket/T111-t111-sqlite-runtime-state-store-for-daemon-intake')
+fatal: 'ticket/T111-t111-sqlite-runtime-state-store-for-daemon-intake' is already used by worktree at '/Users/pierrebocquet/ai-dev-factory'
+[2026-05-18T21:23:33Z] [daemon] T111: worktree creation failed — ticket will fall back to legacy mode
+[2026-05-18T21:23:33Z] [daemon] skipping T109: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T010: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T013: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T014: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T015: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T016: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T017: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T018: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T019: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T020: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T021: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T022: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T023: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T024: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T025: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T026: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T027: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T028: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T029: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T030: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T031: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T033: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T101: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T104: daemon_archived=true
+[2026-05-18T21:23:33Z] [daemon] skipping T032: TEST_COMPLETE already finalized
+[2026-05-18T21:23:33Z] [daemon] skipping T100: TEST_COMPLETE already finalized
+[2026-05-18T21:23:33Z] [daemon] skipping T102: TEST_COMPLETE already finalized
+[2026-05-18T21:23:33Z] [daemon] detected T103 state=TEST_COMPLETE (human gate — PR lifecycle)
+[2026-05-18T21:23:33Z] [daemon] T103: TEST_COMPLETE PR lifecycle
+[2026-05-18T21:23:33Z] [daemon] T103: pre-PR checkpoint commit
