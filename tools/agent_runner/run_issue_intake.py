@@ -22,6 +22,12 @@ if str(_ROOT) not in sys.path:
 from runtime_checkpoint import checkpoint_transition as _checkpoint_transition
 from runtime_checkpoint import CheckpointError as _CheckpointError
 from runtime_checkpoint import DirtyTreeError as _DirtyTreeError
+from runtime_db import (
+    get_db_path as _rdb_get_db_path,
+    init_runtime_db as _rdb_init,
+    record_issue_intake as _rdb_record_intake,
+    upsert_ticket_runtime as _rdb_upsert_ticket,
+)
 
 
 def _now_iso() -> str:
@@ -143,6 +149,18 @@ def commit_bootstrap(ticket_id: str, push: bool = False) -> None:
         print(f"warning: bootstrap checkpoint: dirty tree after commit: {exc}", file=sys.stderr)
 
 
+def _record_sqlite_intake(ticket_id: str, issue_number: int, branch: str) -> None:
+    """Write intake record to SQLite runtime DB. Non-fatal on any error."""
+    try:
+        db_path = _rdb_get_db_path()
+        if db_path:
+            _rdb_init(db_path)
+            _rdb_record_intake(db_path, issue_number, ticket_id, branch=branch)
+            _rdb_upsert_ticket(db_path, ticket_id, issue_number=issue_number, branch=branch, state="INIT")
+    except Exception:
+        pass
+
+
 def write_state_json(ticket_id: str, branch: str, issue_number: int) -> None:
     path = Path("runs") / ticket_id / "state.json"
     state = {
@@ -211,6 +229,8 @@ def run_intake(
 
     _log(ticket_id, f"intake: issue=#{issue_number} title={title!r} branch={branch}")
     _log(ticket_id, "intake: done")
+
+    _record_sqlite_intake(ticket_id, issue_number, branch)
 
     commit_bootstrap(ticket_id, push=push)
 

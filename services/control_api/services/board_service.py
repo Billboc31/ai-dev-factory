@@ -1,6 +1,7 @@
 """Board projection — maps runs/* state files + gh issue list to 7 kanban columns."""
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -63,6 +64,21 @@ def _load_issue_index(runs_dir: Path) -> dict[str, str]:
         return {}
 
 
+def _load_runtime_db(project_root: Path):
+    """Load the runtime_db module if the SQLite DB exists. Returns (module, db_path) or (None, None)."""
+    db_path = project_root / ".runtime" / "ai-dev-factory.sqlite"
+    if not db_path.exists():
+        return None, None
+    try:
+        _tools = Path(__file__).resolve().parent.parent.parent.parent / "tools" / "agent_runner"
+        spec = importlib.util.spec_from_file_location("_rdb_board", _tools / "runtime_db.py")
+        mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod, db_path
+    except Exception:
+        return None, None
+
+
 def _fetch_ai_ready_issues(repo: str | None) -> list[dict]:
     cmd = ["gh", "issue", "list", "--label", "ai-ready", "--json", "number,title", "--state", "open"]
     if repo:
@@ -79,7 +95,16 @@ def _fetch_ai_ready_issues(repo: str | None) -> list[dict]:
 def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path | None = None) -> BoardResponse:
     runs_dir = project_root / "runs"
     columns: dict[str, list[BoardItem]] = {col_id: [] for col_id, _ in _COLUMN_ORDER}
-    workers = _load_workers_registry(runs_dir) if runs_dir.exists() else {}
+
+    rdb, db_path = _load_runtime_db(project_root)
+
+    if rdb and db_path:
+        workers = {
+            w["ticket_id"]: {"pid": w["pid"], "branch": w["branch"], "worktree_path": w["worktree_path"]}
+            for w in rdb.list_workers(db_path)
+        }
+    else:
+        workers = _load_workers_registry(runs_dir) if runs_dir.exists() else {}
 
     # Collect tickets from runs/ (main repo)
     ticket_dirs: dict[str, Path] = {}
@@ -108,36 +133,75 @@ def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path |
             if wt_run_dir.exists():
                 ticket_dirs[ticket_id] = wt_run_dir
 
-    for ticket_id, ticket_dir in sorted(ticket_dirs.items()):
-        state_data = _load_json(ticket_dir / "state.json")
-        if not state_data:
-            continue
-        state = state_data.get("state", "")
+    # Load ticket_runtime from SQLite — primary source for kanban state
+    sqlite_ticket_states: dict[str, dict] = {}
+    if rdb and db_path:
+        try:
+            for row in rdb.list_ticket_runtime(db_path):
+                sqlite_ticket_states[row["ticket_id"]] = row
+        except Exception:
+            pass  # degraded: fall back to state.json only
+
+    # Union of filesystem-discovered tickets and SQLite-known tickets
+    all_ticket_ids = sorted(set(ticket_dirs.keys()) | set(sqlite_ticket_states.keys()))
+
+    for ticket_id in all_ticket_ids:
+        ticket_dir = ticket_dirs.get(ticket_id)
+        sqlite_row = sqlite_ticket_states.get(ticket_id)
+
+        if sqlite_row:
+            state = sqlite_row.get("state") or ""
+            issue_number = sqlite_row.get("issue_number")
+            branch = sqlite_row.get("branch")
+            daemon_archived = bool(sqlite_row.get("daemon_archived"))
+            pr_number = sqlite_row.get("pr_number")
+            state_data = _load_json(ticket_dir / "state.json") if ticket_dir else {}
+            issue_closed = state_data.get("issue_closed", False)
+            retry_stopped = (
+                _load_json(ticket_dir / "retry-state.json").get("stopped", False)
+                if ticket_dir else False
+            )
+        else:
+            if not ticket_dir:
+                continue
+            state_data = _load_json(ticket_dir / "state.json")
+            if not state_data:
+                continue
+            state = state_data.get("state", "")
+            issue_number = state_data.get("issue_number")
+            branch = state_data.get("branch")
+            daemon_archived = bool(state_data.get("daemon_archived") or state_data.get("issue_closed"))
+            pr_number = state_data.get("pr_number")
+            issue_closed = state_data.get("issue_closed", False)
+            retry_stopped = _load_json(ticket_dir / "retry-state.json").get("stopped", False)
+
         worker_info = workers.get(ticket_id, {})
         item = BoardItem(
             ticket_id=ticket_id,
-            issue_number=state_data.get("issue_number"),
+            issue_number=issue_number,
             state=state,
-            branch=state_data.get("branch"),
+            branch=branch,
             worker_pid=worker_info.get("pid"),
             worker_cwd=worker_info.get("worktree_path"),
         )
-        # Priority: first match wins
-        if state_data.get("daemon_archived") or state_data.get("issue_closed"):
+        if daemon_archived or issue_closed:
             columns["done"].append(item)
-        elif state == "TEST_COMPLETE" and state_data.get("pr_number"):
+        elif state == "TEST_COMPLETE" and pr_number:
             columns["pr_ready"].append(item)
         elif state in _HUMAN_GATE_STATES:
             columns["waiting_human"].append(item)
-        elif _load_json(ticket_dir / "retry-state.json").get("stopped"):
+        elif retry_stopped:
             columns["blocked"].append(item)
-        elif ticket_id in workers or _lock_held(ticket_dir):
+        elif ticket_id in workers or (ticket_dir and _lock_held(ticket_dir)):
             columns["running"].append(item)
         else:
             columns["queued"].append(item)
 
-    # Backlog: ai-ready issues not yet ingested
-    issue_index = _load_issue_index(runs_dir) if runs_dir.exists() else {}
+    # Backlog: ai-ready issues not yet ingested — SQLite primary, JSON fallback
+    if rdb and db_path:
+        issue_index = {str(r["issue_number"]): r["ticket_id"] for r in rdb.list_issue_intake(db_path)}
+    else:
+        issue_index = _load_issue_index(runs_dir) if runs_dir.exists() else {}
     ingested = set(issue_index.keys())
     for issue in _fetch_ai_ready_issues(repo):
         if str(issue["number"]) not in ingested:

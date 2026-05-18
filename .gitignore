@@ -3,7 +3,15 @@ runs/*/state.json.tmp
 runs/*/runtime.log
 runs/*/retry-state.json
 runs/*/retry-state.json.tmp
+runs/.issue-intake.json
 runs/.issue-intake.json.tmp
+runs/workers.json
+runs/workers.json.tmp
+# SQLite runtime DB
+.runtime/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
 __pycache__/
 *.py[cod]
 .venv/
@@ -15,6 +23,11 @@ runs/*/workflow-status.md
 runs/*/daemon.lock
 __pycache__/
 *.pyc
+
+runs/daemon.log
+runs/*/runtime.log
+runs/runtime.log
+runs/daemon.pid
 
 # Frontend/runtime caches
 node_modules/
