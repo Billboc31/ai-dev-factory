@@ -232603,3 +232603,6 @@ fatal: Not possible to fast-forward, aborting.
 [2026-05-18T21:29:02Z] [daemon] T111: no failure class in runtime.log — retry policy not applied
 [2026-05-18T21:29:02Z] [daemon] detected TTEST2 state=PLAN_REVIEW_NEEDED (human gate — checkpoint for visibility)
 [2026-05-18T21:29:02Z] [daemon] TTEST2: pre-PR checkpoint commit
+[2026-05-18T21:29:06Z] [daemon] TTEST2: pre-PR push ok
+[2026-05-18T21:29:06Z] [daemon] skipping TTEST2 state=PLAN_REVIEW_NEEDED (human gate)
+[2026-05-18T21:29:06Z] [daemon] sleeping 30s
