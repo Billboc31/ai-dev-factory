@@ -74,3 +74,5 @@
 [2026-05-18T21:45:28Z] compose: skill=ai/skills/security.md
 [2026-05-18T21:45:28Z] compose: task (canonical prompt)
 [2026-05-18T21:45:28Z] snapshot: runtime-prompt=runs/T111/prompts/coder-attempt-1.md
+[2026-05-18T22:00:04Z] auto-run: step=coder done rc=0
+[2026-05-18T22:00:04Z] auto-run: transition PLAN_APPROVED → IMPLEMENTATION_REVIEW_NEEDED

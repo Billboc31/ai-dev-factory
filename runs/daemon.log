@@ -233830,3 +233830,10 @@ fatal: Not possible to fast-forward, aborting.
 [2026-05-18T21:45:26Z] [daemon] detected T111 state=PLAN_APPROVED
 [2026-05-18T21:45:28Z] [daemon] T111: sync branch 'ticket/T111-t111-sqlite-runtime-state-store-for-daemon-intake' ok
 [2026-05-18T21:45:28Z] [daemon] Running ticket command: /Users/pierrebocquet/ai-dev-factory/.venv/bin/python3.14 /Users/pierrebocquet/ai-dev-factory/tools/agent_runner/run_ticket.py T111 --auto --exec-cmd 'claude --dangerously-skip-permissions'
+[2026-05-18T22:00:04Z] [daemon] T111: [auto] state=PLAN_APPROVED step=coder
+[2026-05-18T22:00:04Z] [daemon] T111: command exit code: 0
+[2026-05-18T22:00:04Z] [daemon] T111: stdout written to: runs/T111/implementation-output.md
+[2026-05-18T22:00:04Z] [daemon] T111: [auto] PLAN_APPROVED → IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T22:00:04Z] [daemon] T111: done rc=0
+[2026-05-18T22:00:04Z] [daemon] detected TTEST2 state=PLAN_REVIEW_NEEDED (human gate — checkpoint for visibility)
+[2026-05-18T22:00:04Z] [daemon] TTEST2: pre-PR checkpoint commit
