@@ -1,0 +1,84 @@
+[
+  {
+    "timestamp": "2026-05-18T06:51:04Z",
+    "total_issues": 0,
+    "runnable": [],
+    "blocked": [],
+    "parallelizable_groups": [],
+    "next_recommended": null,
+    "cycles": [],
+    "ambiguities": [],
+    "summary": {
+      "total": 0,
+      "done": 0,
+      "running": 0,
+      "waiting_human": 0,
+      "runnable": 0,
+      "blocked": 0,
+      "not_ingested": 0
+    }
+  },
+  {
+    "timestamp": "2026-05-18T06:51:10Z",
+    "total_issues": 5,
+    "runnable": [],
+    "blocked": [],
+    "parallelizable_groups": [],
+    "next_recommended": null,
+    "cycles": [],
+    "ambiguities": [],
+    "summary": {
+      "total": 5,
+      "done": 0,
+      "running": 0,
+      "waiting_human": 0,
+      "runnable": 0,
+      "blocked": 0,
+      "not_ingested": 5
+    }
+  },
+  {
+    "timestamp": "2026-05-18T06:51:19Z",
+    "total_issues": 5,
+    "runnable": [],
+    "blocked": [],
+    "parallelizable_groups": [],
+    "next_recommended": null,
+    "cycles": [],
+    "ambiguities": [],
+    "summary": {
+      "total": 5,
+      "done": 0,
+      "running": 0,
+      "waiting_human": 0,
+      "runnable": 0,
+      "blocked": 0,
+      "not_ingested": 5
+    }
+  },
+  {
+    "timestamp": "2026-05-18T06:51:52Z",
+    "total_issues": 5,
+    "runnable": [
+      "T106"
+    ],
+    "blocked": [],
+    "parallelizable_groups": [
+      [
+        "T106"
+      ]
+    ],
+    "next_recommended": "T106",
+    "cycles": [],
+    "ambiguities": [],
+    "summary": {
+      "total": 5,
+      "done": 0,
+      "running": 0,
+      "waiting_human": 0,
+      "runnable": 1,
+      "blocked": 0,
+      "not_ingested": 4
+    }
+  }
+]

@@ -24,7 +24,9 @@ ROOT = Path(__file__).resolve().parent
 REPO_ROOT = ROOT.parent.parent
 RUN_TICKET = ROOT / "run_ticket.py"
 RUN_ISSUE_INTAKE = ROOT / "run_issue_intake.py"
+RUN_ISSUE_MAPPER = ROOT / "run_issue_mapper.py"
 ISSUE_INDEX_FILENAME = ".issue-intake.json"
+PROJECT_MAP_FILENAME = ".project-map.json"
 RETRY_STATE_FILENAME = "retry-state.json"
 WORKERS_REGISTRY_FILENAME = "workers.json"
 DEFAULT_WORKTREES_DIR = REPO_ROOT.parent / (REPO_ROOT.name + "-worktrees")
@@ -1117,6 +1119,36 @@ def poll_github_issues(
             _log(f"intake failed for issue #{number} — will retry next cycle")
 
 
+def poll_project_map(runs_dir: Path, repo: str | None, worktrees_dir: Path | None = None) -> None:
+    """Run run_issue_mapper.py to refresh the project dependency map."""
+    cmd = [sys.executable, str(RUN_ISSUE_MAPPER), "--runs-dir", str(runs_dir)]
+    if repo:
+        cmd += ["--repo", repo]
+    if worktrees_dir:
+        cmd += ["--worktrees-dir", str(worktrees_dir)]
+    _log("running issue mapper")
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+        for line in result.stdout.splitlines():
+            _log(f"mapper: {line}")
+        if result.returncode != 0:
+            for line in result.stderr.splitlines():
+                _log(f"mapper [err]: {line}")
+            _log(f"mapper exited rc={result.returncode}")
+    except FileNotFoundError:
+        _log("mapper: run_issue_mapper.py not found")
+
+
+def _load_project_map(runs_dir: Path) -> dict | None:
+    path = runs_dir / PROJECT_MAP_FILENAME
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 def run_once(
     exec_cmd: str,
     dry_run: bool,
@@ -1127,9 +1159,29 @@ def run_once(
     auto_include_code: bool = False,
     repo: str | None = None,
     max_workers: int = 1,
+    use_project_map: bool = False,
 ) -> None:
     """Scan all tickets and process auto-runnable ones."""
-    tickets = sorted(scan_tickets(runs_dir, worktrees_dir), key=lambda t: ticket_sort_key(t[0]))
+    all_tickets = sorted(scan_tickets(runs_dir, worktrees_dir), key=lambda t: ticket_sort_key(t[0]))
+
+    if use_project_map:
+        project_map = _load_project_map(runs_dir)
+        if project_map:
+            next_recommended = project_map.get("next_recommended")
+            if next_recommended:
+                # Move next_recommended to front of the list
+                reordered = [t for t in all_tickets if t[0] == next_recommended]
+                reordered += [t for t in all_tickets if t[0] != next_recommended]
+                _log(f"project-map scheduling: next_recommended={next_recommended}")
+                tickets = reordered
+            else:
+                _log("project-map: no next_recommended — falling back to FIFO")
+                tickets = all_tickets
+        else:
+            _log("project-map: map absent — falling back to FIFO")
+            tickets = all_tickets
+    else:
+        tickets = all_tickets
     if not tickets:
         _log("no tickets found")
         return
@@ -1189,6 +1241,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--auto-commit", action="store_true", help="After each successful step, commit runs/ artifacts")
     parser.add_argument("--auto-push", action="store_true", help="After each successful auto-commit, push the ticket branch")
     parser.add_argument("--auto-include-code", action="store_true", help="With --auto-commit, also stage COMMIT_SCOPE paths (tools/, tests/, prompts/, tickets/, docs/, ai/)")
+    parser.add_argument("--poll-project-map", action="store_true", help="Run issue mapper at each daemon cycle to refresh the project dependency map")
+    parser.add_argument("--use-project-map", action="store_true", help="Use project map next_recommended for scheduling instead of FIFO (fallback to FIFO if map absent)")
     return parser.parse_args(argv)
 
 
@@ -1207,18 +1261,25 @@ def main(argv: list[str]) -> int:
         _log(f"issue polling enabled label={args.issue_label!r} repo={args.issue_repo!r}")
     if args.auto_commit:
         _log(f"auto-commit enabled auto-push={args.auto_push} auto-include-code={args.auto_include_code}")
+    if args.poll_project_map:
+        _log("project-map polling enabled")
+    if args.use_project_map:
+        _log("project-map scheduling enabled (fallback: FIFO)")
 
     _cleanup_stale_workers(runs_dir)
 
     if args.once:
         if args.poll_issues:
             poll_github_issues(runs_dir, args.issue_label, args.issue_repo, worktrees_dir=worktrees_dir)
+        if args.poll_project_map:
+            poll_project_map(runs_dir, args.issue_repo, worktrees_dir=worktrees_dir)
         run_once(
             args.exec_cmd, args.dry_run, runs_dir,
             worktrees_dir=worktrees_dir,
             auto_commit=args.auto_commit, auto_push=args.auto_push,
             auto_include_code=args.auto_include_code, repo=args.issue_repo,
             max_workers=args.max_workers,
+            use_project_map=args.use_project_map,
         )
         return 0
 
@@ -1226,12 +1287,15 @@ def main(argv: list[str]) -> int:
         while True:
             if args.poll_issues:
                 poll_github_issues(runs_dir, args.issue_label, args.issue_repo, worktrees_dir=worktrees_dir)
+            if args.poll_project_map:
+                poll_project_map(runs_dir, args.issue_repo, worktrees_dir=worktrees_dir)
             run_once(
                 args.exec_cmd, args.dry_run, runs_dir,
                 worktrees_dir=worktrees_dir,
                 auto_commit=args.auto_commit, auto_push=args.auto_push,
                 auto_include_code=args.auto_include_code, repo=args.issue_repo,
                 max_workers=args.max_workers,
+                use_project_map=args.use_project_map,
             )
             _log(f"sleeping {args.interval}s")
             time.sleep(args.interval)

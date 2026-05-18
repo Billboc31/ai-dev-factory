@@ -1,0 +1,9 @@
+{
+  "ticket_id": "T106",
+  "state": "TEST_COMPLETE",
+  "branch": "ticket/T106-t106-project-issue-tree-agent-and-dependency-map",
+  "issue_number": 48,
+  "updated_at": "2026-05-18T06:54:43Z",
+  "pr_number": 55,
+  "pr_synced": true
+}
