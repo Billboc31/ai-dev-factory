@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-05-18T06:51:52Z",
+  "generated_at": "2026-05-18T21:23:42Z",
   "tickets": [
     {
       "ticket_id": null,
@@ -12,30 +12,20 @@
       "ambiguities": []
     },
     {
-      "ticket_id": "T106",
-      "issue_number": 48,
-      "title": "T106 \u2014 Project issue tree agent and dependency map",
-      "status": "runnable",
-      "depends_on": [],
-      "depends_on_issues": [],
-      "blocks": [],
-      "ambiguities": []
-    },
-    {
-      "ticket_id": null,
+      "ticket_id": "T107",
       "issue_number": 49,
       "title": "T107 \u2014 Project guardian regression agent",
-      "status": "not_ingested",
+      "status": "waiting_human",
       "depends_on": [],
       "depends_on_issues": [],
       "blocks": [],
       "ambiguities": []
     },
     {
-      "ticket_id": null,
+      "ticket_id": "T108",
       "issue_number": 51,
       "title": "T108 \u2014 Multi-project onboarding and project registry",
-      "status": "not_ingested",
+      "status": "waiting_human",
       "depends_on": [],
       "depends_on_issues": [],
       "blocks": [],
@@ -50,22 +40,42 @@
       "depends_on_issues": [],
       "blocks": [],
       "ambiguities": []
+    },
+    {
+      "ticket_id": null,
+      "issue_number": 56,
+      "title": "T110 \u2014 Responsive dashboard UX and stable live log scrolling",
+      "status": "not_ingested",
+      "depends_on": [],
+      "depends_on_issues": [],
+      "blocks": [],
+      "ambiguities": []
+    },
+    {
+      "ticket_id": "T111",
+      "issue_number": 58,
+      "title": "T111 \u2014 SQLite runtime state store for daemon, intake, workers and board",
+      "status": "runnable",
+      "depends_on": [],
+      "depends_on_issues": [],
+      "blocks": [],
+      "ambiguities": []
     }
   ],
   "parallelizable_groups": [
     [
-      "T106"
+      "T111"
     ]
   ],
-  "next_recommended": "T106",
+  "next_recommended": "T111",
   "cycles": [],
   "summary": {
-    "total": 5,
+    "total": 6,
     "done": 0,
     "running": 0,
-    "waiting_human": 0,
+    "waiting_human": 2,
     "runnable": 1,
     "blocked": 0,
-    "not_ingested": 4
+    "not_ingested": 3
   }
 }

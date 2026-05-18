@@ -80,5 +80,30 @@
       "blocked": 0,
       "not_ingested": 4
     }
+  },
+  {
+    "timestamp": "2026-05-18T21:23:42Z",
+    "total_issues": 6,
+    "runnable": [
+      "T111"
+    ],
+    "blocked": [],
+    "parallelizable_groups": [
+      [
+        "T111"
+      ]
+    ],
+    "next_recommended": "T111",
+    "cycles": [],
+    "ambiguities": [],
+    "summary": {
+      "total": 6,
+      "done": 0,
+      "running": 0,
+      "waiting_human": 2,
+      "runnable": 1,
+      "blocked": 0,
+      "not_ingested": 3
+    }
   }
 ]
