@@ -196,3 +196,92 @@
 [2026-05-18T07:56:02Z] push: done branch=ticket/T109-t109-atomic-runtime-checkpoint-and-worktree-safe-c
 [2026-05-18T07:56:20Z] human-approval: refused 'approve-implementation' — expected 'IMPLEMENTATION_REVIEW_NEEDED', got 'IMPLEMENTATION_APPROVED'
 [2026-05-18T07:56:25Z] commit-checkpoint: skipped missing scope paths: package.json, package-lock.json
+[2026-05-18T07:56:25Z] commit-checkpoint: sha=375c656 message='T109: checkpoint [IMPLEMENTATION_APPROVED] — update workflow artifacts'
+[2026-05-18T07:56:27Z] push: warning — working tree dirty
+[2026-05-18T07:56:27Z] push: pushing branch=ticket/T109-t109-atomic-runtime-checkpoint-and-worktree-safe-c
+[2026-05-18T07:56:29Z] push: done branch=ticket/T109-t109-atomic-runtime-checkpoint-and-worktree-safe-c
+[2026-05-18T07:56:38Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T07:56:38Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:57:14Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T07:57:14Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:57:49Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T07:57:50Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:58:25Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T07:58:25Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:59:01Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T07:59:01Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:59:37Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T07:59:37Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:00:13Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:00:13Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:00:49Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:00:49Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:01:25Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:01:25Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:02:01Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:02:01Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:02:37Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:02:37Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:03:13Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:03:13Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:03:49Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:03:49Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:04:25Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:04:25Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:05:01Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:05:01Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:05:37Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:05:37Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:06:13Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:06:13Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:06:49Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:06:49Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:07:25Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:07:25Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:08:01Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:08:01Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:08:37Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:08:37Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:09:13Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:09:13Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:09:49Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:09:49Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:10:24Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:10:24Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:11:01Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:11:01Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:11:37Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:11:37Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:12:13Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:12:13Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:12:48Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:12:49Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:13:24Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:13:25Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:14:01Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:14:01Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:14:37Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:14:37Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:15:13Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:15:13Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:15:49Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:15:49Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:16:25Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:16:25Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:17:01Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:17:01Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:17:37Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:17:37Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:18:13Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:18:13Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:18:48Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:18:49Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:19:25Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:19:25Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:20:01Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:20:01Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:20:38Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:20:38Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:21:13Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-18T08:21:13Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T08:21:33Z] commit-checkpoint: skipped missing scope paths: package.json, package-lock.json
