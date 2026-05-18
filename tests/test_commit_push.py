@@ -339,14 +339,14 @@ def test_push_refused_on_wrong_branch():
             os.chdir(orig)
 
 
-def test_push_warns_on_dirty_working_tree(capsys):
+def test_push_blocked_on_dirty_working_tree(capsys):
     with tempfile.TemporaryDirectory() as tmp:
         orig = os.getcwd()
         os.chdir(tmp)
         try:
             _write_state(Path(tmp) / "runs" / "T999", branch="ticket/T999-work")
 
-            def fake(args):
+            def fake(args, **kwargs):
                 if "--abbrev-ref" in args:
                     return _cp("ticket/T999-work\n")
                 if args == ["git", "status", "--porcelain"]:
@@ -359,8 +359,8 @@ def test_push_warns_on_dirty_working_tree(capsys):
                 rc = push_branch("T999", None)
 
             captured = capsys.readouterr()
-            assert "warning" in (captured.out + captured.err).lower()
-            assert rc == 0
+            assert "DIRTY_RUNTIME_CHECKPOINT" in (captured.out + captured.err)
+            assert rc == 2
         finally:
             os.chdir(orig)
 
