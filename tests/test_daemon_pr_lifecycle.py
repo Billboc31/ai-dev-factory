@@ -210,52 +210,25 @@ def test_handle_test_complete_skips_pr_when_push_fails(tmp_path):
     mock_close.assert_not_called()
 
 
-def test_checkpoint_and_push_before_pr_calls_commit_with_include_code(tmp_path):
-    subprocess_calls = []
-
-    def fake_run(args, **kwargs):
-        subprocess_calls.append(args)
-        return MagicMock(stdout="", stderr="", returncode=0)
-
-    with patch("run_daemon.subprocess.run", side_effect=fake_run):
+def test_checkpoint_and_push_before_pr_calls_checkpoint_with_include_code():
+    with patch("run_daemon.checkpoint_transition") as mock_ckpt:
         _checkpoint_and_push_before_pr("T001")
+    mock_ckpt.assert_called_once()
+    _args, kwargs = mock_ckpt.call_args
+    assert kwargs.get("include_code") is True
 
-    commit_calls = [c for c in subprocess_calls if "--commit" in c]
-    assert len(commit_calls) == 1
-    assert "--include-code" in commit_calls[0]
 
-
-def test_checkpoint_and_push_before_pr_pushes_after_successful_commit(tmp_path):
-    subprocess_calls = []
-
-    def fake_run(args, **kwargs):
-        subprocess_calls.append(args)
-        return MagicMock(stdout="", stderr="", returncode=0)
-
-    with patch("run_daemon.subprocess.run", side_effect=fake_run):
+def test_checkpoint_and_push_before_pr_calls_checkpoint_with_push():
+    with patch("run_daemon.checkpoint_transition") as mock_ckpt:
         _checkpoint_and_push_before_pr("T001")
+    mock_ckpt.assert_called_once()
+    _args, kwargs = mock_ckpt.call_args
+    assert kwargs.get("push") is True
 
-    push_calls = [c for c in subprocess_calls if "--push" in c]
-    assert len(push_calls) == 1
 
-
-def test_checkpoint_and_push_before_pr_still_pushes_when_nothing_to_commit(tmp_path):
-    # When commit rc=1 (nothing new), we still push prior commits to keep the remote in sync.
-    subprocess_calls = []
-
-    def fake_run(args, **kwargs):
-        subprocess_calls.append(args)
-        # rc=0 for push so it does not abort
-        if "--push" in args:
-            return MagicMock(stdout="", stderr="", returncode=0)
-        # rc=1 for commit means nothing to commit
-        return MagicMock(stdout="", stderr="", returncode=1)
-
-    with patch("run_daemon.subprocess.run", side_effect=fake_run):
+def test_checkpoint_and_push_before_pr_returns_true_on_success():
+    with patch("run_daemon.checkpoint_transition"):
         result = _checkpoint_and_push_before_pr("T001")
-
-    push_calls = [c for c in subprocess_calls if "--push" in c]
-    assert len(push_calls) == 1
     assert result is True
 
 

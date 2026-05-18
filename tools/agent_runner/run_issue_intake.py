@@ -16,6 +16,13 @@ import subprocess
 import sys
 from pathlib import Path
 
+_ROOT = Path(__file__).resolve().parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+from runtime_checkpoint import checkpoint_transition as _checkpoint_transition
+from runtime_checkpoint import CheckpointError as _CheckpointError
+from runtime_checkpoint import DirtyTreeError as _DirtyTreeError
+
 
 def _now_iso() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -116,36 +123,24 @@ def write_ticket_md(ticket_id: str, issue_number: int, title: str, body: str) ->
 
 
 def commit_bootstrap(ticket_id: str, push: bool = False) -> None:
-    """Stage runs/TXXX/ticket.md + state.json and commit as bootstrap checkpoint."""
-    paths_to_stage = [
-        f"runs/{ticket_id}/ticket.md",
-        f"runs/{ticket_id}/state.json",
-    ]
-    for path in paths_to_stage:
-        add_result = _run(["git", "add", "-f", path])
-        if add_result.returncode != 0:
-            stderr = add_result.stderr.strip()
-            _log(ticket_id, f"bootstrap checkpoint: failed to stage {path}: {stderr}")
-            print(f"warning: bootstrap checkpoint: failed to stage {path}", file=sys.stderr)
-            return
-    message = f"{ticket_id}: bootstrap checkpoint"
-    commit_result = _run(["git", "commit", "-m", message])
-    if commit_result.returncode != 0:
-        stderr = (commit_result.stderr or commit_result.stdout).strip()
-        _log(ticket_id, f"bootstrap checkpoint: commit failed: {stderr}")
-        print(f"warning: bootstrap checkpoint commit failed: {stderr}", file=sys.stderr)
-        return
-    _log(ticket_id, "bootstrap checkpoint completed")
-    print(f"bootstrap checkpoint completed for {ticket_id}")
-    if push:
-        push_result = _run(["git", "push", "-u", "origin", "HEAD"])
-        if push_result.returncode != 0:
-            stderr = push_result.stderr.strip()
-            _log(ticket_id, f"checkpoint push for {ticket_id}: failed: {stderr}")
-            print(f"warning: checkpoint push failed: {stderr}", file=sys.stderr)
-        else:
+    """Stage runs/TXXX/ artifacts and commit as bootstrap checkpoint."""
+    try:
+        _checkpoint_transition(
+            ticket_id,
+            f"{ticket_id}: bootstrap checkpoint",
+            push=push,
+        )
+        _log(ticket_id, "bootstrap checkpoint completed")
+        print(f"bootstrap checkpoint completed for {ticket_id}")
+        if push:
             _log(ticket_id, f"checkpoint push for {ticket_id}")
             print(f"checkpoint push for {ticket_id}")
+    except _CheckpointError as exc:
+        _log(ticket_id, f"bootstrap checkpoint: failed: {exc}")
+        print(f"warning: bootstrap checkpoint failed: {exc}", file=sys.stderr)
+    except _DirtyTreeError as exc:
+        _log(ticket_id, f"bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: {exc}")
+        print(f"warning: bootstrap checkpoint: dirty tree after commit: {exc}", file=sys.stderr)
 
 
 def write_state_json(ticket_id: str, branch: str, issue_number: int) -> None:
