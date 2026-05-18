@@ -31,3 +31,11 @@ runs/daemon.log
 runs/*/runtime.log
 runs/daemon.log
 runs/daemon.pid
+
+# Frontend/runtime/test caches
+node_modules/
+apps/dashboard/node_modules/
+.vite/
+apps/dashboard/.vite/
+.pytest_cache/
+**/.pytest_cache/
