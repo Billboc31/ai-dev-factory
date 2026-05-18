@@ -279,7 +279,6 @@ def test_poll_github_issues_ingests_new_issue(tmp_path):
 
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
          patch("run_daemon.call_issue_intake", return_value=True), \
-         patch("run_daemon._commit_after_intake"), \
          patch("run_daemon.subprocess.run", side_effect=_git_ok):
         poll_github_issues(runs, "ai-ready", None)
 
@@ -340,7 +339,6 @@ def test_poll_github_issues_assigns_correct_next_ticket_id(tmp_path):
 
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
          patch("run_daemon.call_issue_intake", return_value=True) as mock_intake, \
-         patch("run_daemon._commit_after_intake"), \
          patch("run_daemon.subprocess.run", side_effect=_git_ok):
         poll_github_issues(runs, "ai-ready", None)
 
@@ -358,7 +356,6 @@ def test_poll_github_issues_multiple_issues_sequential_ids(tmp_path):
 
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
          patch("run_daemon.call_issue_intake", return_value=True), \
-         patch("run_daemon._commit_after_intake"), \
          patch("run_daemon.subprocess.run", side_effect=_git_ok):
         poll_github_issues(runs, "ai-ready", None)
 
@@ -375,11 +372,12 @@ def test_poll_github_issues_does_not_commit_after_intake_on_success(tmp_path):
 
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
          patch("run_daemon.call_issue_intake", return_value=True), \
-         patch("run_daemon._commit_after_intake") as mock_commit, \
-         patch("run_daemon.subprocess.run", side_effect=_git_ok):
+         patch("run_daemon.subprocess.run", side_effect=_git_ok) as mock_sp:
         poll_github_issues(runs, "ai-ready", None)
 
-    mock_commit.assert_not_called()
+    for call in mock_sp.call_args_list:
+        args = call[0][0] if call[0] else []
+        assert "commit" not in args, f"unexpected git commit call: {args}"
     index = load_issue_index(runs)
     assert "42" in index
 
@@ -388,12 +386,14 @@ def test_poll_github_issues_does_not_call_commit_after_intake_on_failure(tmp_pat
     runs = _make_runs(tmp_path)
     issues = [{"number": 42, "title": "Add feature"}]
 
-    with patch("run_daemon.fetch_ready_issues", return_value=issues):
-        with patch("run_daemon.call_issue_intake", return_value=False):
-            with patch("run_daemon._commit_after_intake") as mock_commit:
-                poll_github_issues(runs, "ai-ready", None)
+    with patch("run_daemon.fetch_ready_issues", return_value=issues), \
+         patch("run_daemon.call_issue_intake", return_value=False), \
+         patch("run_daemon.subprocess.run", side_effect=_git_ok) as mock_sp:
+        poll_github_issues(runs, "ai-ready", None)
 
-    mock_commit.assert_not_called()
+    for call in mock_sp.call_args_list:
+        args = call[0][0] if call[0] else []
+        assert "commit" not in args, f"unexpected git commit call: {args}"
 
 
 # ── main CLI integration ──────────────────────────────────────────────────────
