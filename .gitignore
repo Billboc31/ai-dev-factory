@@ -22,3 +22,11 @@ apps/dashboard/node_modules/
 .vite/
 apps/dashboard/.vite/
 .pytest_cache/
+
+# Frontend/runtime/test caches
+node_modules/
+apps/dashboard/node_modules/
+.vite/
+apps/dashboard/.vite/
+.pytest_cache/
+**/.pytest_cache/
