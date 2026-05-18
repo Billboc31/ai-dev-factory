@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import argparse
 import datetime
-import importlib.util
 import json
 import re
 import subprocess
@@ -18,13 +17,11 @@ import sys
 from pathlib import Path
 
 _ROOT = Path(__file__).resolve().parent
-_rc_spec = importlib.util.spec_from_file_location("_runtime_checkpoint", _ROOT / "runtime_checkpoint.py")
-_rc_mod = importlib.util.module_from_spec(_rc_spec)  # type: ignore[arg-type]
-_rc_spec.loader.exec_module(_rc_mod)  # type: ignore[union-attr]
-_checkpoint_transition = _rc_mod.checkpoint_transition
-_CheckpointError = _rc_mod.CheckpointError
-_DirtyTreeError = _rc_mod.DirtyTreeError
-del _rc_spec, _rc_mod
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+from runtime_checkpoint import checkpoint_transition as _checkpoint_transition
+from runtime_checkpoint import CheckpointError as _CheckpointError
+from runtime_checkpoint import DirtyTreeError as _DirtyTreeError
 
 
 def _now_iso() -> str:

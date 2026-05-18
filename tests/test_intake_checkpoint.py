@@ -8,8 +8,7 @@ from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "tools" / "agent_runner"))
 
-from run_issue_intake import commit_bootstrap, run_intake
-from runtime_checkpoint import CheckpointError, DirtyTreeError
+from run_issue_intake import commit_bootstrap, run_intake, _CheckpointError as CheckpointError, _DirtyTreeError as DirtyTreeError
 
 
 def _cp(stdout="", stderr="", returncode=0):
