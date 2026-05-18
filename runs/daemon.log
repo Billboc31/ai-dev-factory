@@ -233163,3 +233163,7 @@ fatal: Not possible to fast-forward, aborting.
 [2026-05-18T21:38:45Z] [daemon] skipping T109: branch sync failed in worktree
 [2026-05-18T21:38:45Z] [daemon] detected T111 state=PLAN_REVIEW_NEEDED (human gate — checkpoint for visibility)
 [2026-05-18T21:38:45Z] [daemon] T111: pre-PR checkpoint commit
+[2026-05-18T21:38:49Z] [daemon] T111: pre-PR push ok
+[2026-05-18T21:38:49Z] [daemon] skipping T111 state=PLAN_REVIEW_NEEDED (human gate)
+[2026-05-18T21:38:49Z] [daemon] detected TTEST2 state=PLAN_REVIEW_NEEDED (human gate — checkpoint for visibility)
+[2026-05-18T21:38:49Z] [daemon] TTEST2: pre-PR checkpoint commit
