@@ -101,3 +101,42 @@
 [2026-05-18T07:27:40Z] commit-checkpoint: sha=1c3cb88 message='T109: checkpoint [PLAN_APPROVED] — update workflow artifacts'
 [2026-05-18T07:27:42Z] push: pushing branch=ticket/T109-t109-atomic-runtime-checkpoint-and-worktree-safe-c
 [2026-05-18T07:27:43Z] push: done branch=ticket/T109-t109-atomic-runtime-checkpoint-and-worktree-safe-c
+[2026-05-18T07:32:07Z] auto-run: step=coder done rc=0
+[2026-05-18T07:32:07Z] auto-run: transition PLAN_APPROVED → IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:32:43Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:32:43Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:33:18Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:33:18Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:33:54Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:33:54Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:34:30Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:34:30Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:35:06Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:35:06Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:35:42Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:35:42Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:36:18Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:36:18Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:36:54Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:36:54Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:37:30Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:37:30Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:38:06Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:38:06Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:38:41Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:38:42Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:39:17Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:39:17Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:39:53Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:39:53Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:40:29Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:40:29Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:41:05Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:41:05Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:41:41Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:41:41Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:42:17Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:42:17Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:42:53Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-18T07:42:53Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T07:42:54Z] commit-checkpoint: skipped missing scope paths: package.json, package-lock.json
