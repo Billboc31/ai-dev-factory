@@ -1,9 +1,0 @@
-{
-  "ticket_id": "T031",
-  "state": "TEST_COMPLETE",
-  "branch": "ticket/T031-daemon-terminal-skip-commit-hardening",
-  "issue_number": 32,
-  "updated_at": "2026-05-15T14:24:20Z",
-  "pr_skipped_no_diff": true,
-  "daemon_archived": true
-}
