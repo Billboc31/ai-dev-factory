@@ -133,30 +133,66 @@ def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path |
             if wt_run_dir.exists():
                 ticket_dirs[ticket_id] = wt_run_dir
 
-    for ticket_id, ticket_dir in sorted(ticket_dirs.items()):
-        state_data = _load_json(ticket_dir / "state.json")
-        if not state_data:
-            continue
-        state = state_data.get("state", "")
+    # Load ticket_runtime from SQLite — primary source for kanban state
+    sqlite_ticket_states: dict[str, dict] = {}
+    if rdb and db_path:
+        try:
+            for row in rdb.list_ticket_runtime(db_path):
+                sqlite_ticket_states[row["ticket_id"]] = row
+        except Exception:
+            pass  # degraded: fall back to state.json only
+
+    # Union of filesystem-discovered tickets and SQLite-known tickets
+    all_ticket_ids = sorted(set(ticket_dirs.keys()) | set(sqlite_ticket_states.keys()))
+
+    for ticket_id in all_ticket_ids:
+        ticket_dir = ticket_dirs.get(ticket_id)
+        sqlite_row = sqlite_ticket_states.get(ticket_id)
+
+        if sqlite_row:
+            state = sqlite_row.get("state") or ""
+            issue_number = sqlite_row.get("issue_number")
+            branch = sqlite_row.get("branch")
+            daemon_archived = bool(sqlite_row.get("daemon_archived"))
+            pr_number = sqlite_row.get("pr_number")
+            state_data = _load_json(ticket_dir / "state.json") if ticket_dir else {}
+            issue_closed = state_data.get("issue_closed", False)
+            retry_stopped = (
+                _load_json(ticket_dir / "retry-state.json").get("stopped", False)
+                if ticket_dir else False
+            )
+        else:
+            if not ticket_dir:
+                continue
+            state_data = _load_json(ticket_dir / "state.json")
+            if not state_data:
+                continue
+            state = state_data.get("state", "")
+            issue_number = state_data.get("issue_number")
+            branch = state_data.get("branch")
+            daemon_archived = bool(state_data.get("daemon_archived") or state_data.get("issue_closed"))
+            pr_number = state_data.get("pr_number")
+            issue_closed = state_data.get("issue_closed", False)
+            retry_stopped = _load_json(ticket_dir / "retry-state.json").get("stopped", False)
+
         worker_info = workers.get(ticket_id, {})
         item = BoardItem(
             ticket_id=ticket_id,
-            issue_number=state_data.get("issue_number"),
+            issue_number=issue_number,
             state=state,
-            branch=state_data.get("branch"),
+            branch=branch,
             worker_pid=worker_info.get("pid"),
             worker_cwd=worker_info.get("worktree_path"),
         )
-        # Priority: first match wins
-        if state_data.get("daemon_archived") or state_data.get("issue_closed"):
+        if daemon_archived or issue_closed:
             columns["done"].append(item)
-        elif state == "TEST_COMPLETE" and state_data.get("pr_number"):
+        elif state == "TEST_COMPLETE" and pr_number:
             columns["pr_ready"].append(item)
         elif state in _HUMAN_GATE_STATES:
             columns["waiting_human"].append(item)
-        elif _load_json(ticket_dir / "retry-state.json").get("stopped"):
+        elif retry_stopped:
             columns["blocked"].append(item)
-        elif ticket_id in workers or _lock_held(ticket_dir):
+        elif ticket_id in workers or (ticket_dir and _lock_held(ticket_dir)):
             columns["running"].append(item)
         else:
             columns["queued"].append(item)

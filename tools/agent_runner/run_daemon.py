@@ -60,6 +60,35 @@ _rdb_remove_worker = _rdb_mod.remove_worker
 _rdb_list_workers = _rdb_mod.list_workers
 del _rdb_spec, _rdb_mod
 
+# SQLite path and init are cached so _rdb_get_db_path() (subprocess) runs only once per daemon process.
+_DB_PATH_RESOLVED: bool = False
+_DB_PATH_VALUE: "Path | None" = None
+_DB_INITIALIZED: bool = False
+
+
+def _cached_db_path() -> "Path | None":
+    global _DB_PATH_RESOLVED, _DB_PATH_VALUE
+    if not _DB_PATH_RESOLVED:
+        _DB_PATH_VALUE = _rdb_get_db_path()
+        _DB_PATH_RESOLVED = True
+    return _DB_PATH_VALUE
+
+
+def _ensure_db() -> "Path | None":
+    """Return an initialized DB path, resolving and initialising at most once per process."""
+    global _DB_INITIALIZED
+    db_path = _cached_db_path()
+    if not db_path:
+        return None
+    if not _DB_INITIALIZED:
+        try:
+            _rdb_init(db_path)
+            _DB_INITIALIZED = True
+        except Exception as exc:
+            _log(f"SQLite init failed: {exc}")
+            return None
+    return db_path
+
 AUTO_RUNNABLE_STATES = frozenset({
     "INIT",
     "PLAN_APPROVED",
@@ -202,25 +231,24 @@ def _register_worker(runs_dir: Path, ticket_id: str, branch: str | None, worktre
         "started_at": _now_iso(),
     }
     _save_workers_registry(runs_dir, workers)
-    db_path = _rdb_get_db_path()
+    db_path = _ensure_db()
     if db_path:
         try:
-            _rdb_init(db_path)
             _rdb_upsert_worker(db_path, ticket_id, os.getpid(), branch, worktree_path)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log(f"SQLite worker register failed for {ticket_id}: {exc}")
 
 
 def _unregister_worker(runs_dir: Path, ticket_id: str) -> None:
     workers = _load_workers_registry(runs_dir)
     workers.pop(ticket_id, None)
     _save_workers_registry(runs_dir, workers)
-    db_path = _rdb_get_db_path()
+    db_path = _cached_db_path()
     if db_path and db_path.exists():
         try:
             _rdb_remove_worker(db_path, ticket_id)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log(f"SQLite worker unregister failed for {ticket_id}: {exc}")
 
 
 def _cleanup_stale_workers(runs_dir: Path) -> None:
@@ -238,7 +266,7 @@ def _cleanup_stale_workers(runs_dir: Path) -> None:
                 del workers[tid]
             _save_workers_registry(runs_dir, workers)
 
-    db_path = _rdb_get_db_path()
+    db_path = _cached_db_path()
     if not db_path or not db_path.exists():
         return
     try:
@@ -250,8 +278,8 @@ def _cleanup_stale_workers(runs_dir: Path) -> None:
                 if tid not in stale:
                     _log(f"removing stale SQLite worker entry for {tid} (pid={pid} dead)")
                 _rdb_remove_worker(db_path, tid)
-    except Exception:
-        pass
+    except Exception as exc:
+        _log(f"SQLite stale worker cleanup failed: {exc}")
 
 
 def _read_last_failure_class(run_dir: Path) -> str | None:
@@ -440,21 +468,6 @@ def _ensure_clean_working_tree(ticket_id: str, auto_push: bool = False) -> bool:
     except DirtyTreeError as exc:
         _log(f"{ticket_id}: DIRTY_RUNTIME_CHECKPOINT — pre-flight: {exc}")
         return False
-
-def _commit_after_intake(ticket_id: str, runs_dir: Path) -> None:
-    """Commit runs/ (including .issue-intake.json) after issue intake."""
-    try:
-        checkpoint_transition(
-            ticket_id,
-            f"{ticket_id}: intake — update issue index",
-            push=False,
-            run_dir=str(runs_dir) + "/",
-        )
-        _log(f"issue index committed for {ticket_id}")
-    except CheckpointError as exc:
-        _log(f"{ticket_id}: intake checkpoint failed: {exc}")
-    except DirtyTreeError as exc:
-        _log(f"{ticket_id}: DIRTY_RUNTIME_CHECKPOINT after intake: {exc}")
 
 
 # ── state json helpers ────────────────────────────────────────────────────────
@@ -996,14 +1009,13 @@ def save_issue_index(runs_dir: Path, index: dict[str, str]) -> None:
     tmp.write_text(json.dumps(index, indent=2), encoding="utf-8")
     tmp.replace(path)
 
-    db_path = _rdb_get_db_path()
+    db_path = _ensure_db()
     if db_path:
         try:
-            _rdb_init(db_path)
             for num_str, tid in index.items():
                 _rdb_record_intake(db_path, int(num_str), tid)
-        except Exception:
-            pass
+        except Exception as exc:
+            _log(f"SQLite issue index sync failed: {exc}")
 
 
 def next_ticket_id(runs_dir: Path, reserved: set[str] | None = None) -> str:
@@ -1147,18 +1159,17 @@ def poll_github_issues(
             index[number] = ticket_id
             save_issue_index(runs_dir, index)
             _log(f"issue #{number} ingested as {ticket_id}")
-            db_path = _rdb_get_db_path()
+            db_path = _ensure_db()
             if db_path:
                 try:
-                    _rdb_init(db_path)
                     _rdb_upsert_ticket(
                         db_path, ticket_id,
                         issue_number=int(number),
                         branch=f"ticket/{ticket_id}-{slug}",
                         state="INIT",
                     )
-                except Exception:
-                    pass
+                except Exception as exc:
+                    _log(f"SQLite ticket upsert failed for {ticket_id}: {exc}")
             if worktrees_dir:
                 branch = f"ticket/{ticket_id}-{slug}"
                 ok, msg = create_ticket_worktree(ticket_id, branch, worktrees_dir)
@@ -1236,12 +1247,7 @@ def run_once(
         _log("no tickets found")
         return
 
-    _db_path = _rdb_get_db_path()
-    if _db_path:
-        try:
-            _rdb_init(_db_path)
-        except Exception:
-            _db_path = None
+    _db_path = _ensure_db()
 
     for ticket_id, state in tickets:
         run_dir = _get_run_dir(ticket_id, runs_dir, worktrees_dir)
@@ -1261,8 +1267,8 @@ def run_once(
                     daemon_archived=int(bool(ticket_data.get("daemon_archived"))),
                     pr_number=ticket_data.get("pr_number"),
                 )
-            except Exception:
-                pass
+            except Exception as exc:
+                _log(f"SQLite ticket sync failed for {ticket_id}: {exc}")
 
         if state in AUTO_RUNNABLE_STATES:
             _log(f"detected {ticket_id} state={state}")
