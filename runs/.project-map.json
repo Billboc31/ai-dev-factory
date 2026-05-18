@@ -1,0 +1,71 @@
+{
+  "generated_at": "2026-05-18T06:51:52Z",
+  "tickets": [
+    {
+      "ticket_id": null,
+      "issue_number": 1,
+      "title": "T001 \u2014 Auditer ai-dev-team et extraire le socle g\u00e9n\u00e9rique ai-dev-factory",
+      "status": "not_ingested",
+      "depends_on": [],
+      "depends_on_issues": [],
+      "blocks": [],
+      "ambiguities": []
+    },
+    {
+      "ticket_id": "T106",
+      "issue_number": 48,
+      "title": "T106 \u2014 Project issue tree agent and dependency map",
+      "status": "runnable",
+      "depends_on": [],
+      "depends_on_issues": [],
+      "blocks": [],
+      "ambiguities": []
+    },
+    {
+      "ticket_id": null,
+      "issue_number": 49,
+      "title": "T107 \u2014 Project guardian regression agent",
+      "status": "not_ingested",
+      "depends_on": [],
+      "depends_on_issues": [],
+      "blocks": [],
+      "ambiguities": []
+    },
+    {
+      "ticket_id": null,
+      "issue_number": 51,
+      "title": "T108 \u2014 Multi-project onboarding and project registry",
+      "status": "not_ingested",
+      "depends_on": [],
+      "depends_on_issues": [],
+      "blocks": [],
+      "ambiguities": []
+    },
+    {
+      "ticket_id": null,
+      "issue_number": 54,
+      "title": "T109 \u2014 Atomic runtime checkpoint and worktree-safe commit/push lifecycle",
+      "status": "not_ingested",
+      "depends_on": [],
+      "depends_on_issues": [],
+      "blocks": [],
+      "ambiguities": []
+    }
+  ],
+  "parallelizable_groups": [
+    [
+      "T106"
+    ]
+  ],
+  "next_recommended": "T106",
+  "cycles": [],
+  "summary": {
+    "total": 5,
+    "done": 0,
+    "running": 0,
+    "waiting_human": 0,
+    "runnable": 1,
+    "blocked": 0,
+    "not_ingested": 4
+  }
+}
