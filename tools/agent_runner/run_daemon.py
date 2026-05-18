@@ -37,6 +37,14 @@ get_ticket_worktree_path = _wm_mod.get_ticket_worktree_path
 remove_ticket_worktree = _wm_mod.remove_ticket_worktree
 del _wm_spec, _wm_mod
 
+_rc_spec = importlib.util.spec_from_file_location("_runtime_checkpoint", ROOT / "runtime_checkpoint.py")
+_rc_mod = importlib.util.module_from_spec(_rc_spec)  # type: ignore[arg-type]
+_rc_spec.loader.exec_module(_rc_mod)  # type: ignore[union-attr]
+checkpoint_transition = _rc_mod.checkpoint_transition
+CheckpointError = _rc_mod.CheckpointError
+DirtyTreeError = _rc_mod.DirtyTreeError
+del _rc_spec, _rc_mod
+
 AUTO_RUNNABLE_STATES = frozenset({
     "INIT",
     "PLAN_APPROVED",
@@ -401,25 +409,19 @@ def _ensure_clean_working_tree(ticket_id: str, auto_push: bool = False) -> bool:
 
 
 def _commit_after_intake(ticket_id: str, runs_dir: Path) -> None:
-    """Commit .issue-intake.json to the current branch after issue intake."""
-    index_path = str(runs_dir / ISSUE_INDEX_FILENAME)
-    add_result = subprocess.run(
-        ["git", "add", index_path],
-        capture_output=True, text=True, check=False,
-    )
-    if add_result.returncode != 0:
-        _log(f"{ticket_id}: failed to stage issue index: {add_result.stderr.strip()}")
-        return
-    commit_result = subprocess.run(
-        ["git", "commit", "-m", f"{ticket_id}: intake — update issue index"],
-        capture_output=True, text=True, check=False,
-    )
-    if commit_result.returncode == 0:
+    """Commit runs/ (including .issue-intake.json) after issue intake."""
+    try:
+        checkpoint_transition(
+            ticket_id,
+            f"{ticket_id}: intake — update issue index",
+            push=False,
+            run_dir=str(runs_dir) + "/",
+        )
         _log(f"issue index committed for {ticket_id}")
-    elif commit_result.returncode == 1:
-        _log(f"{ticket_id}: nothing new in issue index to commit")
-    else:
-        _log(f"{ticket_id}: issue index commit failed rc={commit_result.returncode}")
+    except CheckpointError as exc:
+        _log(f"{ticket_id}: intake checkpoint failed: {exc}")
+    except DirtyTreeError as exc:
+        _log(f"{ticket_id}: DIRTY_RUNTIME_CHECKPOINT after intake: {exc}")
 
 
 # ── state json helpers ────────────────────────────────────────────────────────
@@ -611,34 +613,22 @@ def check_and_close_issue(ticket_id: str, run_dir: Path, repo: str | None) -> No
 def _checkpoint_and_push_before_pr(ticket_id: str, cwd: str | None = None) -> bool:
     """Checkpoint commit + push before PR creation. Returns False if commit or push failed."""
     _log(f"{ticket_id}: pre-PR checkpoint commit")
-    commit_result = subprocess.run(
-        [sys.executable, str(RUN_TICKET), ticket_id, "--commit", "--include-code"],
-        capture_output=True, text=True, check=False,
-        cwd=cwd,
-    )
-    for line in commit_result.stdout.splitlines():
-        _log(f"{ticket_id}: {line}")
-    for line in commit_result.stderr.splitlines():
-        _log(f"{ticket_id} [err]: {line}")
-    if commit_result.returncode not in (0, 1):
-        _log(f"{ticket_id}: pre-PR checkpoint failed rc={commit_result.returncode}")
+    try:
+        checkpoint_transition(
+            ticket_id,
+            f"{ticket_id}: checkpoint [TEST_COMPLETE] — update workflow artifacts",
+            push=True,
+            include_code=True,
+            cwd=cwd,
+        )
+        _log(f"{ticket_id}: pre-PR push ok")
+        return True
+    except CheckpointError as exc:
+        _log(f"{ticket_id}: pre-PR checkpoint failed: {exc}")
         return False
-    if commit_result.returncode == 0:
-        _log(f"{ticket_id}: pre-PR checkpoint committed — pushing")
-    else:
-        _log(f"{ticket_id}: pre-PR checkpoint — nothing to commit — pushing prior commits")
-    push_result = subprocess.run(
-        [sys.executable, str(RUN_TICKET), ticket_id, "--push"],
-        capture_output=True, text=True, check=False,
-        cwd=cwd,
-    )
-    for line in push_result.stdout.splitlines():
-        _log(f"{ticket_id}: {line}")
-    if push_result.returncode != 0:
-        _log(f"{ticket_id}: pre-PR push failed rc={push_result.returncode}")
+    except DirtyTreeError as exc:
+        _log(f"{ticket_id}: DIRTY_RUNTIME_CHECKPOINT — pre-PR: {exc}")
         return False
-    _log(f"{ticket_id}: pre-PR push ok")
-    return True
 
 
 def auto_merge_pr(ticket_id: str, run_dir: Path, repo: str | None) -> bool:

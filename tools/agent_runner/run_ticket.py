@@ -111,12 +111,13 @@ def branch_name(ticket_id: str, slug: str | None) -> str:
     return f"ticket/{ticket_id}-{suffix}"
 
 
-def run_command(args: list[str]) -> subprocess.CompletedProcess[str]:
+def run_command(args: list[str], cwd: str | None = None) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
         args,
         text=True,
         capture_output=True,
         check=False,
+        cwd=cwd,
     )
 
 
@@ -313,11 +314,13 @@ def push_branch(ticket_id: str, slug: str | None) -> int:
     else:
         push_target = branch_name(ticket_id, slug)
 
-    # Non-blocking warning if working tree is dirty
+    # Blocking check: uncommitted changes must not be silently left behind
     wt_result = run_command(["git", "status", "--porcelain"])
     if wt_result.returncode == 0 and wt_result.stdout.strip():
-        print("warning: working tree has uncommitted changes — push proceeds", file=sys.stderr)
-        _log_runtime(ticket_id, "push: warning — working tree dirty")
+        msg = "DIRTY_RUNTIME_CHECKPOINT — uncommitted changes present before push"
+        print(f"error: {msg}", file=sys.stderr)
+        _log_runtime(ticket_id, f"push: refused — {msg}")
+        return 2
 
     print(f"push branch: {push_target}")
     _log_runtime(ticket_id, f"push: pushing branch={push_target}")
