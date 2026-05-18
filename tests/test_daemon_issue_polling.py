@@ -368,7 +368,8 @@ def test_poll_github_issues_multiple_issues_sequential_ids(tmp_path):
     assert "2" not in index
 
 
-def test_poll_github_issues_calls_commit_after_intake_on_success(tmp_path):
+def test_poll_github_issues_does_not_commit_after_intake_on_success(tmp_path):
+    # T111: intake no longer creates a git commit — index saved in SQLite + gitignored JSON
     runs = _make_runs(tmp_path)
     issues = [{"number": 42, "title": "Add feature"}]
 
@@ -378,7 +379,9 @@ def test_poll_github_issues_calls_commit_after_intake_on_success(tmp_path):
          patch("run_daemon.subprocess.run", side_effect=_git_ok):
         poll_github_issues(runs, "ai-ready", None)
 
-    mock_commit.assert_called_once_with("T001", runs)
+    mock_commit.assert_not_called()
+    index = load_issue_index(runs)
+    assert "42" in index
 
 
 def test_poll_github_issues_does_not_call_commit_after_intake_on_failure(tmp_path):

@@ -47,6 +47,19 @@ CheckpointError = _rc_mod.CheckpointError
 DirtyTreeError = _rc_mod.DirtyTreeError
 del _rc_spec, _rc_mod
 
+_rdb_spec = importlib.util.spec_from_file_location("_runtime_db", ROOT / "runtime_db.py")
+_rdb_mod = importlib.util.module_from_spec(_rdb_spec)  # type: ignore[arg-type]
+_rdb_spec.loader.exec_module(_rdb_mod)  # type: ignore[union-attr]
+_rdb_get_db_path = _rdb_mod.get_db_path
+_rdb_init = _rdb_mod.init_runtime_db
+_rdb_record_intake = _rdb_mod.record_issue_intake
+_rdb_list_intake = _rdb_mod.list_issue_intake
+_rdb_upsert_ticket = _rdb_mod.upsert_ticket_runtime
+_rdb_upsert_worker = _rdb_mod.upsert_worker
+_rdb_remove_worker = _rdb_mod.remove_worker
+_rdb_list_workers = _rdb_mod.list_workers
+del _rdb_spec, _rdb_mod
+
 AUTO_RUNNABLE_STATES = frozenset({
     "INIT",
     "PLAN_APPROVED",
@@ -189,29 +202,56 @@ def _register_worker(runs_dir: Path, ticket_id: str, branch: str | None, worktre
         "started_at": _now_iso(),
     }
     _save_workers_registry(runs_dir, workers)
+    db_path = _rdb_get_db_path()
+    if db_path:
+        try:
+            _rdb_init(db_path)
+            _rdb_upsert_worker(db_path, ticket_id, os.getpid(), branch, worktree_path)
+        except Exception:
+            pass
 
 
 def _unregister_worker(runs_dir: Path, ticket_id: str) -> None:
     workers = _load_workers_registry(runs_dir)
     workers.pop(ticket_id, None)
     _save_workers_registry(runs_dir, workers)
+    db_path = _rdb_get_db_path()
+    if db_path and db_path.exists():
+        try:
+            _rdb_remove_worker(db_path, ticket_id)
+        except Exception:
+            pass
 
 
 def _cleanup_stale_workers(runs_dir: Path) -> None:
-    """Remove dead PIDs from workers.json — called at daemon startup."""
+    """Remove dead PIDs from workers.json and SQLite — called at daemon startup."""
     workers = _load_workers_registry(runs_dir)
-    if not workers:
+    stale: list[str] = []
+    if workers:
+        stale = [
+            tid for tid, w in workers.items()
+            if not isinstance(w.get("pid"), int) or not _is_pid_alive(w["pid"])
+        ]
+        if stale:
+            for tid in stale:
+                _log(f"removing stale worker entry for {tid} (pid={workers[tid].get('pid')} dead)")
+                del workers[tid]
+            _save_workers_registry(runs_dir, workers)
+
+    db_path = _rdb_get_db_path()
+    if not db_path or not db_path.exists():
         return
-    stale = [
-        tid for tid, w in workers.items()
-        if not isinstance(w.get("pid"), int) or not _is_pid_alive(w["pid"])
-    ]
-    if not stale:
-        return
-    for tid in stale:
-        _log(f"removing stale worker entry for {tid} (pid={workers[tid].get('pid')} dead)")
-        del workers[tid]
-    _save_workers_registry(runs_dir, workers)
+    try:
+        db_workers = _rdb_list_workers(db_path)
+        for w in db_workers:
+            tid = w["ticket_id"]
+            pid = w.get("pid")
+            if not isinstance(pid, int) or not _is_pid_alive(pid):
+                if tid not in stale:
+                    _log(f"removing stale SQLite worker entry for {tid} (pid={pid} dead)")
+                _rdb_remove_worker(db_path, tid)
+    except Exception:
+        pass
 
 
 def _read_last_failure_class(run_dir: Path) -> str | None:
@@ -930,7 +970,12 @@ def launch_ticket(
 # ── issue polling ─────────────────────────────────────────────────────────────
 
 def load_issue_index(runs_dir: Path) -> dict[str, str]:
-    """Load the anti-duplicate index mapping issue numbers to ticket IDs."""
+    """Load the anti-duplicate index mapping issue numbers to ticket IDs.
+
+    Reads from the local JSON file (gitignored, written by save_issue_index).
+    The JSON file is the daemon's working copy; SQLite is written in parallel
+    for the board/dashboard to consume.
+    """
     path = runs_dir / ISSUE_INDEX_FILENAME
     if not path.exists():
         return {}
@@ -941,11 +986,24 @@ def load_issue_index(runs_dir: Path) -> dict[str, str]:
 
 
 def save_issue_index(runs_dir: Path, index: dict[str, str]) -> None:
-    """Persist the anti-duplicate index atomically via a temp file rename."""
+    """Persist the anti-duplicate index.
+
+    Writes to both the local JSON file (daemon working copy) and SQLite
+    (for board/dashboard). The JSON file is gitignored — see .gitignore.
+    """
     path = runs_dir / ISSUE_INDEX_FILENAME
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(index, indent=2), encoding="utf-8")
     tmp.replace(path)
+
+    db_path = _rdb_get_db_path()
+    if db_path:
+        try:
+            _rdb_init(db_path)
+            for num_str, tid in index.items():
+                _rdb_record_intake(db_path, int(num_str), tid)
+        except Exception:
+            pass
 
 
 def next_ticket_id(runs_dir: Path, reserved: set[str] | None = None) -> str:
@@ -1089,7 +1147,18 @@ def poll_github_issues(
             index[number] = ticket_id
             save_issue_index(runs_dir, index)
             _log(f"issue #{number} ingested as {ticket_id}")
-            _commit_after_intake(ticket_id, runs_dir)
+            db_path = _rdb_get_db_path()
+            if db_path:
+                try:
+                    _rdb_init(db_path)
+                    _rdb_upsert_ticket(
+                        db_path, ticket_id,
+                        issue_number=int(number),
+                        branch=f"ticket/{ticket_id}-{slug}",
+                        state="INIT",
+                    )
+                except Exception:
+                    pass
             if worktrees_dir:
                 branch = f"ticket/{ticket_id}-{slug}"
                 ok, msg = create_ticket_worktree(ticket_id, branch, worktrees_dir)
@@ -1166,10 +1235,34 @@ def run_once(
     if not tickets:
         _log("no tickets found")
         return
+
+    _db_path = _rdb_get_db_path()
+    if _db_path:
+        try:
+            _rdb_init(_db_path)
+        except Exception:
+            _db_path = None
+
     for ticket_id, state in tickets:
         run_dir = _get_run_dir(ticket_id, runs_dir, worktrees_dir)
         worktree_path = worktrees_dir / ticket_id if worktrees_dir else None
         worktree_cwd = str(worktree_path) if worktree_path and worktree_path.exists() else None
+
+        if _db_path:
+            try:
+                ticket_data = _load_state_json(run_dir)
+                _rdb_upsert_ticket(
+                    _db_path, ticket_id,
+                    state=state,
+                    branch=ticket_data.get("branch"),
+                    issue_number=ticket_data.get("issue_number"),
+                    run_dir=str(run_dir),
+                    worktree_path=worktree_cwd,
+                    daemon_archived=int(bool(ticket_data.get("daemon_archived"))),
+                    pr_number=ticket_data.get("pr_number"),
+                )
+            except Exception:
+                pass
 
         if state in AUTO_RUNNABLE_STATES:
             _log(f"detected {ticket_id} state={state}")

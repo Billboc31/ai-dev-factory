@@ -1,6 +1,7 @@
 """Board projection — maps runs/* state files + gh issue list to 7 kanban columns."""
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
@@ -63,6 +64,21 @@ def _load_issue_index(runs_dir: Path) -> dict[str, str]:
         return {}
 
 
+def _load_runtime_db(project_root: Path):
+    """Load the runtime_db module if the SQLite DB exists. Returns (module, db_path) or (None, None)."""
+    db_path = project_root / ".runtime" / "ai-dev-factory.sqlite"
+    if not db_path.exists():
+        return None, None
+    try:
+        _tools = Path(__file__).resolve().parent.parent.parent.parent / "tools" / "agent_runner"
+        spec = importlib.util.spec_from_file_location("_rdb_board", _tools / "runtime_db.py")
+        mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        return mod, db_path
+    except Exception:
+        return None, None
+
+
 def _fetch_ai_ready_issues(repo: str | None) -> list[dict]:
     cmd = ["gh", "issue", "list", "--label", "ai-ready", "--json", "number,title", "--state", "open"]
     if repo:
@@ -79,7 +95,16 @@ def _fetch_ai_ready_issues(repo: str | None) -> list[dict]:
 def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path | None = None) -> BoardResponse:
     runs_dir = project_root / "runs"
     columns: dict[str, list[BoardItem]] = {col_id: [] for col_id, _ in _COLUMN_ORDER}
-    workers = _load_workers_registry(runs_dir) if runs_dir.exists() else {}
+
+    rdb, db_path = _load_runtime_db(project_root)
+
+    if rdb and db_path:
+        workers = {
+            w["ticket_id"]: {"pid": w["pid"], "branch": w["branch"], "worktree_path": w["worktree_path"]}
+            for w in rdb.list_workers(db_path)
+        }
+    else:
+        workers = _load_workers_registry(runs_dir) if runs_dir.exists() else {}
 
     # Collect tickets from runs/ (main repo)
     ticket_dirs: dict[str, Path] = {}
@@ -136,8 +161,11 @@ def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path |
         else:
             columns["queued"].append(item)
 
-    # Backlog: ai-ready issues not yet ingested
-    issue_index = _load_issue_index(runs_dir) if runs_dir.exists() else {}
+    # Backlog: ai-ready issues not yet ingested — SQLite primary, JSON fallback
+    if rdb and db_path:
+        issue_index = {str(r["issue_number"]): r["ticket_id"] for r in rdb.list_issue_intake(db_path)}
+    else:
+        issue_index = _load_issue_index(runs_dir) if runs_dir.exists() else {}
     ingested = set(issue_index.keys())
     for issue in _fetch_ai_ready_issues(repo):
         if str(issue["number"]) not in ingested:
