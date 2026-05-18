@@ -20,3 +20,4 @@ runs/*/runtime.log
 runs/runtime.log
 runs/daemon.log
 runs/daemon.log
+runs/*/runtime.log
