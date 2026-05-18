@@ -3,6 +3,8 @@ import TicketsPage from './pages/TicketsPage'
 import TicketDetailPage from './pages/TicketDetailPage'
 import DaemonPage from './pages/DaemonPage'
 import BoardPage from './pages/BoardPage'
+import ProjectMapPage from './pages/ProjectMapPage'
+import IssueMapperActivityPage from './pages/IssueMapperActivityPage'
 
 function Nav() {
   const linkClass = ({ isActive }) =>
@@ -14,6 +16,8 @@ function Nav() {
       <NavLink to="/" className={linkClass} end>Tickets</NavLink>
       <NavLink to="/daemon" className={linkClass}>Daemon</NavLink>
       <NavLink to="/board" className={linkClass}>Board</NavLink>
+      <NavLink to="/project-map" className={linkClass}>Project Map</NavLink>
+      <NavLink to="/mapper-activity" className={linkClass}>Mapper Activity</NavLink>
     </nav>
   )
 }
@@ -29,6 +33,8 @@ export default function App() {
             <Route path="/tickets/:id" element={<TicketDetailPage />} />
             <Route path="/daemon" element={<DaemonPage />} />
             <Route path="/board" element={<BoardPage />} />
+            <Route path="/project-map" element={<ProjectMapPage />} />
+            <Route path="/mapper-activity" element={<IssueMapperActivityPage />} />
           </Routes>
         </main>
       </div>

@@ -11,7 +11,7 @@ import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
-from .routes import daemon, health, issues, providers, tickets
+from .routes import daemon, health, issues, project_map, providers, tickets
 
 
 logging.basicConfig(
@@ -63,6 +63,7 @@ def create_app(
     app.include_router(tickets.router)
     app.include_router(issues.router)
     app.include_router(providers.router)
+    app.include_router(project_map.router)
 
     return app
 

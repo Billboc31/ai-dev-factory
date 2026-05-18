@@ -97,3 +97,49 @@ class BoardColumn(BaseModel):
 
 class BoardResponse(BaseModel):
     columns: list[BoardColumn]
+
+
+class ProjectMapTicket(BaseModel):
+    ticket_id: str | None = None
+    issue_number: int | None = None
+    title: str | None = None
+    status: str
+    depends_on: list[str] = []
+    depends_on_issues: list[int] = []
+    blocks: list[str] = []
+    ambiguities: list[str] = []
+
+
+class ProjectMapSummary(BaseModel):
+    total: int
+    done: int
+    running: int
+    waiting_human: int
+    runnable: int
+    blocked: int
+    not_ingested: int = 0
+
+
+class ProjectMapResponse(BaseModel):
+    generated_at: str | None = None
+    tickets: list[ProjectMapTicket] = []
+    parallelizable_groups: list[list[str]] = []
+    next_recommended: str | None = None
+    cycles: list[list[str]] = []
+    summary: ProjectMapSummary | None = None
+
+
+class ProjectMapActivityEntry(BaseModel):
+    timestamp: str
+    total_issues: int
+    runnable: list[str] = []
+    blocked: list[str] = []
+    parallelizable_groups: list[list[str]] = []
+    next_recommended: str | None = None
+    cycles: list[list[str]] = []
+    ambiguities: list[Any] = []
+    summary: Any = None
+
+
+class ProjectMapActivityResponse(BaseModel):
+    entries: list[ProjectMapActivityEntry] = []
