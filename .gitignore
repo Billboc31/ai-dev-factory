@@ -13,3 +13,5 @@ runs/daemon.pid
 runs/daemon.log
 runs/*/workflow-status.md
 runs/*/daemon.lock
+__pycache__/
+*.pyc
