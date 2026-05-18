@@ -16,3 +16,4 @@ runs/*/daemon.lock
 __pycache__/
 *.pyc
 runs/daemon.log
+runs/*/runtime.log
