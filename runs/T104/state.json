@@ -1,0 +1,9 @@
+{
+  "ticket_id": "T104",
+  "state": "TEST_COMPLETE",
+  "branch": "ticket/T104-t104-per-ticket-worker-worktrees-and-isolated-runt",
+  "issue_number": 46,
+  "updated_at": "2026-05-15T23:55:59Z",
+  "daemon_archived": true,
+  "issue_closed": true
+}

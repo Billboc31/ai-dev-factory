@@ -1,0 +1,10 @@
+{
+  "ticket_id": "T100",
+  "state": "TEST_COMPLETE",
+  "branch": "ticket/T100-t034-visual-workflow-timeline-in-dashboard",
+  "issue_number": 38,
+  "updated_at": "2026-05-15T16:29:55Z",
+  "pr_number": 40,
+  "pr_synced": true,
+  "issue_closed": true
+}
