@@ -31,3 +31,4 @@
 [2026-05-18T21:29:41Z] auto-run gate failed: working tree is not clean — commit or stash changes first
 [2026-05-18T21:30:20Z] auto-run start: state=INIT
 [2026-05-18T21:30:20Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-18T21:30:33Z] commit-checkpoint: skipped missing scope paths: package.json, package-lock.json
