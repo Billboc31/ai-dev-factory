@@ -377,36 +377,27 @@ def _ensure_clean_working_tree(ticket_id: str, auto_push: bool = False) -> bool:
 
     if code_scope_files:
         _log(f"{ticket_id}: pre-flight — dirty code-scope files detected: {code_scope_files!r}")
-    _log(f"{ticket_id}: pre-flight — triggering checkpoint commit (--include-code)")
-    commit_result = subprocess.run(
-        [sys.executable, str(RUN_TICKET), ticket_id, "--commit", "--include-code"],
-        capture_output=True, text=True, check=False,
-    )
-    for line in commit_result.stdout.splitlines():
-        _log(f"{ticket_id}: {line}")
-    for line in commit_result.stderr.splitlines():
-        _log(f"{ticket_id} [err]: {line}")
 
-    if commit_result.returncode not in (0, 1):
-        _log(f"{ticket_id}: pre-flight abort — checkpoint commit failed rc={commit_result.returncode}")
+    _log(f"{ticket_id}: pre-flight — triggering checkpoint_transition()")
+
+    try:
+        checkpoint_transition(
+            ticket_id,
+            f"{ticket_id}: pre-flight checkpoint — persist dirty runtime artifacts",
+            push=auto_push,
+            include_code=True,
+        )
+
+        _log(f"{ticket_id}: pre-flight checkpoint ok")
+        return True
+
+    except CheckpointError as exc:
+        _log(f"{ticket_id}: pre-flight abort — checkpoint failed: {exc}")
         return False
 
-    if commit_result.returncode == 0:
-        _log(f"checkpoint commit for {ticket_id}")
-        if auto_push:
-            push_result = subprocess.run(
-                [sys.executable, str(RUN_TICKET), ticket_id, "--push"],
-                capture_output=True, text=True, check=False,
-            )
-            for line in push_result.stdout.splitlines():
-                _log(f"{ticket_id}: {line}")
-            if push_result.returncode == 0:
-                _log(f"checkpoint push for {ticket_id}")
-            else:
-                _log(f"{ticket_id}: checkpoint push failed rc={push_result.returncode}")
-
-    return True
-
+    except DirtyTreeError as exc:
+        _log(f"{ticket_id}: DIRTY_RUNTIME_CHECKPOINT — pre-flight: {exc}")
+        return False
 
 def _commit_after_intake(ticket_id: str, runs_dir: Path) -> None:
     """Commit runs/ (including .issue-intake.json) after issue intake."""
