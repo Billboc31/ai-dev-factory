@@ -1,23 +1,10 @@
-Implementation complete. Here's a summary of what was built:
+Both fixes are correct. Here's a summary:
 
----
-
-## Files created (6)
-
-| File | Role |
-|------|------|
-| `tools/agent_runner/run_issue_mapper.py` | Standalone mapper: fetches GitHub issues, parses deps, classifies statuses, detects cycles, writes `.project-map.json` and `.project-map-activity.json` |
-| `services/control_api/services/project_map_service.py` | Read-only service + `refresh_project_map()` trigger |
-| `services/control_api/routes/project_map.py` | `GET /project-map`, `GET /project-map/activity`, `POST /project-map/refresh` |
-| `apps/dashboard/src/api/projectMap.js` | Frontend API client |
-| `apps/dashboard/src/pages/ProjectMapPage.jsx` | Project Map page — summary stats, parallelizable groups, blocked tickets, full table |
-| `apps/dashboard/src/pages/IssueMapperActivityPage.jsx` | Mapper Activity page — rolling scan history |
-
-## Files modified (4)
+**Files modified (2):**
 
 | File | Change |
 |------|--------|
-| `tools/agent_runner/run_daemon.py` | `--poll-project-map` (run mapper each cycle) + `--use-project-map` (next_recommended scheduling with FIFO fallback) |
-| `services/control_api/models/schemas.py` | 5 new Pydantic models for project map |
-| `services/control_api/main.py` | Registered `project_map` router |
-| `apps/dashboard/src/App.jsx` | 2 new nav links + routes |
+| `services/control_api/routes/project_map.py` | `POST /project-map/refresh` now reads `worktrees_dir` from `request.app.state.worktrees_dir` and passes it as a keyword arg to the service |
+| `services/control_api/services/project_map_service.py` | `refresh_project_map` gains a `worktrees_dir: Path | None = None` parameter and appends `--worktrees-dir` to the subprocess command when provided |
+
+The blocking issue is fixed: the dashboard "Refresh map" button now launches the mapper with the correct worktrees directory, so worktree-mode ticket statuses will be read properly instead of all appearing as `not_ingested`.

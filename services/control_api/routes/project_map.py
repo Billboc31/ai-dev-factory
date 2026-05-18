@@ -26,5 +26,10 @@ def get_project_map_activity(request: Request) -> ProjectMapActivityResponse:
 def refresh_project_map(request: Request, background_tasks: BackgroundTasks) -> ActionResult:
     logger.info("api: POST /project-map/refresh")
     project_root = _root(request)
-    background_tasks.add_task(project_map_service.refresh_project_map, project_root)
+    worktrees_dir = request.app.state.worktrees_dir
+    background_tasks.add_task(
+        project_map_service.refresh_project_map,
+        project_root,
+        worktrees_dir=worktrees_dir,
+    )
     return ActionResult(ok=True, message="issue mapper started in background")

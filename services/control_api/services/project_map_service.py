@@ -96,7 +96,11 @@ def get_project_map_activity(project_root: Path) -> ProjectMapActivityResponse:
     return ProjectMapActivityResponse(entries=entries)
 
 
-def refresh_project_map(project_root: Path, repo: str | None = None) -> bool:
+def refresh_project_map(
+    project_root: Path,
+    repo: str | None = None,
+    worktrees_dir: Path | None = None,
+) -> bool:
     """Trigger run_issue_mapper.py synchronously. Returns True on success."""
     mapper = Path(__file__).resolve().parent.parent.parent.parent / "tools" / "agent_runner" / "run_issue_mapper.py"
     if not mapper.exists():
@@ -104,5 +108,7 @@ def refresh_project_map(project_root: Path, repo: str | None = None) -> bool:
     cmd = [sys.executable, str(mapper), "--runs-dir", str(_runs_dir(project_root))]
     if repo:
         cmd += ["--repo", repo]
+    if worktrees_dir:
+        cmd += ["--worktrees-dir", str(worktrees_dir)]
     result = subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=str(project_root))
     return result.returncode == 0
