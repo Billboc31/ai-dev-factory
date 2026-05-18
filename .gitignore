@@ -17,3 +17,4 @@ __pycache__/
 *.pyc
 runs/daemon.log
 runs/*/runtime.log
+runs/runtime.log
