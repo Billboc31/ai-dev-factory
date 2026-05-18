@@ -1,0 +1,70 @@
+[2026-05-11T22:38:53Z] auto-init: state=INIT branch=ticket/T013-git-workflow-automation-primitives
+[2026-05-11T22:38:58Z] auto-run start: state=INIT
+[2026-05-11T22:38:58Z] auto-run: running step=planner
+[2026-05-11T22:38:58Z] compose: global-context=docs/ai/global-context.md
+[2026-05-11T22:38:58Z] compose: role=ai/roles/planner.md
+[2026-05-11T22:38:58Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-11T22:38:58Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-11T22:38:58Z] compose: skill=ai/skills/documentation.md
+[2026-05-11T22:38:58Z] compose: task (canonical prompt)
+[2026-05-11T22:40:43Z] auto-run: step=planner done rc=0
+[2026-05-11T22:40:43Z] planner validation failed: section manquante: «contexte»
+[2026-05-11T22:40:43Z] planner validation failed: section manquante: «objectif»
+[2026-05-11T22:40:43Z] planner validation failed: section manquante: «inclus»
+[2026-05-11T22:40:43Z] planner validation failed: section manquante: «hors scope»
+[2026-05-11T22:40:43Z] planner validation failed: section manquante: «critères d'acceptation»
+[2026-05-11T22:40:43Z] planner validation: rejected — state unchanged
+[2026-05-11T22:58:31Z] set-state: INIT → PLAN_APPROVED (human)
+[2026-05-11T22:58:40Z] auto-run start: state=PLAN_APPROVED
+[2026-05-11T22:58:40Z] auto-run gate failed: working tree is not clean — commit or stash changes before running --auto
+[2026-05-11T22:58:53Z] auto-run start: state=PLAN_APPROVED
+[2026-05-11T22:58:53Z] auto-run: running step=coder
+[2026-05-11T22:58:53Z] compose: global-context=docs/ai/global-context.md
+[2026-05-11T22:58:53Z] compose: role=ai/roles/coder.md
+[2026-05-11T22:58:53Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-11T22:58:53Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-11T22:58:53Z] compose: skill=ai/skills/code-quality.md
+[2026-05-11T22:58:53Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-11T22:58:53Z] compose: skill=ai/skills/security.md
+[2026-05-11T22:58:53Z] compose: task (canonical prompt)
+[2026-05-11T23:01:54Z] auto-run: step=coder done rc=0
+[2026-05-11T23:01:54Z] auto-run: transition PLAN_APPROVED → IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-11T23:02:13Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-11T23:02:13Z] auto-run gate failed: working tree is not clean — commit or stash changes before running --auto
+[2026-05-11T23:02:44Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-11T23:02:44Z] auto-run: running step=review
+[2026-05-11T23:02:44Z] compose: global-context=docs/ai/global-context.md
+[2026-05-11T23:02:44Z] compose: role=ai/roles/reviewer.md
+[2026-05-11T23:02:44Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-11T23:02:44Z] compose: skill=ai/skills/code-quality.md
+[2026-05-11T23:02:44Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-11T23:02:44Z] compose: skill=ai/skills/security.md
+[2026-05-11T23:02:44Z] compose: task (canonical prompt)
+[2026-05-11T23:05:03Z] auto-run: step=review done rc=0
+[2026-05-11T23:05:03Z] auto-run: review parsed from: runs/T013/reviews/implementation-review.md
+[2026-05-11T23:05:03Z] auto-run: no keyword found in runs/T013/reviews/implementation-review.md
+[2026-05-11T23:06:48Z] set-state: IMPLEMENTATION_REVIEW_NEEDED → IMPLEMENTATION_APPROVED (human)
+[2026-05-11T23:07:11Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-11T23:07:11Z] auto-run: running step=tester
+[2026-05-11T23:07:11Z] compose: global-context=docs/ai/global-context.md
+[2026-05-11T23:07:11Z] compose: role=ai/roles/tester.md
+[2026-05-11T23:07:11Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-11T23:07:11Z] compose: skill=ai/skills/testing.md
+[2026-05-11T23:07:11Z] compose: skill=ai/skills/debugging.md
+[2026-05-11T23:07:11Z] compose: task (canonical prompt)
+[2026-05-11T23:08:01Z] commit-checkpoint: refused — nothing to commit in runs/
+[2026-05-11T23:08:07Z] ensure-branch: switching to existing branch ticket/T013-git-workflow-automation-primitives
+[2026-05-11T23:08:07Z] ensure-branch: done branch=ticket/T013-git-workflow-automation-primitives
+[2026-05-11T23:08:10Z] ensure-branch: refused — working tree is not clean — commit or stash changes first
+[2026-05-11T23:08:13Z] push: pushing branch=ticket/T013-git-workflow-automation-primitives
+[2026-05-11T23:08:15Z] push: done branch=ticket/T013-git-workflow-automation-primitives
+[2026-05-11T23:08:21Z] push: refused — current branch 'ticket/T013-git-workflow-automation-primitives' does not match state branch 'ticket/T013-some-other-branch'
+[2026-05-11T23:08:24Z] push: warning — state.json absent, branch not verified
+[2026-05-11T23:08:24Z] push: pushing branch=ticket/T013-work
+[2026-05-11T23:08:25Z] push: failed branch=ticket/T013-work
+[2026-05-11T23:08:30Z] commit-checkpoint: sha=df51674 message='T013: test state-aware message'
+[2026-05-11T23:08:33Z] commit-checkpoint: sha=140ba8d message='T013: checkpoint [IMPLEMENTATION_APPROVED] — update workflow artifacts'
+[2026-05-11T23:09:15Z] set-state: IMPLEMENTATION_APPROVED → TEST_COMPLETE (human)
+[2026-05-11T23:09:17Z] commit-checkpoint: sha=56363a3 message='T013: checkpoint [TEST_COMPLETE] — update workflow artifacts'
+[2026-05-11T23:09:25Z] auto-run: step=tester done rc=0
+[2026-05-11T23:09:25Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE

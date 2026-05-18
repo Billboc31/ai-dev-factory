@@ -1,0 +1,116 @@
+[2026-05-15T12:53:36Z] intake: issue=#32 title='T031 — Daemon terminal-ticket skip and commit/checkpoint hardening' branch=ticket/T031-daemon-terminal-skip-commit-hardening
+[2026-05-15T12:53:36Z] intake: done
+[2026-05-15T12:53:48Z] commit-checkpoint: sha=9d2ef7c message='T031: checkpoint [INIT] — update workflow artifacts'
+[2026-05-15T12:54:06Z] auto-run start: state=INIT
+[2026-05-15T12:54:06Z] auto-run: running step=planner
+[2026-05-15T12:54:06Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-05-15T12:54:06Z] prompt: generic fallback — injecting runs/T031/ticket.md
+[2026-05-15T12:54:06Z] compose: global-context=docs/ai/global-context.md
+[2026-05-15T12:54:06Z] compose: role=ai/roles/planner.md
+[2026-05-15T12:54:06Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-15T12:54:06Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-15T12:54:06Z] compose: skill=ai/skills/documentation.md
+[2026-05-15T12:54:06Z] compose: task (canonical prompt)
+[2026-05-15T12:54:06Z] snapshot: runtime-prompt=runs/T031/prompts/planner-attempt-1.md
+[2026-05-15T12:59:49Z] auto-run: step=planner done rc=0
+[2026-05-15T12:59:49Z] planner validation success
+[2026-05-15T12:59:49Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-15T13:03:53Z] human-approval: approve-plan — PLAN_REVIEW_NEEDED → PLAN_APPROVED
+[2026-05-15T13:03:58Z] commit-checkpoint: sha=5361cb2 message='T031: checkpoint [PLAN_APPROVED] — update workflow artifacts'
+[2026-05-15T13:04:02Z] auto-run start: state=PLAN_APPROVED
+[2026-05-15T13:04:02Z] auto-run: running step=coder
+[2026-05-15T13:04:02Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-15T13:04:02Z] prompt: generic fallback — injecting runs/T031/ticket.md
+[2026-05-15T13:04:02Z] compose: global-context=docs/ai/global-context.md
+[2026-05-15T13:04:02Z] compose: role=ai/roles/coder.md
+[2026-05-15T13:04:02Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-15T13:04:02Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-15T13:04:02Z] compose: skill=ai/skills/code-quality.md
+[2026-05-15T13:04:02Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-15T13:04:02Z] compose: skill=ai/skills/security.md
+[2026-05-15T13:04:02Z] compose: task (canonical prompt)
+[2026-05-15T13:04:02Z] snapshot: runtime-prompt=runs/T031/prompts/coder-attempt-1.md
+[2026-05-15T13:11:54Z] auto-run: step=coder done rc=0
+[2026-05-15T13:11:54Z] auto-run: transition PLAN_APPROVED → IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-15T13:12:08Z] commit-checkpoint: failed to stage package.json
+[2026-05-15T13:13:36Z] commit-checkpoint: sha=86d24ec message='T031: checkpoint [IMPLEMENTATION_REVIEW_NEEDED] — update workflow artifacts'
+[2026-05-15T13:13:42Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-15T13:13:42Z] auto-run: running step=review
+[2026-05-15T13:13:42Z] auto-run: review decision context: context_file=runs/T031/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-15T13:13:42Z] prompt: resolved=prompts/generic/review.md source=generic
+[2026-05-15T13:13:42Z] prompt: generic fallback — injecting runs/T031/ticket.md
+[2026-05-15T13:13:42Z] compose: global-context=docs/ai/global-context.md
+[2026-05-15T13:13:42Z] compose: role=ai/roles/reviewer.md
+[2026-05-15T13:13:42Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-15T13:13:42Z] compose: skill=ai/skills/code-quality.md
+[2026-05-15T13:13:42Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-15T13:13:42Z] compose: skill=ai/skills/security.md
+[2026-05-15T13:13:42Z] compose: task (canonical prompt)
+[2026-05-15T13:13:42Z] compose: extra-context=runs/T031/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-15T13:13:42Z] snapshot: runtime-prompt=runs/T031/prompts/review-attempt-1.md
+[2026-05-15T13:17:22Z] auto-run: step=review done rc=0
+[2026-05-15T13:17:22Z] auto-run: review parsed from: runs/T031/reviews/implementation-review.md
+[2026-05-15T13:17:22Z] auto-run: review keyword detected: IMPLEMENTATION_FIX_REQUIRED
+[2026-05-15T13:17:22Z] auto-run: transition IMPLEMENTATION_REVIEW_NEEDED → IMPLEMENTATION_FIX_REQUIRED
+[2026-05-15T13:17:22Z] auto-run: fix artifact written: runs/T031/fixes/implementation-fix-1.md
+[2026-05-15T13:18:42Z] commit-checkpoint: sha=c6dfb85 message='T031: checkpoint [IMPLEMENTATION_FIX_REQUIRED] — update workflow artifacts'
+[2026-05-15T13:18:45Z] auto-run start: state=IMPLEMENTATION_FIX_REQUIRED
+[2026-05-15T13:18:45Z] auto-run: running step=coder
+[2026-05-15T13:18:45Z] auto-run: fix context: previous_output=runs/T031/implementation-output.md
+[2026-05-15T13:18:45Z] auto-run: fix context: review=runs/T031/reviews/implementation-review.md
+[2026-05-15T13:18:45Z] auto-run: fix context: fix_instructions=runs/T031/fixes/implementation-fix-1.md
+[2026-05-15T13:18:45Z] auto-run: fix context: context_file=runs/T031/fixes/context-20260515T131845Z.md
+[2026-05-15T13:18:45Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-15T13:18:45Z] prompt: generic fallback — injecting runs/T031/ticket.md
+[2026-05-15T13:18:45Z] compose: global-context=docs/ai/global-context.md
+[2026-05-15T13:18:45Z] compose: role=ai/roles/coder.md
+[2026-05-15T13:18:45Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-15T13:18:45Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-15T13:18:45Z] compose: skill=ai/skills/code-quality.md
+[2026-05-15T13:18:45Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-15T13:18:45Z] compose: skill=ai/skills/security.md
+[2026-05-15T13:18:45Z] compose: task (canonical prompt)
+[2026-05-15T13:18:45Z] compose: extra-context=runs/T031/fixes/context-20260515T131845Z.md
+[2026-05-15T13:18:45Z] snapshot: runtime-prompt=runs/T031/prompts/coder-attempt-2.md
+[2026-05-15T13:19:19Z] auto-run: step=coder done rc=0
+[2026-05-15T13:19:19Z] auto-run: transition IMPLEMENTATION_FIX_REQUIRED → IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-15T13:20:21Z] commit-checkpoint: failed to stage package.json
+[2026-05-15T13:29:57Z] commit-checkpoint: skipped missing scope paths: package.json, package-lock.json
+[2026-05-15T13:29:57Z] commit-checkpoint: sha=88c98e4 message='T031: checkpoint [IMPLEMENTATION_REVIEW_NEEDED] — update workflow artifacts'
+[2026-05-15T13:30:05Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-15T13:30:05Z] auto-run: running step=review
+[2026-05-15T13:30:05Z] auto-run: review decision context: context_file=runs/T031/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-15T13:30:05Z] prompt: resolved=prompts/generic/review.md source=generic
+[2026-05-15T13:30:05Z] prompt: generic fallback — injecting runs/T031/ticket.md
+[2026-05-15T13:30:05Z] compose: global-context=docs/ai/global-context.md
+[2026-05-15T13:30:05Z] compose: role=ai/roles/reviewer.md
+[2026-05-15T13:30:05Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-15T13:30:05Z] compose: skill=ai/skills/code-quality.md
+[2026-05-15T13:30:05Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-15T13:30:05Z] compose: skill=ai/skills/security.md
+[2026-05-15T13:30:05Z] compose: task (canonical prompt)
+[2026-05-15T13:30:05Z] compose: extra-context=runs/T031/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-15T13:30:05Z] snapshot: runtime-prompt=runs/T031/prompts/review-attempt-2.md
+[2026-05-15T13:32:50Z] auto-run: step=review done rc=0
+[2026-05-15T13:32:50Z] auto-run: review parsed from: runs/T031/reviews/implementation-review.md
+[2026-05-15T13:32:50Z] auto-run: review keyword detected: IMPLEMENTATION_APPROVED
+[2026-05-15T13:32:50Z] auto-run: transition IMPLEMENTATION_REVIEW_NEEDED → IMPLEMENTATION_APPROVED
+[2026-05-15T13:34:20Z] commit-checkpoint: skipped missing scope paths: package.json, package-lock.json
+[2026-05-15T13:34:21Z] commit-checkpoint: sha=69d1f81 message='T031: checkpoint [IMPLEMENTATION_APPROVED] — update workflow artifacts'
+[2026-05-15T13:34:23Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-15T13:34:23Z] auto-run: running step=tester
+[2026-05-15T13:34:23Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-15T13:34:23Z] prompt: generic fallback — injecting runs/T031/ticket.md
+[2026-05-15T13:34:23Z] compose: global-context=docs/ai/global-context.md
+[2026-05-15T13:34:23Z] compose: role=ai/roles/tester.md
+[2026-05-15T13:34:23Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-15T13:34:23Z] compose: skill=ai/skills/testing.md
+[2026-05-15T13:34:23Z] compose: skill=ai/skills/debugging.md
+[2026-05-15T13:34:23Z] compose: task (canonical prompt)
+[2026-05-15T13:34:23Z] snapshot: runtime-prompt=runs/T031/prompts/tester-attempt-1.md
+[2026-05-15T13:36:40Z] auto-run: step=tester done rc=0
+[2026-05-15T13:36:40Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-15T13:36:51Z] commit-checkpoint: skipped missing scope paths: package.json, package-lock.json
+[2026-05-15T13:36:51Z] commit-checkpoint: sha=2c184e9 message='T031: checkpoint [TEST_COMPLETE] — update workflow artifacts'
+[2026-05-15T13:36:59Z] push: pushing branch=ticket/T031-daemon-terminal-skip-commit-hardening
+[2026-05-15T13:37:01Z] push: done branch=ticket/T031-daemon-terminal-skip-commit-hardening
