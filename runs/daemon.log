@@ -232230,3 +232230,14 @@ fatal: Not possible to fast-forward, aborting.
 [2026-05-18T21:25:47Z] [daemon] detected T111 state=INIT
 [2026-05-18T21:25:49Z] [daemon] T111: sync branch 'ticket/T111-t111-sqlite-runtime-state-store-for-daemon-intake' ok
 [2026-05-18T21:25:49Z] [daemon] T111: pre-flight — triggering checkpoint_transition()
+[2026-05-18T21:25:49Z] [daemon] T111: pre-flight checkpoint ok
+[2026-05-18T21:25:49Z] [daemon] Running ticket command: /Users/pierrebocquet/ai-dev-factory/.venv/bin/python3.14 /Users/pierrebocquet/ai-dev-factory/tools/agent_runner/run_ticket.py T111 --auto --exec-cmd 'claude --dangerously-skip-permissions'
+[2026-05-18T21:25:49Z] [daemon] T111: DEBUG dirty working tree:
+[2026-05-18T21:25:49Z] [daemon] T111:  M runs/T111/runtime.log
+[2026-05-18T21:25:49Z] [daemon] T111:  M runs/daemon.log
+[2026-05-18T21:25:49Z] [daemon] T111: 
+[2026-05-18T21:25:49Z] [daemon] T111 [err]: error: working tree is not clean — commit or stash changes first
+[2026-05-18T21:25:49Z] [daemon] T111: done rc=2
+[2026-05-18T21:25:49Z] [daemon] T111: no failure class in runtime.log — retry policy not applied
+[2026-05-18T21:25:49Z] [daemon] detected TTEST2 state=PLAN_REVIEW_NEEDED (human gate — checkpoint for visibility)
+[2026-05-18T21:25:49Z] [daemon] TTEST2: pre-PR checkpoint commit
