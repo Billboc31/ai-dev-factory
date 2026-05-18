@@ -1,0 +1,40 @@
+[2026-05-18T07:27:33Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: T099: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: ools/agent_runner/run_daemon.py, tools/agent_runner/run_issue_intake.py, tools/agent_runner/run_ticket.py, runs/T109/prompts/coder-attempt-1.md, tests/test_runtime_checkpoint.py, tools/agent_runner/runtime_checkpoint.py
+[2026-05-18T07:27:33Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: T099: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: ools/agent_runner/run_daemon.py, tools/agent_runner/run_issue_intake.py, tools/agent_runner/run_ticket.py, runs/T109/prompts/coder-attempt-1.md, tests/test_runtime_checkpoint.py, tools/agent_runner/runtime_checkpoint.py
+[2026-05-18T07:27:33Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: T099: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: ools/agent_runner/run_daemon.py, tools/agent_runner/run_issue_intake.py, tools/agent_runner/run_ticket.py, runs/T109/prompts/coder-attempt-1.md, tests/test_runtime_checkpoint.py, tools/agent_runner/runtime_checkpoint.py
+[2026-05-18T07:27:33Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: T099: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: ools/agent_runner/run_daemon.py, tools/agent_runner/run_issue_intake.py, tools/agent_runner/run_ticket.py, runs/T109/prompts/coder-attempt-1.md, tests/test_runtime_checkpoint.py, tools/agent_runner/runtime_checkpoint.py
+[2026-05-18T07:27:35Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: T099: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: ools/agent_runner/run_daemon.py, tools/agent_runner/run_issue_intake.py, tools/agent_runner/run_ticket.py, runs/T109/prompts/coder-attempt-1.md, tests/test_runtime_checkpoint.py, tools/agent_runner/runtime_checkpoint.py
+[2026-05-18T07:27:35Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: T099: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: ools/agent_runner/run_daemon.py, tools/agent_runner/run_issue_intake.py, tools/agent_runner/run_ticket.py, runs/T109/prompts/coder-attempt-1.md, tests/test_runtime_checkpoint.py, tools/agent_runner/runtime_checkpoint.py
+[2026-05-18T07:27:38Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: T099: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: ools/agent_runner/run_daemon.py, tools/agent_runner/run_issue_intake.py, tools/agent_runner/run_ticket.py, runs/T109/prompts/coder-attempt-1.md, tests/test_runtime_checkpoint.py, tools/agent_runner/runtime_checkpoint.py
+[2026-05-18T07:27:38Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: T099: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: ools/agent_runner/run_daemon.py, tools/agent_runner/run_issue_intake.py, tools/agent_runner/run_ticket.py, runs/T109/prompts/coder-attempt-1.md, tests/test_runtime_checkpoint.py, tools/agent_runner/runtime_checkpoint.py
+[2026-05-18T07:28:04Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: T099: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: uns/T109/runtime.log, tests/__pycache__/test_commit_push.cpython-314-pytest-9.0.3.pyc, tests/test_commit_push.py
+[2026-05-18T07:28:04Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: T099: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: uns/T109/runtime.log, tests/__pycache__/test_commit_push.cpython-314-pytest-9.0.3.pyc, tests/test_commit_push.py
+[2026-05-18T07:28:04Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: T099: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: uns/T109/runtime.log, tests/__pycache__/test_commit_push.cpython-314-pytest-9.0.3.pyc, tests/test_commit_push.py
+[2026-05-18T07:28:04Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: T099: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: uns/T109/runtime.log, tests/__pycache__/test_commit_push.cpython-314-pytest-9.0.3.pyc, tests/test_commit_push.py
+[2026-05-18T07:28:06Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: T099: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: uns/T109/runtime.log, tests/__pycache__/test_commit_push.cpython-314-pytest-9.0.3.pyc, tests/test_commit_push.py
+[2026-05-18T07:28:06Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: T099: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: uns/T109/runtime.log, tests/__pycache__/test_commit_push.cpython-314-pytest-9.0.3.pyc, tests/test_commit_push.py
+[2026-05-18T07:28:08Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: T099: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: uns/T109/runtime.log, tests/__pycache__/test_commit_push.cpython-314-pytest-9.0.3.pyc, tests/test_commit_push.py
+[2026-05-18T07:28:08Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: T099: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: uns/T109/runtime.log, tests/__pycache__/test_commit_push.cpython-314-pytest-9.0.3.pyc, tests/test_commit_push.py
+[2026-05-18T07:30:39Z] bootstrap checkpoint completed
+[2026-05-18T07:30:39Z] bootstrap checkpoint completed
+[2026-05-18T07:30:39Z] bootstrap checkpoint completed
+[2026-05-18T07:30:39Z] bootstrap checkpoint completed
+[2026-05-18T07:30:39Z] bootstrap checkpoint completed
+[2026-05-18T07:30:39Z] checkpoint push for T099
+[2026-05-18T07:31:50Z] bootstrap checkpoint completed
+[2026-05-18T07:31:50Z] bootstrap checkpoint completed
+[2026-05-18T07:31:50Z] bootstrap checkpoint completed
+[2026-05-18T07:31:50Z] bootstrap checkpoint completed
+[2026-05-18T07:31:50Z] bootstrap checkpoint completed
+[2026-05-18T07:31:50Z] checkpoint push for T099
+[2026-05-18T07:31:50Z] bootstrap checkpoint: failed: add failed
+[2026-05-18T07:31:50Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: DIRTY_RUNTIME_CHECKPOINT
+[2026-05-18T07:31:50Z] bootstrap checkpoint: failed: unexpected error
+[2026-05-18T22:50:27Z] bootstrap checkpoint completed
+[2026-05-18T22:50:27Z] bootstrap checkpoint completed
+[2026-05-18T22:50:27Z] bootstrap checkpoint completed
+[2026-05-18T22:50:27Z] bootstrap checkpoint completed
+[2026-05-18T22:50:27Z] bootstrap checkpoint completed
+[2026-05-18T22:50:27Z] checkpoint push for T099
+[2026-05-18T22:50:27Z] bootstrap checkpoint: failed: add failed
+[2026-05-18T22:50:27Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: DIRTY_RUNTIME_CHECKPOINT
+[2026-05-18T22:50:27Z] bootstrap checkpoint: failed: unexpected error

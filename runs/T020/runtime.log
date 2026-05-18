@@ -1,0 +1,74 @@
+[2026-05-12T22:44:37Z] ensure-branch: refused — working tree is not clean — commit or stash changes first
+[2026-05-12T22:47:26Z] ensure-branch: creating new branch ticket/T020-local-workflow-daemon
+[2026-05-12T22:47:26Z] ensure-branch: done branch=ticket/T020-local-workflow-daemon
+[2026-05-12T22:47:32Z] auto-init: state=INIT branch=ticket/T020-local-workflow-daemon
+[2026-05-12T22:47:32Z] ticket-source: copied 'tickets/TODO/T020-local-workflow-daemon.md' → runs/T020/ticket.md
+[2026-05-12T22:47:43Z] auto-run start: state=INIT
+[2026-05-12T22:47:43Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-12T22:48:24Z] commit-checkpoint: sha=f68de8c message='T020: checkpoint [INIT] — update workflow artifacts'
+[2026-05-12T22:48:30Z] auto-run start: state=INIT
+[2026-05-12T22:48:30Z] auto-run: running step=planner
+[2026-05-12T22:48:30Z] compose: global-context=docs/ai/global-context.md
+[2026-05-12T22:48:30Z] compose: role=ai/roles/planner.md
+[2026-05-12T22:48:30Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-12T22:48:30Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-12T22:48:30Z] compose: skill=ai/skills/documentation.md
+[2026-05-12T22:48:30Z] compose: task (canonical prompt)
+[2026-05-12T22:48:30Z] snapshot: runtime-prompt=runs/T020/prompts/planner-attempt-1.md
+[2026-05-12T22:49:53Z] auto-run: step=planner done rc=0
+[2026-05-12T22:49:53Z] planner validation success
+[2026-05-12T22:49:53Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-12T22:50:52Z] set-state: PLAN_REVIEW_NEEDED → PLAN_APPROVED (human)
+[2026-05-12T22:50:57Z] commit-checkpoint: sha=0112200 message='T020: checkpoint [PLAN_APPROVED] — update workflow artifacts'
+[2026-05-12T22:51:03Z] auto-run start: state=PLAN_APPROVED
+[2026-05-12T22:51:03Z] auto-run: running step=coder
+[2026-05-12T22:51:03Z] compose: global-context=docs/ai/global-context.md
+[2026-05-12T22:51:03Z] compose: role=ai/roles/coder.md
+[2026-05-12T22:51:03Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-12T22:51:03Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-12T22:51:03Z] compose: skill=ai/skills/code-quality.md
+[2026-05-12T22:51:03Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-12T22:51:03Z] compose: skill=ai/skills/security.md
+[2026-05-12T22:51:03Z] compose: task (canonical prompt)
+[2026-05-12T22:51:03Z] snapshot: runtime-prompt=runs/T020/prompts/coder-attempt-1.md
+[2026-05-12T22:54:30Z] auto-run: step=coder done rc=0
+[2026-05-12T22:54:30Z] auto-run: transition PLAN_APPROVED → IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-12T22:54:39Z] commit-checkpoint: sha=baf31bf message='T020: checkpoint [IMPLEMENTATION_REVIEW_NEEDED] — update workflow artifacts'
+[2026-05-12T22:54:46Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-12T22:54:46Z] auto-run: running step=review
+[2026-05-12T22:54:46Z] auto-run: review decision context: context_file=runs/T020/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-12T22:54:46Z] compose: global-context=docs/ai/global-context.md
+[2026-05-12T22:54:46Z] compose: role=ai/roles/reviewer.md
+[2026-05-12T22:54:46Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-12T22:54:46Z] compose: skill=ai/skills/code-quality.md
+[2026-05-12T22:54:46Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-12T22:54:46Z] compose: skill=ai/skills/security.md
+[2026-05-12T22:54:46Z] compose: task (canonical prompt)
+[2026-05-12T22:54:46Z] compose: extra-context=runs/T020/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-12T22:54:46Z] snapshot: runtime-prompt=runs/T020/prompts/review-attempt-1.md
+[2026-05-12T22:56:55Z] auto-run: step=review done rc=0
+[2026-05-12T22:56:55Z] auto-run: review parsed from: runs/T020/reviews/implementation-review.md
+[2026-05-12T22:56:55Z] auto-run: keyword detected: IMPLEMENTATION_APPROVED
+[2026-05-12T22:56:55Z] auto-run: transition IMPLEMENTATION_REVIEW_NEEDED → IMPLEMENTATION_APPROVED
+[2026-05-12T23:00:00Z] commit-checkpoint: sha=dca1760 message='T020: checkpoint [IMPLEMENTATION_APPROVED] — update workflow artifacts'
+[2026-05-12T23:00:07Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-12T23:00:07Z] auto-run: running step=tester
+[2026-05-12T23:00:07Z] auto-run: runtime failure: empty_output (rc=2)
+[2026-05-12T23:00:07Z] auto-run: step=tester done rc=2
+[2026-05-12T23:00:07Z] auto-run: runtime failure: empty_output (rc=2)
+[2026-05-12T23:00:07Z] auto-run: step=tester failed rc=2, state unchanged=IMPLEMENTATION_APPROVED
+[2026-05-12T23:01:18Z] commit-checkpoint: sha=65f6e8f message='T020: checkpoint [IMPLEMENTATION_APPROVED] — update workflow artifacts'
+[2026-05-12T23:01:21Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-12T23:01:21Z] auto-run: running step=tester
+[2026-05-12T23:01:21Z] compose: global-context=docs/ai/global-context.md
+[2026-05-12T23:01:21Z] compose: role=ai/roles/tester.md
+[2026-05-12T23:01:21Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-12T23:01:21Z] compose: skill=ai/skills/testing.md
+[2026-05-12T23:01:21Z] compose: skill=ai/skills/debugging.md
+[2026-05-12T23:01:21Z] compose: task (canonical prompt)
+[2026-05-12T23:01:21Z] snapshot: runtime-prompt=runs/T020/prompts/tester-attempt-1.md
+[2026-05-12T23:03:25Z] auto-run: step=tester done rc=0
+[2026-05-12T23:03:25Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-12T23:03:31Z] commit-checkpoint: sha=10de356 message='T020: checkpoint [TEST_COMPLETE] — update workflow artifacts'
+[2026-05-12T23:03:38Z] push: pushing branch=ticket/T020-local-workflow-daemon
+[2026-05-12T23:03:40Z] push: done branch=ticket/T020-local-workflow-daemon
