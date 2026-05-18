@@ -29,3 +29,12 @@
 [2026-05-18T07:31:50Z] bootstrap checkpoint: failed: add failed
 [2026-05-18T07:31:50Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: DIRTY_RUNTIME_CHECKPOINT
 [2026-05-18T07:31:50Z] bootstrap checkpoint: failed: unexpected error
+[2026-05-18T22:50:27Z] bootstrap checkpoint completed
+[2026-05-18T22:50:27Z] bootstrap checkpoint completed
+[2026-05-18T22:50:27Z] bootstrap checkpoint completed
+[2026-05-18T22:50:27Z] bootstrap checkpoint completed
+[2026-05-18T22:50:27Z] bootstrap checkpoint completed
+[2026-05-18T22:50:27Z] checkpoint push for T099
+[2026-05-18T22:50:27Z] bootstrap checkpoint: failed: add failed
+[2026-05-18T22:50:27Z] bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: DIRTY_RUNTIME_CHECKPOINT
+[2026-05-18T22:50:27Z] bootstrap checkpoint: failed: unexpected error
