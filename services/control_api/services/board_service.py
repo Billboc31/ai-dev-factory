@@ -9,7 +9,6 @@ import subprocess
 from pathlib import Path
 
 from ..models.schemas import BoardColumn, BoardItem, BoardResponse
-from .runtime_resolver import resolve_runs_dir, resolve_state_dir
 
 _TICKET_RE = re.compile(r"^T\d{3,}$")
 _HUMAN_GATE_STATES = frozenset({"PLAN_REVIEW_NEEDED", "TEST_COMPLETE"})
@@ -67,11 +66,7 @@ def _load_issue_index(runs_dir: Path) -> dict[str, str]:
 
 def _load_runtime_db(project_root: Path):
     """Load the runtime_db module if the SQLite DB exists. Returns (module, db_path) or (None, None)."""
-    runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
-    if runtime_root:
-        db_path = Path(runtime_root) / ".runtime" / "ai-dev-factory.sqlite"
-    else:
-        db_path = project_root / ".runtime" / "ai-dev-factory.sqlite"
+    db_path = project_root / ".runtime" / "ai-dev-factory.sqlite"
     if not db_path.exists():
         return None, None
     try:
@@ -98,8 +93,7 @@ def _fetch_ai_ready_issues(repo: str | None) -> list[dict]:
 
 
 def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path | None = None) -> BoardResponse:
-    runs_dir = resolve_runs_dir(project_root)
-    state_dir = resolve_state_dir(project_root)
+    runs_dir = project_root / "runs"
     columns: dict[str, list[BoardItem]] = {col_id: [] for col_id, _ in _COLUMN_ORDER}
 
     rdb, db_path = _load_runtime_db(project_root)
@@ -110,7 +104,7 @@ def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path |
             for w in rdb.list_workers(db_path)
         }
     else:
-        workers = _load_workers_registry(state_dir) if state_dir.exists() else {}
+        workers = _load_workers_registry(runs_dir) if runs_dir.exists() else {}
 
     # Collect tickets from runs/ (main repo)
     ticket_dirs: dict[str, Path] = {}
@@ -207,7 +201,7 @@ def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path |
     if rdb and db_path:
         issue_index = {str(r["issue_number"]): r["ticket_id"] for r in rdb.list_issue_intake(db_path)}
     else:
-        issue_index = _load_issue_index(state_dir) if state_dir.exists() else {}
+        issue_index = _load_issue_index(runs_dir) if runs_dir.exists() else {}
     ingested = set(issue_index.keys())
     for issue in _fetch_ai_ready_issues(repo):
         if str(issue["number"]) not in ingested:

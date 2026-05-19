@@ -2,8 +2,7 @@
 """SQLite runtime state store for ai-dev-factory daemon.
 
 Single-file module — stdlib only (sqlite3, subprocess, json, datetime).
-DB path: RUNTIME_ROOT/.runtime/... when AI_DEV_FACTORY_RUNTIME_ROOT is set;
-otherwise resolved via git rev-parse --git-common-dir so all worktrees share one DB.
+DB path is resolved from the git common dir so all worktrees share one DB.
 """
 
 from __future__ import annotations
@@ -70,35 +69,27 @@ def _now_iso() -> str:
 
 
 def get_db_path() -> Path | None:
-    """Resolve the SQLite DB path.
+    """Resolve the SQLite DB path from RUNTIME_ROOT env var or the git common dir.
 
-    When AI_DEV_FACTORY_RUNTIME_ROOT is set (Docker/runtime), returns RUNTIME_ROOT/.runtime/...
-    Dev fallback: use git rev-parse --git-common-dir so all worktrees share one DB even when
-    this module is loaded from a worktree copy (where __file__-based paths point to the worktree).
+    When AI_DEV_FACTORY_RUNTIME_ROOT is set (Docker), returns RUNTIME_ROOT/.runtime/...
+    Otherwise resolves from the git common dir so all worktrees share one DB.
+    Returns None when not inside a git repository and RUNTIME_ROOT is not set.
     """
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
     if runtime_root:
         return Path(runtime_root) / _DB_FILENAME
-    # Dev fallback: git common-dir points to the main repo's .git regardless of which
-    # worktree this module was loaded from, ensuring a single shared DB in dev mode.
-    try:
-        result = subprocess.run(
-            ["git", "rev-parse", "--git-common-dir"],
-            capture_output=True,
-            text=True,
-            check=False,
-            cwd=str(Path(__file__).parent),
-        )
-        if result.returncode == 0:
-            common_dir = result.stdout.strip()
-            common_path = Path(common_dir)
-            if not common_path.is_absolute():
-                common_path = (Path(__file__).parent / common_path).resolve()
-            return common_path.parent / _DB_FILENAME
-    except FileNotFoundError:
-        pass
-    # Last resort: module-location path (valid only when invoked from the main clone).
-    return Path(__file__).resolve().parent.parent.parent / _DB_FILENAME
+
+    result = subprocess.run(
+        ["git", "rev-parse", "--git-common-dir"],
+        capture_output=True, text=True, check=False,
+    )
+    if result.returncode != 0:
+        return None
+    common_dir = result.stdout.strip()
+    git_common = Path(common_dir)
+    if not git_common.is_absolute():
+        git_common = Path.cwd() / git_common
+    return git_common.parent / _DB_FILENAME
 
 
 def init_runtime_db(db_path: Path) -> None:
