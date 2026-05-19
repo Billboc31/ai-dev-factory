@@ -1,0 +1,34 @@
+.git
+.gitignore
+.runtime/
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Runtime state (never in image)
+runs/*/state.json
+runs/*/runtime.log
+runs/*/retry-state.json
+runs/.issue-intake.json
+runs/workers.json
+runs/daemon.pid
+runs/daemon.log
+
+# Python caches
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+
+# Node
+apps/dashboard/node_modules/
+node_modules/
+apps/dashboard/.vite/
+
+# OS/editor
+.DS_Store
+*.swp
+*.swo
+
+# Dev-only
+deploy/.env
