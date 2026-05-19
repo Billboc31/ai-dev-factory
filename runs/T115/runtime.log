@@ -9,3 +9,6 @@
 [2026-05-19T23:29:25Z] compose: skill=ai/skills/debugging.md
 [2026-05-19T23:29:25Z] compose: task (canonical prompt)
 [2026-05-19T23:29:25Z] snapshot: runtime-prompt=runs/T115/prompts/tester-attempt-2.md
+[2026-05-19T23:40:30Z] auto-run: step=tester done rc=0
+[2026-05-19T23:40:30Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-19T23:40:30Z] auto-run: auto-commit triggered
