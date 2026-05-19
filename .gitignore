@@ -60,3 +60,14 @@ runs/daemon.log
 runs/daemon.pid
 runs/.project-map*.json
 runs/.issue-intake.json
+
+# Python cache
+__pycache__/
+*.pyc
+
+# Runtime generated files
+runs/**/runtime.log
+runs/daemon.log
+runs/daemon.pid
+runs/.project-map*.json
+runs/.issue-intake.json
