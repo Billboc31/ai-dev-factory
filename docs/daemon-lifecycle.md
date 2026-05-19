@@ -14,8 +14,7 @@ The daemon must **never run in a human clone**. It requires either:
 
 ```
 GitHub issue (label: ai-ready)
-  → intake (_intake worktree, main branch)
-  → ticket worktree created (worktrees/TXXX/)
+  → ephemeral intake (fetch origin/main, branch + worktrees/TXXX/ created directly)
   → planner step (AUTO_RUNNABLE: INIT)
   → PLAN_REVIEW_NEEDED  ← human gate (checkpoint pushed for visibility)
   → human approves plan (sets state to PLAN_APPROVED)
@@ -63,14 +62,16 @@ Each daemon cycle (default: 30s interval):
 
 ---
 
-## Issue Intake
+## Issue Intake (ephemeral)
 
-When a new issue is detected:
+Intake is fully ephemeral — there is **no persistent `_intake` worktree**. When a new issue is detected the daemon runs:
 
-1. `ensure_intake_worktree()` verifies `worktrees/_intake` exists and forces `git checkout -f main` to prevent lingering ticket branches.
-2. `git pull --ff-only origin main` brings the worktree up to date.
-3. `run_issue_intake.py` runs inside `_intake`: creates the ticket branch, writes `ticket.md` and `state.json`, commits bootstrap checkpoint, pushes.
-4. `create_ticket_worktree()` creates `worktrees/TXXX/` on the ticket branch.
+1. `fetch_origin_main(REPO_ROOT)` — pure ref operation (`git fetch origin main`), does not touch any branch or working tree.
+2. `create_ticket_branch_and_worktree(ticket_id, branch, worktrees_dir, REPO_ROOT)` — atomically creates the ticket branch from `origin/main` and adds `worktrees/TXXX/` on that branch. If the worktree add fails the branch ref is rolled back.
+3. `run_issue_intake.py` runs **inside the new `worktrees/TXXX/`** which is already on the ticket branch: writes `ticket.md` + `state.json`, commits the bootstrap checkpoint, pushes.
+4. On any failure during the intake call, `cleanup_failed_intake(...)` removes the worktree and deletes the branch so the next daemon cycle can retry from scratch.
+
+There is no return-to-main checkout, no shared `_intake` worktree, and no `runs/TXXX/runtime.log` produced during intake — the per-ticket runtime.log is created later by `run_ticket.py`.
 
 ### runtime.log and intake preflight
 
@@ -147,5 +148,4 @@ Retry state is persisted in `runs/TXXX/retry-state.json`.
 | `runs/TXXX/runtime.log` | Per-ticket step logs (never committed) |
 | `runs/TXXX/daemon.lock` | Per-ticket execution lock |
 | `runs/TXXX/retry-state.json` | Retry/cooldown state |
-| `worktrees/_intake/` | Shared intake worktree on `main` |
-| `worktrees/TXXX/` | Per-ticket isolated worktree |
+| `worktrees/TXXX/` | Per-ticket isolated worktree (created directly by ephemeral intake, no shared `_intake`) |
