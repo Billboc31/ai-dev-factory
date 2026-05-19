@@ -8,14 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from ..models.schemas import TicketSummary, TimelineStep, TimelineResponse
-from .runtime_resolver import resolve_ticket_run_dir
+from .runtime_resolver import resolve_ticket_run_dir, resolve_runs_dir
 
 
 TICKET_ID_RE = re.compile(r"^T\d{3,}$")
 
 
 def _runs_root(project_root: Path) -> Path:
-    return project_root / "runs"
+    return resolve_runs_dir(project_root)
 
 
 def _last_log_line(log_file: Path) -> str | None:

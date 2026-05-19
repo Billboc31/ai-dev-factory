@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import datetime
 import json
+import os
 import sqlite3
 import subprocess
 from pathlib import Path
@@ -68,11 +69,16 @@ def _now_iso() -> str:
 
 
 def get_db_path() -> Path | None:
-    """Resolve the SQLite DB path from the git common dir.
+    """Resolve the SQLite DB path from RUNTIME_ROOT env var or the git common dir.
 
-    Works in both main worktrees and linked worktrees — all share one DB.
-    Returns None when not inside a git repository.
+    When AI_DEV_FACTORY_RUNTIME_ROOT is set (Docker), returns RUNTIME_ROOT/.runtime/...
+    Otherwise resolves from the git common dir so all worktrees share one DB.
+    Returns None when not inside a git repository and RUNTIME_ROOT is not set.
     """
+    runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if runtime_root:
+        return Path(runtime_root) / _DB_FILENAME
+
     result = subprocess.run(
         ["git", "rev-parse", "--git-common-dir"],
         capture_output=True, text=True, check=False,

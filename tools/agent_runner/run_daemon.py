@@ -1405,8 +1405,15 @@ def main(argv: list[str]) -> int:
         return 2
 
     args = parse_args(argv)
-    runs_dir = Path(args.runs_dir)
-    worktrees_dir = Path(args.worktrees_dir)
+
+    runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if runtime_root:
+        rt = Path(runtime_root)
+        runs_dir = rt / "runs"
+        worktrees_dir = rt / "worktrees"
+    else:
+        runs_dir = Path(args.runs_dir)
+        worktrees_dir = Path(args.worktrees_dir)
 
     if not runs_dir.exists():
         print(f"error: runs dir not found: {runs_dir}", file=sys.stderr)
