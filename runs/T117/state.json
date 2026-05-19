@@ -3,5 +3,11 @@
   "state": "TEST_COMPLETE",
   "branch": "ticket/T117-t117-restore-fully-autonomous-daemon-workflow-afte",
   "issue_number": 71,
-  "updated_at": "2026-05-19T21:36:45Z"
+
+  "updated_at": "2026-05-19T21:37:28Z",
+  "pr_number": 73,
+  "pr_synced": true,
+  "pr_merged": true,
+  "daemon_archived": true,
+  "issue_closed": true
 }
