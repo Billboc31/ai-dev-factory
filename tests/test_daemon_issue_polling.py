@@ -275,12 +275,14 @@ def _git_ok(*args, **kwargs):
 
 def test_poll_github_issues_ingests_new_issue(tmp_path):
     runs = _make_runs(tmp_path)
+    worktrees_dir = tmp_path / "worktrees"
     issues = [{"number": 42, "title": "Add feature"}]
 
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
          patch("run_daemon.call_issue_intake", return_value=True), \
-         patch("run_daemon.subprocess.run", side_effect=_git_ok):
-        poll_github_issues(runs, "ai-ready", None)
+         patch("run_daemon.fetch_origin_main", return_value=(True, "fetched origin/main")), \
+         patch("run_daemon.create_ticket_branch_and_worktree", return_value=(True, "ok")):
+        poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir)
 
     index = load_issue_index(runs)
     assert "42" in index
@@ -314,12 +316,15 @@ def test_poll_github_issues_does_not_update_index_on_intake_failure(tmp_path):
 
 def test_poll_github_issues_logs_retry_on_intake_failure(tmp_path, capsys):
     runs = _make_runs(tmp_path)
+    worktrees_dir = tmp_path / "worktrees"
     issues = [{"number": 7, "title": "Broken"}]
 
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
          patch("run_daemon.call_issue_intake", return_value=False), \
-         patch("run_daemon.subprocess.run", side_effect=_git_ok):
-        poll_github_issues(runs, "ai-ready", None)
+         patch("run_daemon.fetch_origin_main", return_value=(True, "fetched origin/main")), \
+         patch("run_daemon.create_ticket_branch_and_worktree", return_value=(True, "ok")), \
+         patch("run_daemon.cleanup_failed_intake", return_value=["removed worktree"]):
+        poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir)
 
     assert "retry" in capsys.readouterr().out
 
@@ -335,12 +340,14 @@ def test_poll_github_issues_no_issues_found_logs(tmp_path, capsys):
 
 def test_poll_github_issues_assigns_correct_next_ticket_id(tmp_path):
     runs = _make_runs(tmp_path, ["T001", "T002", "T003"])
+    worktrees_dir = tmp_path / "worktrees"
     issues = [{"number": 10, "title": "Next ticket"}]
 
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
          patch("run_daemon.call_issue_intake", return_value=True) as mock_intake, \
-         patch("run_daemon.subprocess.run", side_effect=_git_ok):
-        poll_github_issues(runs, "ai-ready", None)
+         patch("run_daemon.fetch_origin_main", return_value=(True, "fetched origin/main")), \
+         patch("run_daemon.create_ticket_branch_and_worktree", return_value=(True, "ok")):
+        poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir)
 
     _, ticket_id, _, _ = mock_intake.call_args[0]
     assert ticket_id == "T004"
@@ -349,6 +356,7 @@ def test_poll_github_issues_assigns_correct_next_ticket_id(tmp_path):
 def test_poll_github_issues_multiple_issues_sequential_ids(tmp_path):
     # poll_github_issues processes one issue per daemon cycle (candidates[:1])
     runs = _make_runs(tmp_path)
+    worktrees_dir = tmp_path / "worktrees"
     issues = [
         {"number": 1, "title": "First"},
         {"number": 2, "title": "Second"},
@@ -356,8 +364,9 @@ def test_poll_github_issues_multiple_issues_sequential_ids(tmp_path):
 
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
          patch("run_daemon.call_issue_intake", return_value=True), \
-         patch("run_daemon.subprocess.run", side_effect=_git_ok):
-        poll_github_issues(runs, "ai-ready", None)
+         patch("run_daemon.fetch_origin_main", return_value=(True, "fetched origin/main")), \
+         patch("run_daemon.create_ticket_branch_and_worktree", return_value=(True, "ok")):
+        poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir)
 
     index = load_issue_index(runs)
     # Only the first candidate is processed per cycle
@@ -368,12 +377,15 @@ def test_poll_github_issues_multiple_issues_sequential_ids(tmp_path):
 def test_poll_github_issues_does_not_commit_after_intake_on_success(tmp_path):
     # T111: intake no longer creates a git commit — index saved in SQLite + gitignored JSON
     runs = _make_runs(tmp_path)
+    worktrees_dir = tmp_path / "worktrees"
     issues = [{"number": 42, "title": "Add feature"}]
 
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
          patch("run_daemon.call_issue_intake", return_value=True), \
+         patch("run_daemon.fetch_origin_main", return_value=(True, "fetched origin/main")), \
+         patch("run_daemon.create_ticket_branch_and_worktree", return_value=(True, "ok")), \
          patch("run_daemon.subprocess.run", side_effect=_git_ok) as mock_sp:
-        poll_github_issues(runs, "ai-ready", None)
+        poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir)
 
     for call in mock_sp.call_args_list:
         args = call[0][0] if call[0] else []
@@ -384,12 +396,16 @@ def test_poll_github_issues_does_not_commit_after_intake_on_success(tmp_path):
 
 def test_poll_github_issues_does_not_call_commit_after_intake_on_failure(tmp_path):
     runs = _make_runs(tmp_path)
+    worktrees_dir = tmp_path / "worktrees"
     issues = [{"number": 42, "title": "Add feature"}]
 
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
          patch("run_daemon.call_issue_intake", return_value=False), \
+         patch("run_daemon.fetch_origin_main", return_value=(True, "fetched origin/main")), \
+         patch("run_daemon.create_ticket_branch_and_worktree", return_value=(True, "ok")), \
+         patch("run_daemon.cleanup_failed_intake", return_value=[]), \
          patch("run_daemon.subprocess.run", side_effect=_git_ok) as mock_sp:
-        poll_github_issues(runs, "ai-ready", None)
+        poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir)
 
     for call in mock_sp.call_args_list:
         args = call[0][0] if call[0] else []
