@@ -1,0 +1,109 @@
+---
+
+## Review — T115 — Docker Compose runtime packaging
+
+### Périmètre reviewé
+
+Fichiers modifiés : `Dockerfile`, `docker-compose.yml`, `.dockerignore`, `deploy/bootstrap.sh`, `deploy/env.example`, `deploy/nginx.conf`, `tools/agent_runner/run_daemon.py`, `tools/agent_runner/runtime_db.py`, `services/control_api/main.py`, `services/control_api/services/artifact_reader.py`, `services/control_api/services/runtime_resolver.py`.
+
+---
+
+### Conformité au plan approuvé
+
+**BLOQUANT — Violation directe du plan approuvé (V1)**
+
+Le plan approuvé contient une décision explicite et motivée :
+
+> "Pour T115 V1, **ne pas installer Claude CLI dans l'image Docker**."
+> "Le container ne doit pas embarquer de dépendance Claude obligatoire."
+> "Le daemon peut rester lancé côté host dans T115 V1."
+
+L'implémentation viole cette décision sur deux points :
+
+**1. Claude CLI installé dans l'image Docker** (`Dockerfile`, lignes 17–23) :
+
+```dockerfile
+# Node.js for Claude CLI
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    ...
+# Claude CLI
+RUN npm install -g @anthropic-ai/claude-code
+```
+
+**2. Service `daemon` conteneurisé** (`docker-compose.yml`, lignes 1–23) :
+
+```yaml
+daemon:
+  ...
+  command: >
+    sh -c "
+      /app/deploy/bootstrap.sh &&
+      python tools/agent_runner/run_daemon.py
+        --exec-cmd 'claude --dangerously-skip-permissions'
+    "
+```
+
+Un service daemon dans Compose qui appelle `claude --dangerously-skip-permissions` n'est pas compatible avec V1 où Claude CLI reste côté host. Ce service ne peut pas fonctionner en état.
+
+**Correction attendue** : retirer l'installation Node.js/Claude CLI du Dockerfile Stage 2. Retirer le service `daemon` de `docker-compose.yml`. Documenter (dans `env.example` ou commentaire) que le daemon doit être lancé côté host avec `RUNTIME_ROOT` pointant vers le même volume.
+
+---
+
+### Invariant ticket violé — pycache versionné
+
+**BLOQUANT**
+
+Le ticket stipule explicitement : "aucun pycache versionné".
+
+Deux fichiers `.pyc` sont commités sur cette branche :
+
+```
+tools/agent_runner/__pycache__/run_step.cpython-314.pyc
+tools/agent_runner/__pycache__/runtime_checkpoint.cpython-314.pyc
+```
+
+Ces fichiers doivent être supprimés de l'historique git (via `git rm --cached` + nouveau commit, ou rebase). Le `.dockerignore` les exclut correctement du contexte de build, mais ils restent dans le repository.
+
+---
+
+### Points corrects
+
+- `runtime_db.py` : `get_db_path()` lit `AI_DEV_FACTORY_RUNTIME_ROOT` en priorité avant la résolution git — correct, conforme au plan.
+- `run_daemon.py` : `main()` dérive `runs_dir` et `worktrees_dir` de `RUNTIME_ROOT` si défini — correct.
+- `runtime_resolver.py` : même logique RUNTIME_ROOT dans l'API — correct.
+- `bootstrap.sh` : idempotent (`mkdir -p`), crée toute la structure attendue dont `${RUNTIME_ROOT}/.runtime` pour SQLite.
+- `.dockerignore` : exclut correctement `*.sqlite`, `.runtime/`, `__pycache__/`, `*.py[cod]`, `deploy/.env`, runtime state files.
+- `docker-compose.yml` : volume nommé `runtime-data` monté sur `/runtime` — persistance correcte. SSH/gitconfig montés en `:ro` — correct.
+- `nginx.conf` : proxy `/api/` → `http://api:8080/` avec suppression du préfixe — comportement SPA correct.
+- `deploy/env.example` : documenté proprement, gitignored.
+
+---
+
+### Observations mineures (non-bloquantes)
+
+**O1 — Runs/ artifacts dans l'image** : `.dockerignore` exclut `runs/*/state.json`, `runs/*/runtime.log` etc., mais laisse `runs/T*/ticket.md`, `runs/T*/plan.md` dans l'image. Ces artefacts workflow se retrouvent baked dans chaque build. Impact faible (lecture seule), mais peut surprendre.
+
+**O2 — Bootstrap dupliqué** : les services `daemon` et `api` appellent tous deux `/app/deploy/bootstrap.sh`. Comportement idempotent donc sûr, mais si le service daemon est supprimé (comme demandé), ce point disparaît.
+
+**O3 — env_file absent** : `docker-compose.yml` référence `deploy/.env` sans fallback. Si l'utilisateur n'a pas copié `env.example` → `.env`, le `docker compose up` échoue avec un message peu explicite. Un commentaire inline ou une note dans `env.example` guiderait mieux.
+
+---
+
+### Résumé
+
+| Critère | Résultat |
+|---|---|
+| Conformité plan V1 | ❌ BLOQUANT — Claude CLI dans Docker + daemon conteneurisé |
+| Invariant pycache | ❌ BLOQUANT — 2 fichiers `.pyc` commités |
+| RUNTIME_ROOT path resolution | ✅ Correct |
+| Volumes persistants | ✅ Correct |
+| .dockerignore | ✅ Correct (hors .pyc déjà commités) |
+| bootstrap.sh | ✅ Correct |
+| nginx.conf | ✅ Correct |
+
+Deux corrections bloquantes requises avant approbation :
+1. Retirer Claude CLI + service daemon du Dockerfile/Compose (revenir à la décision V1 du plan)
+2. Supprimer les fichiers `.pyc` commités
+
+IMPLEMENTATION_FIX_REQUIRED
