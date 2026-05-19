@@ -1,40 +1,9 @@
-All files parse cleanly. Here's a summary of what was implemented:
+Both blocking issues resolved in a single commit:
 
----
+1. **Dockerfile** — removed the Node.js + Claude CLI installation block (lines 17–23); the `runtime` stage now only installs `git`, `curl`, and Python deps.
 
-## Résumé des changements
+2. **docker-compose.yml** — removed the `daemon` service entirely; Compose now defines only `api` and `web`. The plan V1 decision (daemon runs on the host) is preserved.
 
-### Fichiers modifiés (5)
+3. **deploy/env.example** — added an explicit comment block explaining how to start the daemon on the host with `AI_DEV_FACTORY_RUNTIME_ROOT` pointing at the Docker volume mount path.
 
-| Fichier | Changement |
-|---|---|
-| `tools/agent_runner/runtime_db.py` | `get_db_path()` lit `AI_DEV_FACTORY_RUNTIME_ROOT` avant de faire `git rev-parse` |
-| `tools/agent_runner/run_daemon.py` | `main()` dérive `runs_dir` et `worktrees_dir` depuis `RUNTIME_ROOT` si défini |
-| `services/control_api/services/runtime_resolver.py` | Ajout de `resolve_runs_dir()` et `resolve_worktrees_dir()` respectant `RUNTIME_ROOT` |
-| `services/control_api/services/artifact_reader.py` | `_runs_root()` délègue à `resolve_runs_dir()` |
-| `services/control_api/main.py` | `create_app()` utilise `resolve_worktrees_dir()` pour le default |
-
-### Nouveaux fichiers (6)
-
-| Fichier | Rôle |
-|---|---|
-| `Dockerfile` | Image multi-stage : `dashboard` (build Vite) → `runtime` (Python + git + Claude CLI) → `web` (nginx) |
-| `docker-compose.yml` | 3 services (`daemon`, `api`, `web`) + volume persistant `runtime-data` |
-| `.dockerignore` | Exclut `.git`, `__pycache__`, runtime state, `node_modules` |
-| `deploy/env.example` | Template — copier vers `deploy/.env` |
-| `deploy/bootstrap.sh` | Crée la structure `RUNTIME_ROOT/runs`, `worktrees`, `clones`, etc. |
-| `deploy/nginx.conf` | Sert le dashboard SPA + proxifie `/api/` vers le service `api` |
-
-### Logique RUNTIME_ROOT
-
-- Si `AI_DEV_FACTORY_RUNTIME_ROOT=/runtime` est défini :
-  - DB SQLite → `/runtime/.runtime/ai-dev-factory.sqlite`
-  - `runs_dir` → `/runtime/runs`
-  - `worktrees_dir` → `/runtime/worktrees`
-- Sans la variable → comportement local inchangé
-
-### Limites connues
-
-1. **Claude CLI auth** : le mount `~/.claude:/root/.claude:ro` dans `docker-compose.yml` suppose une auth déjà faite sur la machine hôte
-2. **Git push depuis container** : nécessite le mount `~/.ssh` + `~/.gitconfig` (déjà dans compose)
-3. **Dashboard API URL** : le dashboard doit être configuré pour appeler `/api/` (nginx proxy), selon le vite.config existant
+4. **.pyc files** — `git rm --cached` on both `run_step.cpython-314.pyc` and `runtime_checkpoint.cpython-314.pyc`; they are now untracked and won't be versioned.

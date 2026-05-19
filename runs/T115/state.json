@@ -1,7 +1,7 @@
 {
   "ticket_id": "T115",
-  "state": "IMPLEMENTATION_FIX_REQUIRED",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T115-t115-package-ai-dev-factory-as-installable-docker",
   "issue_number": 66,
-  "updated_at": "2026-05-19T12:49:56Z"
+  "updated_at": "2026-05-19T12:52:32Z"
 }
