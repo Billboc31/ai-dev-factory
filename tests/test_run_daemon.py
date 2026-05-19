@@ -14,6 +14,7 @@ from run_daemon import (
     AUTO_RUNNABLE_STATES,
     HUMAN_GATE_STATES,
     _acquire_lock,
+    _check_runtime_clone,
     _is_pid_alive,
     _lock_path,
     _release_lock,
@@ -285,17 +286,62 @@ def test_launch_ticket_releases_lock_after_run(tmp_path):
     assert not _lock_path(run_dir).exists()
 
 
+# ── _check_runtime_clone ──────────────────────────────────────────────────────
+
+def test_check_runtime_clone_returns_true_when_sentinel_exists(tmp_path, monkeypatch):
+    sentinel = tmp_path / ".ai-dev-factory-runtime"
+    sentinel.touch()
+    import run_daemon
+    monkeypatch.setattr(run_daemon, "REPO_ROOT", tmp_path)
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    assert _check_runtime_clone() is True
+
+
+def test_check_runtime_clone_returns_true_when_env_var_set(tmp_path, monkeypatch):
+    import run_daemon
+    monkeypatch.setattr(run_daemon, "REPO_ROOT", tmp_path)
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", "/runtime/ai-dev-factory")
+    assert _check_runtime_clone() is True
+
+
+def test_check_runtime_clone_returns_false_when_neither(tmp_path, monkeypatch):
+    import run_daemon
+    monkeypatch.setattr(run_daemon, "REPO_ROOT", tmp_path)
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    assert _check_runtime_clone() is False
+
+
+def test_check_runtime_clone_prints_error_when_neither(tmp_path, monkeypatch, capsys):
+    import run_daemon
+    monkeypatch.setattr(run_daemon, "REPO_ROOT", tmp_path)
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    _check_runtime_clone()
+    assert "runtime clone" in capsys.readouterr().err
+
+
 # ── main / CLI ────────────────────────────────────────────────────────────────
 
 def test_main_once_returns_zero(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
-    rc = main(["--exec-cmd", "test-cmd", "--once", "--runs-dir", str(runs)])
+    with patch("run_daemon._check_runtime_clone", return_value=True):
+        rc = main(["--exec-cmd", "test-cmd", "--once", "--runs-dir", str(runs)])
     assert rc == 0
 
 
 def test_main_returns_2_when_runs_dir_missing(tmp_path):
-    rc = main(["--exec-cmd", "test-cmd", "--once", "--runs-dir", str(tmp_path / "nonexistent")])
+    with patch("run_daemon._check_runtime_clone", return_value=True):
+        rc = main(["--exec-cmd", "test-cmd", "--once", "--runs-dir", str(tmp_path / "nonexistent")])
+    assert rc == 2
+
+
+def test_main_returns_2_when_not_runtime_clone(tmp_path, monkeypatch):
+    import run_daemon
+    monkeypatch.setattr(run_daemon, "REPO_ROOT", tmp_path)
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    rc = main(["--exec-cmd", "test-cmd", "--once", "--runs-dir", str(runs)])
     assert rc == 2
 
 

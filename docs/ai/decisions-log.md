@@ -23,6 +23,18 @@ Les moteurs externes (Claude CLI, Codex CLI, etc.) génèrent uniquement du cont
 
 ---
 
+## 2026-05-19 — T114 — Séparation clone humain / clone runtime
+
+Architecture runtime officielle définie et documentée.
+
+Séparation stricte introduite entre clone humain (développement) et clone runtime (daemon + agents).
+Le daemon refuse de démarrer dans un clone humain via `_check_runtime_clone()` (sentinel `.ai-dev-factory-runtime` ou env var `AI_DEV_FACTORY_RUNTIME_ROOT`).
+
+Structure cible : `~/runtime/ai-dev-factory/{clones,worktrees,state,logs}`.
+Migration effective des chemins actuels : hors scope T114, fera l'objet d'un ticket dédié.
+
+---
+
 ## 2026-05-07 — T007 — Workflow Git ticket branch
 
 Adoption de la convention Git :

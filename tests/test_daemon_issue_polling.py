@@ -402,14 +402,15 @@ def test_main_poll_issues_flag_calls_poll_before_run_once(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
 
-    with patch("run_daemon.poll_github_issues") as mock_poll:
-        with patch("run_daemon.run_once") as mock_run:
-            rc = main([
-                "--exec-cmd", "test-cmd",
-                "--once",
-                "--poll-issues",
-                "--runs-dir", str(runs),
-            ])
+    with patch("run_daemon._check_runtime_clone", return_value=True):
+        with patch("run_daemon.poll_github_issues") as mock_poll:
+            with patch("run_daemon.run_once") as mock_run:
+                rc = main([
+                    "--exec-cmd", "test-cmd",
+                    "--once",
+                    "--poll-issues",
+                    "--runs-dir", str(runs),
+                ])
 
     assert rc == 0
     mock_run.assert_called_once()
@@ -421,9 +422,10 @@ def test_main_without_poll_issues_does_not_call_poll(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
 
-    with patch("run_daemon.poll_github_issues") as mock_poll:
-        with patch("run_daemon.run_once"):
-            main(["--exec-cmd", "test-cmd", "--once", "--runs-dir", str(runs)])
+    with patch("run_daemon._check_runtime_clone", return_value=True):
+        with patch("run_daemon.poll_github_issues") as mock_poll:
+            with patch("run_daemon.run_once"):
+                main(["--exec-cmd", "test-cmd", "--once", "--runs-dir", str(runs)])
 
     mock_poll.assert_not_called()
 
@@ -432,15 +434,16 @@ def test_main_issue_label_passed_to_poll(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
 
-    with patch("run_daemon.poll_github_issues") as mock_poll:
-        with patch("run_daemon.run_once"):
-            main([
-                "--exec-cmd", "test-cmd",
-                "--once",
-                "--poll-issues",
-                "--issue-label", "my-label",
-                "--runs-dir", str(runs),
-            ])
+    with patch("run_daemon._check_runtime_clone", return_value=True):
+        with patch("run_daemon.poll_github_issues") as mock_poll:
+            with patch("run_daemon.run_once"):
+                main([
+                    "--exec-cmd", "test-cmd",
+                    "--once",
+                    "--poll-issues",
+                    "--issue-label", "my-label",
+                    "--runs-dir", str(runs),
+                ])
 
     _, label, _ = mock_poll.call_args[0]
     assert label == "my-label"
@@ -450,15 +453,16 @@ def test_main_issue_repo_passed_to_poll(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
 
-    with patch("run_daemon.poll_github_issues") as mock_poll:
-        with patch("run_daemon.run_once"):
-            main([
-                "--exec-cmd", "test-cmd",
-                "--once",
-                "--poll-issues",
-                "--issue-repo", "owner/repo",
-                "--runs-dir", str(runs),
-            ])
+    with patch("run_daemon._check_runtime_clone", return_value=True):
+        with patch("run_daemon.poll_github_issues") as mock_poll:
+            with patch("run_daemon.run_once"):
+                main([
+                    "--exec-cmd", "test-cmd",
+                    "--once",
+                    "--poll-issues",
+                    "--issue-repo", "owner/repo",
+                    "--runs-dir", str(runs),
+                ])
 
     _, _, repo = mock_poll.call_args[0]
     assert repo == "owner/repo"
@@ -468,9 +472,10 @@ def test_main_default_issue_label_is_ai_ready(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
 
-    with patch("run_daemon.poll_github_issues") as mock_poll:
-        with patch("run_daemon.run_once"):
-            main(["--exec-cmd", "cmd", "--once", "--poll-issues", "--runs-dir", str(runs)])
+    with patch("run_daemon._check_runtime_clone", return_value=True):
+        with patch("run_daemon.poll_github_issues") as mock_poll:
+            with patch("run_daemon.run_once"):
+                main(["--exec-cmd", "cmd", "--once", "--poll-issues", "--runs-dir", str(runs)])
 
     _, label, _ = mock_poll.call_args[0]
     assert label == "ai-ready"

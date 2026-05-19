@@ -1,3 +1,6 @@
+# Runtime clone sentinel (created manually in runtime clones, never in human clones)
+.ai-dev-factory-runtime
+
 runs/*/state.json
 runs/*/state.json.tmp
 runs/*/runtime.log

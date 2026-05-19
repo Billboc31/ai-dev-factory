@@ -1357,6 +1357,29 @@ def run_once(
             _log(f"skipping {ticket_id} state={state}")
 
 
+def _check_runtime_clone() -> bool:
+    """Return True if the daemon is running in a valid runtime clone.
+
+    Accepts either:
+    - REPO_ROOT contains .ai-dev-factory-runtime sentinel file, OR
+    - AI_DEV_FACTORY_RUNTIME_ROOT env var is set (non-empty).
+
+    Without one of these, the daemon refuses to start (exit code 2).
+    This prevents accidental daemon launch in a human clone.
+    """
+    if (REPO_ROOT / ".ai-dev-factory-runtime").exists():
+        return True
+    if os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT"):
+        return True
+    print(
+        "error: daemon must run in a runtime clone, not a human clone.\n"
+        "  Create '.ai-dev-factory-runtime' at the repo root, or set AI_DEV_FACTORY_RUNTIME_ROOT.\n"
+        "  See docs/ai/architecture.md for the expected runtime layout.",
+        file=sys.stderr,
+    )
+    return False
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Local workflow daemon for ai-dev-factory")
     parser.add_argument("--exec-cmd", required=True, help="Command passed to run_ticket.py --auto")
@@ -1378,6 +1401,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str]) -> int:
+    if not _check_runtime_clone():
+        return 2
+
     args = parse_args(argv)
     runs_dir = Path(args.runs_dir)
     worktrees_dir = Path(args.worktrees_dir)
