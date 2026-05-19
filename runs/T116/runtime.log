@@ -85,3 +85,21 @@
 [2026-05-19T17:05:46Z] snapshot: runtime-prompt=runs/T116/prompts/coder-attempt-2.md
 [2026-05-19T17:10:01Z] auto-run: step=coder done rc=0
 [2026-05-19T17:10:01Z] auto-run: transition IMPLEMENTATION_FIX_REQUIRED → IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-19T18:14:04Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-19T18:14:04Z] auto-run: running step=review
+[2026-05-19T18:14:04Z] auto-run: review decision context: context_file=runs/T116/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-19T18:14:05Z] prompt: resolved=prompts/generic/review.md source=generic
+[2026-05-19T18:14:05Z] prompt: generic fallback — injecting runs/T116/ticket.md
+[2026-05-19T18:14:05Z] compose: global-context=docs/ai/global-context.md
+[2026-05-19T18:14:05Z] compose: role=ai/roles/reviewer.md
+[2026-05-19T18:14:05Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-19T18:14:05Z] compose: skill=ai/skills/code-quality.md
+[2026-05-19T18:14:05Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-19T18:14:05Z] compose: skill=ai/skills/security.md
+[2026-05-19T18:14:05Z] compose: task (canonical prompt)
+[2026-05-19T18:14:05Z] compose: extra-context=runs/T116/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-19T18:14:05Z] snapshot: runtime-prompt=runs/T116/prompts/review-attempt-3.md
+[2026-05-19T18:16:44Z] auto-run: step=review done rc=0
+[2026-05-19T18:16:44Z] auto-run: review parsed from: runs/T116/reviews/implementation-review.md
+[2026-05-19T18:16:44Z] auto-run: review keyword detected: IMPLEMENTATION_APPROVED
+[2026-05-19T18:16:44Z] auto-run: transition IMPLEMENTATION_REVIEW_NEEDED → IMPLEMENTATION_APPROVED
