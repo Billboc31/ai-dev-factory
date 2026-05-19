@@ -541,3 +541,16 @@
 [2026-05-19T21:33:05Z] auto-run gate failed: working tree is not clean — commit or stash changes first
 [2026-05-19T21:33:38Z] auto-run start: state=IMPLEMENTATION_APPROVED
 [2026-05-19T21:33:38Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-19T21:34:12Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-19T21:34:12Z] auto-run: running step=tester
+[2026-05-19T21:34:12Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-19T21:34:12Z] prompt: generic fallback — injecting runs/T117/ticket.md
+[2026-05-19T21:34:12Z] compose: global-context=docs/ai/global-context.md
+[2026-05-19T21:34:12Z] compose: role=ai/roles/tester.md
+[2026-05-19T21:34:12Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-19T21:34:12Z] compose: skill=ai/skills/testing.md
+[2026-05-19T21:34:12Z] compose: skill=ai/skills/debugging.md
+[2026-05-19T21:34:12Z] compose: task (canonical prompt)
+[2026-05-19T21:34:12Z] snapshot: runtime-prompt=runs/T117/prompts/tester-attempt-1.md
+[2026-05-19T21:36:45Z] auto-run: step=tester done rc=0
+[2026-05-19T21:36:45Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
