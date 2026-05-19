@@ -1,9 +1,0 @@
-{
-  "ticket_id": "T016",
-  "state": "TEST_COMPLETE",
-  "branch": "ticket/T016-runtime-prompt-snapshots",
-  "updated_at": "2026-05-15T11:27:37Z",
-  "pr_number": 29,
-  "pr_synced": true,
-  "daemon_archived": true
-}

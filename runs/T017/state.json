@@ -1,7 +1,0 @@
-{
-  "ticket_id": "T017",
-  "state": "TEST_COMPLETE",
-  "branch": "ticket/T017-workflow-aware-commit-and-push",
-  "updated_at": "2026-05-12T15:33:15Z",
-  "daemon_archived": true
-}

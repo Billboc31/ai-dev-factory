@@ -1,9 +1,0 @@
-{
-  "ticket_id": "T111",
-  "state": "TEST_COMPLETE",
-  "branch": "ticket/T111-t111-sqlite-runtime-state-store-for-daemon-intake",
-  "issue_number": 58,
-  "updated_at": "2026-05-19T07:23:56Z",
-  "pr_skipped_no_diff": true,
-  "daemon_archived": true
-}

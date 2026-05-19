@@ -1,7 +1,0 @@
-{
-  "ticket_id": "T025",
-  "state": "TEST_COMPLETE",
-  "branch": "ticket/T025-daemon-retry-cooldown",
-  "updated_at": "2026-05-15T07:19:43Z",
-  "daemon_archived": true
-}
