@@ -35,6 +35,7 @@ _wm_spec = importlib.util.spec_from_file_location("_worktree_manager", ROOT / "w
 _wm_mod = importlib.util.module_from_spec(_wm_spec)  # type: ignore[arg-type]
 _wm_spec.loader.exec_module(_wm_mod)  # type: ignore[union-attr]
 create_ticket_worktree = _wm_mod.create_ticket_worktree
+ensure_intake_worktree = _wm_mod.ensure_intake_worktree
 get_ticket_worktree_path = _wm_mod.get_ticket_worktree_path
 remove_ticket_worktree = _wm_mod.remove_ticket_worktree
 del _wm_spec, _wm_mod
@@ -798,6 +799,27 @@ def scan_tickets(runs_dir: Path, worktrees_dir: Path | None = None) -> list[tupl
         except (json.JSONDecodeError, OSError):
             _log(f"skipping {ticket_id}: corrupted or unreadable state.json")
 
+    # Tier 3: _intake worktree runs/ — fallback for tickets not yet in a TXXX worktree
+    if worktrees_dir:
+        intake_runs = worktrees_dir / "_intake" / "runs"
+        if intake_runs.exists():
+            for state_path in sorted(intake_runs.glob("*/state.json")):
+                ticket_id = state_path.parent.name
+                if ticket_id in seen:
+                    continue
+                if not re.match(r"^T\d{3,}$", ticket_id):
+                    continue
+                try:
+                    data = json.loads(state_path.read_text(encoding="utf-8"))
+                    if data.get("daemon_archived"):
+                        _log(f"skipping {ticket_id}: daemon_archived=true")
+                        continue
+                    state = data.get("state", "")
+                    if state:
+                        seen[ticket_id] = state
+                except (json.JSONDecodeError, OSError):
+                    _log(f"skipping {ticket_id}: corrupted state.json in _intake")
+
     return list(seen.items())
 
 
@@ -807,6 +829,9 @@ def _get_run_dir(ticket_id: str, runs_dir: Path, worktrees_dir: Path | None = No
         wt_run_dir = worktrees_dir / ticket_id / "runs" / ticket_id
         if wt_run_dir.exists():
             return wt_run_dir
+        intake_run_dir = worktrees_dir / "_intake" / "runs" / ticket_id
+        if intake_run_dir.exists():
+            return intake_run_dir
     return runs_dir / ticket_id
 
 
@@ -1074,7 +1099,7 @@ def fetch_ready_issues(label: str, repo: str | None) -> list[dict]:
         return []
 
 
-def call_issue_intake(issue_number: int, ticket_id: str, branch_slug: str, repo: str | None, push: bool = False) -> bool:
+def call_issue_intake(issue_number: int, ticket_id: str, branch_slug: str, repo: str | None, push: bool = False, cwd: str | None = None) -> bool:
     """Run run_issue_intake.py for one issue. Returns True on success."""
     cmd = [
         sys.executable, str(RUN_ISSUE_INTAKE),
@@ -1086,7 +1111,7 @@ def call_issue_intake(issue_number: int, ticket_id: str, branch_slug: str, repo:
         cmd += ["--repo", repo]
     if push:
         cmd.append("--push")
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+    result = subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=cwd)
     for line in result.stdout.splitlines():
         _log(f"intake {ticket_id}: {line}")
     for line in result.stderr.splitlines():
@@ -1135,27 +1160,41 @@ def poll_github_issues(
         slug = slugify_title(title)
         _log(f"ingesting issue #{number} ({title!r}) as {ticket_id} slug={slug!r}")
 
-        checkout_main = subprocess.run(
-            ["git", "checkout", "main"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if checkout_main.returncode != 0:
-            _log(f"issue #{number}: failed checkout main before intake: {checkout_main.stderr.strip()}")
-            continue
+        # Determine intake context: prefer _intake worktree, fall back to legacy
+        intake_cwd: str | None = None
+        if worktrees_dir:
+            ok, intake_path = ensure_intake_worktree(worktrees_dir, repo_root=REPO_ROOT)
+            if ok:
+                pull_result = subprocess.run(
+                    ["git", "pull", "--ff-only", "origin", "main"],
+                    capture_output=True, text=True, check=False,
+                    cwd=str(intake_path),
+                )
+                if pull_result.returncode != 0:
+                    _log(f"issue #{number}: failed pull main in _intake: {pull_result.stderr.strip()}")
+                    continue
+                intake_cwd = str(intake_path)
+            else:
+                _log(f"issue #{number}: _intake worktree not available — falling back to legacy")
 
-        pull_main = subprocess.run(
-            ["git", "pull", "--ff-only", "origin", "main"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if pull_main.returncode != 0:
-            _log(f"issue #{number}: failed pull main before intake: {pull_main.stderr.strip()}")
-            continue
+        if intake_cwd is None:
+            # Legacy: checkout main + pull in main repo
+            checkout_main = subprocess.run(
+                ["git", "checkout", "main"],
+                capture_output=True, text=True, check=False,
+            )
+            if checkout_main.returncode != 0:
+                _log(f"issue #{number}: failed checkout main before intake: {checkout_main.stderr.strip()}")
+                continue
+            pull_main = subprocess.run(
+                ["git", "pull", "--ff-only", "origin", "main"],
+                capture_output=True, text=True, check=False,
+            )
+            if pull_main.returncode != 0:
+                _log(f"issue #{number}: failed pull main before intake: {pull_main.stderr.strip()}")
+                continue
 
-        if call_issue_intake(int(number), ticket_id, slug, repo, push=True):
+        if call_issue_intake(int(number), ticket_id, slug, repo, push=True, cwd=intake_cwd):
             index[number] = ticket_id
             save_issue_index(runs_dir, index)
             _log(f"issue #{number} ingested as {ticket_id}")
@@ -1182,7 +1221,12 @@ def poll_github_issues(
 
 def poll_project_map(runs_dir: Path, repo: str | None, worktrees_dir: Path | None = None) -> None:
     """Run run_issue_mapper.py to refresh the project dependency map."""
-    cmd = [sys.executable, str(RUN_ISSUE_MAPPER), "--runs-dir", str(runs_dir)]
+    effective_runs_dir = runs_dir
+    if worktrees_dir:
+        intake_runs = worktrees_dir / "_intake" / "runs"
+        if intake_runs.exists():
+            effective_runs_dir = intake_runs
+    cmd = [sys.executable, str(RUN_ISSUE_MAPPER), "--runs-dir", str(effective_runs_dir)]
     if repo:
         cmd += ["--repo", repo]
     if worktrees_dir:
@@ -1200,7 +1244,14 @@ def poll_project_map(runs_dir: Path, repo: str | None, worktrees_dir: Path | Non
         _log("mapper: run_issue_mapper.py not found")
 
 
-def _load_project_map(runs_dir: Path) -> dict | None:
+def _load_project_map(runs_dir: Path, worktrees_dir: "Path | None" = None) -> "dict | None":
+    if worktrees_dir:
+        intake_map = worktrees_dir / "_intake" / "runs" / PROJECT_MAP_FILENAME
+        if intake_map.exists():
+            try:
+                return json.loads(intake_map.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                pass
     path = runs_dir / PROJECT_MAP_FILENAME
     if not path.exists():
         return None
@@ -1226,7 +1277,7 @@ def run_once(
     all_tickets = sorted(scan_tickets(runs_dir, worktrees_dir), key=lambda t: ticket_sort_key(t[0]))
 
     if use_project_map:
-        project_map = _load_project_map(runs_dir)
+        project_map = _load_project_map(runs_dir, worktrees_dir=worktrees_dir)
         if project_map:
             next_recommended = project_map.get("next_recommended")
             if next_recommended:
