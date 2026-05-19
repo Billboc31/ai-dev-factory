@@ -30,6 +30,12 @@ def ensure_intake_worktree(worktrees_dir: Path, repo_root: "Path | None" = None)
     """Create or verify the _intake worktree on main. Returns (success, path)."""
     intake_path = worktrees_dir / "_intake"
     if intake_path.exists():
+        # Force return to main at every call — prevents lingering ticket branches
+        subprocess.run(
+            ["git", "checkout", "-f", "main"],
+            capture_output=True, text=True, check=False,
+            cwd=str(intake_path),
+        )
         return True, intake_path
     worktrees_dir.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(
