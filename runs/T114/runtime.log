@@ -18,3 +18,17 @@
 [2026-05-19T09:55:54Z] auto-run start: state=PLAN_APPROVED
 [2026-05-19T09:55:54Z] auto-run gate failed: working tree is not clean — commit or stash changes first
 [2026-05-19T09:56:06Z] commit-checkpoint: skipped missing scope paths: package.json, package-lock.json
+[2026-05-19T09:56:06Z] commit-checkpoint: sha=3c2b525 message='T114: checkpoint [PLAN_APPROVED] — update workflow artifacts'
+[2026-05-19T09:56:33Z] auto-run start: state=PLAN_APPROVED
+[2026-05-19T09:56:33Z] auto-run: running step=coder
+[2026-05-19T09:56:33Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-19T09:56:33Z] prompt: generic fallback — injecting runs/T114/ticket.md
+[2026-05-19T09:56:33Z] compose: global-context=docs/ai/global-context.md
+[2026-05-19T09:56:33Z] compose: role=ai/roles/coder.md
+[2026-05-19T09:56:33Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-19T09:56:33Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-19T09:56:33Z] compose: skill=ai/skills/code-quality.md
+[2026-05-19T09:56:33Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-19T09:56:33Z] compose: skill=ai/skills/security.md
+[2026-05-19T09:56:33Z] compose: task (canonical prompt)
+[2026-05-19T09:56:33Z] snapshot: runtime-prompt=runs/T114/prompts/coder-attempt-1.md
