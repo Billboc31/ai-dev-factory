@@ -43,3 +43,9 @@ apps/dashboard/node_modules/
 apps/dashboard/.vite/
 .pytest_cache/
 **/.pytest_cache/
+
+# Generated / local caches
+node_modules/
+.pytest_cache/
+apps/dashboard/node_modules/
+apps/dashboard/.pytest_cache/
