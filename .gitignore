@@ -71,3 +71,4 @@ runs/daemon.log
 runs/daemon.pid
 runs/.project-map*.json
 runs/.issue-intake.json
+runtime/*.sqlite-wal
