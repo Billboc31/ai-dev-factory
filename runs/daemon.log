@@ -12460,3 +12460,94 @@ fatal: Not possible to fast-forward, aborting.
 [2026-05-19T11:06:48Z] [daemon] detected T113 state=TEST_COMPLETE (human gate — PR lifecycle)
 [2026-05-19T11:06:48Z] [daemon] T113: TEST_COMPLETE PR lifecycle
 [2026-05-19T11:06:48Z] [daemon] T113: pre-PR checkpoint commit
+[2026-05-19T11:06:50Z] [daemon] T113: DIRTY_RUNTIME_CHECKPOINT — pre-PR: T113: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: runtime/ai-dev-factory.sqlite, .gitignore~
+[2026-05-19T11:06:50Z] [daemon] T113: pre-PR push failed — PR skipped
+[2026-05-19T11:06:50Z] [daemon] detected T114 state=IMPLEMENTATION_APPROVED
+[2026-05-19T11:06:52Z] [daemon] T114: sync branch 'ticket/T114-t114-separate-human-clones-from-runtime-clones-and' ok
+[2026-05-19T11:06:52Z] [daemon] launching worker T114 in worktree=/Users/pierrebocquet/ai-dev-factory-worktrees/T114: /Users/pierrebocquet/ai-dev-factory/.venv/bin/python3.14 /Users/pierrebocquet/ai-dev-factory/tools/agent_runner/run_ticket.py T114 --auto --exec-cmd 'claude --dangerously-skip-permissions'
+[2026-05-19T11:06:52Z] [daemon] T114: DEBUG dirty working tree:
+[2026-05-19T11:06:52Z] [daemon] T114:  M runs/T114/runtime.log
+[2026-05-19T11:06:52Z] [daemon] T114:  M runs/T114/state.json
+[2026-05-19T11:06:52Z] [daemon] T114:  M runs/T114/workflow-status.md
+[2026-05-19T11:06:52Z] [daemon] T114: ?? runs/T114/prompts/review-attempt-1.md
+[2026-05-19T11:06:52Z] [daemon] T114: ?? runs/T114/reviews/
+[2026-05-19T11:06:52Z] [daemon] T114: 
+[2026-05-19T11:06:52Z] [daemon] T114 [err]: error: working tree is not clean — commit or stash changes first
+[2026-05-19T11:06:52Z] [daemon] T114: done rc=2
+[2026-05-19T11:06:52Z] [daemon] T114: no failure class in runtime.log — retry policy not applied
+[2026-05-19T11:06:52Z] [daemon] sleeping 30s
+[2026-05-19T11:07:23Z] [daemon] found 1 candidate issue(s)
+[2026-05-19T11:07:23Z] [daemon] ingesting issue #63 ('T114 — Separate Human Clones from Runtime Clones and Isolate Managed Project Worktrees') as T114 slug='t114-separate-human-clones-from-runtime-clones-and'
+[2026-05-19T11:07:25Z] [daemon] intake T114: fetching GitHub issue #63...
+[2026-05-19T11:07:25Z] [daemon] intake T114: issue title: T114 — Separate Human Clones from Runtime Clones and Isolate Managed Project Worktrees
+[2026-05-19T11:07:25Z] [daemon] intake T114: creating branch: ticket/T114-t114-separate-human-clones-from-runtime-clones-and
+[2026-05-19T11:07:25Z] [daemon] intake T114 [err]: error: branch 'ticket/T114-t114-separate-human-clones-from-runtime-clones-and' already exists — delete it first or choose a different slug
+[2026-05-19T11:07:25Z] [daemon] intake failed for issue #63 — will retry next cycle
+[2026-05-19T11:07:25Z] [daemon] skipping T109: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T010: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T013: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T014: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T015: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T016: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T017: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T018: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T019: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T020: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T021: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T022: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T023: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T024: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T025: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T026: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T027: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T028: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T029: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T030: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T111: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T010: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T013: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T014: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T015: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T016: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T017: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T018: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T019: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T020: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T021: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T022: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T023: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T024: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T025: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T026: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T027: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T028: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T029: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T030: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T111: daemon_archived=true
+[2026-05-19T11:07:25Z] [daemon] skipping T105: TEST_COMPLETE already finalized
+[2026-05-19T11:07:25Z] [daemon] skipping T106: TEST_COMPLETE already finalized
+[2026-05-19T11:07:25Z] [daemon] detected T107 state=PLAN_REVIEW_NEEDED (human gate — checkpoint for visibility)
+[2026-05-19T11:07:25Z] [daemon] T107: pre-PR checkpoint commit
+[2026-05-19T11:07:25Z] [daemon] T107: pre-PR push ok
+[2026-05-19T11:07:25Z] [daemon] skipping T107 state=PLAN_REVIEW_NEEDED (human gate)
+[2026-05-19T11:07:25Z] [daemon] detected T108 state=PLAN_REVIEW_NEEDED (human gate — checkpoint for visibility)
+[2026-05-19T11:07:25Z] [daemon] T108: pre-PR checkpoint commit
+[2026-05-19T11:07:26Z] [daemon] T108: pre-PR push ok
+[2026-05-19T11:07:26Z] [daemon] skipping T108 state=PLAN_REVIEW_NEEDED (human gate)
+[2026-05-19T11:07:26Z] [daemon] detected T109 state=IMPLEMENTATION_APPROVED
+[2026-05-19T11:07:27Z] [daemon] T109: sync branch 'ticket/T109-t109-atomic-runtime-checkpoint-and-worktree-safe-c' failed — diverged or conflict: From github.com:Billboc31/ai-dev-factory
+ * branch            ticket/T109-t109-atomic-runtime-checkpoint-and-worktree-safe-c -> FETCH_HEAD
+hint: Diverging branches can't be fast-forwarded, you need to either:
+hint:
+hint: 	git merge --no-ff
+hint:
+hint: or:
+hint:
+hint: 	git rebase
+hint:
+hint: Disable this message with "git config set advice.diverging false"
+fatal: Not possible to fast-forward, aborting.
+[2026-05-19T11:07:27Z] [daemon] skipping T109: branch sync failed in worktree
+[2026-05-19T11:07:27Z] [daemon] detected T113 state=TEST_COMPLETE (human gate — PR lifecycle)
+[2026-05-19T11:07:27Z] [daemon] T113: TEST_COMPLETE PR lifecycle
+[2026-05-19T11:07:27Z] [daemon] T113: pre-PR checkpoint commit
