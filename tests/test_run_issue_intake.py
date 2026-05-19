@@ -36,6 +36,8 @@ def _happy_fake_run(args):
         return _cp()  # clean tree
     if args[:3] == ["gh", "issue", "view"]:
         return _cp(stdout=_issue_json())
+    if args[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+        return _cp(stdout="main\n")
     if args[:2] == ["git", "show-ref"]:
         return _cp(returncode=1)  # branch does not exist
     if args[:3] == ["git", "checkout", "-b"]:
@@ -126,7 +128,37 @@ def test_happy_path(tmp_path):
         assert rc == 0
         assert (tmp_path / "runs" / "T099" / "ticket.md").exists()
         assert (tmp_path / "runs" / "T099" / "state.json").exists()
-        assert (tmp_path / "runs" / "T099" / "runtime.log").exists()
+        # intake must not produce runtime.log — that file is owned by run_ticket.py
+        assert not (tmp_path / "runs" / "T099" / "runtime.log").exists()
+    finally:
+        os.chdir(orig)
+
+
+def test_skip_create_branch_when_already_on_target_branch(tmp_path):
+    """Daemon's ephemeral flow lands intake in a worktree already on the ticket branch."""
+    orig = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        seen_args: list[list[str]] = []
+
+        def fake_run(args):
+            seen_args.append(list(args))
+            if args[:2] == ["git", "status"]:
+                return _cp()
+            if args[:3] == ["gh", "issue", "view"]:
+                return _cp(stdout=_issue_json())
+            if args[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+                return _cp(stdout="ticket/T099-my-feature\n")
+            return _cp(returncode=2, stderr=f"unexpected: {args}")
+
+        with patch("run_issue_intake._run", side_effect=fake_run):
+            rc = run_intake("T099", 42, "my-feature", None)
+
+        assert rc == 0
+        # No git show-ref / checkout -b must have been issued
+        for args in seen_args:
+            assert args[:2] != ["git", "show-ref"]
+            assert args[:3] != ["git", "checkout", "-b"]
     finally:
         os.chdir(orig)
 
@@ -217,6 +249,7 @@ def test_working_tree_dirty_refused(tmp_path, capsys):
 # ── guard: branch already exists ─────────────────────────────────────────────
 
 def test_branch_already_exists_refused(tmp_path, capsys):
+    """CLI path: if branch already exists AND we're not on it, intake must refuse."""
     orig = os.getcwd()
     os.chdir(tmp_path)
     try:
@@ -225,6 +258,8 @@ def test_branch_already_exists_refused(tmp_path, capsys):
                 return _cp()
             if args[:3] == ["gh", "issue", "view"]:
                 return _cp(stdout=_issue_json())
+            if args[:3] == ["git", "rev-parse", "--abbrev-ref"]:
+                return _cp(stdout="main\n")  # not on target branch
             if args[:2] == ["git", "show-ref"]:
                 return _cp(returncode=0)  # branch exists
             return _cp()

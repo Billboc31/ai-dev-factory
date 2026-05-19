@@ -38,13 +38,6 @@ def _now_iso() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _log(ticket_id: str, message: str) -> None:
-    log_path = Path("runs") / ticket_id / "runtime.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a", encoding="utf-8") as fh:
-        fh.write(f"[{_now_iso()}] {message}\n")
-
-
 def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, text=True, capture_output=True, check=False)
 
@@ -134,12 +127,6 @@ def get_current_branch() -> str | None:
     return result.stdout.strip() or None
 
 
-def return_to_branch(branch: str) -> None:
-    result = _run(["git", "checkout", branch])
-    if result.returncode != 0:
-        print(f"warning: failed to return to branch {branch!r}: {result.stderr.strip()}", file=sys.stderr)
-
-
 def fetch_issue(issue_number: int, repo: str | None) -> dict[str, str]:
     cmd = ["gh", "issue", "view", str(issue_number), "--json", "title,body"]
     if repo:
@@ -162,6 +149,16 @@ def branch_name(ticket_id: str, slug: str) -> str:
 
 
 def create_branch(name: str) -> None:
+    """Create and check out a new branch ``name``.
+
+    When called from the daemon's ephemeral intake flow, the worktree is
+    already on ``name`` (the branch and worktree were created upstream by
+    ``create_ticket_branch_and_worktree``), so this is a no-op. The CLI
+    path (manual intake from any branch) still performs the actual creation.
+    """
+    current = get_current_branch()
+    if current == name:
+        return
     exists = _run(["git", "show-ref", "--verify", "--quiet", f"refs/heads/{name}"])
     if exists.returncode == 0:
         raise IntakeError(
@@ -192,16 +189,12 @@ def commit_bootstrap(ticket_id: str, push: bool = False) -> None:
             f"{ticket_id}: bootstrap checkpoint",
             push=push,
         )
-        _log(ticket_id, "bootstrap checkpoint completed")
         print(f"bootstrap checkpoint completed for {ticket_id}")
         if push:
-            _log(ticket_id, f"checkpoint push for {ticket_id}")
             print(f"checkpoint push for {ticket_id}")
     except _CheckpointError as exc:
-        _log(ticket_id, f"bootstrap checkpoint: failed: {exc}")
         print(f"warning: bootstrap checkpoint failed: {exc}", file=sys.stderr)
     except _DirtyTreeError as exc:
-        _log(ticket_id, f"bootstrap checkpoint: DIRTY_RUNTIME_CHECKPOINT: {exc}")
         print(f"warning: bootstrap checkpoint: dirty tree after commit: {exc}", file=sys.stderr)
 
 
@@ -256,8 +249,6 @@ def run_intake(
         print(f"error: {exc}", file=sys.stderr)
         return 2
 
-    original_branch = get_current_branch()
-
     print(f"fetching GitHub issue #{issue_number}...")
     try:
         issue = fetch_issue(issue_number, repo)
@@ -270,7 +261,7 @@ def run_intake(
     print(f"issue title: {title}")
 
     branch = branch_name(ticket_id, branch_slug)
-    print(f"creating branch: {branch}")
+    print(f"ensuring branch: {branch}")
     try:
         create_branch(branch)
     except IntakeError as exc:
@@ -283,17 +274,9 @@ def run_intake(
     write_state_json(ticket_id, branch, issue_number)
     print(f"state.json initialized: state=INIT branch={branch} issue={issue_number}")
 
-    _log(ticket_id, f"intake: issue=#{issue_number} title={title!r} branch={branch}")
-    _log(ticket_id, "intake: done")
-
     _record_sqlite_intake(ticket_id, issue_number, branch)
 
     commit_bootstrap(ticket_id, push=push)
-
-    if original_branch and original_branch != branch:
-        print(f"returning to original branch: {original_branch}")
-        return_to_branch(original_branch)
-        _log(ticket_id, f"intake: returned to branch {original_branch!r}")
 
     print(f"\nrun workflow with:")
     print(

@@ -1,4 +1,16 @@
-"""Tests for T113 — intake worktree isolation."""
+"""Tests for the ephemeral intake flow (replaces persistent `_intake` worktree).
+
+The daemon no longer maintains a long-lived `_intake` worktree. Instead, each
+new GitHub issue is ingested by:
+
+1. fetching ``origin/main`` (pure ref op),
+2. creating the ticket branch directly from ``origin/main``,
+3. adding ``worktrees/TXXX`` on that branch,
+4. running ``run_issue_intake.py`` inside the new worktree.
+
+On failure the just-created branch and worktree are cleaned up so the next
+daemon cycle can retry from scratch.
+"""
 
 import json
 import sys
@@ -17,13 +29,16 @@ from run_daemon import (
     poll_project_map,
     scan_tickets,
 )
-from worktree_manager import ensure_intake_worktree
+from worktree_manager import (
+    cleanup_failed_intake,
+    create_ticket_branch_and_worktree,
+    fetch_origin_main,
+)
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
 def _write_state_in_runs(runs_dir: Path, ticket_id: str, state: str) -> None:
-    """Write state.json directly under runs_dir/ticket_id/ (main runs directory layout)."""
     run_dir = runs_dir / ticket_id
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "state.json").write_text(
@@ -33,7 +48,6 @@ def _write_state_in_runs(runs_dir: Path, ticket_id: str, state: str) -> None:
 
 
 def _write_state_in_worktree(worktree: Path, ticket_id: str, state: str) -> None:
-    """Write state.json under worktree/runs/ticket_id/ (worktree layout)."""
     run_dir = worktree / "runs" / ticket_id
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "state.json").write_text(
@@ -42,340 +56,356 @@ def _write_state_in_worktree(worktree: Path, ticket_id: str, state: str) -> None
     )
 
 
-def _make_intake_worktree(worktrees_dir: Path) -> Path:
-    intake_path = worktrees_dir / "_intake"
-    intake_path.mkdir(parents=True, exist_ok=True)
-    return intake_path
+def _cp(returncode=0, stdout="", stderr=""):
+    return MagicMock(returncode=returncode, stdout=stdout, stderr=stderr)
 
 
-# ── ensure_intake_worktree ────────────────────────────────────────────────────
+# ── fetch_origin_main ─────────────────────────────────────────────────────────
 
-def test_ensure_intake_worktree_returns_true_when_already_exists(tmp_path):
-    worktrees_dir = tmp_path / "worktrees"
-    intake_path = worktrees_dir / "_intake"
-    intake_path.mkdir(parents=True)
-    ok, path = ensure_intake_worktree(worktrees_dir)
+def test_fetch_origin_main_success(tmp_path):
+    with patch("worktree_manager.subprocess.run", return_value=_cp()) as mock_sub:
+        ok, msg = fetch_origin_main(repo_root=tmp_path)
     assert ok is True
-    assert path == intake_path
+    cmd, kwargs = mock_sub.call_args[0][0], mock_sub.call_args[1]
+    assert cmd == ["git", "fetch", "origin", "main"]
+    assert kwargs["cwd"] == str(tmp_path)
 
 
-def test_ensure_intake_worktree_creates_when_absent(tmp_path):
-    worktrees_dir = tmp_path / "worktrees"
-    mock_result = MagicMock(returncode=0)
-    with patch("worktree_manager.subprocess.run", return_value=mock_result) as mock_sub:
-        ok, path = ensure_intake_worktree(worktrees_dir, repo_root=tmp_path)
-    assert ok is True
-    assert path == worktrees_dir / "_intake"
-    cmd = mock_sub.call_args[0][0]
-    assert "worktree" in cmd
-    assert "add" in cmd
-    assert str(worktrees_dir / "_intake") in cmd
-    assert "main" in cmd
-
-
-def test_ensure_intake_worktree_returns_false_on_git_failure(tmp_path):
-    worktrees_dir = tmp_path / "worktrees"
-    mock_result = MagicMock(returncode=1, stderr="error")
-    with patch("worktree_manager.subprocess.run", return_value=mock_result):
-        ok, path = ensure_intake_worktree(worktrees_dir)
+def test_fetch_origin_main_failure_returns_false_with_stderr(tmp_path):
+    with patch("worktree_manager.subprocess.run", return_value=_cp(returncode=1, stderr="boom")):
+        ok, msg = fetch_origin_main(repo_root=tmp_path)
     assert ok is False
+    assert "boom" in msg
 
 
-def test_ensure_intake_worktree_passes_repo_root_as_cwd(tmp_path):
+# ── create_ticket_branch_and_worktree ────────────────────────────────────────
+
+def test_create_ticket_branch_and_worktree_happy_path(tmp_path):
     worktrees_dir = tmp_path / "worktrees"
-    repo_root = tmp_path / "repo"
-    mock_result = MagicMock(returncode=0)
-    with patch("worktree_manager.subprocess.run", return_value=mock_result) as mock_sub:
-        ensure_intake_worktree(worktrees_dir, repo_root=repo_root)
-    kwargs = mock_sub.call_args[1]
-    assert kwargs.get("cwd") == str(repo_root)
+    branch = "ticket/T001-feat"
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["git", "show-ref"]:
+            return _cp(returncode=1)  # branch doesn't exist yet
+        if cmd[:2] == ["git", "branch"] and "origin/main" in cmd:
+            return _cp()
+        if cmd[:3] == ["git", "worktree", "add"]:
+            return _cp()
+        return _cp(returncode=2, stderr=f"unexpected {cmd}")
+
+    with patch("worktree_manager.subprocess.run", side_effect=fake_run) as mock_sub:
+        ok, msg = create_ticket_branch_and_worktree("T001", branch, worktrees_dir, repo_root=tmp_path)
+
+    assert ok is True
+    assert "branch+worktree created" in msg
+    calls = [c[0][0] for c in mock_sub.call_args_list]
+    assert ["git", "branch", branch, "origin/main"] in calls
+    assert any(c[:3] == ["git", "worktree", "add"] for c in calls)
 
 
-# ── call_issue_intake with cwd ────────────────────────────────────────────────
+def test_create_ticket_branch_and_worktree_refuses_if_worktree_exists(tmp_path):
+    worktrees_dir = tmp_path / "worktrees"
+    (worktrees_dir / "T001").mkdir(parents=True)
+    ok, msg = create_ticket_branch_and_worktree(
+        "T001", "ticket/T001-feat", worktrees_dir, repo_root=tmp_path,
+    )
+    assert ok is False
+    assert "worktree already exists" in msg
+
+
+def test_create_ticket_branch_and_worktree_refuses_if_branch_exists(tmp_path):
+    worktrees_dir = tmp_path / "worktrees"
+    with patch("worktree_manager.subprocess.run", return_value=_cp(returncode=0)):
+        ok, msg = create_ticket_branch_and_worktree(
+            "T001", "ticket/T001-feat", worktrees_dir, repo_root=tmp_path,
+        )
+    assert ok is False
+    assert "branch already exists" in msg
+
+
+def test_create_ticket_branch_and_worktree_rolls_back_branch_when_worktree_add_fails(tmp_path):
+    worktrees_dir = tmp_path / "worktrees"
+    branch = "ticket/T001-feat"
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        if cmd[:2] == ["git", "show-ref"]:
+            return _cp(returncode=1)
+        if cmd[:2] == ["git", "branch"] and "origin/main" in cmd:
+            return _cp()
+        if cmd[:3] == ["git", "worktree", "add"]:
+            return _cp(returncode=1, stderr="cannot add worktree")
+        if cmd[:3] == ["git", "branch", "-D"]:
+            return _cp()
+        return _cp(returncode=2, stderr=f"unexpected {cmd}")
+
+    with patch("worktree_manager.subprocess.run", side_effect=fake_run):
+        ok, msg = create_ticket_branch_and_worktree("T001", branch, worktrees_dir, repo_root=tmp_path)
+
+    assert ok is False
+    assert "worktree add failed" in msg
+    # rollback step must have run
+    assert ["git", "branch", "-D", branch] in calls
+
+
+# ── cleanup_failed_intake ─────────────────────────────────────────────────────
+
+def test_cleanup_failed_intake_removes_worktree_and_deletes_branch(tmp_path):
+    worktrees_dir = tmp_path / "worktrees"
+    worktree_path = worktrees_dir / "T001"
+    worktree_path.mkdir(parents=True)
+    branch = "ticket/T001-feat"
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:3] == ["git", "worktree", "remove"]:
+            return _cp()
+        if cmd[:2] == ["git", "show-ref"]:
+            return _cp(returncode=0)  # branch exists
+        if cmd[:3] == ["git", "branch", "-D"]:
+            return _cp()
+        return _cp()
+
+    with patch("worktree_manager.subprocess.run", side_effect=fake_run) as mock_sub:
+        msgs = cleanup_failed_intake("T001", branch, worktrees_dir, repo_root=tmp_path)
+
+    calls = [c[0][0] for c in mock_sub.call_args_list]
+    assert any(c[:3] == ["git", "worktree", "remove"] for c in calls)
+    assert ["git", "branch", "-D", branch] in calls
+    assert any("removed worktree" in m for m in msgs)
+    assert any("deleted branch" in m for m in msgs)
+
+
+def test_cleanup_failed_intake_handles_missing_worktree_and_branch(tmp_path):
+    worktrees_dir = tmp_path / "worktrees"
+    worktrees_dir.mkdir()
+    # neither worktree nor branch exists
+    with patch("worktree_manager.subprocess.run", return_value=_cp(returncode=1)) as mock_sub:
+        msgs = cleanup_failed_intake("T001", "ticket/T001-feat", worktrees_dir, repo_root=tmp_path)
+
+    # no git worktree remove and no git branch -D — both gated by existence checks
+    calls = [c[0][0] for c in mock_sub.call_args_list]
+    for c in calls:
+        assert c[:3] != ["git", "worktree", "remove"]
+        assert c[:3] != ["git", "branch", "-D"]
+    assert msgs == []
+
+
+# ── call_issue_intake passes cwd ──────────────────────────────────────────────
 
 def test_call_issue_intake_passes_cwd_to_subprocess(tmp_path):
-    mock_result = MagicMock(returncode=0, stdout="", stderr="")
-    with patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
-        call_issue_intake(42, "T001", "feat", None, cwd="/some/intake/path")
-    kwargs = mock_sub.call_args[1]
-    assert kwargs.get("cwd") == "/some/intake/path"
+    with patch("run_daemon.subprocess.run", return_value=_cp()) as mock_sub:
+        call_issue_intake(42, "T001", "feat", None, cwd="/some/worktree/path")
+    assert mock_sub.call_args[1].get("cwd") == "/some/worktree/path"
 
 
-def test_call_issue_intake_cwd_none_by_default(tmp_path):
-    mock_result = MagicMock(returncode=0, stdout="", stderr="")
-    with patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
+def test_call_issue_intake_cwd_none_by_default():
+    with patch("run_daemon.subprocess.run", return_value=_cp()) as mock_sub:
         call_issue_intake(42, "T001", "feat", None)
-    kwargs = mock_sub.call_args[1]
-    assert kwargs.get("cwd") is None
+    assert mock_sub.call_args[1].get("cwd") is None
 
 
-# ── scan_tickets tier 3 (_intake) ─────────────────────────────────────────────
+# ── scan_tickets — no more _intake tier ──────────────────────────────────────
 
-def test_scan_tickets_finds_ticket_in_intake_worktree(tmp_path):
+def test_scan_tickets_only_uses_worktrees_and_main_runs(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
     worktrees_dir = tmp_path / "worktrees"
-    intake = _make_intake_worktree(worktrees_dir)
-    _write_state_in_worktree(intake, "T001", "INIT")
 
-    result = scan_tickets(runs, worktrees_dir=worktrees_dir)
-    assert ("T001", "INIT") in result
-
-
-def test_scan_tickets_intake_does_not_override_txxx_worktree(tmp_path):
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    worktrees_dir = tmp_path / "worktrees"
-    intake = _make_intake_worktree(worktrees_dir)
-
-    # T001 in TXXX worktree with state PLAN_APPROVED
-    txxx = worktrees_dir / "T001"
-    _write_state_in_worktree(txxx, "T001", "PLAN_APPROVED")
-    # T001 in _intake with older state INIT — should not override
-    _write_state_in_worktree(intake, "T001", "INIT")
-
-    result = scan_tickets(runs, worktrees_dir=worktrees_dir)
-    states = dict(result)
-    assert states["T001"] == "PLAN_APPROVED"
-
-
-def test_scan_tickets_intake_does_not_override_main_runs(tmp_path):
-    runs = tmp_path / "runs"
-    worktrees_dir = tmp_path / "worktrees"
-    intake = _make_intake_worktree(worktrees_dir)
-
-    # T001 in main runs/ with PLAN_APPROVED
-    _write_state_in_runs(runs, "T001", "PLAN_APPROVED")
-    # T001 in _intake with INIT — main runs takes priority (tier 2 > tier 3)
-    _write_state_in_worktree(intake, "T001", "INIT")
-
-    result = scan_tickets(runs, worktrees_dir=worktrees_dir)
-    states = dict(result)
-    assert states["T001"] == "PLAN_APPROVED"
-
-
-def test_scan_tickets_intake_skips_non_ticket_dirs(tmp_path):
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    worktrees_dir = tmp_path / "worktrees"
-    intake = _make_intake_worktree(worktrees_dir)
-
-    # non-ticket dir in _intake/runs/
-    non_ticket = intake / "runs" / "some-dir"
-    non_ticket.mkdir(parents=True)
-    (non_ticket / "state.json").write_text(
-        json.dumps({"state": "INIT"}), encoding="utf-8"
+    # Plain runs/ entry
+    _write_state_in_runs(runs, "T001", "INIT")
+    # TXXX worktree entry
+    _write_state_in_worktree(worktrees_dir / "T002", "T002", "PLAN_APPROVED")
+    # Any stray _intake subdirectory must now be ignored
+    legacy_intake = worktrees_dir / "_intake" / "runs" / "T999"
+    legacy_intake.mkdir(parents=True)
+    (legacy_intake / "state.json").write_text(
+        json.dumps({"ticket_id": "T999", "state": "INIT"}), encoding="utf-8"
     )
 
-    result = scan_tickets(runs, worktrees_dir=worktrees_dir)
-    assert result == []
+    result = dict(scan_tickets(runs, worktrees_dir=worktrees_dir))
+    assert result == {"T001": "INIT", "T002": "PLAN_APPROVED"}
+    assert "T999" not in result
 
 
-def test_scan_tickets_intake_skips_daemon_archived(tmp_path):
+# ── _get_run_dir — no _intake fallback ────────────────────────────────────────
+
+def test_get_run_dir_prefers_txxx_worktree(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
     worktrees_dir = tmp_path / "worktrees"
-    intake = _make_intake_worktree(worktrees_dir)
-
-    run_dir = intake / "runs" / "T001"
-    run_dir.mkdir(parents=True)
-    (run_dir / "state.json").write_text(
-        json.dumps({"ticket_id": "T001", "state": "INIT", "daemon_archived": True}),
-        encoding="utf-8",
-    )
-
-    result = scan_tickets(runs, worktrees_dir=worktrees_dir)
-    assert result == []
-
-
-# ── _get_run_dir with _intake fallback ───────────────────────────────────────
-
-def test_get_run_dir_uses_intake_when_no_txxx_worktree(tmp_path):
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    worktrees_dir = tmp_path / "worktrees"
-    intake = _make_intake_worktree(worktrees_dir)
-    intake_run_dir = intake / "runs" / "T001"
-    intake_run_dir.mkdir(parents=True)
-
-    result = _get_run_dir("T001", runs, worktrees_dir=worktrees_dir)
-    assert result == intake_run_dir
-
-
-def test_get_run_dir_prefers_txxx_worktree_over_intake(tmp_path):
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    worktrees_dir = tmp_path / "worktrees"
-    intake = _make_intake_worktree(worktrees_dir)
-
     txxx_run_dir = worktrees_dir / "T001" / "runs" / "T001"
     txxx_run_dir.mkdir(parents=True)
-    intake_run_dir = intake / "runs" / "T001"
-    intake_run_dir.mkdir(parents=True)
-
-    result = _get_run_dir("T001", runs, worktrees_dir=worktrees_dir)
-    assert result == txxx_run_dir
+    assert _get_run_dir("T001", runs, worktrees_dir=worktrees_dir) == txxx_run_dir
 
 
 def test_get_run_dir_falls_back_to_main_runs(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
     worktrees_dir = tmp_path / "worktrees"
-    _make_intake_worktree(worktrees_dir)  # _intake exists but no T001 inside
-
-    result = _get_run_dir("T001", runs, worktrees_dir=worktrees_dir)
-    assert result == runs / "T001"
+    assert _get_run_dir("T001", runs, worktrees_dir=worktrees_dir) == runs / "T001"
 
 
-# ── poll_github_issues with intake worktree ───────────────────────────────────
-
-def test_poll_github_issues_uses_intake_pull_when_worktrees_dir_set(tmp_path):
+def test_get_run_dir_ignores_intake_subdir(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
     worktrees_dir = tmp_path / "worktrees"
-    intake = _make_intake_worktree(worktrees_dir)
-
-    issues = [{"number": 42, "title": "New feature"}]
-    pull_result = MagicMock(returncode=0, stdout="", stderr="")
-
-    with patch("run_daemon.fetch_ready_issues", return_value=issues), \
-         patch("run_daemon.call_issue_intake", return_value=True), \
-         patch("run_daemon.ensure_intake_worktree", return_value=(True, intake)) as mock_ensure, \
-         patch("run_daemon.subprocess.run", return_value=pull_result) as mock_sub, \
-         patch("run_daemon.create_ticket_worktree", return_value=(True, "ok")):
-        poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir)
-
-    mock_ensure.assert_called_once()
-    # subprocess.run should be called for git pull in _intake, not git checkout main
-    for c in mock_sub.call_args_list:
-        cmd = c[0][0]
-        assert "checkout" not in cmd, f"unexpected git checkout: {cmd}"
+    # Even if a stale _intake/runs/T001/ exists, it must not be used
+    legacy = worktrees_dir / "_intake" / "runs" / "T001"
+    legacy.mkdir(parents=True)
+    assert _get_run_dir("T001", runs, worktrees_dir=worktrees_dir) == runs / "T001"
 
 
-def test_poll_github_issues_intake_cwd_passed_to_call_issue_intake(tmp_path):
+# ── poll_github_issues — ephemeral intake flow ────────────────────────────────
+
+def test_poll_github_issues_fetches_main_creates_branch_and_worktree_and_runs_intake(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
     worktrees_dir = tmp_path / "worktrees"
-    intake = _make_intake_worktree(worktrees_dir)
-
     issues = [{"number": 42, "title": "New feature"}]
-    pull_ok = MagicMock(returncode=0, stdout="", stderr="")
+    worktree_path = worktrees_dir / "T001"
 
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
+         patch("run_daemon.extract_ticket_id_from_title", return_value="T001"), \
+         patch("run_daemon.next_ticket_id", return_value="T001"), \
+         patch("run_daemon.slugify_title", return_value="new-feature"), \
+         patch("run_daemon.fetch_origin_main", return_value=(True, "fetched origin/main")) as mock_fetch, \
+         patch(
+             "run_daemon.create_ticket_branch_and_worktree",
+             return_value=(True, f"branch+worktree created at {worktree_path}"),
+         ) as mock_create, \
          patch("run_daemon.call_issue_intake", return_value=True) as mock_intake, \
-         patch("run_daemon.ensure_intake_worktree", return_value=(True, intake)), \
-         patch("run_daemon.subprocess.run", return_value=pull_ok), \
-         patch("run_daemon.create_ticket_worktree", return_value=(True, "ok")):
-        poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir)
+         patch("run_daemon.cleanup_failed_intake") as mock_cleanup:
+        poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir, state_dir=tmp_path)
 
-    kwargs = mock_intake.call_args[1]
-    assert kwargs.get("cwd") == str(intake)
+    mock_fetch.assert_called_once()
+    mock_create.assert_called_once()
+    create_args = mock_create.call_args
+    assert create_args[0][0] == "T001"
+    assert create_args[0][1].startswith("ticket/T001-")
+    mock_intake.assert_called_once()
+    intake_kwargs = mock_intake.call_args[1]
+    assert intake_kwargs.get("cwd") == str(worktree_path)
+    mock_cleanup.assert_not_called()
 
 
-def test_poll_github_issues_legacy_path_when_worktrees_dir_none(tmp_path):
+def test_poll_github_issues_skips_when_worktrees_dir_none(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
     issues = [{"number": 42, "title": "New feature"}]
-    git_ok = MagicMock(returncode=0, stdout="", stderr="")
-
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
-         patch("run_daemon.call_issue_intake", return_value=True), \
-         patch("run_daemon.subprocess.run", return_value=git_ok) as mock_sub:
-        poll_github_issues(runs, "ai-ready", None, worktrees_dir=None)
+         patch("run_daemon.extract_ticket_id_from_title", return_value="T001"), \
+         patch("run_daemon.next_ticket_id", return_value="T001"), \
+         patch("run_daemon.slugify_title", return_value="new-feature"), \
+         patch("run_daemon.call_issue_intake") as mock_intake, \
+         patch("run_daemon.fetch_origin_main") as mock_fetch:
+        poll_github_issues(runs, "ai-ready", None, worktrees_dir=None, state_dir=tmp_path)
 
-    cmds = [c[0][0] for c in mock_sub.call_args_list]
-    checkout_calls = [c for c in cmds if "checkout" in c]
-    assert len(checkout_calls) >= 1, "legacy path must call git checkout main"
+    mock_fetch.assert_not_called()
+    mock_intake.assert_not_called()
 
 
-def test_poll_github_issues_falls_back_to_legacy_when_intake_creation_fails(tmp_path):
+def test_poll_github_issues_aborts_on_fetch_failure(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
     worktrees_dir = tmp_path / "worktrees"
-    intake = worktrees_dir / "_intake"  # does not exist yet
-
     issues = [{"number": 42, "title": "New feature"}]
-    git_ok = MagicMock(returncode=0, stdout="", stderr="")
 
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
-         patch("run_daemon.call_issue_intake", return_value=True), \
-         patch("run_daemon.ensure_intake_worktree", return_value=(False, intake)), \
-         patch("run_daemon.subprocess.run", return_value=git_ok) as mock_sub:
-        poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir)
+         patch("run_daemon.extract_ticket_id_from_title", return_value="T001"), \
+         patch("run_daemon.next_ticket_id", return_value="T001"), \
+         patch("run_daemon.slugify_title", return_value="new-feature"), \
+         patch("run_daemon.fetch_origin_main", return_value=(False, "git fetch failed: network down")), \
+         patch("run_daemon.create_ticket_branch_and_worktree") as mock_create, \
+         patch("run_daemon.call_issue_intake") as mock_intake:
+        poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir, state_dir=tmp_path)
 
-    cmds = [c[0][0] for c in mock_sub.call_args_list]
-    checkout_calls = [c for c in cmds if "checkout" in c]
-    assert len(checkout_calls) >= 1, "must fall back to legacy checkout main"
+    mock_create.assert_not_called()
+    mock_intake.assert_not_called()
 
 
-# ── _load_project_map with worktrees_dir ─────────────────────────────────────
-
-def test_load_project_map_reads_from_intake_when_available(tmp_path):
+def test_poll_github_issues_rolls_back_when_intake_fails(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
     worktrees_dir = tmp_path / "worktrees"
-    intake = _make_intake_worktree(worktrees_dir)
-    intake_map_path = intake / "runs" / ".project-map.json"
-    intake_map_path.parent.mkdir(parents=True, exist_ok=True)
-    intake_map_path.write_text(json.dumps({"next_recommended": "T005"}), encoding="utf-8")
+    worktree_path = worktrees_dir / "T001"
+    issues = [{"number": 42, "title": "New feature"}]
 
-    result = _load_project_map(runs, worktrees_dir=worktrees_dir)
-    assert result == {"next_recommended": "T005"}
+    with patch("run_daemon.fetch_ready_issues", return_value=issues), \
+         patch("run_daemon.extract_ticket_id_from_title", return_value="T001"), \
+         patch("run_daemon.next_ticket_id", return_value="T001"), \
+         patch("run_daemon.slugify_title", return_value="new-feature"), \
+         patch("run_daemon.fetch_origin_main", return_value=(True, "fetched origin/main")), \
+         patch(
+             "run_daemon.create_ticket_branch_and_worktree",
+             return_value=(True, f"branch+worktree created at {worktree_path}"),
+         ), \
+         patch("run_daemon.call_issue_intake", return_value=False), \
+         patch("run_daemon.cleanup_failed_intake", return_value=["removed worktree", "deleted branch"]) as mock_cleanup:
+        poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir, state_dir=tmp_path)
+
+    mock_cleanup.assert_called_once()
+    cleanup_args = mock_cleanup.call_args
+    assert cleanup_args[0][0] == "T001"
+    assert cleanup_args[0][1].startswith("ticket/T001-")
 
 
-def test_load_project_map_falls_back_to_runs_dir_when_no_intake_map(tmp_path):
+def test_poll_github_issues_aborts_when_branch_or_worktree_creation_fails(tmp_path):
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    worktrees_dir = tmp_path / "worktrees"
+    issues = [{"number": 42, "title": "New feature"}]
+
+    with patch("run_daemon.fetch_ready_issues", return_value=issues), \
+         patch("run_daemon.extract_ticket_id_from_title", return_value="T001"), \
+         patch("run_daemon.next_ticket_id", return_value="T001"), \
+         patch("run_daemon.slugify_title", return_value="new-feature"), \
+         patch("run_daemon.fetch_origin_main", return_value=(True, "fetched origin/main")), \
+         patch(
+             "run_daemon.create_ticket_branch_and_worktree",
+             return_value=(False, "branch already exists: ticket/T001-new-feature — refusing"),
+         ), \
+         patch("run_daemon.call_issue_intake") as mock_intake, \
+         patch("run_daemon.cleanup_failed_intake") as mock_cleanup:
+        poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir, state_dir=tmp_path)
+
+    mock_intake.assert_not_called()
+    mock_cleanup.assert_not_called()
+
+
+# ── _load_project_map / poll_project_map — no _intake lookups ────────────────
+
+def test_load_project_map_reads_runs_dir_only(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
     (runs / ".project-map.json").write_text(
         json.dumps({"next_recommended": "T003"}), encoding="utf-8"
     )
     worktrees_dir = tmp_path / "worktrees"
-    _make_intake_worktree(worktrees_dir)  # _intake exists but no map
+    # any stale _intake map must not be considered anymore
+    intake_map = worktrees_dir / "_intake" / "runs" / ".project-map.json"
+    intake_map.parent.mkdir(parents=True, exist_ok=True)
+    intake_map.write_text(json.dumps({"next_recommended": "T999"}), encoding="utf-8")
 
-    result = _load_project_map(runs, worktrees_dir=worktrees_dir)
-    assert result == {"next_recommended": "T003"}
+    assert _load_project_map(runs, worktrees_dir=worktrees_dir) == {"next_recommended": "T003"}
 
 
-def test_load_project_map_returns_none_when_no_map_anywhere(tmp_path):
+def test_load_project_map_returns_none_when_no_map(tmp_path):
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    assert _load_project_map(runs) is None
+
+
+def test_poll_project_map_uses_runs_dir(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
     worktrees_dir = tmp_path / "worktrees"
-    _make_intake_worktree(worktrees_dir)
+    # any stale _intake/runs must be ignored
+    (worktrees_dir / "_intake" / "runs").mkdir(parents=True)
 
-    result = _load_project_map(runs, worktrees_dir=worktrees_dir)
-    assert result is None
-
-
-# ── poll_project_map uses _intake/runs/ ───────────────────────────────────────
-
-def test_poll_project_map_passes_intake_runs_as_runs_dir(tmp_path):
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    worktrees_dir = tmp_path / "worktrees"
-    intake = _make_intake_worktree(worktrees_dir)
-    intake_runs = intake / "runs"
-    intake_runs.mkdir(parents=True, exist_ok=True)
-
-    mock_result = MagicMock(returncode=0, stdout="", stderr="")
-    with patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
+    with patch("run_daemon.subprocess.run", return_value=_cp()) as mock_sub:
         poll_project_map(runs, None, worktrees_dir=worktrees_dir)
 
     cmd = mock_sub.call_args[0][0]
     assert "--runs-dir" in cmd
-    idx = cmd.index("--runs-dir")
-    assert cmd[idx + 1] == str(intake_runs)
-
-
-def test_poll_project_map_uses_original_runs_dir_when_no_intake(tmp_path):
-    runs = tmp_path / "runs"
-    runs.mkdir()
-    worktrees_dir = tmp_path / "worktrees"
-    worktrees_dir.mkdir()  # no _intake inside
-
-    mock_result = MagicMock(returncode=0, stdout="", stderr="")
-    with patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
-        poll_project_map(runs, None, worktrees_dir=worktrees_dir)
-
-    cmd = mock_sub.call_args[0][0]
-    idx = cmd.index("--runs-dir")
-    assert cmd[idx + 1] == str(runs)
+    assert cmd[cmd.index("--runs-dir") + 1] == str(runs)
