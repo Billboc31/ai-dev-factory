@@ -83,6 +83,10 @@ def _cleanup_ignorable_runtime_paths(paths: list[str]) -> None:
             continue
         if path.startswith(".runtime/"):
             continue
+        # Only restore tracked files — untracked files would cause git checkout HEAD to error
+        ls = _run(["git", "ls-files", "--error-unmatch", path])
+        if ls.returncode != 0:
+            continue
         _run(["git", "checkout", "HEAD", "--", path])
 
 

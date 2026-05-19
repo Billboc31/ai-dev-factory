@@ -3,11 +3,13 @@ services:
     build:
       context: .
       target: runtime
-    env_file: deploy/.env
+    env_file:
+      - path: deploy/.env
+        required: false
     environment:
       - AI_DEV_FACTORY_RUNTIME_ROOT=/runtime
     volumes:
-      - runtime-data:/runtime
+      - ~/runtime/ai-dev-factory:/runtime
       - ~/.ssh:/root/.ssh:ro
       - ~/.gitconfig:/root/.gitconfig:ro
     working_dir: /app
@@ -32,6 +34,3 @@ services:
     depends_on:
       - api
 
-volumes:
-  runtime-data:
-    driver: local

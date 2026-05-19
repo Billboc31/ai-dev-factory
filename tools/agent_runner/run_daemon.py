@@ -881,7 +881,7 @@ def _sync_ticket_branch(ticket_id: str, branch: str, cwd: str | None = None) -> 
     Returns False if diverged (caller should skip the ticket).
     """
     result = subprocess.run(
-        ["git", "pull", "--ff-only", "origin", branch],
+        ["git", "pull", "--rebase", "origin", branch],
         capture_output=True, text=True, check=False,
         cwd=cwd,
     )
@@ -892,7 +892,8 @@ def _sync_ticket_branch(ticket_id: str, branch: str, cwd: str | None = None) -> 
     if "couldn't find remote ref" in stderr or "no tracking information" in stderr:
         _log(f"{ticket_id}: sync branch {branch!r} — remote branch not found yet, skipping pull")
         return True
-    _log(f"{ticket_id}: sync branch {branch!r} failed — diverged or conflict: {stderr}")
+    _log(f"{ticket_id}: sync branch {branch!r} failed — rebase conflict: {stderr}")
+    subprocess.run(["git", "rebase", "--abort"], cwd=cwd, capture_output=True)
     return False
 
 
@@ -930,6 +931,18 @@ def launch_ticket(
         wt = get_ticket_worktree_path(ticket_id, worktrees_dir)
         if wt.exists():
             worktree_path = wt
+        else:
+            # Try on-demand creation before falling back
+            ticket_state = _load_state_json(runs_dir / ticket_id)
+            branch = ticket_state.get("branch")
+            if branch:
+                ok, msg = create_ticket_worktree(ticket_id, branch, worktrees_dir)
+                _log(f"{ticket_id}: on-demand worktree: {msg}")
+                if ok:
+                    worktree_path = wt
+            if worktree_path is None or not worktree_path.exists():
+                _log(f"skipping {ticket_id}: worktrees_dir set but worktree unavailable — no legacy fallback")
+                return
 
     if worktree_path is not None:
         # ── Worktree-based launch ─────────────────────────────────────────────
