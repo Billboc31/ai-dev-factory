@@ -12,6 +12,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from .routes import daemon, health, issues, project_map, providers, tickets
+from .services.runtime_resolver import resolve_worktrees_dir
 
 
 logging.basicConfig(
@@ -35,7 +36,7 @@ def create_app(
     _root = project_root or Path.cwd()
     app.state.project_root = _root
     app.state.daemon_exec_cmd = daemon_exec_cmd
-    app.state.worktrees_dir = worktrees_dir or (_root.parent / (_root.name + "-worktrees"))
+    app.state.worktrees_dir = worktrees_dir or resolve_worktrees_dir(_root)
 
     app.add_middleware(
         CORSMiddleware,

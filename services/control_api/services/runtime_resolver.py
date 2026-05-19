@@ -3,9 +3,26 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 _WORKERS_JSON = "workers.json"
+
+
+def resolve_runs_dir(project_root: Path) -> Path:
+    """Return the runs/ directory: RUNTIME_ROOT/runs if set, else project_root/runs."""
+    runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if runtime_root:
+        return Path(runtime_root) / "runs"
+    return project_root / "runs"
+
+
+def resolve_worktrees_dir(project_root: Path) -> Path:
+    """Return the worktrees/ directory: RUNTIME_ROOT/worktrees if set, else sibling convention."""
+    runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if runtime_root:
+        return Path(runtime_root) / "worktrees"
+    return project_root.parent / (project_root.name + "-worktrees")
 
 
 def _load_workers(runs_dir: Path) -> dict:
