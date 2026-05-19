@@ -1,0 +1,7 @@
+{
+  "ticket_id": "T113",
+  "state": "INIT",
+  "branch": "ticket/T113-t113-isolate-daemon-and-intake-from-developer-main",
+  "issue_number": 61,
+  "updated_at": "2026-05-19T07:23:43Z"
+}
