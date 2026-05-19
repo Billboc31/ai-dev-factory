@@ -1,7 +1,7 @@
 {
   "ticket_id": "T117",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_APPROVED",
   "branch": "ticket/T117-t117-restore-fully-autonomous-daemon-workflow-afte",
   "issue_number": 71,
-  "updated_at": "2026-05-19T19:06:11Z"
+  "updated_at": "2026-05-19T19:09:46Z"
 }

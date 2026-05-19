@@ -15,3 +15,7 @@
 [2026-05-19T19:06:11Z] planner validation success
 [2026-05-19T19:06:11Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
 [2026-05-19T19:07:20Z] commit-checkpoint: refused — failed to determine current git branch
+[2026-05-19T19:09:46Z] human-approval: approve-plan — PLAN_REVIEW_NEEDED → PLAN_APPROVED
+[2026-05-19T19:10:03Z] auto-run start: state=PLAN_APPROVED
+[2026-05-19T19:10:03Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-19T19:10:07Z] commit-checkpoint: refused — failed to determine current git branch
