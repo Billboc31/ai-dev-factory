@@ -22,6 +22,10 @@ if str(_ROOT) not in sys.path:
 from runtime_checkpoint import checkpoint_transition as _checkpoint_transition
 from runtime_checkpoint import CheckpointError as _CheckpointError
 from runtime_checkpoint import DirtyTreeError as _DirtyTreeError
+from runtime_checkpoint import (
+    classify_intake_dirty_paths as _classify_intake_dirty_paths,
+    parse_porcelain_paths as _parse_porcelain_paths,
+)
 from runtime_db import (
     get_db_path as _rdb_get_db_path,
     init_runtime_db as _rdb_init,
@@ -63,12 +67,60 @@ def check_state_absent(ticket_id: str) -> None:
         )
 
 
+def _cleanup_ignorable_runtime_paths(paths: list[str]) -> None:
+    """Discard local changes to runtime/generated paths so intake can proceed.
+
+    For tracked files (typical for the listed paths), `git checkout HEAD -- <p>`
+    restores the committed version. For untracked paths the command is a no-op
+    and is silently ignored — those files don't dirty the index anyway.
+
+    SQLite runtime databases are never restored — that would wipe live workflow
+    state (intake records, worker registry, etc.). They're tolerated as-is in
+    the working tree; the recheck still classifies them as ignorable.
+    """
+    for path in paths:
+        if path.endswith((".sqlite", ".sqlite-wal", ".sqlite-shm")):
+            continue
+        if path.startswith(".runtime/"):
+            continue
+        _run(["git", "checkout", "HEAD", "--", path])
+
+
 def check_working_tree_clean() -> None:
+    """Preflight: refuse if real code is dirty; auto-clean runtime/generated noise.
+
+    Files like __pycache__/*.pyc, runs/.project-map*.json, runs/*/runtime.log,
+    runs/daemon.log etc. are produced by the daemon itself and must never
+    block intake. Real source-tree changes still block.
+    """
     result = _run(["git", "status", "--porcelain"])
     if result.returncode != 0:
         raise IntakeError("failed to check git status")
-    if result.stdout.strip():
+
+    raw = result.stdout
+    if not raw.strip():
+        return
+
+    paths = _parse_porcelain_paths(raw)
+    ignorable, real = _classify_intake_dirty_paths(paths)
+
+    if real:
         raise IntakeError("working tree is not clean — commit or stash changes first")
+
+    if ignorable:
+        print(f"intake preflight: ignored runtime dirty files: {ignorable}")
+        _cleanup_ignorable_runtime_paths(ignorable)
+
+        recheck = _run(["git", "status", "--porcelain"])
+        if recheck.returncode == 0 and recheck.stdout.strip():
+            leftover = _parse_porcelain_paths(recheck.stdout)
+            _, still_real = _classify_intake_dirty_paths(leftover)
+            if still_real:
+                raise IntakeError(
+                    "working tree is not clean — commit or stash changes first"
+                )
+
+    print("intake preflight: clean enough to continue")
 
 
 def get_current_branch() -> str | None:

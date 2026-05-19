@@ -50,6 +50,79 @@ class DirtyTreeError(Exception):
     """
 
 
+# Runtime/generated files that should never block the intake preflight or the
+# auto-loop clean gate. These are produced or mutated by the daemon itself
+# (bytecode caches, logs, project-map snapshots, worker registry, etc.) and
+# are not "real" code edits.
+_RUNTIME_IGNORABLE_PATHS: frozenset[str] = frozenset({
+    "runs/.project-map.json",
+    "runs/.project-map-activity.json",
+    "runs/.issue-intake.json",
+    "runs/.issue-intake.json.tmp",
+    "runs/workers.json",
+    "runs/workers.json.tmp",
+    "runs/daemon.log",
+    "runs/daemon.pid",
+    "runs/runtime.log",
+})
+
+
+def is_ignorable_runtime_dirty_path(path: str) -> bool:
+    """Return True if `path` is a runtime/generated artifact safe to ignore.
+
+    Examples of ignorable paths:
+      - any *.pyc
+      - any path containing __pycache__/
+      - runs/.project-map.json, runs/.project-map-activity.json
+      - runs/daemon.log, runs/runtime.log, runs/<ticket>/runtime.log
+      - runs/workers.json, runs/.issue-intake.json
+      - .runtime/ live SQLite DB and its WAL/SHM sidecars
+    """
+    if not path:
+        return False
+    if path.endswith(".pyc"):
+        return True
+    if "__pycache__/" in path or path.endswith("/__pycache__") or path.startswith("__pycache__/"):
+        return True
+    if path in _RUNTIME_IGNORABLE_PATHS:
+        return True
+    if path.startswith("runs/") and path.endswith("/runtime.log"):
+        return True
+    if path.startswith(".runtime/"):
+        return True
+    if path.endswith((".sqlite", ".sqlite-wal", ".sqlite-shm")):
+        return True
+    return False
+
+
+def classify_intake_dirty_paths(paths: list[str]) -> tuple[list[str], list[str]]:
+    """Split `paths` into (ignorable_runtime, real_dirty)."""
+    ignorable: list[str] = []
+    real: list[str] = []
+    for p in paths:
+        if is_ignorable_runtime_dirty_path(p):
+            ignorable.append(p)
+        else:
+            real.append(p)
+    return ignorable, real
+
+
+def parse_porcelain_paths(porcelain_output: str) -> list[str]:
+    """Extract file paths from `git status --porcelain` output.
+
+    Handles rename entries ("R  old -> new") by keeping the new path.
+    """
+    paths: list[str] = []
+    for line in porcelain_output.splitlines():
+        if len(line) < 4:
+            continue
+        path = line[3:]
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        paths.append(path.strip())
+    return paths
+
+
 def resolve_ticket_cwd(ticket_id: str, runs_dir: Path | None = None) -> str | None:
     """Return the cwd for git operations for this ticket, or None for current dir.
 
