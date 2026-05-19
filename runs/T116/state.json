@@ -1,7 +1,7 @@
 {
   "ticket_id": "T116",
-  "state": "IMPLEMENTATION_REVIEW_NEEDED",
+  "state": "IMPLEMENTATION_FIX_REQUIRED",
   "branch": "ticket/T116-t116-canonical-runtime-ownership-and-multi-runtime",
   "issue_number": 68,
-  "updated_at": "2026-05-19T16:37:07Z"
+  "updated_at": "2026-05-19T17:05:13Z"
 }
