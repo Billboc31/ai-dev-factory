@@ -1,2 +1,16 @@
 [2026-05-19T18:54:06Z] intake: issue=#71 title='T117 — Restore fully autonomous daemon workflow after runtime migration' branch=ticket/T117-t117-restore-fully-autonomous-daemon-workflow-afte
 [2026-05-19T18:54:06Z] intake: done
+[2026-05-19T18:59:23Z] auto-run start: state=INIT
+[2026-05-19T18:59:23Z] auto-run: running step=planner
+[2026-05-19T18:59:23Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-05-19T18:59:23Z] prompt: generic fallback — injecting runs/T117/ticket.md
+[2026-05-19T18:59:23Z] compose: global-context=docs/ai/global-context.md
+[2026-05-19T18:59:23Z] compose: role=ai/roles/planner.md
+[2026-05-19T18:59:23Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-19T18:59:23Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-19T18:59:23Z] compose: skill=ai/skills/documentation.md
+[2026-05-19T18:59:23Z] compose: task (canonical prompt)
+[2026-05-19T18:59:23Z] snapshot: runtime-prompt=runs/T117/prompts/planner-attempt-1.md
+[2026-05-19T19:06:11Z] auto-run: step=planner done rc=0
+[2026-05-19T19:06:11Z] planner validation success
+[2026-05-19T19:06:11Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
