@@ -1,24 +1,18 @@
-All 6 fixes are in place. Here's a summary:
+All fixes look correct. Here's a summary of what was changed to address the two blocking issues:
 
 ---
 
 ## Changes made
 
-### Files modified
+**BLOCKING #1 — Out-of-scope docker-compose.yml + deploy/.env**
 
-**`services/control_api/services/daemon_manager.py`**
-- `start()`: added `--auto-commit`, `--auto-push`, `--worktrees-dir <project_root>/worktrees` to the daemon Popen command — enables automatic checkpoint/push after each workflow step when launched from the dashboard.
+- **`docker-compose.yml`**: Reverted volume mount back to `~/runtime/ai-dev-factory:/runtime` (host bind mount, as on `main`). Changed `env_file` from the single-string form to the long-form with `required: false` — `docker-compose up` now works on a fresh deploy even without a `.env` file. Removed the orphaned `volumes: runtime-data:` named-volume declaration.
+- **`deploy/env.example` → `deploy/.env.example`**: Renamed to the conventional dotfile template name so users know to `cp deploy/.env.example deploy/.env` before first run.
 
-**`tools/agent_runner/worktree_manager.py`**
-- `ensure_intake_worktree()`: when the `_intake` worktree already exists, forces `git checkout -f main` before returning — prevents lingering ticket branches from blocking intake.
+**BLOCKING #2 — Rebase left in mid-conflict state**
 
-**`tools/agent_runner/run_issue_intake.py`**
-- `_cleanup_ignorable_runtime_paths()`: added `git ls-files --error-unmatch` check before `git checkout HEAD` — skips untracked files (e.g. a fresh `runtime.log`) that would otherwise cause a non-zero exit and abort intake.
+- **`tools/agent_runner/run_daemon.py:_sync_ticket_branch()`**: Added `subprocess.run(["git", "rebase", "--abort"], ...)` in the failure path before returning `False`, so the worktree is never left stuck mid-rebase.
 
-**`tools/agent_runner/run_daemon.py`**
-- `launch_ticket()`: when `worktrees_dir` is set but the worktree is absent, attempts on-demand creation via `create_ticket_worktree()`; if that fails, skips the ticket with a clear log message — no silent legacy fallback.
-- `_sync_ticket_branch()`: changed `--ff-only` to `--rebase` — handles non-fast-forward remote commits (from human plan approvals) without aborting the sync.
+**Minor — unchecked `git checkout -f main`**
 
-### File created
-
-**`docs/daemon-lifecycle.md`** — documents the complete daemon lifecycle: startup flags, per-cycle loop, intake flow, worktree execution, checkpoint mechanics, the single human gate (`PLAN_REVIEW_NEEDED`), and failure/retry policies.
+- **`tools/agent_runner/worktree_manager.py:ensure_intake_worktree()`**: Captured the return value of `git checkout -f main` and prints a stderr warning on non-zero exit. Added `import sys` at the top of the file.

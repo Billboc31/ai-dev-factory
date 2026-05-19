@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import subprocess
+import sys
 from pathlib import Path
 
 
@@ -31,11 +32,13 @@ def ensure_intake_worktree(worktrees_dir: Path, repo_root: "Path | None" = None)
     intake_path = worktrees_dir / "_intake"
     if intake_path.exists():
         # Force return to main at every call — prevents lingering ticket branches
-        subprocess.run(
+        co = subprocess.run(
             ["git", "checkout", "-f", "main"],
             capture_output=True, text=True, check=False,
             cwd=str(intake_path),
         )
+        if co.returncode != 0:
+            print(f"[worktree_manager] warning: git checkout -f main failed in _intake: {co.stderr.strip()}", file=sys.stderr)
         return True, intake_path
     worktrees_dir.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(

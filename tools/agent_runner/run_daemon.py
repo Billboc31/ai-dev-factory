@@ -893,6 +893,7 @@ def _sync_ticket_branch(ticket_id: str, branch: str, cwd: str | None = None) -> 
         _log(f"{ticket_id}: sync branch {branch!r} — remote branch not found yet, skipping pull")
         return True
     _log(f"{ticket_id}: sync branch {branch!r} failed — rebase conflict: {stderr}")
+    subprocess.run(["git", "rebase", "--abort"], cwd=cwd, capture_output=True)
     return False
 
 
