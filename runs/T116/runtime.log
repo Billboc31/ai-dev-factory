@@ -103,3 +103,14 @@
 [2026-05-19T18:16:44Z] auto-run: review parsed from: runs/T116/reviews/implementation-review.md
 [2026-05-19T18:16:44Z] auto-run: review keyword detected: IMPLEMENTATION_APPROVED
 [2026-05-19T18:16:44Z] auto-run: transition IMPLEMENTATION_REVIEW_NEEDED → IMPLEMENTATION_APPROVED
+[2026-05-19T18:17:30Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-19T18:17:30Z] auto-run: running step=tester
+[2026-05-19T18:17:30Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-19T18:17:30Z] prompt: generic fallback — injecting runs/T116/ticket.md
+[2026-05-19T18:17:30Z] compose: global-context=docs/ai/global-context.md
+[2026-05-19T18:17:30Z] compose: role=ai/roles/tester.md
+[2026-05-19T18:17:30Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-19T18:17:30Z] compose: skill=ai/skills/testing.md
+[2026-05-19T18:17:30Z] compose: skill=ai/skills/debugging.md
+[2026-05-19T18:17:30Z] compose: task (canonical prompt)
+[2026-05-19T18:17:30Z] snapshot: runtime-prompt=runs/T116/prompts/tester-attempt-1.md
