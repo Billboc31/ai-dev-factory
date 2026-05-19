@@ -58,28 +58,67 @@ def _branch_exists(branch: str, repo_root: "Path | None" = None) -> bool:
     return result.returncode == 0
 
 
+def _branch_used_by_any_worktree(branch: str, repo_root: "Path | None" = None) -> bool:
+    """Return True if any existing git worktree currently has ``branch`` checked out."""
+    result = subprocess.run(
+        ["git", "worktree", "list", "--porcelain"],
+        capture_output=True, text=True, check=False,
+        cwd=str(repo_root) if repo_root else None,
+    )
+    if result.returncode != 0:
+        return False
+    target = f"refs/heads/{branch}"
+    return any(
+        line.strip() == f"branch {target}"
+        for line in result.stdout.splitlines()
+    )
+
+
 def create_ticket_branch_and_worktree(
     ticket_id: str,
     branch: str,
     worktrees_dir: Path,
     repo_root: "Path | None" = None,
 ) -> tuple[bool, str]:
-    """Create ticket branch from `origin/main` then add the ticket worktree.
+    """Provision the ticket worktree on ``branch``, creating the branch if needed.
 
-    Atomic: if the worktree add fails, the just-created branch is rolled back so
-    we don't leave a dangling ref that would block re-ingestion of the same
-    issue on the next daemon cycle.
+    Behaviour:
 
-    Refuses if the worktree path already exists OR the branch already exists —
-    those signal a partially-completed previous intake that requires manual
-    triage. Returns ``(success, message)``.
+    1. If ``worktrees/<ticket_id>`` already exists, refuse — the caller should
+       reuse it or remove it explicitly.
+    2. If the branch already exists locally and is **not** checked out in
+       another worktree, adopt it: ``git worktree add <wt> <branch>`` without
+       recreating the ref. This is the recovery path for tickets whose previous
+       intake left an orphan branch behind.
+    3. If the branch is currently checked out in another worktree, refuse —
+       that is a real conflict needing human attention.
+    4. Otherwise, create the branch from ``origin/main`` then add the worktree.
+       The branch ref is rolled back if the worktree add fails so the next
+       cycle can retry cleanly.
+
+    Returns ``(success, message)``.
     """
     worktree_path = get_ticket_worktree_path(ticket_id, worktrees_dir)
     if worktree_path.exists():
         return False, f"worktree already exists: {worktree_path} — refusing"
 
-    if _branch_exists(branch, repo_root=repo_root):
-        return False, f"branch already exists: {branch} — refusing"
+    branch_already_exists = _branch_exists(branch, repo_root=repo_root)
+    if branch_already_exists:
+        if _branch_used_by_any_worktree(branch, repo_root=repo_root):
+            return False, (
+                f"branch {branch} is already checked out in another worktree — refusing"
+            )
+        worktrees_dir.mkdir(parents=True, exist_ok=True)
+        wt_add = subprocess.run(
+            ["git", "worktree", "add", str(worktree_path), branch],
+            capture_output=True, text=True, check=False,
+            cwd=str(repo_root) if repo_root else None,
+        )
+        if wt_add.returncode == 0:
+            return True, (
+                f"recovered orphan branch {branch} into worktree at {worktree_path}"
+            )
+        return False, f"worktree add (recovery) failed: {wt_add.stderr.strip()}"
 
     branch_create = subprocess.run(
         ["git", "branch", branch, "origin/main"],

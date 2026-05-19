@@ -59,3 +59,24 @@ def test_forbidden_phrase_real():
 def test_forbidden_phrase_in_code_block():
     plan = _make_plan(CANONICAL, extra="```\nimplémentation terminée\n```")
     assert validate_planner_output(plan) == []
+
+
+def test_small_plan_with_one_section_passes():
+    """Tickets triviaux: un petit plan avec au moins une section reconnue est OK."""
+    plan = (
+        "## Objectif\n"
+        "Renommer la variable foo en bar dans le module utils. "
+        "Pas de changement de comportement, juste une homogénéisation."
+    )
+    assert validate_planner_output(plan) == []
+
+
+def test_plan_without_any_section_is_rejected():
+    """Un plan sans aucune section reconnue est rejeté (probablement pas un plan)."""
+    plan = (
+        "Voici une réponse libre sans aucune structure de plan: "
+        "on va modifier le fichier et tout devrait fonctionner correctement, "
+        "il suffit de remplacer la chaîne de caractères concernée par la nouvelle valeur."
+    )
+    reasons = validate_planner_output(plan)
+    assert any("section reconnue" in r for r in reasons)

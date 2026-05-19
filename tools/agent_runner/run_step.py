@@ -95,7 +95,10 @@ _REQUIRED_SECTION_GROUPS = {
     ],
 }
 
-_MIN_WORD_COUNT = 100
+# Validation thresholds — kept low on purpose. We only reject plans that are
+# obviously empty/garbage. Real quality checks are the reviewer's job, and
+# trivial tickets legitimately produce short plans.
+_MIN_PLAN_WORDS = 20
 
 _QUOTA_PATTERNS: tuple[str, ...] = (
     "rate limit",
@@ -312,17 +315,40 @@ def compose_runtime_prompt(ticket_id: str, step: str, task_content: str) -> str:
 
 
 def validate_planner_output(content: str) -> list[str]:
-    """Return rejection reasons; empty list means the output is valid."""
+    """Return rejection reasons; empty list means the output is valid.
+
+    Validation is intentionally permissive:
+    - reject only obviously empty/garbage output (< 20 words),
+    - require at least one recognised section header (synonyms in
+      ``_REQUIRED_SECTION_GROUPS``) so a free-form prose answer is not
+      mistaken for a plan,
+    - reject reviewer/coder telltales (``_FORBIDDEN_PHRASES``).
+
+    Trivial tickets legitimately produce short plans; deeper quality checks
+    are the reviewer's job, not this gate.
+    """
     reasons: list[str] = []
     stripped = content.strip()
     lower = stripped.lower()
 
-    word_count = len(stripped.split())
-    if word_count < _MIN_WORD_COUNT:
-        reasons.append(f"plan trop court ({word_count} mots, minimum {_MIN_WORD_COUNT})")
-
     code_stripped = re.sub(r"```[\s\S]*?```", "", lower)
     code_stripped = re.sub(r"`[^`\n]+`", "", code_stripped)
+
+    word_count = len(stripped.split())
+    if word_count < _MIN_PLAN_WORDS:
+        reasons.append(
+            f"plan trop court ({word_count} mots, minimum {_MIN_PLAN_WORDS})"
+        )
+
+    has_section = False
+    for synonyms in _REQUIRED_SECTION_GROUPS.values():
+        if any(synonym in lower for synonym in synonyms):
+            has_section = True
+            break
+    if not has_section:
+        reasons.append(
+            "plan sans section reconnue (objectif/inclus/critères/…)"
+        )
 
     for phrase in _FORBIDDEN_PHRASES:
         if phrase in code_stripped:

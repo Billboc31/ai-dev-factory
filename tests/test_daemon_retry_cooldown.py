@@ -193,6 +193,38 @@ def test_apply_retry_policy_process_crashed_same_as_provider_error():
 
 # ── _apply_retry_policy — fixed_delay policy ─────────────────────────────────
 
+def test_apply_retry_policy_planner_invalid_uses_fixed_delay():
+    """T118 follow-up: planner validation failures must be classified and bounded."""
+    result = _apply_retry_policy("T001", "planner_invalid", {})
+    assert result["retry_count"] == 1
+    assert "cooldown_until" in result
+    assert result.get("stopped") is not True
+    assert result["failure_class"] == "planner_invalid"
+
+
+def test_apply_retry_policy_planner_invalid_stops_after_max_retries():
+    state = {"retry_count": 3}
+    result = _apply_retry_policy("T001", "planner_invalid", state)
+    assert result["stopped"] is True
+    assert "planner_invalid" in result["stop_reason"]
+
+
+def test_apply_retry_policy_dirty_tree_uses_fixed_delay():
+    """T118 follow-up: dirty-tree gate failures must be classified and bounded."""
+    result = _apply_retry_policy("T001", "dirty_tree", {})
+    assert result["retry_count"] == 1
+    assert "cooldown_until" in result
+    assert result.get("stopped") is not True
+    assert result["failure_class"] == "dirty_tree"
+
+
+def test_apply_retry_policy_dirty_tree_stops_after_max_retries():
+    state = {"retry_count": 3}
+    result = _apply_retry_policy("T001", "dirty_tree", state)
+    assert result["stopped"] is True
+    assert "dirty_tree" in result["stop_reason"]
+
+
 def test_apply_retry_policy_process_failed_first_retry_sets_delay():
     result = _apply_retry_policy("T001", "process_failed", {})
     assert result["retry_count"] == 1

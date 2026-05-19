@@ -126,6 +126,14 @@ _RETRY_POLICIES: dict[str, dict] = {
     "process_crashed":         {"action": "exponential", "base_seconds": 60, "max_retries": 5, "fallback_cooldown_seconds": 3600},
     "process_failed":          {"action": "fixed_delay", "delay_seconds": 300, "max_retries": 3},
     "empty_output":            {"action": "fixed_delay", "delay_seconds": 300, "max_retries": 3},
+    # planner_invalid: model produced a structurally bad plan. Bounded retries
+    # with a short delay — usually the next sample is fine; otherwise stop so
+    # a human can refine the prompt.
+    "planner_invalid":         {"action": "fixed_delay", "delay_seconds": 120, "max_retries": 3},
+    # dirty_tree: a previous step left runs/<ticket>/ uncommitted. Bounded
+    # retries with a very short delay — the next cycle's auto-checkpoint or
+    # human intervention should clear it; otherwise stop.
+    "dirty_tree":              {"action": "fixed_delay", "delay_seconds": 60,  "max_retries": 3},
     "write_permission_missing": {"action": "stop"},
     "unknown":                 {"action": "stop"},
 }

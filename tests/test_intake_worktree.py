@@ -113,14 +113,53 @@ def test_create_ticket_branch_and_worktree_refuses_if_worktree_exists(tmp_path):
     assert "worktree already exists" in msg
 
 
-def test_create_ticket_branch_and_worktree_refuses_if_branch_exists(tmp_path):
+def test_create_ticket_branch_and_worktree_recovers_orphan_branch(tmp_path):
+    """If the branch exists locally and no worktree uses it, adopt it (recovery path)."""
     worktrees_dir = tmp_path / "worktrees"
-    with patch("worktree_manager.subprocess.run", return_value=_cp(returncode=0)):
+    branch = "ticket/T001-feat"
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["git", "show-ref"]:
+            return _cp(returncode=0)  # branch exists
+        if cmd[:3] == ["git", "worktree", "list"]:
+            return _cp(stdout="worktree /repo\nHEAD abc\nbranch refs/heads/main\n\n")
+        if cmd[:3] == ["git", "worktree", "add"]:
+            return _cp()
+        return _cp(returncode=2, stderr=f"unexpected {cmd}")
+
+    with patch("worktree_manager.subprocess.run", side_effect=fake_run) as mock_sub:
         ok, msg = create_ticket_branch_and_worktree(
-            "T001", "ticket/T001-feat", worktrees_dir, repo_root=tmp_path,
+            "T001", branch, worktrees_dir, repo_root=tmp_path,
         )
+
+    assert ok is True
+    assert "recovered orphan branch" in msg
+    calls = [c[0][0] for c in mock_sub.call_args_list]
+    # We must NOT recreate the branch in recovery mode
+    assert not any(c[:2] == ["git", "branch"] and "origin/main" in c for c in calls)
+    # We must attach a worktree to the existing branch
+    assert any(c[:3] == ["git", "worktree", "add"] for c in calls)
+
+
+def test_create_ticket_branch_and_worktree_refuses_if_branch_in_other_worktree(tmp_path):
+    """If the branch is already checked out in another worktree, refuse — real conflict."""
+    worktrees_dir = tmp_path / "worktrees"
+    branch = "ticket/T001-feat"
+
+    def fake_run(cmd, **kwargs):
+        if cmd[:2] == ["git", "show-ref"]:
+            return _cp(returncode=0)  # branch exists
+        if cmd[:3] == ["git", "worktree", "list"]:
+            return _cp(stdout=f"worktree /repo\nHEAD abc\nbranch refs/heads/{branch}\n\n")
+        return _cp(returncode=2, stderr=f"unexpected {cmd}")
+
+    with patch("worktree_manager.subprocess.run", side_effect=fake_run):
+        ok, msg = create_ticket_branch_and_worktree(
+            "T001", branch, worktrees_dir, repo_root=tmp_path,
+        )
+
     assert ok is False
-    assert "branch already exists" in msg
+    assert "already checked out in another worktree" in msg
 
 
 def test_create_ticket_branch_and_worktree_rolls_back_branch_when_worktree_add_fails(tmp_path):

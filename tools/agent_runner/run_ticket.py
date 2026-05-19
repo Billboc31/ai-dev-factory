@@ -35,6 +35,9 @@ _rc_mod = importlib.util.module_from_spec(_rc_spec)  # type: ignore[arg-type]
 _rc_spec.loader.exec_module(_rc_mod)  # type: ignore[union-attr]
 classify_intake_dirty_paths = _rc_mod.classify_intake_dirty_paths
 parse_porcelain_paths = _rc_mod.parse_porcelain_paths
+checkpoint_transition = _rc_mod.checkpoint_transition
+CheckpointError = _rc_mod.CheckpointError
+DirtyTreeError = _rc_mod.DirtyTreeError
 del _rc_spec, _rc_mod
 
 VALID_STATES = frozenset({
@@ -445,6 +448,31 @@ def _check_working_tree_clean() -> None:
         print(f"clean gate: ignored runtime dirty files: {ignorable}")
 
 
+def _checkpoint_planner_artifacts(ticket_id: str, push: bool) -> None:
+    """Best-effort checkpoint of planner artifacts.
+
+    The planner step writes ``runs/<ticket>/plan.md`` and
+    ``runs/<ticket>/prompts/planner-attempt-N.md``. If we leave those uncommitted,
+    the next daemon cycle's clean gate refuses to advance the ticket, which is
+    the original bug this helper fixes. Errors are swallowed (logged only) so a
+    transient git failure does not block the loop — the worst case is that
+    the next cycle's clean gate will surface the issue with a real error.
+    """
+    try:
+        checkpoint_transition(
+            ticket_id,
+            f"{ticket_id}: planner checkpoint",
+            push=push,
+        )
+        _log_runtime(ticket_id, "planner checkpoint: committed")
+        if push:
+            _log_runtime(ticket_id, "planner checkpoint: pushed")
+    except CheckpointError as exc:
+        _log_runtime(ticket_id, f"planner checkpoint: skipped — {exc}")
+    except DirtyTreeError as exc:
+        _log_runtime(ticket_id, f"planner checkpoint: dirty tree after commit — {exc}")
+
+
 def _determine_next_state(
     is_deterministic: bool,
     output: str,
@@ -792,6 +820,11 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
     except TicketRunnerError as exc:
         print(f"error: {exc}", file=sys.stderr)
         _log_runtime(ticket_id, f"auto-run gate failed: {exc}")
+        # Distinct failure class so the daemon's retry policy can react
+        # specifically to "dirty tree" loops (typically a missed checkpoint
+        # by the previous run).
+        if "working tree is not clean" in str(exc):
+            _log_runtime(ticket_id, "runtime failure: dirty_tree")
         return 2
 
     transition = TRANSITIONS[current_state]
@@ -832,12 +865,20 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
         return 2
 
     if step == "planner":
+        # Always checkpoint planner artifacts (plan.md + prompts/) before
+        # validating so the working tree never stays dirty between cycles,
+        # whether validation accepts or rejects. The rejected attempt stays
+        # in git history for human inspection.
+        _checkpoint_planner_artifacts(ticket_id, push=auto_push)
+
         reasons = validate_planner_output(output_content)
         if reasons:
             for reason in reasons:
                 _log_runtime(ticket_id, f"planner validation failed: {reason}")
                 print(f"error: planner output invalid: {reason}", file=sys.stderr)
             _log_runtime(ticket_id, "planner validation: rejected — state unchanged")
+            # Distinct failure class for retry policy (see _RETRY_POLICIES in run_daemon)
+            _log_runtime(ticket_id, "runtime failure: planner_invalid")
             return 2
         _log_runtime(ticket_id, "planner validation success")
 
