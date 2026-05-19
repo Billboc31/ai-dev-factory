@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 from ..models.schemas import BoardColumn, BoardItem, BoardResponse
+from .runtime_resolver import resolve_runs_dir, resolve_state_dir
 
 _TICKET_RE = re.compile(r"^T\d{3,}$")
 _HUMAN_GATE_STATES = frozenset({"PLAN_REVIEW_NEEDED", "TEST_COMPLETE"})
@@ -97,14 +98,8 @@ def _fetch_ai_ready_issues(repo: str | None) -> list[dict]:
 
 
 def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path | None = None) -> BoardResponse:
-    runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
-    if runtime_root:
-        rt = Path(runtime_root)
-        runs_dir = rt / "runs"
-        state_dir = rt / "state"
-    else:
-        runs_dir = project_root / "runs"
-        state_dir = runs_dir
+    runs_dir = resolve_runs_dir(project_root)
+    state_dir = resolve_state_dir(project_root)
     columns: dict[str, list[BoardItem]] = {col_id: [] for col_id, _ in _COLUMN_ORDER}
 
     rdb, db_path = _load_runtime_db(project_root)

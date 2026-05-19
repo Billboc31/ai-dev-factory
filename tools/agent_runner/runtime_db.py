@@ -2,7 +2,8 @@
 """SQLite runtime state store for ai-dev-factory daemon.
 
 Single-file module — stdlib only (sqlite3, subprocess, json, datetime).
-DB path is resolved from the git common dir so all worktrees share one DB.
+DB path: RUNTIME_ROOT/.runtime/... when AI_DEV_FACTORY_RUNTIME_ROOT is set;
+otherwise resolved via git rev-parse --git-common-dir so all worktrees share one DB.
 """
 
 from __future__ import annotations
@@ -11,6 +12,7 @@ import datetime
 import json
 import os
 import sqlite3
+import subprocess
 from pathlib import Path
 
 _DB_FILENAME = ".runtime/ai-dev-factory.sqlite"
@@ -71,14 +73,31 @@ def get_db_path() -> Path | None:
     """Resolve the SQLite DB path.
 
     When AI_DEV_FACTORY_RUNTIME_ROOT is set (Docker/runtime), returns RUNTIME_ROOT/.runtime/...
-    Otherwise falls back to the repo root derived from this module's own location, which is
-    stable regardless of CWD and avoids creating DB files in unexpected worktree directories.
+    Dev fallback: use git rev-parse --git-common-dir so all worktrees share one DB even when
+    this module is loaded from a worktree copy (where __file__-based paths point to the worktree).
     """
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
     if runtime_root:
         return Path(runtime_root) / _DB_FILENAME
-    # Dev fallback: this module lives at tools/agent_runner/runtime_db.py,
-    # so parent.parent.parent resolves to the repo root deterministically.
+    # Dev fallback: git common-dir points to the main repo's .git regardless of which
+    # worktree this module was loaded from, ensuring a single shared DB in dev mode.
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--git-common-dir"],
+            capture_output=True,
+            text=True,
+            check=False,
+            cwd=str(Path(__file__).parent),
+        )
+        if result.returncode == 0:
+            common_dir = result.stdout.strip()
+            common_path = Path(common_dir)
+            if not common_path.is_absolute():
+                common_path = (Path(__file__).parent / common_path).resolve()
+            return common_path.parent / _DB_FILENAME
+    except FileNotFoundError:
+        pass
+    # Last resort: module-location path (valid only when invoked from the main clone).
     return Path(__file__).resolve().parent.parent.parent / _DB_FILENAME
 
 

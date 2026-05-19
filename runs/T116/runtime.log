@@ -65,3 +65,23 @@
 [2026-05-19T17:05:13Z] auto-run: review keyword detected: IMPLEMENTATION_FIX_REQUIRED
 [2026-05-19T17:05:13Z] auto-run: transition IMPLEMENTATION_REVIEW_NEEDED → IMPLEMENTATION_FIX_REQUIRED
 [2026-05-19T17:05:13Z] auto-run: fix artifact written: runs/T116/fixes/implementation-fix-1.md
+[2026-05-19T17:05:46Z] auto-run start: state=IMPLEMENTATION_FIX_REQUIRED
+[2026-05-19T17:05:46Z] auto-run: running step=coder
+[2026-05-19T17:05:46Z] auto-run: fix context: previous_output=runs/T116/implementation-output.md
+[2026-05-19T17:05:46Z] auto-run: fix context: review=runs/T116/reviews/implementation-review.md
+[2026-05-19T17:05:46Z] auto-run: fix context: fix_instructions=runs/T116/fixes/implementation-fix-1.md
+[2026-05-19T17:05:46Z] auto-run: fix context: context_file=runs/T116/fixes/context-20260519T170546Z.md
+[2026-05-19T17:05:46Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-19T17:05:46Z] prompt: generic fallback — injecting runs/T116/ticket.md
+[2026-05-19T17:05:46Z] compose: global-context=docs/ai/global-context.md
+[2026-05-19T17:05:46Z] compose: role=ai/roles/coder.md
+[2026-05-19T17:05:46Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-19T17:05:46Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-19T17:05:46Z] compose: skill=ai/skills/code-quality.md
+[2026-05-19T17:05:46Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-19T17:05:46Z] compose: skill=ai/skills/security.md
+[2026-05-19T17:05:46Z] compose: task (canonical prompt)
+[2026-05-19T17:05:46Z] compose: extra-context=runs/T116/fixes/context-20260519T170546Z.md
+[2026-05-19T17:05:46Z] snapshot: runtime-prompt=runs/T116/prompts/coder-attempt-2.md
+[2026-05-19T17:10:01Z] auto-run: step=coder done rc=0
+[2026-05-19T17:10:01Z] auto-run: transition IMPLEMENTATION_FIX_REQUIRED → IMPLEMENTATION_REVIEW_NEEDED

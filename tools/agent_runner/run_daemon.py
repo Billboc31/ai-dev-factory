@@ -63,6 +63,16 @@ _rdb_remove_worker = _rdb_mod.remove_worker
 _rdb_list_workers = _rdb_mod.list_workers
 del _rdb_spec, _rdb_mod
 
+_rr_spec = importlib.util.spec_from_file_location(
+    "_runtime_resolver",
+    REPO_ROOT / "services" / "control_api" / "services" / "runtime_resolver.py",
+)
+_rr_mod = importlib.util.module_from_spec(_rr_spec)  # type: ignore[arg-type]
+_rr_spec.loader.exec_module(_rr_mod)  # type: ignore[union-attr]
+_rr_resolve_state_dir = _rr_mod.resolve_state_dir
+_rr_resolve_logs_dir = _rr_mod.resolve_logs_dir
+del _rr_spec, _rr_mod
+
 # SQLite path and init are cached so _rdb_get_db_path() (subprocess) runs only once per daemon process.
 _DB_PATH_RESOLVED: bool = False
 _DB_PATH_VALUE: "Path | None" = None
@@ -1429,14 +1439,13 @@ def main(argv: list[str]) -> int:
         rt = Path(runtime_root)
         runs_dir = rt / "runs"
         worktrees_dir = rt / "worktrees"
-        state_dir = rt / "state"
         global _LOG_FILE
-        _LOG_FILE = rt / "logs" / "daemon.log"
+        _LOG_FILE = _rr_resolve_logs_dir(REPO_ROOT) / "daemon.log"
         _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     else:
         runs_dir = Path(args.runs_dir)
         worktrees_dir = Path(args.worktrees_dir)
-        state_dir = runs_dir
+    state_dir = _rr_resolve_state_dir(REPO_ROOT)
 
     if not runs_dir.exists():
         print(f"error: runs dir not found: {runs_dir}", file=sys.stderr)
@@ -1444,6 +1453,8 @@ def main(argv: list[str]) -> int:
 
     _log(f"starting daemon exec-cmd={args.exec_cmd!r} interval={args.interval}s dry-run={args.dry_run}")
     _log(f"worktrees-dir={worktrees_dir} max-workers={args.max_workers}")
+    if not runtime_root:
+        _log("WARNING: AI_DEV_FACTORY_RUNTIME_ROOT not set — using dev fallback paths")
     if args.poll_issues:
         _log(f"issue polling enabled label={args.issue_label!r} repo={args.issue_repo!r}")
     if args.auto_commit:

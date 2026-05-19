@@ -1,17 +1,15 @@
-All changes are in scope. Here's a summary of what was implemented across the 8 plan steps:
+All three fixes are in place. Here's a summary of what was changed:
 
----
+**Fix 1 — Dead code (`runtime_resolver.py` helpers unused)**
 
-**Files modified:**
+`board_service.py`: Added `from .runtime_resolver import resolve_runs_dir, resolve_state_dir` and replaced the 7-line inline `runtime_root` block in `get_board()` with two resolver calls.
 
-| File | Change |
-|------|--------|
-| `services/control_api/services/board_service.py` | Step 1: `_load_runtime_db` now reads DB from `RUNTIME_ROOT/.runtime/` when env var is set. Step 5: `get_board` computes `state_dir` and uses it for JSON fallback of workers/issue-index. |
-| `tools/agent_runner/runtime_db.py` | Step 2: Removed `subprocess` import and the `git rev-parse --git-common-dir` call. Dev fallback now uses `Path(__file__).resolve().parent.parent.parent` (stable, CWD-independent). |
-| `tools/agent_runner/run_daemon.py` | Step 3: `state_dir` threaded through `launch_ticket`, `run_once`, `poll_github_issues`; workers.json and .issue-intake.json now read/written from `state_dir`. Step 4: `_LOG_FILE` module variable + `_log()` writes to `RUNTIME_ROOT/logs/daemon.log` when set. |
-| `services/control_api/services/runtime_resolver.py` | Step 6: Added `resolve_state_dir()` and `resolve_logs_dir()`. |
-| `deploy/bootstrap.sh` | Step 7: Best-effort migration of SQLite DB, `workers.json`, and `.issue-intake.json` from old locations to canonical ones. Never overwrites existing files. |
-| `docs/ai/runtime-layout.md` | Step 8: Updated "état réel" section to reflect T116 changes and residual gaps. |
-| `docs/ai/decisions-log.md` | Step 8: New T116 entry documenting the structural decisions. |
+`run_daemon.py`: Added importlib loading of `runtime_resolver.py` at module level (same pattern as existing `runtime_db.py` load). In `main()`, replaced `state_dir = rt / "state"` / `state_dir = runs_dir` with `state_dir = _rr_resolve_state_dir(REPO_ROOT)`, and `_LOG_FILE = rt / "logs" / "daemon.log"` with `_LOG_FILE = _rr_resolve_logs_dir(REPO_ROOT) / "daemon.log"`.
 
-**Key invariant preserved:** all changes fall back gracefully when `AI_DEV_FACTORY_RUNTIME_ROOT` is not set — dev-without-Docker keeps working as before.
+**Fix 2 — `runtime_db.py` dev fallback creates DB in worktrees**
+
+Restored `git rev-parse --git-common-dir` as the dev fallback. The git command is run with `cwd=Path(__file__).parent` — this works correctly even when the module is loaded from a worktree copy, because git always reports the main repo's `.git` as the common-dir regardless of which worktree you're in. Added `import subprocess`, resolved relative paths to absolute, and kept a last-resort module-location fallback. Updated the module docstring.
+
+**Fix 3 — Missing invariant check**
+
+Added `_log("WARNING: AI_DEV_FACTORY_RUNTIME_ROOT not set — using dev fallback paths")` in `main()` after the startup log lines, emitted whenever the daemon starts without a canonical runtime root configured.
