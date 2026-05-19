@@ -21,6 +21,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 RUN_STEP = ROOT / "run_step.py"
+RUNTIME_CHECKPOINT = ROOT / "runtime_checkpoint.py"
 
 _spec = importlib.util.spec_from_file_location("_run_step", RUN_STEP)
 _mod = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
@@ -28,6 +29,13 @@ _spec.loader.exec_module(_mod)  # type: ignore[union-attr]
 validate_planner_output = _mod.validate_planner_output
 classify_runtime_failure = _mod.classify_runtime_failure
 del _spec, _mod
+
+_rc_spec = importlib.util.spec_from_file_location("_runtime_checkpoint", RUNTIME_CHECKPOINT)
+_rc_mod = importlib.util.module_from_spec(_rc_spec)  # type: ignore[arg-type]
+_rc_spec.loader.exec_module(_rc_mod)  # type: ignore[union-attr]
+classify_intake_dirty_paths = _rc_mod.classify_intake_dirty_paths
+parse_porcelain_paths = _rc_mod.parse_porcelain_paths
+del _rc_spec, _rc_mod
 
 VALID_STATES = frozenset({
     "INIT",
@@ -406,18 +414,35 @@ def _get_current_branch() -> str:
 
 
 def _check_working_tree_clean() -> None:
+    """Refuse a step only when *real* code changes are dirty.
+
+    Runtime/generated artifacts produced by the workflow itself
+    (runs/<ticket>/runtime.log, __pycache__/*.pyc, runs/.project-map*.json,
+    runs/daemon.log, .runtime/*.sqlite, etc.) must not block the auto loop:
+    they are classified via runtime_checkpoint.is_ignorable_runtime_dirty_path
+    and tolerated. Any other dirty path still raises.
+    """
     result = run_command(["git", "status", "--porcelain"])
 
     if result.returncode != 0:
         raise TicketRunnerError("failed to check git status")
 
-    if result.stdout.strip():
+    if not result.stdout.strip():
+        return
+
+    paths = parse_porcelain_paths(result.stdout)
+    ignorable, real = classify_intake_dirty_paths(paths)
+
+    if real:
         print("DEBUG dirty working tree:")
         print(result.stdout)
 
         raise TicketRunnerError(
             "working tree is not clean — commit or stash changes first"
         )
+
+    if ignorable:
+        print(f"clean gate: ignored runtime dirty files: {ignorable}")
 
 
 def _determine_next_state(

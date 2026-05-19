@@ -26,6 +26,22 @@ def create_ticket_worktree(ticket_id: str, branch: str, worktrees_dir: Path) -> 
     return False, f"worktree creation failed: {result.stderr.strip()}"
 
 
+def ensure_intake_worktree(worktrees_dir: Path, repo_root: "Path | None" = None) -> "tuple[bool, Path]":
+    """Create or verify the _intake worktree on main. Returns (success, path)."""
+    intake_path = worktrees_dir / "_intake"
+    if intake_path.exists():
+        return True, intake_path
+    worktrees_dir.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(
+        ["git", "worktree", "add", str(intake_path), "main"],
+        capture_output=True, text=True, check=False,
+        cwd=str(repo_root) if repo_root else None,
+    )
+    if result.returncode == 0:
+        return True, intake_path
+    return False, intake_path
+
+
 def remove_ticket_worktree(ticket_id: str, worktrees_dir: Path, force: bool = False) -> tuple[bool, str]:
     """Remove the git worktree for the ticket.
 
