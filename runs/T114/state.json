@@ -1,7 +1,7 @@
 {
   "ticket_id": "T114",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T114-t114-separate-human-clones-from-runtime-clones-and",
   "issue_number": 63,
-  "updated_at": "2026-05-19T09:25:19Z"
+  "updated_at": "2026-05-19T09:45:10Z"
 }
