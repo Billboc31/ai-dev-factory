@@ -31,6 +31,8 @@ RETRY_STATE_FILENAME = "retry-state.json"
 WORKERS_REGISTRY_FILENAME = "workers.json"
 DEFAULT_WORKTREES_DIR = REPO_ROOT.parent / (REPO_ROOT.name + "-worktrees")
 
+_LOG_FILE: "Path | None" = None
+
 _wm_spec = importlib.util.spec_from_file_location("_worktree_manager", ROOT / "worktree_manager.py")
 _wm_mod = importlib.util.module_from_spec(_wm_spec)  # type: ignore[arg-type]
 _wm_spec.loader.exec_module(_wm_mod)  # type: ignore[union-attr]
@@ -60,6 +62,16 @@ _rdb_upsert_worker = _rdb_mod.upsert_worker
 _rdb_remove_worker = _rdb_mod.remove_worker
 _rdb_list_workers = _rdb_mod.list_workers
 del _rdb_spec, _rdb_mod
+
+_rr_spec = importlib.util.spec_from_file_location(
+    "_runtime_resolver",
+    REPO_ROOT / "services" / "control_api" / "services" / "runtime_resolver.py",
+)
+_rr_mod = importlib.util.module_from_spec(_rr_spec)  # type: ignore[arg-type]
+_rr_spec.loader.exec_module(_rr_mod)  # type: ignore[union-attr]
+_rr_resolve_state_dir = _rr_mod.resolve_state_dir
+_rr_resolve_logs_dir = _rr_mod.resolve_logs_dir
+del _rr_spec, _rr_mod
 
 # SQLite path and init are cached so _rdb_get_db_path() (subprocess) runs only once per daemon process.
 _DB_PATH_RESOLVED: bool = False
@@ -122,7 +134,14 @@ def _now_iso() -> str:
 
 
 def _log(message: str) -> None:
-    print(f"[{_now_iso()}] [daemon] {message}", flush=True)
+    line = f"[{_now_iso()}] [daemon] {message}"
+    print(line, flush=True)
+    if _LOG_FILE:
+        try:
+            with _LOG_FILE.open("a", encoding="utf-8") as fh:
+                fh.write(line + "\n")
+        except OSError:
+            pass
 
 
 def _lock_path(run_dir: Path) -> Path:
@@ -202,12 +221,12 @@ def _clear_retry_state(run_dir: Path) -> None:
 
 # ── workers registry ──────────────────────────────────────────────────────────
 
-def _workers_registry_path(runs_dir: Path) -> Path:
-    return runs_dir / WORKERS_REGISTRY_FILENAME
+def _workers_registry_path(state_dir: Path) -> Path:
+    return state_dir / WORKERS_REGISTRY_FILENAME
 
 
-def _load_workers_registry(runs_dir: Path) -> dict:
-    path = _workers_registry_path(runs_dir)
+def _load_workers_registry(state_dir: Path) -> dict:
+    path = _workers_registry_path(state_dir)
     if not path.exists():
         return {}
     try:
@@ -216,22 +235,22 @@ def _load_workers_registry(runs_dir: Path) -> dict:
         return {}
 
 
-def _save_workers_registry(runs_dir: Path, workers: dict) -> None:
-    path = _workers_registry_path(runs_dir)
+def _save_workers_registry(state_dir: Path, workers: dict) -> None:
+    path = _workers_registry_path(state_dir)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(workers, indent=2), encoding="utf-8")
     tmp.replace(path)
 
 
-def _register_worker(runs_dir: Path, ticket_id: str, branch: str | None, worktree_path: str) -> None:
-    workers = _load_workers_registry(runs_dir)
+def _register_worker(state_dir: Path, ticket_id: str, branch: str | None, worktree_path: str) -> None:
+    workers = _load_workers_registry(state_dir)
     workers[ticket_id] = {
         "pid": os.getpid(),
         "branch": branch,
         "worktree_path": worktree_path,
         "started_at": _now_iso(),
     }
-    _save_workers_registry(runs_dir, workers)
+    _save_workers_registry(state_dir, workers)
     db_path = _ensure_db()
     if db_path:
         try:
@@ -240,10 +259,10 @@ def _register_worker(runs_dir: Path, ticket_id: str, branch: str | None, worktre
             _log(f"SQLite worker register failed for {ticket_id}: {exc}")
 
 
-def _unregister_worker(runs_dir: Path, ticket_id: str) -> None:
-    workers = _load_workers_registry(runs_dir)
+def _unregister_worker(state_dir: Path, ticket_id: str) -> None:
+    workers = _load_workers_registry(state_dir)
     workers.pop(ticket_id, None)
-    _save_workers_registry(runs_dir, workers)
+    _save_workers_registry(state_dir, workers)
     db_path = _cached_db_path()
     if db_path and db_path.exists():
         try:
@@ -252,9 +271,9 @@ def _unregister_worker(runs_dir: Path, ticket_id: str) -> None:
             _log(f"SQLite worker unregister failed for {ticket_id}: {exc}")
 
 
-def _cleanup_stale_workers(runs_dir: Path) -> None:
+def _cleanup_stale_workers(state_dir: Path) -> None:
     """Remove dead PIDs from workers.json and SQLite — called at daemon startup."""
-    workers = _load_workers_registry(runs_dir)
+    workers = _load_workers_registry(state_dir)
     stale: list[str] = []
     if workers:
         stale = [
@@ -265,7 +284,7 @@ def _cleanup_stale_workers(runs_dir: Path) -> None:
             for tid in stale:
                 _log(f"removing stale worker entry for {tid} (pid={workers[tid].get('pid')} dead)")
                 del workers[tid]
-            _save_workers_registry(runs_dir, workers)
+            _save_workers_registry(state_dir, workers)
 
     db_path = _cached_db_path()
     if not db_path or not db_path.exists():
@@ -896,11 +915,14 @@ def launch_ticket(
     auto_commit: bool = False,
     auto_push: bool = False,
     auto_include_code: bool = False,
+    state_dir: Path | None = None,
 ) -> None:
     """Launch run_ticket.py --auto for one ticket. No-op in dry_run mode."""
     if dry_run:
         _log(f"dry-run: would launch {ticket_id} --auto --exec-cmd {exec_cmd!r}")
         return
+
+    _state_dir = state_dir if state_dir is not None else runs_dir
 
     # Determine if this ticket has a dedicated worktree
     worktree_path: Path | None = None
@@ -926,7 +948,7 @@ def launch_ticket(
                 _log(f"skipping {ticket_id}: branch sync failed in worktree")
                 return
 
-            _register_worker(runs_dir, ticket_id, branch, str(worktree_path))
+            _register_worker(_state_dir, ticket_id, branch, str(worktree_path))
             cmd = build_run_ticket_command(ticket_id, exec_cmd, auto_commit, auto_push, auto_include_code)
             _log(f"launching worker {ticket_id} in worktree={worktree_path}: {shlex.join(cmd)}")
             result = subprocess.run(
@@ -952,7 +974,7 @@ def launch_ticket(
             else:
                 _clear_retry_state(worktree_run_dir)
         finally:
-            _unregister_worker(runs_dir, ticket_id)
+            _unregister_worker(_state_dir, ticket_id)
             _release_lock(worktree_run_dir)
 
     else:
@@ -1007,14 +1029,14 @@ def launch_ticket(
 
 # ── issue polling ─────────────────────────────────────────────────────────────
 
-def load_issue_index(runs_dir: Path) -> dict[str, str]:
+def load_issue_index(state_dir: Path) -> dict[str, str]:
     """Load the anti-duplicate index mapping issue numbers to ticket IDs.
 
     Reads from the local JSON file (gitignored, written by save_issue_index).
     The JSON file is the daemon's working copy; SQLite is written in parallel
     for the board/dashboard to consume.
     """
-    path = runs_dir / ISSUE_INDEX_FILENAME
+    path = state_dir / ISSUE_INDEX_FILENAME
     if not path.exists():
         return {}
     try:
@@ -1023,13 +1045,13 @@ def load_issue_index(runs_dir: Path) -> dict[str, str]:
         return {}
 
 
-def save_issue_index(runs_dir: Path, index: dict[str, str]) -> None:
+def save_issue_index(state_dir: Path, index: dict[str, str]) -> None:
     """Persist the anti-duplicate index.
 
     Writes to both the local JSON file (daemon working copy) and SQLite
     (for board/dashboard). The JSON file is gitignored — see .gitignore.
     """
-    path = runs_dir / ISSUE_INDEX_FILENAME
+    path = state_dir / ISSUE_INDEX_FILENAME
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(index, indent=2), encoding="utf-8")
     tmp.replace(path)
@@ -1124,14 +1146,17 @@ def poll_github_issues(
     label: str,
     repo: str | None,
     worktrees_dir: Path | None = None,
+    state_dir: Path | None = None,
 ) -> None:
     """Detect ready GitHub issues and create local runs for new ones."""
+    _state_dir = state_dir if state_dir is not None else runs_dir
+
     issues = fetch_ready_issues(label, repo)
     if not issues:
         _log(f"no issues found with label={label!r}")
         return
 
-    index = load_issue_index(runs_dir)
+    index = load_issue_index(_state_dir)
     candidates = sorted(
         [i for i in issues if str(i["number"]) not in index],
         key=lambda i: i["number"],
@@ -1196,7 +1221,7 @@ def poll_github_issues(
 
         if call_issue_intake(int(number), ticket_id, slug, repo, push=True, cwd=intake_cwd):
             index[number] = ticket_id
-            save_issue_index(runs_dir, index)
+            save_issue_index(_state_dir, index)
             _log(f"issue #{number} ingested as {ticket_id}")
             db_path = _ensure_db()
             if db_path:
@@ -1272,6 +1297,7 @@ def run_once(
     repo: str | None = None,
     max_workers: int = 1,
     use_project_map: bool = False,
+    state_dir: Path | None = None,
 ) -> None:
     """Scan all tickets and process auto-runnable ones."""
     all_tickets = sorted(scan_tickets(runs_dir, worktrees_dir), key=lambda t: ticket_sort_key(t[0]))
@@ -1298,6 +1324,7 @@ def run_once(
         _log("no tickets found")
         return
 
+    _state_dir = state_dir if state_dir is not None else runs_dir
     _db_path = _ensure_db()
 
     for ticket_id, state in tickets:
@@ -1323,7 +1350,7 @@ def run_once(
 
         if state in AUTO_RUNNABLE_STATES:
             _log(f"detected {ticket_id} state={state}")
-            active_count = len(_load_workers_registry(runs_dir))
+            active_count = len(_load_workers_registry(_state_dir))
             if active_count >= max_workers:
                 _log(f"skipping {ticket_id}: max_workers={max_workers} reached ({active_count} active)")
                 continue
@@ -1334,6 +1361,7 @@ def run_once(
                 ticket_id, exec_cmd, dry_run, runs_dir,
                 worktrees_dir=worktrees_dir,
                 auto_commit=auto_commit, auto_push=auto_push, auto_include_code=auto_include_code,
+                state_dir=_state_dir,
             )
         elif state == "TEST_COMPLETE":
             ticket_state = _load_state_json(run_dir)
@@ -1411,9 +1439,13 @@ def main(argv: list[str]) -> int:
         rt = Path(runtime_root)
         runs_dir = rt / "runs"
         worktrees_dir = rt / "worktrees"
+        global _LOG_FILE
+        _LOG_FILE = _rr_resolve_logs_dir(REPO_ROOT) / "daemon.log"
+        _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
     else:
         runs_dir = Path(args.runs_dir)
         worktrees_dir = Path(args.worktrees_dir)
+    state_dir = _rr_resolve_state_dir(REPO_ROOT)
 
     if not runs_dir.exists():
         print(f"error: runs dir not found: {runs_dir}", file=sys.stderr)
@@ -1421,6 +1453,8 @@ def main(argv: list[str]) -> int:
 
     _log(f"starting daemon exec-cmd={args.exec_cmd!r} interval={args.interval}s dry-run={args.dry_run}")
     _log(f"worktrees-dir={worktrees_dir} max-workers={args.max_workers}")
+    if not runtime_root:
+        _log("WARNING: AI_DEV_FACTORY_RUNTIME_ROOT not set — using dev fallback paths")
     if args.poll_issues:
         _log(f"issue polling enabled label={args.issue_label!r} repo={args.issue_repo!r}")
     if args.auto_commit:
@@ -1430,11 +1464,11 @@ def main(argv: list[str]) -> int:
     if args.use_project_map:
         _log("project-map scheduling enabled (fallback: FIFO)")
 
-    _cleanup_stale_workers(runs_dir)
+    _cleanup_stale_workers(state_dir)
 
     if args.once:
         if args.poll_issues:
-            poll_github_issues(runs_dir, args.issue_label, args.issue_repo, worktrees_dir=worktrees_dir)
+            poll_github_issues(runs_dir, args.issue_label, args.issue_repo, worktrees_dir=worktrees_dir, state_dir=state_dir)
         if args.poll_project_map:
             poll_project_map(runs_dir, args.issue_repo, worktrees_dir=worktrees_dir)
         run_once(
@@ -1444,13 +1478,14 @@ def main(argv: list[str]) -> int:
             auto_include_code=args.auto_include_code, repo=args.issue_repo,
             max_workers=args.max_workers,
             use_project_map=args.use_project_map,
+            state_dir=state_dir,
         )
         return 0
 
     try:
         while True:
             if args.poll_issues:
-                poll_github_issues(runs_dir, args.issue_label, args.issue_repo, worktrees_dir=worktrees_dir)
+                poll_github_issues(runs_dir, args.issue_label, args.issue_repo, worktrees_dir=worktrees_dir, state_dir=state_dir)
             if args.poll_project_map:
                 poll_project_map(runs_dir, args.issue_repo, worktrees_dir=worktrees_dir)
             run_once(
@@ -1460,6 +1495,7 @@ def main(argv: list[str]) -> int:
                 auto_include_code=args.auto_include_code, repo=args.issue_repo,
                 max_workers=args.max_workers,
                 use_project_map=args.use_project_map,
+                state_dir=state_dir,
             )
             _log(f"sleeping {args.interval}s")
             time.sleep(args.interval)

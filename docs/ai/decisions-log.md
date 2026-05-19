@@ -23,6 +23,20 @@ Les moteurs externes (Claude CLI, Codex CLI, etc.) génèrent uniquement du cont
 
 ---
 
+## 2026-05-19 — T116 — Ownership runtime canonique et fondation multi-runtime
+
+RUNTIME_ROOT devient la seule source de vérité pour tous les artefacts runtime.
+
+Changements structurants :
+- `AI_DEV_FACTORY_RUNTIME_ROOT` obligatoire en Docker ; fallback module-location en dev local
+- SQLite DB unique : `RUNTIME_ROOT/.runtime/ai-dev-factory.sqlite` (plus de DB dans clones ou worktrees)
+- `workers.json` et `.issue-intake.json` migrés de `runs/` vers `RUNTIME_ROOT/state/`
+- File logging daemon vers `RUNTIME_ROOT/logs/daemon.log` quand RUNTIME_ROOT est set
+- `runtime_resolver.py` enrichi : `resolve_state_dir()` et `resolve_logs_dir()`
+- `deploy/bootstrap.sh` : migration best-effort des anciens artefacts au démarrage Docker
+
+---
+
 ## 2026-05-19 — T114 — Séparation clone humain / clone runtime
 
 Architecture runtime officielle définie et documentée.

@@ -25,6 +25,22 @@ def resolve_worktrees_dir(project_root: Path) -> Path:
     return project_root.parent / (project_root.name + "-worktrees")
 
 
+def resolve_state_dir(project_root: Path) -> Path:
+    """Return the state/ directory: RUNTIME_ROOT/state if set, else project_root/runs (legacy fallback)."""
+    runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if runtime_root:
+        return Path(runtime_root) / "state"
+    return project_root / "runs"
+
+
+def resolve_logs_dir(project_root: Path) -> Path:
+    """Return the logs/ directory: RUNTIME_ROOT/logs if set, else project_root/logs."""
+    runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if runtime_root:
+        return Path(runtime_root) / "logs"
+    return project_root / "logs"
+
+
 def _load_workers(runs_dir: Path) -> dict:
     path = runs_dir / _WORKERS_JSON
     try:
