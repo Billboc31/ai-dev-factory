@@ -32,3 +32,8 @@
 [2026-05-19T09:56:33Z] compose: skill=ai/skills/security.md
 [2026-05-19T09:56:33Z] compose: task (canonical prompt)
 [2026-05-19T09:56:33Z] snapshot: runtime-prompt=runs/T114/prompts/coder-attempt-1.md
+[2026-05-19T10:02:57Z] auto-run: step=coder done rc=0
+[2026-05-19T10:02:57Z] auto-run: transition PLAN_APPROVED → IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-19T10:03:37Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-19T10:03:37Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-05-19T10:04:15Z] commit-checkpoint: skipped missing scope paths: package.json, package-lock.json
