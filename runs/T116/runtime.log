@@ -31,3 +31,18 @@
 [2026-05-19T16:25:59Z] snapshot: runtime-prompt=runs/T116/prompts/review-attempt-1.md
 [2026-05-19T16:27:21Z] human-approval: approve-plan — PLAN_REVIEW_NEEDED → PLAN_APPROVED
 [2026-05-19T16:27:22Z] commit-checkpoint: refused — failed to determine current git branch
+[2026-05-19T16:27:58Z] auto-run start: state=PLAN_APPROVED
+[2026-05-19T16:27:58Z] auto-run: running step=coder
+[2026-05-19T16:27:58Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-19T16:27:58Z] prompt: generic fallback — injecting runs/T116/ticket.md
+[2026-05-19T16:27:58Z] compose: global-context=docs/ai/global-context.md
+[2026-05-19T16:27:58Z] compose: role=ai/roles/coder.md
+[2026-05-19T16:27:58Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-19T16:27:58Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-19T16:27:58Z] compose: skill=ai/skills/code-quality.md
+[2026-05-19T16:27:58Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-19T16:27:58Z] compose: skill=ai/skills/security.md
+[2026-05-19T16:27:58Z] compose: task (canonical prompt)
+[2026-05-19T16:27:58Z] snapshot: runtime-prompt=runs/T116/prompts/coder-attempt-1.md
+[2026-05-19T16:37:07Z] auto-run: step=coder done rc=0
+[2026-05-19T16:37:07Z] auto-run: transition PLAN_APPROVED → IMPLEMENTATION_REVIEW_NEEDED

@@ -30,38 +30,47 @@
 
 ---
 
-## Architecture actuelle (état réel — 2026-05-19)
+## État réel après T116 (2026-05-19)
 
-L'architecture actuelle diffère de la cible sur plusieurs points :
+Les chemins canoniques sont désormais imposés via `AI_DEV_FACTORY_RUNTIME_ROOT` :
 
 ```text
-~/dev/ai-dev-factory/            # clone humain ET runtime (couplé)
+/runtime/<instance>/             # RUNTIME_ROOT — seul lieu autorisé pour les artefacts runtime
 ├── .runtime/
-│   └── runtime.db               # SQLite DB dans le clone (gitignored)
+│   └── ai-dev-factory.sqlite    # SQLite DB canonique (une seule instance autorisée)
 ├── runs/
-│   ├── daemon.log               # log daemon dans le clone (gitignored)
-│   ├── daemon.pid               # PID daemon dans le clone (gitignored)
-│   ├── workers.json             # registry dans le clone (gitignored)
 │   └── <ticket>/
-│       ├── runtime.log          # log ticket dans le clone (gitignored)
-│       └── state.json           # état ticket dans le clone (versionné)
-└── [worktrees dans ../ai-dev-factory-worktrees/]
+│       ├── runtime.log          # log ticket (dans le worktree associé si actif)
+│       └── state.json           # état ticket (versionné dans le worktree)
+├── worktrees/
+│   └── <ticket>/                # worktree jetable par ticket
+├── clones/
+│   └── ai-dev-factory/          # clone runtime (sentinel .ai-dev-factory-runtime présent)
+├── state/
+│   ├── workers.json             # registry des workers actifs (hors runs/)
+│   └── .issue-intake.json       # index anti-doublon issues GitHub (hors runs/)
+└── logs/
+    └── daemon.log               # log daemon (file logging activé quand RUNTIME_ROOT est set)
 ```
+
+Interdictions enforced par le code :
+- Aucune DB SQLite dans les worktrees (fallback `git common-dir` supprimé)
+- `workers.json` et `.issue-intake.json` dans `state/` (séparé de `runs/`)
+- Board Docker lit `RUNTIME_ROOT/.runtime/ai-dev-factory.sqlite` (path hardcodé supprimé)
 
 ---
 
-## Écarts et notes de migration
+## Écarts résiduels
 
-| Élément              | Actuel                        | Cible                                      |
-|----------------------|-------------------------------|--------------------------------------------|
-| SQLite DB            | `.runtime/runtime.db` (clone) | `~/runtime/.../state/runtime.db`           |
-| Daemon logs          | `runs/daemon.log` (clone)     | `~/runtime/.../logs/daemon.log`            |
-| Ticket logs          | `runs/T*/runtime.log` (clone) | `~/runtime/.../logs/<ticket>.log`          |
-| Workers registry     | `runs/workers.json` (clone)   | `~/runtime/.../state/workers.json`         |
-| Worktrees            | `../ai-dev-factory-worktrees` | `~/runtime/.../worktrees/<project>/`       |
-| Clone runtime        | Clone humain (couplé)         | Clone dédié sous `~/runtime/.../clones/`   |
+| Élément              | T116                                          | Cible long terme                        |
+|----------------------|-----------------------------------------------|-----------------------------------------|
+| Ticket logs          | `runs/T*/runtime.log` dans le worktree        | `logs/<ticket>.log` dans RUNTIME_ROOT   |
+| Daemon logs          | `RUNTIME_ROOT/logs/daemon.log` (file logging) | ✓ implémenté                            |
+| Workers registry     | `RUNTIME_ROOT/state/workers.json`             | ✓ implémenté                            |
+| SQLite DB            | `RUNTIME_ROOT/.runtime/ai-dev-factory.sqlite` | ✓ implémenté                            |
+| Board Docker         | Lit depuis RUNTIME_ROOT                       | ✓ implémenté                            |
 
-**La migration effective est hors scope de T114.** Elle fera l'objet d'un ticket dédié.
+Migration progressive : `deploy/bootstrap.sh` copie les anciens artefacts vers les nouvelles destinations au démarrage Docker (best-effort, sans suppression).
 
 ---
 
