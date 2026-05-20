@@ -1,25 +1,22 @@
-The plan is written to `runs/T120/plan.md`. Here's a summary:
+The plan is written. Here's a summary of what it covers:
 
 ---
 
-**T120 — Plan d'implémentation**
+**T120 — Implementation Plan**
 
-**7 fichiers, 6 étapes + tests.**
+**Problem**: The backend already tracks retry state (`retry-state.json`) and last error (`state.json`), but neither is exposed in the dashboard or API.
 
-**Constat** : `retry-state.json` (`failure_class`, `retry_count`, `cooldown_until`, `stopped`, `stop_reason`) existe déjà mais n'est exposé nulle part.
+**3 files, 4 steps:**
 
-**Étapes** :
+| File | Change |
+|------|--------|
+| `services/control_api/models/schemas.py` | Add `RetryStatus` model; extend `TimelineResponse` with `retry_status` and `last_error` |
+| `services/control_api/services/artifact_reader.py` | Add `_read_retry_state()` with cooldown computation; wire into `get_ticket_timeline()` |
+| `apps/dashboard/src/components/WorkflowTimeline.jsx` | Render retry banner (stopped/cooldown/failed) and `last_error` block |
 
-| # | Fichier | Changement |
-|---|---|---|
-| 1 | `schemas.py` | Modèle `RetryState` + champ `retry_state: RetryState \| None` dans `TimelineResponse` |
-| 2 | `artifact_reader.py` | `get_retry_state()` : lit JSON + extrait dernière ligne `runtime failure:` du log → `last_error` |
-| 3 | `artifact_reader.py` | `get_ticket_timeline()` : alimente `retry_state` dans le retour |
-| 4 | `routes/tickets.py` | `GET /tickets/{id}/retry-state` — 404 si fichier absent |
-| 5 | `api/tickets.js` | Export `getTicketRetryState(id)` |
-| 6 | `WorkflowTimeline.jsx` | Bandeau rouge (`stopped=true`) ou orange (`cooldown_until` défini) |
-| 7 | Tests | 4 tests unitaires artifact_reader + 3 tests endpoint |
+**Key decisions:**
+- Extending the existing `/timeline` endpoint rather than adding a new one — avoids an extra polling call
+- All new API fields are optional with `None` defaults — fully backwards-compatible
+- No new routes, no DB changes, no daemon changes
 
-**Risques** : faibles — lecture seule, champs optionnels, backward-compatible.
-
-**Hors scope** : historique retries, reset dashboard, modifications daemon/SQLite.
+**Out of scope**: retry history, reset action, board view, daemon changes.
