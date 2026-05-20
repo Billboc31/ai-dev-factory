@@ -13,7 +13,7 @@ def _make_plan(sections: list[str], extra: str = "") -> str:
     return "\n\n".join(sections) + "\n\n" + body + "\n\n" + extra
 
 
-CANONICAL = [
+CANONICAL_FR = [
     "## contexte",
     "## objectif",
     "## inclus",
@@ -21,7 +21,7 @@ CANONICAL = [
     "## critères d'acceptation",
 ]
 
-SYNONYMS = [
+SYNONYMS_FR = [
     "## contexte technique",
     "## objectifs",
     "## scope",
@@ -29,35 +29,100 @@ SYNONYMS = [
     "## acceptance criteria",
 ]
 
+CANONICAL_EN = [
+    "## Context",
+    "## Objective",
+    "## Included",
+    "## Excluded",
+    "## Acceptance criteria",
+]
 
-def test_valid_canonical():
-    assert validate_planner_output(_make_plan(CANONICAL)) == []
+
+def test_valid_canonical_fr():
+    assert validate_planner_output(_make_plan(CANONICAL_FR)) == []
 
 
-def test_valid_synonyms():
-    assert validate_planner_output(_make_plan(SYNONYMS)) == []
+def test_valid_synonyms_fr():
+    assert validate_planner_output(_make_plan(SYNONYMS_FR)) == []
 
 
-def test_too_short():
-    short = "\n\n".join(CANONICAL) + "\n\ncourt"
-    reasons = validate_planner_output(short)
-    assert any("plan trop court" in r for r in reasons)
+# ── new bilingual / trivial-ticket tests ─────────────────────────────────────
 
+def test_valid_canonical_en():
+    """A full plan with the canonical English headers must pass."""
+    assert validate_planner_output(_make_plan(CANONICAL_EN)) == []
+
+
+def test_valid_small_plan_en():
+    """An English plan for a trivial ticket — short but with sections — must pass."""
+    plan = (
+        "## Objective\n"
+        "Rename `foo` to `bar` in `utils.py`. Behaviour-preserving rename.\n\n"
+        "## Included\n"
+        "- utils.py\n\n"
+        "## Excluded\n"
+        "- callers\n\n"
+        "## Acceptance criteria\n"
+        "- module still imports, tests green"
+    )
+    assert validate_planner_output(plan) == []
+
+
+def test_valid_small_plan_fr():
+    """A French plan for a trivial ticket — short but with sections — must pass."""
+    plan = (
+        "## Objectif\n"
+        "Renommer `foo` en `bar` dans `utils.py`. Renommage préservant le comportement.\n\n"
+        "## Inclus\n"
+        "- utils.py\n\n"
+        "## Hors scope\n"
+        "- appelants\n\n"
+        "## Critères d'acceptation\n"
+        "- import OK, tests verts"
+    )
+    assert validate_planner_output(plan) == []
+
+
+def test_empty_plan_is_rejected():
+    """An empty / whitespace-only plan must be rejected."""
+    reasons = validate_planner_output("   \n  \n")
+    assert reasons, "empty plan must be rejected"
+
+
+def test_garbage_one_liner_is_rejected():
+    """A one-line throwaway answer with no structure must be rejected."""
+    reasons = validate_planner_output("done")
+    assert any("trop court" in r and "sans section reconnue" in r for r in reasons)
+
+
+def test_long_prose_without_section_still_rejected():
+    """Removing the word-count short-circuit must NOT let unstructured prose pass."""
+    plan = (
+        "Je vais modifier le fichier utils.py et renommer la variable foo en bar. "
+        "Ensuite je mets à jour les tests pour refléter ce changement et je relance "
+        "la suite complète. Si tout passe je crée la PR et je demande une review."
+    ) * 3
+    reasons = validate_planner_output(plan)
+    assert any("section reconnue" in r for r in reasons)
+
+
+# ── tests historiques (adaptés au nouveau comportement) ──────────────────────
 
 def test_missing_section_is_not_blocking_anymore():
-    sections = [s for s in CANONICAL if "hors scope" not in s]
+    """Avoir 4/5 sections reste OK — au moins une section suffit."""
+    sections = [s for s in CANONICAL_FR if "hors scope" not in s]
     reasons = validate_planner_output(_make_plan(sections))
     assert reasons == []
 
 
 def test_forbidden_phrase_real():
-    plan = _make_plan(CANONICAL, extra="implémentation terminée")
+    plan = _make_plan(CANONICAL_FR, extra="implémentation terminée")
     reasons = validate_planner_output(plan)
     assert any("phrase interdite" in r for r in reasons)
 
 
 def test_forbidden_phrase_in_code_block():
-    plan = _make_plan(CANONICAL, extra="```\nimplémentation terminée\n```")
+    plan = _make_plan(CANONICAL_FR, extra="```\nimplémentation terminée\n```")
     assert validate_planner_output(plan) == []
 
 

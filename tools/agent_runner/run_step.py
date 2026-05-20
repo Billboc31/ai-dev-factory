@@ -73,31 +73,69 @@ _FORBIDDEN_PHRASES = [
     "modifications effectuées",
 ]
 
+# Recognised section headers for planner output. Each group lists synonyms
+# in both French and English. The validator accepts a plan if at least one
+# synonym from any group is present — we do not require the full schema.
+#
+# The canonical structure documented in ai/roles/planner.md is:
+#   ## Contexte / Context
+#   ## Objectif / Objective
+#   ## Inclus / Included
+#   ## Hors scope / Excluded
+#   ## Critères d'acceptation / Acceptance criteria
 _REQUIRED_SECTION_GROUPS = {
-    "contexte": ["## contexte", "## diagnostic", "## contexte et diagnostic", "## contexte technique"],
-    "objectif": ["## objectif", "## objectifs", "## but"],
+    "contexte": [
+        "## contexte",
+        "## context",
+        "## diagnostic",
+        "## contexte et diagnostic",
+        "## contexte technique",
+    ],
+    "objectif": [
+        "## objectif",
+        "## objectifs",
+        "## but",
+        "## objective",
+        "## goal",
+        "## goals",
+    ],
     "inclus": [
         "## inclus",
+        "## included",
         "## périmètre",
         "## scope",
         "## changements prévus",
         "## plan",
         "## étapes",
         "## étapes d’implémentation",
+        "## steps",
+        "## implementation",
+        "## implementation steps",
     ],
-    "hors scope": ["## hors scope", "## hors périmètre", "## non inclus", "## exclusions"],
+    "hors scope": [
+        "## hors scope",
+        "## hors périmètre",
+        "## non inclus",
+        "## exclusions",
+        "## excluded",
+        "## out of scope",
+        "## not in scope",
+    ],
     "critères d’acceptation": [
         "## critères d’acceptation",
+        "## critères d'acceptation",
         "## critères",
         "## validation",
         "## critères de validation",
         "## acceptance criteria",
+        "## acceptance",
     ],
 }
 
 # Validation thresholds — kept low on purpose. We only reject plans that are
-# obviously empty/garbage. Real quality checks are the reviewer's job, and
-# trivial tickets legitimately produce short plans.
+# *both* short *and* unstructured. Trivial tickets legitimately produce short
+# plans, so a plan with at least one recognised section is always accepted
+# regardless of length. Real quality checks are the reviewer's job.
 _MIN_PLAN_WORDS = 20
 
 _QUOTA_PATTERNS: tuple[str, ...] = (
@@ -317,15 +355,23 @@ def compose_runtime_prompt(ticket_id: str, step: str, task_content: str) -> str:
 def validate_planner_output(content: str) -> list[str]:
     """Return rejection reasons; empty list means the output is valid.
 
-    Validation is intentionally permissive:
-    - reject only obviously empty/garbage output (< 20 words),
-    - require at least one recognised section header (synonyms in
-      ``_REQUIRED_SECTION_GROUPS``) so a free-form prose answer is not
-      mistaken for a plan,
-    - reject reviewer/coder telltales (``_FORBIDDEN_PHRASES``).
+    Validation is intentionally permissive and decoupled from a fixed word
+    count or exact wording:
 
-    Trivial tickets legitimately produce short plans; deeper quality checks
-    are the reviewer's job, not this gate.
+    - **Structural check** — accept the plan if at least one recognised
+      section header (FR or EN, synonyms in ``_REQUIRED_SECTION_GROUPS``) is
+      present. A plan with sections is accepted *regardless of length* so
+      trivial tickets can produce short legitimate plans.
+    - **Fallback short-circuit** — only when *no* section header is found do
+      we apply a minimum-length sanity check (``_MIN_PLAN_WORDS``). This
+      catches empty or one-line garbage output while still allowing
+      free-form plans of substantial length to pass with a structural
+      complaint.
+    - **Forbidden phrases** — reviewer/coder telltales remain rejected
+      regardless of structure.
+
+    Deeper quality checks (sound design, complete coverage) are the
+    reviewer's job — not this gate.
     """
     reasons: list[str] = []
     stripped = content.strip()
@@ -334,21 +380,23 @@ def validate_planner_output(content: str) -> list[str]:
     code_stripped = re.sub(r"```[\s\S]*?```", "", lower)
     code_stripped = re.sub(r"`[^`\n]+`", "", code_stripped)
 
-    word_count = len(stripped.split())
-    if word_count < _MIN_PLAN_WORDS:
-        reasons.append(
-            f"plan trop court ({word_count} mots, minimum {_MIN_PLAN_WORDS})"
-        )
+    has_section = any(
+        synonym in lower
+        for synonyms in _REQUIRED_SECTION_GROUPS.values()
+        for synonym in synonyms
+    )
 
-    has_section = False
-    for synonyms in _REQUIRED_SECTION_GROUPS.values():
-        if any(synonym in lower for synonym in synonyms):
-            has_section = True
-            break
     if not has_section:
-        reasons.append(
-            "plan sans section reconnue (objectif/inclus/critères/…)"
-        )
+        word_count = len(stripped.split())
+        if word_count < _MIN_PLAN_WORDS:
+            reasons.append(
+                f"plan trop court ({word_count} mots) et sans section reconnue"
+            )
+        else:
+            reasons.append(
+                "plan sans section reconnue (Objective/Included/Excluded/"
+                "Acceptance criteria — ou équivalents FR)"
+            )
 
     for phrase in _FORBIDDEN_PHRASES:
         if phrase in code_stripped:
