@@ -1,12 +1,19 @@
+import json
 import logging
+import sys
 from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
-from ..models.schemas import ActionResult, TicketSummary, TimelineResponse
+from ..models.schemas import ActionResult, AuditEvent, TicketSummary, TimelineResponse
 from ..services import artifact_reader, subprocess_runner
+
+_TOOLS_DIR = Path(__file__).resolve().parents[3] / "tools" / "agent_runner"
+if str(_TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_DIR))
+import runtime_db  # noqa: E402
 
 logger = logging.getLogger("control-api")
 router = APIRouter(prefix="/tickets", tags=["tickets"])
@@ -18,6 +25,24 @@ def _root(request: Request) -> Path:
 
 def _worktrees_dir(request: Request) -> Path | None:
     return getattr(request.app.state, "worktrees_dir", None)
+
+
+def _db_path(request: Request) -> Path | None:
+    return getattr(request.app.state, "db_path", None)
+
+
+def _log_action(request: Request, ticket_id: str, action: str, result: ActionResult) -> None:
+    db = _db_path(request)
+    if db is None:
+        return
+    msg = f"{action} ok" if result.ok else f"{action} failed: {result.stderr or result.message}"
+    runtime_db.append_runtime_event(
+        db,
+        ticket_id,
+        event_type=f"action:{action}",
+        message=msg,
+        metadata={"ok": result.ok, "returncode": result.returncode},
+    )
 
 
 def _get_or_404(project_root: Path, ticket_id: str, worktrees_dir: Path | None = None) -> TicketSummary:
@@ -108,28 +133,36 @@ def get_timeline(ticket_id: str, request: Request) -> TimelineResponse:
 def approve_plan(ticket_id: str, request: Request) -> ActionResult:
     logger.info("api: POST /tickets/%s/approve-plan", ticket_id)
     _get_or_404(_root(request), ticket_id, _worktrees_dir(request))
-    return subprocess_runner.approve_plan(ticket_id, _root(request), _worktrees_dir(request))
+    result = subprocess_runner.approve_plan(ticket_id, _root(request), _worktrees_dir(request))
+    _log_action(request, ticket_id, "approve-plan", result)
+    return result
 
 
 @router.post("/{ticket_id}/request-plan-fix", response_model=ActionResult)
 def request_plan_fix(ticket_id: str, request: Request) -> ActionResult:
     logger.info("api: POST /tickets/%s/request-plan-fix", ticket_id)
     _get_or_404(_root(request), ticket_id, _worktrees_dir(request))
-    return subprocess_runner.request_plan_fix(ticket_id, _root(request), _worktrees_dir(request))
+    result = subprocess_runner.request_plan_fix(ticket_id, _root(request), _worktrees_dir(request))
+    _log_action(request, ticket_id, "request-plan-fix", result)
+    return result
 
 
 @router.post("/{ticket_id}/approve-implementation", response_model=ActionResult)
 def approve_implementation(ticket_id: str, request: Request) -> ActionResult:
     logger.info("api: POST /tickets/%s/approve-implementation", ticket_id)
     _get_or_404(_root(request), ticket_id, _worktrees_dir(request))
-    return subprocess_runner.approve_implementation(ticket_id, _root(request), _worktrees_dir(request))
+    result = subprocess_runner.approve_implementation(ticket_id, _root(request), _worktrees_dir(request))
+    _log_action(request, ticket_id, "approve-implementation", result)
+    return result
 
 
 @router.post("/{ticket_id}/request-implementation-fix", response_model=ActionResult)
 def request_implementation_fix(ticket_id: str, request: Request) -> ActionResult:
     logger.info("api: POST /tickets/%s/request-implementation-fix", ticket_id)
     _get_or_404(_root(request), ticket_id, _worktrees_dir(request))
-    return subprocess_runner.request_implementation_fix(ticket_id, _root(request), _worktrees_dir(request))
+    result = subprocess_runner.request_implementation_fix(ticket_id, _root(request), _worktrees_dir(request))
+    _log_action(request, ticket_id, "request-implementation-fix", result)
+    return result
 
 
 @router.post("/{ticket_id}/run-next", response_model=ActionResult, status_code=202)
@@ -146,7 +179,9 @@ def run_next(ticket_id: str, request: Request) -> ActionResult:
 
     t = threading.Thread(target=_bg, daemon=True)
     t.start()
-    return ActionResult(ok=True, message="run-next dispatched in background")
+    result = ActionResult(ok=True, message="run-next dispatched in background")
+    _log_action(request, ticket_id, "run-next", result)
+    return result
 
 
 # ── git action endpoints ──────────────────────────────────────────────────────
@@ -155,25 +190,57 @@ def run_next(ticket_id: str, request: Request) -> ActionResult:
 def commit(ticket_id: str, request: Request) -> ActionResult:
     logger.info("api: POST /tickets/%s/commit", ticket_id)
     _get_or_404(_root(request), ticket_id, _worktrees_dir(request))
-    return subprocess_runner.commit_ticket(ticket_id, _root(request), _worktrees_dir(request))
+    result = subprocess_runner.commit_ticket(ticket_id, _root(request), _worktrees_dir(request))
+    _log_action(request, ticket_id, "commit", result)
+    return result
 
 
 @router.post("/{ticket_id}/push", response_model=ActionResult)
 def push(ticket_id: str, request: Request) -> ActionResult:
     logger.info("api: POST /tickets/%s/push", ticket_id)
     _get_or_404(_root(request), ticket_id, _worktrees_dir(request))
-    return subprocess_runner.push_ticket(ticket_id, _root(request), _worktrees_dir(request))
+    result = subprocess_runner.push_ticket(ticket_id, _root(request), _worktrees_dir(request))
+    _log_action(request, ticket_id, "push", result)
+    return result
 
 
 @router.post("/{ticket_id}/checkpoint", response_model=ActionResult)
 def checkpoint(ticket_id: str, request: Request) -> ActionResult:
     logger.info("api: checkpoint requested for %s", ticket_id)
     _get_or_404(_root(request), ticket_id, _worktrees_dir(request))
-    return subprocess_runner.checkpoint_ticket(ticket_id, _root(request), _worktrees_dir(request))
+    result = subprocess_runner.checkpoint_ticket(ticket_id, _root(request), _worktrees_dir(request))
+    _log_action(request, ticket_id, "checkpoint", result)
+    return result
 
 
 @router.post("/{ticket_id}/archive", response_model=ActionResult)
 def archive(ticket_id: str, request: Request) -> ActionResult:
     logger.info("api: POST /tickets/%s/archive", ticket_id)
     _get_or_404(_root(request), ticket_id, _worktrees_dir(request))
-    return subprocess_runner.archive_ticket(ticket_id, _root(request), _worktrees_dir(request))
+    result = subprocess_runner.archive_ticket(ticket_id, _root(request), _worktrees_dir(request))
+    _log_action(request, ticket_id, "archive", result)
+    return result
+
+
+# ── audit log endpoint ────────────────────────────────────────────────────────
+
+@router.get("/{ticket_id}/audit-log", response_model=list[AuditEvent])
+def get_audit_log(ticket_id: str, request: Request) -> list[AuditEvent]:
+    _get_or_404(_root(request), ticket_id, _worktrees_dir(request))
+    db = _db_path(request)
+    if db is None:
+        return []
+    events = runtime_db.list_runtime_events(db, ticket_id=ticket_id)
+    result = []
+    for e in events:
+        if not e["event_type"].startswith("action:"):
+            continue
+        meta = json.loads(e["metadata_json"]) if e.get("metadata_json") else None
+        result.append(AuditEvent(
+            id=e["id"],
+            event_type=e["event_type"],
+            message=e["message"],
+            metadata=meta,
+            created_at=e["created_at"],
+        ))
+    return result

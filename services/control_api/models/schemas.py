@@ -152,3 +152,11 @@ class ProjectMapActivityEntry(BaseModel):
 
 class ProjectMapActivityResponse(BaseModel):
     entries: list[ProjectMapActivityEntry] = []
+
+
+class AuditEvent(BaseModel):
+    id: int
+    event_type: str
+    message: str
+    metadata: dict | None = None
+    created_at: str
