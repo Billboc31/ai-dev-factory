@@ -1,7 +1,7 @@
 {
   "ticket_id": "T130",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_FIX_REQUIRED",
   "branch": "ticket/T130-t130-ai-assisted-operational-project-analysis-and",
   "issue_number": 99,
-  "updated_at": "2026-05-21T20:41:44Z"
+  "updated_at": "2026-05-21T20:46:38Z"
 }
