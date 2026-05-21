@@ -24,4 +24,6 @@ naming convention. Behaviour is preserved.
 - `utils.py` no longer defines `foo`.
 - `pytest tests/test_utils.py` passes.
 - No other file references the old name.
+
 The ticket follows.
+
