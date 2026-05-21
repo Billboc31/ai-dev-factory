@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -193,3 +194,49 @@ def test_voluntary_stop_not_flagged_unexpected(monkeypatch, tmp_path):
 
     assert sup_mod._daemon_state.exit_unexpected is False
     assert sup_mod._voluntary_stop is False
+
+
+# ── 9. daemon_stop clears pid immediately (stop/start race fix) ───────────────
+
+def test_daemon_stop_clears_pid_immediately(monkeypatch, tmp_path):
+    """POST /daemon/stop clears pid/started_at in-memory before returning."""
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path))
+    monkeypatch.setattr(sup_mod, "_daemon_state", sup_mod.DaemonState())
+
+    live_pid = os.getpid()  # use our own PID — guaranteed alive
+    sup_mod._daemon_state.pid = live_pid
+    sup_mod._daemon_state.started_at = "2026-01-01T00:00:00Z"
+
+    client = TestClient(supervisor_app)
+
+    with patch.object(sup_mod.os, "kill") as mock_kill:
+        mock_kill.return_value = None
+        resp = client.post("/daemon/stop")
+
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+    assert sup_mod._daemon_state.pid is None
+    assert sup_mod._daemon_state.started_at is None
+
+
+# ── 10. Lifespan restores exec_cmd and restart_policy from PID file ───────────
+
+def test_lifespan_restores_exec_cmd_and_restart_policy(monkeypatch, tmp_path):
+    """On supervisor restart, exec_cmd and restart_policy are loaded from the PID file."""
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path))
+    monkeypatch.setattr(sup_mod, "_daemon_state", sup_mod.DaemonState())
+    monkeypatch.setattr(sup_mod, "_daemon_exec_cmd", "claude --dangerously-skip-permissions")
+
+    live_pid = os.getpid()
+    pid_path = tmp_path / "runs" / "daemon.pid"
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text(json.dumps({
+        "pid": live_pid,
+        "started_at": "2026-01-01T00:00:00Z",
+        "exec_cmd": "my-custom-cmd --flag",
+        "restart_policy": "restart-on-crash",
+    }))
+
+    with TestClient(supervisor_app):
+        assert sup_mod._daemon_state.restart_policy == "restart-on-crash"
+        assert sup_mod._daemon_exec_cmd == "my-custom-cmd --flag"

@@ -1,13 +1,12 @@
-Both fixes applied and verified. Here's what changed:
+All 10 tests pass. Here's a summary of what changed:
 
-**Files modified:**
+**Fix 1 — stop/start race** (`daemon_stop()`, lines 411–412):  
+Added `_daemon_state.pid = None` and `_daemon_state.started_at = None` immediately after SIGTERM, before returning. The window where a rapid Stop→Start would see a stale in-memory PID and return `already_running` is eliminated.
 
-- **`docker-compose.yml`** — Removed the extra leading space on line 24 before `- AI_DEV_FACTORY_SUPERVISOR_URL=...`. YAML now parses correctly and the env var is picked up by the container.
+**Fix 2 — state lost on supervisor restart** (3 locations):  
+- `_write_pid_file()` — now accepts and persists `exec_cmd` and `restart_policy` in the JSON.  
+- `_spawn_daemon()` — passes both values to `_write_pid_file`.  
+- `lifespan` — restores `_daemon_exec_cmd` and `_daemon_state.restart_policy` when reconnecting to a live daemon.  
+- `daemon_status()` — same restore logic in the stale-PID-recovery path for completeness.
 
-- **`services/control_api/models/schemas.py`** — Added `DaemonStartRequest` model with `restart_policy: str = "no-restart"`.
-
-- **`services/control_api/services/daemon_manager.py`** — Added `restart_policy: str = "no-restart"` to `start()` and `restart()`. The supervisor call now passes `{"exec_cmd": exec_cmd, "restart_policy": restart_policy}`.
-
-- **`services/control_api/routes/daemon.py`** — Updated all four start/restart endpoints (default and project-scoped) to accept an optional `DaemonStartRequest` body and forward `restart_policy` to the manager.
-
-The `restart_policy` flows fully: dashboard → `POST /daemon/start` → `daemon_manager.start()` → `_call_supervisor(...)` → supervisor `POST /daemon/start`.
+**Two new tests** (test 9 and 10) verify these behaviors directly.

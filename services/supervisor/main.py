@@ -91,11 +91,11 @@ def _read_pid_file() -> dict | None:
         return None
 
 
-def _write_pid_file(pid: int, started_at: str) -> None:
+def _write_pid_file(pid: int, started_at: str, exec_cmd: str = "", restart_policy: str = "no-restart") -> None:
     path = _pid_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps({"pid": pid, "started_at": started_at}),
+        json.dumps({"pid": pid, "started_at": started_at, "exec_cmd": exec_cmd, "restart_policy": restart_policy}),
         encoding="utf-8",
     )
 
@@ -171,7 +171,7 @@ def _spawn_daemon(exec_cmd: str) -> tuple[int | None, str | None, str | None]:
                 env=env,
             )
         _daemon_proc = proc
-        _write_pid_file(proc.pid, started_at)
+        _write_pid_file(proc.pid, started_at, exec_cmd, _daemon_state.restart_policy)
         logger.info("supervisor: daemon started pid=%d", proc.pid)
         return proc.pid, started_at, None
     except OSError as exc:
@@ -236,6 +236,7 @@ async def _monitor_daemon() -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global _daemon_exec_cmd
     # Initialise in-memory state from PID file so a supervisor restart
     # reconnects to a live daemon, and cleans up stale PID files.
     data = _read_pid_file()
@@ -245,6 +246,8 @@ async def lifespan(app: FastAPI):
             if _is_alive(pid):
                 _daemon_state.pid = pid
                 _daemon_state.started_at = data.get("started_at")
+                _daemon_exec_cmd = data.get("exec_cmd", _daemon_exec_cmd)
+                _daemon_state.restart_policy = data.get("restart_policy", "no-restart")
             else:
                 _remove_pid_file()
 
@@ -328,7 +331,8 @@ def health():
 
 
 @app.get("/daemon/status")
-def daemon_status():
+def daemon_status():  # noqa: C901
+    global _daemon_exec_cmd
     pid = _daemon_state.pid
 
     if pid is not None and not _is_alive(pid):
@@ -346,6 +350,8 @@ def daemon_status():
             if isinstance(file_pid, int) and _is_alive(file_pid):
                 _daemon_state.pid = file_pid
                 _daemon_state.started_at = data.get("started_at")
+                _daemon_exec_cmd = data.get("exec_cmd", _daemon_exec_cmd)
+                _daemon_state.restart_policy = data.get("restart_policy", "no-restart")
                 pid = file_pid
                 running = True
             else:
@@ -408,6 +414,8 @@ def daemon_stop():
     _voluntary_stop = True
     try:
         os.kill(pid, signal.SIGTERM)
+        _daemon_state.pid = None
+        _daemon_state.started_at = None
         _remove_pid_file()
         logger.info("supervisor: daemon stopped pid=%d", pid)
         return {"ok": True}
