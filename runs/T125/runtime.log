@@ -21,3 +21,4 @@
 [2026-05-21T16:01:50Z] push: tolerating runtime dirty files (not blocking): ['runs/T125/runtime.log']
 [2026-05-21T16:01:50Z] push: pushing branch=ticket/T125-t125-project-scoped-runtime-apis-and-daemon-isolat
 [2026-05-21T16:01:53Z] push: done branch=ticket/T125-t125-project-scoped-runtime-apis-and-daemon-isolat
+[2026-05-21T16:07:46Z] human-approval: approve-plan — PLAN_REVIEW_NEEDED → PLAN_APPROVED
