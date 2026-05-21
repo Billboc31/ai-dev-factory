@@ -1,96 +1,53 @@
-I have enough information to write a complete review.
+I have a complete picture of the implementation. Let me now write the formal review.
 
 ---
 
-# PR Review — T122: Dashboard action audit trail
+# PR Review — T122: Dashboard action audit trail (second review)
 
 ## Résumé
 
-L'implémentation couvre l'ensemble du scope défini dans le plan : logging audit sur les 9 endpoints d'action, endpoint `GET /tickets/{id}/audit-log`, schéma `AuditEvent`, API frontend `getAuditLog`, composant `AuditLog.jsx`, et onglet "Audit" dans `TicketDetailPage`. La structure est propre et cohérente avec les conventions du codebase.
-
-Un problème de robustesse bloquant a été identifié : les exceptions levées par le logging audit peuvent masquer un résultat d'action réussi et faire retourner HTTP 500 au client.
+La correction demandée lors de la review précédente (try/except dans `_log_action`) a été appliquée correctement. L'implémentation couvre intégralement le scope du plan. Aucun nouveau problème bloquant n'est détecté.
 
 ## Vérifications effectuées
 
-- Conformité du plan d'implémentation (9 endpoints, endpoint audit-log, schéma Pydantic, composant frontend, onglet)
+- Fix du problème bloquant précédent (`_log_action` sans try/except)
+- Couverture des 9 endpoints d'action
 - Signature `append_runtime_event` vs appels dans `_log_action`
-- Comportement du composant `AuditLog` vis-à-vis des critères d'acceptation
-- Filtrage `event_type.startswith("action:")` et ordre de tri (id DESC = created_at DESC)
-- Gestion du cas "pas d'événements" (HTTP 200 + liste vide)
-- Gestion `db_path = None` dans `_db_path()` et `get_audit_log`
-- Comportement du remontage React lors du changement d'onglet
+- Schéma `AuditEvent` Pydantic
+- Endpoint `GET /tickets/{ticket_id}/audit-log` (filtrage, désérialisation, empty state)
+- Injection `db_path` dans `app.state`
+- Composant `AuditLog.jsx` (colonnes, fetch, empty/error state, badge)
+- Onglet "Audit" dans `TicketDetailPage.jsx`
+- Comportement de re-fetch au retour sur l'onglet Audit
 
 ## Points validés
 
-- **Couverture complète** : les 9 endpoints (`approve-plan`, `request-plan-fix`, `approve-implementation`, `request-implementation-fix`, `run-next`, `commit`, `push`, `checkpoint`, `archive`) appellent tous `_log_action` après la construction du résultat.
-- **Signature correcte** : `_log_action` appelle `runtime_db.append_runtime_event(db, ticket_id, event_type=..., message=..., metadata=...)` — correspond exactement au paramètre `metadata: dict | None` (pas `metadata_json`).
-- **Filtrage DB correct** : `get_audit_log` filtre les lignes sur `event_type.startswith("action:")` en application code, ce qui est approprié étant donné que `list_runtime_events` ne supporte pas de filtre de préfixe.
-- **Schéma Pydantic** : `AuditEvent(id, event_type, message, metadata, created_at)` correct, `metadata` est `dict | None`.
-- **Désérialisation DB** : `json.loads(e["metadata_json"]) if e.get("metadata_json") else None` — conforme au stockage effectué par `runtime_db`.
-- **Onglet "Audit" React** : rendu conditionnel `tab === 'audit'` entraîne un unmount/remount à chaque switch d'onglet, ce qui déclenche un nouveau fetch dans `useEffect([ticketId])`. Critère d'acceptation "refreshing the Audit tab" satisfait.
-- **Empty state** : `events.length === 0` → texte "No audit events yet." — correct.
-- **Badge de statut** : `e.metadata?.ok ?? true` — valeur par défaut sûre si metadata absent.
-- **`app.state.db_path`** injecté dans `create_app()` via `_runtime_db.get_db_path()` — disponible dans tous les handlers via `_db_path(request)`.
-- **Ordre des événements** : `list_runtime_events` trie `ORDER BY id DESC` (AUTOINCREMENT ≡ ordre chronologique) — conforme au plan "ordered by created_at descending".
+**Fix bloquant appliqué** — `_log_action` (tickets.py:39-48) enveloppe maintenant `append_runtime_event` dans un `try/except Exception`, et logue via `logger.exception(...)` sans re-lever. Une failure SQLite n'entraîne plus de HTTP 500. ✓
 
-## Problèmes détectés
+**Couverture complète des 9 endpoints** — approve-plan (140), request-plan-fix (149), approve-implementation (158), request-implementation-fix (167), run-next (186), commit (197), push (206), checkpoint (215), archive (224) — tous appellent `_log_action`. ✓
 
-### BLOQUANT — `_log_action` sans gestion d'erreur (tickets.py:34-45)
+**Signature conforme** — `append_runtime_event(db, ticket_id, event_type=..., message=..., metadata={...})` correspond exactement à la définition dans `runtime_db.py:252`. ✓
 
-```python
-def _log_action(request, ticket_id, action, result):
-    db = _db_path(request)
-    if db is None:
-        return
-    msg = ...
-    runtime_db.append_runtime_event(db, ...)  # ← aucun try/except
-```
+**Schéma AuditEvent** — `id: int`, `event_type: str`, `message: str`, `metadata: dict | None`, `created_at: str` — conforme au plan. ✓
 
-**Problème** : Si `append_runtime_event` lève une exception (verrou SQLite, disque plein, corruption), l'exception se propage dans le handler FastAPI et retourne HTTP 500 au client — alors que l'action sous-jacente (`subprocess_runner.approve_plan(...)` etc.) a déjà réussi.
+**Endpoint audit-log** — filtre `event_type.startswith("action:")` en code applicatif, retourne `[]` si `db is None` ou aucun événement (HTTP 200), désérialise `metadata_json` correctement. ✓
 
-Le client interprète ce 500 comme un échec de l'action et peut décider de réessayer, créant des effets de bord (double commit, double push, etc.). La règle "never mask a completed action" s'applique ici.
+**Injection `db_path`** — `app.state.db_path = _runtime_db.get_db_path()` dans `main.py:46`. ✓
 
-**Correction attendue** — envelopper l'appel DB dans un try/except dans `_log_action` :
-```python
-def _log_action(request, ticket_id, action, result):
-    db = _db_path(request)
-    if db is None:
-        return
-    msg = f"{action} ok" if result.ok else f"{action} failed: {result.stderr or result.message}"
-    try:
-        runtime_db.append_runtime_event(
-            db, ticket_id,
-            event_type=f"action:{action}",
-            message=msg,
-            metadata={"ok": result.ok, "returncode": result.returncode},
-        )
-    except Exception:
-        logger.exception("audit log write failed for %s/%s (non-fatal)", ticket_id, action)
-```
+**Frontend complet** — `getAuditLog(id)` dans `tickets.js:24`, composant `AuditLog.jsx` avec colonnes timestamp/action/status/message, empty state, loading state, badge basé sur `metadata?.ok`. ✓
 
-### Mineur — `run-next` audit reflect dispatch, pas le résultat réel (tickets.py:168-184)
+**Onglet "Audit"** — ajouté à `TABS` (TicketDetailPage.jsx:10), rendu conditionnel direct `<AuditLog ticketId={id} />` (ligne 173). Le pattern de rendu direct (hors `TAB_FETCHERS`) provoque un unmount/remount de `AuditLog` à chaque changement d'onglet, déclenchant un nouveau fetch via `useEffect([ticketId])`. Critère "refreshing the Audit tab shows new event" satisfait. ✓
 
-Le background thread lance `subprocess_runner.run_next(...)` de manière asynchrone, mais l'événement est enregistré immédiatement avec `ok=True`. Si le subprocess échoue, l'audit log montre toujours "run-next ok". C'est une conséquence de la conception async du plan (logging après retour du `ActionResult`), mais le message `"run-next dispatched in background"` est suffisamment explicite pour ne pas induire en erreur.
+**Ordre des événements** — `list_runtime_events` trie `ORDER BY id DESC` (AUTOINCREMENT = ordre chronologique). ✓
 
-### Mineur — Troncature silencieuse à 100 événements (runtime_db.py:271, tickets.py:233)
+## Observations mineures (inchangées, non bloquantes)
 
-`list_runtime_events` a un `limit=100` par défaut. L'endpoint `get_audit_log` ne surcharge pas cette valeur. Pour des tickets à forte activité (tests en boucle), les événements anciens sont silencieusement exclus sans indication dans la réponse. Pas bloquant pour un v1 mais à noter.
-
-### Mineur — Injection `sys.path` dupliquée
-
-`main.py` et `routes/tickets.py` injectent tous les deux `tools/agent_runner` dans `sys.path` indépendamment. Fonctionnel mais redondant — cohérent avec le pattern existant du codebase.
-
-## Risques éventuels
-
-- En production sous Docker (`AI_DEV_FACTORY_RUNTIME_ROOT` défini), la résolution DB est stable. En dev sans l'env var, `get_db_path()` exécute `git rev-parse` au démarrage — cela peut lentement échouer dans des contextes CI non-git (retombe sur le path module-relatif, pas de `None`).
-- Le `sys.path.insert(0, ...)` au niveau module dans `routes/tickets.py` est un side-effect global déclenché à l'import — risque théorique en tests parallèles, mais conforme au pattern de `main.py`.
+- `run-next` logue `ok=True` au dispatch, pas le résultat du subprocess — conséquence acceptée du design async du plan.
+- `list_runtime_events` a `limit=100` par défaut ; troncature silencieuse pour les tickets très actifs — acceptable pour v1.
+- `sys.path.insert` dupliqué entre `main.py` et `routes/tickets.py` — cohérent avec le pattern existant du codebase.
 
 ## Décision
 
-- IMPLEMENTATION_FIX_REQUIRED
+Le seul problème bloquant de la review précédente a été corrigé exactement comme demandé. Toutes les acceptance criteria sont satisfaites. L'implémentation est conforme au plan et au ticket.
 
-## Actions demandées
-
-1. **[Bloquant]** Envelopper l'appel `runtime_db.append_runtime_event(...)` dans `_log_action` avec un `try/except Exception` loggant l'erreur sans la propager — afin qu'une failure du logging audit ne retourne jamais HTTP 500 pour une action qui a réussi.
-
-IMPLEMENTATION_FIX_REQUIRED
+IMPLEMENTATION_APPROVED
