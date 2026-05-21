@@ -1,7 +1,7 @@
 {
   "ticket_id": "T123",
-  "state": "IMPLEMENTATION_APPROVED",
+  "state": "TEST_COMPLETE",
   "branch": "ticket/T123-t123-persistent-daemon-runtime-status-streaming-in",
   "issue_number": 85,
-  "updated_at": "2026-05-21T13:51:01Z"
+  "updated_at": "2026-05-21T13:57:27Z"
 }
