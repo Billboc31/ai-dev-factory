@@ -1,3 +1,4 @@
+The ticket follows.
 # Generic Planner Task Read the ticket below and produce a detailed implementation plan. 
 
 ## Required output structure (strict) Your reply **MUST** be a Markdown document containing **exactly** these four level-2 headings, in this order, spelled exactly as shown:
