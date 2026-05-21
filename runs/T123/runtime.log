@@ -10,3 +10,14 @@
 [2026-05-21T13:27:15Z] compose: task (canonical prompt)
 [2026-05-21T13:27:15Z] snapshot: runtime-prompt=runs/T123/prompts/planner-attempt-1.md
 [2026-05-21T13:32:19Z] auto-run: step=planner done rc=0
+[2026-05-21T13:32:21Z] planner checkpoint: committed
+[2026-05-21T13:32:21Z] planner checkpoint: pushed
+[2026-05-21T13:32:21Z] planner validation success
+[2026-05-21T13:32:21Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-21T13:32:21Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-21T13:32:22Z] commit-checkpoint: unstaged runtime garbage: ['runs/T123/runtime.log']
+[2026-05-21T13:32:22Z] commit-checkpoint: sha=0f3e626 files=2 title='docs(T123/workflow): planner — update 2 file(s)'
+[2026-05-21T13:32:22Z] auto-run: auto-push triggered
+[2026-05-21T13:32:22Z] push: tolerating runtime dirty files (not blocking): ['runs/T123/runtime.log']
+[2026-05-21T13:32:22Z] push: pushing branch=ticket/T123-t123-persistent-daemon-runtime-status-streaming-in
+[2026-05-21T13:32:24Z] push: done branch=ticket/T123-t123-persistent-daemon-runtime-status-streaming-in
