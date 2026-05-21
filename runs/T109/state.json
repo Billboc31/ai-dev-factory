@@ -3,5 +3,8 @@
   "state": "TEST_COMPLETE",
   "branch": "ticket/T109-t109-atomic-runtime-checkpoint-and-worktree-safe-c",
   "issue_number": 54,
-  "updated_at": "2026-05-19T22:25:07Z"
+  "updated_at": "2026-05-19T22:26:04Z",
+  "pr_number": 76,
+  "pr_synced": true,
+  "daemon_archived": true
 }
