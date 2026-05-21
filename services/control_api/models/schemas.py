@@ -205,11 +205,19 @@ class DeployComponent(BaseModel):
     command: str | None = None
 
 
+class DeployHealthcheck(BaseModel):
+    command: str
+    timeout: int = 30
+    retries: int = 3
+    delay: int = 5
+
+
 class DeployProfile(BaseModel):
     version: int
     project: str
     required_tools: list[str] = []
     components: list[DeployComponent] = []
+    healthcheck: DeployHealthcheck | None = None
 
 
 class ScanResult(BaseModel):
@@ -220,7 +228,23 @@ class ScanResult(BaseModel):
     deploy_profile: DeployProfile | None = None
 
 
+class DeployState(BaseModel):
+    state: Literal["idle", "running", "success", "failed"] = "idle"
+    started_at: str | None = None
+    finished_at: str | None = None
+    error: str | None = None
+    last_step: str | None = None
+
+
 class DeployerStatus(BaseModel):
-    state: Literal["idle"]
+    state: Literal["idle", "running", "success", "failed"]
     profile_present: bool
     project_id: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    error: str | None = None
+    last_step: str | None = None
+
+
+class DeployLogsResponse(BaseModel):
+    lines: list[str]
