@@ -1,0 +1,128 @@
+[2026-05-21T09:50:40Z] auto-run start: state=INIT
+[2026-05-21T09:50:40Z] auto-run: running step=planner
+[2026-05-21T09:50:40Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-05-21T09:50:40Z] prompt: generic fallback — injecting runs/T122/ticket.md
+[2026-05-21T09:50:40Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T09:50:40Z] compose: role=ai/roles/planner.md
+[2026-05-21T09:50:40Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T09:50:40Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-21T09:50:40Z] compose: skill=ai/skills/documentation.md
+[2026-05-21T09:50:40Z] compose: task (canonical prompt)
+[2026-05-21T09:50:40Z] snapshot: runtime-prompt=runs/T122/prompts/planner-attempt-1.md
+[2026-05-21T09:52:59Z] auto-run: step=planner done rc=0
+[2026-05-21T09:53:01Z] planner checkpoint: committed
+[2026-05-21T09:53:01Z] planner checkpoint: pushed
+[2026-05-21T09:53:01Z] planner validation success
+[2026-05-21T09:53:01Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-21T09:53:01Z] auto-run: auto-commit triggered (step=planner)
+[2026-05-21T09:53:01Z] commit-checkpoint: sha=0e7c853 files=2 title='docs(T122/workflow): planner — update 2 file(s)'
+[2026-05-21T09:53:01Z] auto-run: auto-push triggered
+[2026-05-21T09:53:01Z] push: tolerating runtime dirty files (not blocking): ['runs/T122/runtime.log']
+[2026-05-21T09:53:01Z] push: pushing branch=ticket/T122-t122-dashboard-action-audit-trail
+[2026-05-21T09:53:03Z] push: done branch=ticket/T122-t122-dashboard-action-audit-trail
+[2026-05-21T09:55:31Z] human-approval: approve-plan — PLAN_REVIEW_NEEDED → PLAN_APPROVED
+[2026-05-21T09:56:05Z] commit-checkpoint: refused — failed to determine current git branch
+[2026-05-21T09:56:51Z] auto-run start: state=PLAN_APPROVED
+[2026-05-21T09:56:51Z] auto-run: running step=coder
+[2026-05-21T09:56:51Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-21T09:56:51Z] prompt: generic fallback — injecting runs/T122/ticket.md
+[2026-05-21T09:56:51Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T09:56:51Z] compose: role=ai/roles/coder.md
+[2026-05-21T09:56:51Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T09:56:51Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-21T09:56:51Z] compose: skill=ai/skills/code-quality.md
+[2026-05-21T09:56:51Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-21T09:56:51Z] compose: skill=ai/skills/security.md
+[2026-05-21T09:56:51Z] compose: task (canonical prompt)
+[2026-05-21T09:56:51Z] snapshot: runtime-prompt=runs/T122/prompts/coder-attempt-1.md
+[2026-05-21T10:02:59Z] auto-run: step=coder done rc=0
+[2026-05-21T10:02:59Z] auto-run: transition PLAN_APPROVED → IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-21T10:02:59Z] auto-run: auto-commit triggered (step=coder)
+[2026-05-21T10:02:59Z] commit-checkpoint: sha=cb688e2 files=4 title='chore(T122/workflow): coder — update 4 file(s)'
+[2026-05-21T10:02:59Z] auto-run: auto-push triggered
+[2026-05-21T10:02:59Z] push: refused — DIRTY_RUNTIME_CHECKPOINT — uncommitted real changes present before push: ['apps/dashboard/src/api/tickets.js', 'apps/dashboard/src/pages/TicketDetailPage.jsx', 'services/control_api/main.py', 'services/control_api/models/schemas.py', 'services/control_api/routes/tickets.py', 'apps/dashboard/src/components/AuditLog.jsx']
+[2026-05-21T10:02:59Z] auto-run: auto-push failed rc=2
+[2026-05-21T12:21:23Z] commit-checkpoint: refused — failed to determine current git branch
+[2026-05-21T12:22:30Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-21T12:22:30Z] auto-run: running step=review
+[2026-05-21T12:22:30Z] auto-run: review decision context: context_file=runs/T122/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-21T12:22:31Z] prompt: resolved=prompts/generic/review.md source=generic
+[2026-05-21T12:22:31Z] prompt: generic fallback — injecting runs/T122/ticket.md
+[2026-05-21T12:22:31Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T12:22:31Z] compose: role=ai/roles/reviewer.md
+[2026-05-21T12:22:31Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T12:22:31Z] compose: skill=ai/skills/code-quality.md
+[2026-05-21T12:22:31Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-21T12:22:31Z] compose: skill=ai/skills/security.md
+[2026-05-21T12:22:31Z] compose: task (canonical prompt)
+[2026-05-21T12:22:31Z] compose: extra-context=runs/T122/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-21T12:22:31Z] snapshot: runtime-prompt=runs/T122/prompts/review-attempt-1.md
+[2026-05-21T12:26:00Z] auto-run: step=review done rc=0
+[2026-05-21T12:26:00Z] auto-run: review parsed from: runs/T122/reviews/implementation-review.md
+[2026-05-21T12:26:00Z] auto-run: review keyword detected: IMPLEMENTATION_FIX_REQUIRED
+[2026-05-21T12:26:00Z] auto-run: transition IMPLEMENTATION_REVIEW_NEEDED → IMPLEMENTATION_FIX_REQUIRED
+[2026-05-21T12:26:00Z] auto-run: fix artifact written: runs/T122/fixes/implementation-fix-1.md
+[2026-05-21T12:26:00Z] auto-run: auto-commit triggered (step=review)
+[2026-05-21T12:26:00Z] commit-checkpoint: sha=476d002 files=6 title='chore(T122/workflow): review — update 6 file(s)'
+[2026-05-21T12:26:00Z] auto-run: auto-push triggered
+[2026-05-21T12:26:00Z] push: pushing branch=ticket/T122-t122-dashboard-action-audit-trail
+[2026-05-21T12:26:02Z] push: done branch=ticket/T122-t122-dashboard-action-audit-trail
+[2026-05-21T12:26:36Z] auto-run start: state=IMPLEMENTATION_FIX_REQUIRED
+[2026-05-21T12:26:36Z] auto-run: running step=coder
+[2026-05-21T12:26:36Z] auto-run: fix context: previous_output=runs/T122/implementation-output.md
+[2026-05-21T12:26:36Z] auto-run: fix context: review=runs/T122/reviews/implementation-review.md
+[2026-05-21T12:26:36Z] auto-run: fix context: fix_instructions=runs/T122/fixes/implementation-fix-1.md
+[2026-05-21T12:26:36Z] auto-run: fix context: context_file=runs/T122/fixes/context-20260521T122636Z.md
+[2026-05-21T12:26:36Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-21T12:26:36Z] prompt: generic fallback — injecting runs/T122/ticket.md
+[2026-05-21T12:26:36Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T12:26:36Z] compose: role=ai/roles/coder.md
+[2026-05-21T12:26:36Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T12:26:36Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-21T12:26:36Z] compose: skill=ai/skills/code-quality.md
+[2026-05-21T12:26:36Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-21T12:26:36Z] compose: skill=ai/skills/security.md
+[2026-05-21T12:26:36Z] compose: task (canonical prompt)
+[2026-05-21T12:26:36Z] compose: extra-context=runs/T122/fixes/context-20260521T122636Z.md
+[2026-05-21T12:26:36Z] snapshot: runtime-prompt=runs/T122/prompts/coder-attempt-2.md
+[2026-05-21T12:26:52Z] auto-run: step=coder done rc=0
+[2026-05-21T12:26:52Z] auto-run: transition IMPLEMENTATION_FIX_REQUIRED → IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-21T12:26:52Z] auto-run: auto-commit triggered (step=coder)
+[2026-05-21T12:26:52Z] commit-checkpoint: sha=a4e2a31 files=5 title='chore(T122/workflow): coder — update 5 file(s)'
+[2026-05-21T12:26:52Z] auto-run: auto-push triggered
+[2026-05-21T12:26:52Z] push: refused — DIRTY_RUNTIME_CHECKPOINT — uncommitted real changes present before push: ['services/control_api/routes/tickets.py']
+[2026-05-21T12:26:52Z] auto-run: auto-push failed rc=2
+[2026-05-21T12:30:20Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-21T12:30:20Z] auto-run: running step=review
+[2026-05-21T12:30:20Z] auto-run: review decision context: context_file=runs/T122/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-21T12:30:20Z] prompt: resolved=prompts/generic/review.md source=generic
+[2026-05-21T12:30:20Z] prompt: generic fallback — injecting runs/T122/ticket.md
+[2026-05-21T12:30:20Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T12:30:20Z] compose: role=ai/roles/reviewer.md
+[2026-05-21T12:30:20Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T12:30:20Z] compose: skill=ai/skills/code-quality.md
+[2026-05-21T12:30:20Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-21T12:30:20Z] compose: skill=ai/skills/security.md
+[2026-05-21T12:30:20Z] compose: task (canonical prompt)
+[2026-05-21T12:30:20Z] compose: extra-context=runs/T122/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-21T12:30:20Z] snapshot: runtime-prompt=runs/T122/prompts/review-attempt-2.md
+[2026-05-21T12:31:43Z] auto-run: step=review done rc=0
+[2026-05-21T12:31:43Z] auto-run: review parsed from: runs/T122/reviews/implementation-review.md
+[2026-05-21T12:31:43Z] auto-run: review keyword detected: IMPLEMENTATION_APPROVED
+[2026-05-21T12:31:43Z] auto-run: transition IMPLEMENTATION_REVIEW_NEEDED → IMPLEMENTATION_APPROVED
+[2026-05-21T12:31:43Z] auto-run: auto-commit triggered (step=review)
+[2026-05-21T12:31:43Z] commit-checkpoint: sha=80f81e2 files=3 title='chore(T122/workflow): review — update 3 file(s)'
+[2026-05-21T12:31:43Z] auto-run: auto-push triggered
+[2026-05-21T12:31:43Z] push: pushing branch=ticket/T122-t122-dashboard-action-audit-trail
+[2026-05-21T12:31:45Z] push: done branch=ticket/T122-t122-dashboard-action-audit-trail
+[2026-05-21T12:32:19Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-21T12:32:19Z] auto-run: running step=tester
+[2026-05-21T12:32:19Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-21T12:32:19Z] prompt: generic fallback — injecting runs/T122/ticket.md
+[2026-05-21T12:32:19Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T12:32:19Z] compose: role=ai/roles/tester.md
+[2026-05-21T12:32:19Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T12:32:19Z] compose: skill=ai/skills/testing.md
+[2026-05-21T12:32:19Z] compose: skill=ai/skills/debugging.md
+[2026-05-21T12:32:19Z] compose: task (canonical prompt)
+[2026-05-21T12:32:19Z] snapshot: runtime-prompt=runs/T122/prompts/tester-attempt-1.md
