@@ -17,6 +17,11 @@ services:
       # actually starts the daemon on the host. Without it, the dashboard's
       # Start button surfaces the suggested command for manual host launch.
       # - AI_DEV_FACTORY_HOST_DAEMON_COMMAND=ssh host -- 'cd ~/runtime/ai-dev-factory/clones/ai-dev-factory && source .venv/bin/activate && python tools/agent_runner/run_daemon.py --exec-cmd "claude --dangerously-skip-permissions" --poll-issues --issue-repo <owner>/<repo> --auto-commit --auto-push --auto-include-code --interval 30'
+      # Optional: point to the host supervisor (start it first with deploy/start_supervisor.sh).
+      # The supervisor manages the daemon lifecycle on the host so the dashboard
+      # can start/stop/monitor it without SSH. host.docker.internal resolves to
+      # the Docker host on macOS and Linux with host-gateway configured.
+      # - AI_DEV_FACTORY_SUPERVISOR_URL=http://host.docker.internal:8090
     volumes:
       - ~/runtime/ai-dev-factory:/runtime
       - ~/.ssh:/root/.ssh:ro

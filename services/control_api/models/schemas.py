@@ -15,6 +15,8 @@ class DaemonStatus(BaseModel):
     started_at: str | None = None
     last_heartbeat: str | None = None
     current_ticket: str | None = None
+    supervisor_available: bool | None = None
+    supervisor_url: str | None = None
 
 
 class DaemonActivity(BaseModel):
@@ -31,6 +33,8 @@ class ActionResult(BaseModel):
     # start the daemon inside a Docker container. The dashboard surfaces
     # this string as a copy-paste block.
     host_command: str | None = None
+    # Machine-readable error code (e.g. "supervisor_unreachable").
+    error: str | None = None
 
 
 class RetryInfo(BaseModel):
