@@ -15,3 +15,15 @@
 [2026-05-21T08:48:07Z] planner validation failed: plan sans section reconnue (Objective/Included/Excluded/Acceptance criteria — ou équivalents FR)
 [2026-05-21T08:48:07Z] planner validation: rejected — state unchanged
 [2026-05-21T08:48:07Z] runtime failure: planner_invalid
+[2026-05-21T08:59:32Z] auto-run start: state=INIT
+[2026-05-21T08:59:32Z] auto-run: running step=planner
+[2026-05-21T08:59:32Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-05-21T08:59:32Z] prompt: generic fallback — injecting runs/T121/ticket.md
+[2026-05-21T08:59:32Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T08:59:32Z] compose: role=ai/roles/planner.md
+[2026-05-21T08:59:32Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T08:59:32Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-21T08:59:32Z] compose: skill=ai/skills/documentation.md
+[2026-05-21T08:59:32Z] compose: task (canonical prompt)
+[2026-05-21T08:59:32Z] snapshot: runtime-prompt=runs/T121/prompts/planner-attempt-2.md
+[2026-05-21T09:04:25Z] auto-run: step=planner done rc=0
