@@ -80,3 +80,14 @@
 [2026-05-21T21:37:30Z] compose: task (canonical prompt)
 [2026-05-21T21:37:30Z] compose: extra-context=runs/T130/fixes/context-20260521T213730Z.md
 [2026-05-21T21:37:30Z] snapshot: runtime-prompt=runs/T130/prompts/coder-attempt-3.md
+[2026-05-21T21:51:34Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-21T21:51:34Z] auto-run: running step=tester
+[2026-05-21T21:51:34Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-21T21:51:34Z] prompt: generic fallback — injecting runs/T130/ticket.md
+[2026-05-21T21:51:34Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T21:51:34Z] compose: role=ai/roles/tester.md
+[2026-05-21T21:51:34Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T21:51:34Z] compose: skill=ai/skills/testing.md
+[2026-05-21T21:51:34Z] compose: skill=ai/skills/debugging.md
+[2026-05-21T21:51:34Z] compose: task (canonical prompt)
+[2026-05-21T21:51:34Z] snapshot: runtime-prompt=runs/T130/prompts/tester-attempt-1.md
