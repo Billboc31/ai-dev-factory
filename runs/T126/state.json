@@ -1,7 +1,7 @@
 {
   "ticket_id": "T126",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_APPROVED",
   "branch": "ticket/T126-t126-fix-dashboard-500-errors-after-project-scoped",
   "issue_number": 91,
-  "updated_at": "2026-05-21T16:50:35Z"
+  "updated_at": "2026-05-21T16:52:06Z"
 }
