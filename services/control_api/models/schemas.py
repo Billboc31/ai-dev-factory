@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
 from pydantic import BaseModel
 
 
@@ -192,3 +192,31 @@ class RuntimeStatus(BaseModel):
     intake_queue: list[QueueEntry] = []
     last_action: str | None = None
     last_error: str | None = None
+
+
+class DeployComponent(BaseModel):
+    name: str
+    type: Literal["docker", "host"]
+    service: str | None = None
+    command: str | None = None
+
+
+class DeployProfile(BaseModel):
+    version: int
+    project: str
+    required_tools: list[str] = []
+    components: list[DeployComponent] = []
+
+
+class ScanResult(BaseModel):
+    docker_services: list[str] = []
+    python_backend: bool = False
+    node_frontend: bool = False
+    required_tools: list[str] = []
+    deploy_profile: DeployProfile | None = None
+
+
+class DeployerStatus(BaseModel):
+    state: Literal["idle"]
+    profile_present: bool
+    project_id: str

@@ -6,6 +6,7 @@ import DaemonPage from './pages/DaemonPage'
 import BoardPage from './pages/BoardPage'
 import ProjectMapPage from './pages/ProjectMapPage'
 import IssueMapperActivityPage from './pages/IssueMapperActivityPage'
+import DeployerPage from './pages/DeployerPage'
 import ProjectSidebar from './components/ProjectSidebar'
 import useProjects from './hooks/useProjects'
 
@@ -23,6 +24,7 @@ function Nav({ activeProject }) {
       <NavLink to="/board" className={linkClass}>Board</NavLink>
       <NavLink to="/project-map" className={linkClass}>Project Map</NavLink>
       <NavLink to="/mapper-activity" className={linkClass}>Mapper Activity</NavLink>
+      <NavLink to="/deployer" className={linkClass}>Deployer</NavLink>
     </nav>
   )
 }
@@ -56,6 +58,7 @@ export default function App() {
                 <Route path="/board" element={<BoardPage projectId={activeProject} />} />
                 <Route path="/project-map" element={<ProjectMapPage projectId={activeProject} />} />
                 <Route path="/mapper-activity" element={<IssueMapperActivityPage projectId={activeProject} />} />
+                <Route path="/deployer" element={<DeployerPage projectId={activeProject} />} />
               </Routes>
             </ActiveProjectContext.Provider>
           </main>
