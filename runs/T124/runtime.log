@@ -41,3 +41,14 @@
 [2026-05-21T15:30:27Z] compose: extra-context=runs/T124/fixes/context-20260521T153027Z.md
 [2026-05-21T15:30:27Z] snapshot: runtime-prompt=runs/T124/prompts/planner-attempt-2.md
 [2026-05-21T15:31:58Z] auto-run: step=planner done rc=0
+[2026-05-21T15:32:00Z] planner checkpoint: committed
+[2026-05-21T15:32:00Z] planner checkpoint: pushed
+[2026-05-21T15:32:00Z] planner validation success
+[2026-05-21T15:32:00Z] auto-run: transition PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED
+[2026-05-21T15:32:00Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-21T15:32:01Z] commit-checkpoint: unstaged runtime garbage: ['runs/T124/runtime.log']
+[2026-05-21T15:32:01Z] commit-checkpoint: sha=64cfa57c files=2 title='docs(T124/workflow): planner — update 2 file(s)'
+[2026-05-21T15:32:01Z] auto-run: auto-push triggered
+[2026-05-21T15:32:01Z] push: tolerating runtime dirty files (not blocking): ['runs/T124/runtime.log']
+[2026-05-21T15:32:01Z] push: pushing branch=ticket/T124-t124-multi-project-runtime-boards-and-project-isol
+[2026-05-21T15:32:03Z] push: done branch=ticket/T124-t124-multi-project-runtime-boards-and-project-isol
