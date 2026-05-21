@@ -1,16 +1,9 @@
-All 20 tests pass. Here's what was done:
+All three fixes are in place. Here's a summary of the changes made:
 
-**Fix 1 — Path traversal (`run_analysis.py:183-193`):** Added a guard that raises `RuntimeError` for any LLM-generated path not starting with `.ai-dev-factory/`, preventing writes outside that directory.
+**Files modified:**
 
-**Fix 2 — New test file (`tests/test_run_analysis.py`, 8 tests):**
+1. **`tools/agent_runner/run_analysis.py`** (lines 183-203) — **Blocking fix**: replaced `startswith(".ai-dev-factory/")` string check with a resolve-based check (`(project_root / rel_path).resolve()` vs `str(project_root) + "/"`). This closes the `.ai-dev-factory/../../../etc/passwd` bypass where the old prefix check passed but the resolved path escaped the project root. Also added a post-write `yaml.safe_load` validation of `deploy.yml` (recommended fix).
 
-| Test | Covers |
-|------|--------|
-| `test_extract_files_valid_response` | Well-formed 3-file LLM output → correct dict |
-| `test_extract_files_empty_output` | No blocks → empty dict |
-| `test_extract_files_malformed_delimiter` | Broken delimiter → empty dict |
-| `test_extract_files_partial_block` | Unclosed block → empty dict |
-| `test_main_happy_path_writes_files_and_state` | Full orchestration: files written, state=success, branch/PR captured |
-| `test_main_missing_required_file_sets_failed_state` | Missing deploy.yml → state=failed, error references deploy.yml |
-| `test_main_path_traversal_rejected` | `../../etc/passwd` path → state=failed, no file written |
-| `test_main_llm_failure_sets_failed_state` | LLM subprocess error → state=failed |
+2. **`tests/test_run_analysis.py`** — Updated `test_main_path_traversal_rejected` assertion to match the new error message (`"escaping project root"`), and added `test_main_path_traversal_with_prefix_bypass_rejected` (9th test) that specifically covers the `.ai-dev-factory/../../../etc/passwd` bypass case that the old check missed.
+
+3. **`services/control_api/services/analysis_manager.py`** (line 67) — **Optional fix**: `get_analysis_status` now catches `httpx.ConnectError` separately and returns `AnalysisStatus(state="failed", error="supervisor_unreachable")` instead of silently returning `idle`.
