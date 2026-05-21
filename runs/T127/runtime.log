@@ -21,3 +21,20 @@
 [2026-05-21T18:09:51Z] push: tolerating runtime dirty files (not blocking): ['runs/T127/runtime.log']
 [2026-05-21T18:09:51Z] push: pushing branch=ticket/T127-t127-project-deployer-profiles-and-dashboard-deplo
 [2026-05-21T18:09:53Z] push: done branch=ticket/T127-t127-project-deployer-profiles-and-dashboard-deplo
+[2026-05-21T18:18:02Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-05-21T18:18:02Z] auto-run: running step=planner
+[2026-05-21T18:18:02Z] auto-run: fix context: previous_output=runs/T127/plan.md
+[2026-05-21T18:18:02Z] auto-run: fix context: review=runs/T127/reviews/plan-review.md
+[2026-05-21T18:18:02Z] auto-run: fix context: fix_instructions=runs/T127/fixes/plan-fix-1.md
+[2026-05-21T18:18:02Z] auto-run: fix context: context_file=runs/T127/fixes/context-20260521T181802Z.md
+[2026-05-21T18:18:02Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-05-21T18:18:02Z] prompt: generic fallback — injecting runs/T127/ticket.md
+[2026-05-21T18:18:02Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T18:18:02Z] compose: role=ai/roles/planner.md
+[2026-05-21T18:18:02Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T18:18:02Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-21T18:18:02Z] compose: skill=ai/skills/documentation.md
+[2026-05-21T18:18:02Z] compose: task (canonical prompt)
+[2026-05-21T18:18:02Z] compose: extra-context=runs/T127/fixes/context-20260521T181802Z.md
+[2026-05-21T18:18:02Z] snapshot: runtime-prompt=runs/T127/prompts/planner-attempt-2.md
+[2026-05-21T18:20:12Z] auto-run: step=planner done rc=0
