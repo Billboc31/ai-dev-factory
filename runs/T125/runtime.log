@@ -22,3 +22,16 @@
 [2026-05-21T16:01:50Z] push: pushing branch=ticket/T125-t125-project-scoped-runtime-apis-and-daemon-isolat
 [2026-05-21T16:01:53Z] push: done branch=ticket/T125-t125-project-scoped-runtime-apis-and-daemon-isolat
 [2026-05-21T16:07:46Z] human-approval: approve-plan — PLAN_REVIEW_NEEDED → PLAN_APPROVED
+[2026-05-21T16:08:25Z] auto-run start: state=PLAN_APPROVED
+[2026-05-21T16:08:25Z] auto-run: running step=coder
+[2026-05-21T16:08:25Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-21T16:08:25Z] prompt: generic fallback — injecting runs/T125/ticket.md
+[2026-05-21T16:08:25Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T16:08:25Z] compose: role=ai/roles/coder.md
+[2026-05-21T16:08:25Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T16:08:25Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-21T16:08:25Z] compose: skill=ai/skills/code-quality.md
+[2026-05-21T16:08:25Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-21T16:08:25Z] compose: skill=ai/skills/security.md
+[2026-05-21T16:08:25Z] compose: task (canonical prompt)
+[2026-05-21T16:08:25Z] snapshot: runtime-prompt=runs/T125/prompts/coder-attempt-1.md

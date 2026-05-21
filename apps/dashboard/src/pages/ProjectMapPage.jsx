@@ -118,24 +118,24 @@ function CycleWarnings({ cycles }) {
   )
 }
 
-export default function ProjectMapPage() {
+export default function ProjectMapPage({ projectId }) {
   const [mapData, setMapData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [refreshing, setRefreshing] = useState(false)
 
   const fetchMap = useCallback(() => {
-    mapApi.getProjectMap()
+    mapApi.getProjectMap(projectId)
       .then(res => { setMapData(res.data); setError(null) })
       .catch(err => setError(err.response?.data?.detail || err.message))
       .finally(() => setLoading(false))
-  }, [])
+  }, [projectId])
 
-  usePolling(fetchMap, 15000)
+  usePolling(fetchMap, 15000, projectId)
 
   const handleRefresh = () => {
     setRefreshing(true)
-    mapApi.refreshProjectMap()
+    mapApi.refreshProjectMap(projectId)
       .then(() => {
         setTimeout(() => {
           fetchMap()

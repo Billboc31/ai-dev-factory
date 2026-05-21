@@ -47,11 +47,11 @@ export default function App() {
           />
           <main className="p-6 flex-1">
             <Routes>
-              <Route path="/" element={<TicketsPage />} />
+              <Route path="/" element={<TicketsPage projectId={activeProject} />} />
               <Route path="/tickets/:id" element={<TicketDetailPage />} />
-              <Route path="/daemon" element={<DaemonPage />} />
-              <Route path="/board" element={<BoardPage />} />
-              <Route path="/project-map" element={<ProjectMapPage />} />
+              <Route path="/daemon" element={<DaemonPage projectId={activeProject} />} />
+              <Route path="/board" element={<BoardPage projectId={activeProject} />} />
+              <Route path="/project-map" element={<ProjectMapPage projectId={activeProject} />} />
               <Route path="/mapper-activity" element={<IssueMapperActivityPage />} />
             </Routes>
           </main>

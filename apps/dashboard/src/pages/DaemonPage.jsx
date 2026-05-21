@@ -100,7 +100,7 @@ function HostCommandPanel({ command, onDismiss }) {
   )
 }
 
-export default function DaemonPage() {
+export default function DaemonPage({ projectId }) {
   const [status, setStatus] = useState(null)
   const [columns, setColumns] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -108,20 +108,20 @@ export default function DaemonPage() {
   const [hostCommand, setHostCommand] = useState(null)
 
   const fetchStatus = useCallback(() => {
-    daemonApi.getDaemonStatus()
+    daemonApi.getDaemonStatus(projectId)
       .then(res => { setStatus(res.data); setError(null) })
       .catch(err => setError(err.response?.data?.detail || err.message))
       .finally(() => setLoading(false))
-  }, [])
+  }, [projectId])
 
   const fetchBoard = useCallback(() => {
-    daemonApi.getBoardData()
+    daemonApi.getBoardData(projectId)
       .then(res => setColumns(res.data.columns))
       .catch(() => {})
-  }, [])
+  }, [projectId])
 
-  usePolling(fetchStatus, 5000)
-  usePolling(fetchBoard, 5000)
+  usePolling(fetchStatus, 5000, projectId)
+  usePolling(fetchBoard, 5000, projectId)
 
   return (
     <div className="max-w-2xl">
@@ -164,13 +164,13 @@ export default function DaemonPage() {
       <div className="flex gap-2 mb-8">
         <ActionButton
           label="Start"
-          action={daemonApi.startDaemon}
+          action={() => daemonApi.startDaemon(projectId)}
           onSuccess={fetchStatus}
           onResult={(data) => setHostCommand(data?.host_command || null)}
         />
-        <ActionButton label="Stop" action={daemonApi.stopDaemon} variant="danger" onSuccess={fetchStatus} />
-        <ActionButton label="Restart" action={daemonApi.restartDaemon} variant="secondary" onSuccess={fetchStatus} />
-        <ActionButton label="Sync Main" action={daemonApi.syncMain} variant="secondary" onSuccess={fetchStatus} />
+        <ActionButton label="Stop" action={() => daemonApi.stopDaemon(projectId)} variant="danger" onSuccess={fetchStatus} />
+        <ActionButton label="Restart" action={() => daemonApi.restartDaemon(projectId)} variant="secondary" onSuccess={fetchStatus} />
+        <ActionButton label="Sync Main" action={() => daemonApi.syncMain(projectId)} variant="secondary" onSuccess={fetchStatus} />
       </div>
 
       <WorkersList columns={columns} />
@@ -178,13 +178,13 @@ export default function DaemonPage() {
       <div className="mb-6">
         <h2 className="text-lg font-semibold mb-2">Runtime Status</h2>
         <div className="bg-white border border-gray-200 rounded p-4">
-          <RuntimeStatusPanel />
+          <RuntimeStatusPanel projectId={projectId} />
         </div>
       </div>
 
       <div>
         <h2 className="text-lg font-semibold mb-2">Activity Feed</h2>
-        <DaemonActivityFeed />
+        <DaemonActivityFeed projectId={projectId} />
       </div>
     </div>
   )

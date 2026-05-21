@@ -97,10 +97,13 @@ def create_app(
 
     app.include_router(health.router)
     app.include_router(daemon.router)
+    app.include_router(daemon.project_router)
     app.include_router(tickets.router)
+    app.include_router(tickets.project_router)
     app.include_router(issues.router)
     app.include_router(providers.router)
     app.include_router(project_map.router)
+    app.include_router(project_map.project_router)
 
     return app
 
