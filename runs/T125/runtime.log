@@ -10,3 +10,14 @@
 [2026-05-21T15:59:00Z] compose: task (canonical prompt)
 [2026-05-21T15:59:00Z] snapshot: runtime-prompt=runs/T125/prompts/planner-attempt-1.md
 [2026-05-21T16:01:47Z] auto-run: step=planner done rc=0
+[2026-05-21T16:01:50Z] planner checkpoint: committed
+[2026-05-21T16:01:50Z] planner checkpoint: pushed
+[2026-05-21T16:01:50Z] planner validation success
+[2026-05-21T16:01:50Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-21T16:01:50Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-21T16:01:50Z] commit-checkpoint: unstaged runtime garbage: ['runs/T125/runtime.log']
+[2026-05-21T16:01:50Z] commit-checkpoint: sha=6e6c6a9c files=2 title='docs(T125/workflow): planner — update 2 file(s)'
+[2026-05-21T16:01:50Z] auto-run: auto-push triggered
+[2026-05-21T16:01:50Z] push: tolerating runtime dirty files (not blocking): ['runs/T125/runtime.log']
+[2026-05-21T16:01:50Z] push: pushing branch=ticket/T125-t125-project-scoped-runtime-apis-and-daemon-isolat
+[2026-05-21T16:01:53Z] push: done branch=ticket/T125-t125-project-scoped-runtime-apis-and-daemon-isolat
