@@ -27,6 +27,10 @@ class ActionResult(BaseModel):
     returncode: int | None = None
     stdout: str | None = None
     stderr: str | None = None
+    # Optional host-side launch command suggested when the API refuses to
+    # start the daemon inside a Docker container. The dashboard surfaces
+    # this string as a copy-paste block.
+    host_command: str | None = None
 
 
 class RetryInfo(BaseModel):

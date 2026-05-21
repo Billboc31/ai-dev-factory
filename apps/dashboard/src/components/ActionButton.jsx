@@ -6,7 +6,7 @@ const VARIANT_CLASSES = {
   danger: 'bg-red-600 text-white hover:bg-red-700'
 }
 
-export default function ActionButton({ label, action, variant = 'primary', onSuccess }) {
+export default function ActionButton({ label, action, variant = 'primary', onSuccess, onResult }) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
 
@@ -15,12 +15,16 @@ export default function ActionButton({ label, action, variant = 'primary', onSuc
     setResult(null)
     try {
       const res = await action()
-      const message = res?.data?.message || 'Done'
-      setResult({ ok: true, message })
-      onSuccess?.()
+      const data = res?.data || {}
+      const message = data.message || 'Done'
+      const ok = data.ok !== false
+      setResult({ ok, message })
+      onResult?.(data)
+      if (ok) onSuccess?.()
     } catch (err) {
       const message = err.response?.data?.detail || err.message || 'Unknown error'
       setResult({ ok: false, message })
+      onResult?.(err.response?.data || null)
     } finally {
       setLoading(false)
     }

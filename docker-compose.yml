@@ -8,6 +8,15 @@ services:
         required: false
     environment:
       - AI_DEV_FACTORY_RUNTIME_ROOT=/runtime
+      # Tell the API it runs inside Docker — daemon_manager.start() will then
+      # refuse to spawn the daemon locally (no gh, no .git, no claude inside
+      # the container) and either delegate to AI_DEV_FACTORY_HOST_DAEMON_COMMAND
+      # or return the host launch command to the dashboard for copy/paste.
+      - AI_DEV_FACTORY_API_IN_DOCKER=1
+      # Optional: set this to a shell command (typically an ssh wrapper) that
+      # actually starts the daemon on the host. Without it, the dashboard's
+      # Start button surfaces the suggested command for manual host launch.
+      # - AI_DEV_FACTORY_HOST_DAEMON_COMMAND=ssh host -- 'cd ~/runtime/ai-dev-factory/clones/ai-dev-factory && source .venv/bin/activate && python tools/agent_runner/run_daemon.py --exec-cmd "claude --dangerously-skip-permissions" --poll-issues --issue-repo <owner>/<repo> --auto-commit --auto-push --auto-include-code --interval 30'
     volumes:
       - ~/runtime/ai-dev-factory:/runtime
       - ~/.ssh:/root/.ssh:ro

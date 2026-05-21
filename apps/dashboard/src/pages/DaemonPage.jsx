@@ -49,11 +49,63 @@ function WorkersList({ columns }) {
   )
 }
 
+function HostCommandPanel({ command, onDismiss }) {
+  const [copied, setCopied] = useState(false)
+  if (!command) return null
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(command)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    } catch (_) {
+      setCopied(false)
+    }
+  }
+  return (
+    <div
+      role="alert"
+      className="bg-yellow-50 border border-yellow-300 rounded p-4 mb-6"
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-yellow-900">
+            Daemon must be started on the host
+          </p>
+          <p className="text-xs text-yellow-800 mt-1">
+            The API runs inside Docker. Copy the command below and run it in
+            a host terminal, or configure{' '}
+            <code className="font-mono">AI_DEV_FACTORY_HOST_DAEMON_COMMAND</code>{' '}
+            so the API can delegate the launch.
+          </p>
+          <pre className="text-xs bg-yellow-100 p-2 rounded mt-2 overflow-x-auto whitespace-pre-wrap break-all font-mono">
+            {command}
+          </pre>
+        </div>
+        <div className="flex flex-col gap-1 flex-shrink-0">
+          <button
+            onClick={copy}
+            className="px-2 py-1 text-xs bg-yellow-200 hover:bg-yellow-300 rounded font-medium"
+          >
+            {copied ? 'Copied' : 'Copy'}
+          </button>
+          <button
+            onClick={onDismiss}
+            className="px-2 py-1 text-xs text-yellow-700 hover:underline"
+          >
+            Dismiss
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function DaemonPage() {
   const [status, setStatus] = useState(null)
   const [columns, setColumns] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [hostCommand, setHostCommand] = useState(null)
 
   const fetchStatus = useCallback(() => {
     daemonApi.getDaemonStatus()
@@ -75,6 +127,7 @@ export default function DaemonPage() {
     <div className="max-w-2xl">
       <h1 className="text-2xl font-bold mb-4">Daemon</h1>
       <ErrorBanner message={error} onClose={() => setError(null)} />
+      <HostCommandPanel command={hostCommand} onDismiss={() => setHostCommand(null)} />
 
       {loading && !status && <p className="text-gray-500">Loading…</p>}
 
@@ -109,7 +162,12 @@ export default function DaemonPage() {
       )}
 
       <div className="flex gap-2 mb-8">
-        <ActionButton label="Start" action={daemonApi.startDaemon} onSuccess={fetchStatus} />
+        <ActionButton
+          label="Start"
+          action={daemonApi.startDaemon}
+          onSuccess={fetchStatus}
+          onResult={(data) => setHostCommand(data?.host_command || null)}
+        />
         <ActionButton label="Stop" action={daemonApi.stopDaemon} variant="danger" onSuccess={fetchStatus} />
         <ActionButton label="Restart" action={daemonApi.restartDaemon} variant="secondary" onSuccess={fetchStatus} />
         <ActionButton label="Sync Main" action={daemonApi.syncMain} variant="secondary" onSuccess={fetchStatus} />

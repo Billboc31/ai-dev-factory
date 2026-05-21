@@ -32,9 +32,46 @@ Only **one mandatory human gate**: `PLAN_REVIEW_NEEDED`.
 
 ## Daemon Start
 
-The daemon is launched from the dashboard (POST /daemon/start) or restart endpoint. The control API calls `daemon_manager.start(project_root, exec_cmd)` which:
+The daemon is launched from the dashboard (POST /daemon/start) or restart
+endpoint. The control API calls `daemon_manager.start(project_root, exec_cmd)`
+which dispatches to one of three paths.
 
-1. **Runs `check_environment(project_root)`** — a strict preflight that records
+### Architecture: host-side daemon, Dockerized API
+
+The dashboard and control API run inside Docker. The daemon runs on the host
+because it needs `gh`, `claude`, the host Python venv, and direct access to
+the git worktrees. **The dashboard's Start button never spawns the daemon
+inside the API container.**
+
+`daemon_manager.start` picks one of three paths in this order:
+
+| Condition | Behavior |
+| --- | --- |
+| `AI_DEV_FACTORY_HOST_DAEMON_COMMAND` is set | Run that shell command verbatim (typically an `ssh host -- '…'` wrapper). The host process writes its own `runs/daemon.pid`. The API does not preflight the container's environment. |
+| API in Docker, no host launcher | Refuse with `ok=False` and populate the `host_command` field with a copy-paste command for the operator. **No PID file is written.** The dashboard displays the command in a yellow copy block. |
+| API on host (no Docker, no override) | Run the preflight described below, then `Popen` the daemon as a local subprocess. |
+
+Docker detection signals (any one triggers Docker mode):
+
+1. `AI_DEV_FACTORY_API_IN_DOCKER=1` env var (set by `docker-compose.yml`),
+2. `/.dockerenv` file exists (Docker sentinel),
+3. `/proc/1/cgroup` mentions `docker` or `containerd`.
+
+Configure the host launcher with `AI_DEV_FACTORY_HOST_DAEMON_COMMAND`, e.g.
+in `deploy/.env`:
+
+```
+AI_DEV_FACTORY_HOST_DAEMON_COMMAND=ssh host -- 'cd ~/runtime/ai-dev-factory/clones/ai-dev-factory && source .venv/bin/activate && python tools/agent_runner/run_daemon.py --exec-cmd "claude --dangerously-skip-permissions" --poll-issues --issue-repo <owner>/<repo> --auto-commit --auto-push --auto-include-code --interval 30'
+```
+
+Without it, operators copy the command from the dashboard's yellow banner and
+run it in a host terminal.
+
+### Host-mode preflight
+
+When the API runs directly on the host:
+
+1. **`check_environment(project_root)`** — a strict preflight that records
    every fact (project_root, cwd, runtime_root, runs_dir, worktrees_dir,
    logs_dir, python, git_path, gh_path) and **refuses** the launch when:
    - `gh` is missing from PATH,
@@ -47,7 +84,8 @@ The daemon is launched from the dashboard (POST /daemon/start) or restart endpoi
    surfaces the cause; **no PID file is written**. The dashboard therefore
    never reports a degraded daemon as "running".
 
-2. **Spawns** `run_daemon.py` as a background subprocess with these flags:
+2. **Spawns** `run_daemon.py` as a *local* background subprocess with these
+   flags (host-mode only — Docker mode delegates to the host launcher):
 
 ```
 run_daemon.py

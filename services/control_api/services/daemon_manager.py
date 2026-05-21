@@ -68,6 +68,90 @@ def _is_alive(pid: int) -> bool:
         return False
 
 
+# ── Docker detection / host-launcher escape hatch ─────────────────────────────
+
+def _is_running_in_docker() -> bool:
+    """Return True when the API process is running inside a Docker container.
+
+    Detection order (first match wins):
+      1. explicit override ``AI_DEV_FACTORY_API_IN_DOCKER=1`` (Compose file
+         sets this and is the trusted signal),
+      2. ``/.dockerenv`` file exists (Docker default sentinel),
+      3. ``/proc/1/cgroup`` mentions ``docker`` or ``containerd`` (Linux fallback).
+    """
+    if os.environ.get("AI_DEV_FACTORY_API_IN_DOCKER", "").lower() in {"1", "true", "yes"}:
+        return True
+    if Path("/.dockerenv").exists():
+        return True
+    try:
+        cgroup = Path("/proc/1/cgroup").read_text(encoding="utf-8", errors="ignore")
+        if "docker" in cgroup or "containerd" in cgroup:
+            return True
+    except OSError:
+        pass
+    return False
+
+
+def _expand_user(path_str: str) -> str:
+    """``Path.expanduser`` but resilient to non-string input."""
+    try:
+        return str(Path(path_str).expanduser())
+    except (TypeError, ValueError):
+        return path_str
+
+
+def _recommended_host_command(
+    project_root: Path,
+    exec_cmd: str,
+    repo_slug: str | None = None,
+) -> str:
+    """Build the canonical multi-line host command for the dashboard to copy.
+
+    The command is intentionally one operator-friendly chain that:
+      - ``cd``s into the host clone (preferring ``AI_DEV_FACTORY_PROJECT_ROOT``
+        if set, otherwise a sensible default under the user's runtime root),
+      - activates the host venv,
+      - exports ``AI_DEV_FACTORY_RUNTIME_ROOT``,
+      - invokes ``tools/agent_runner/run_daemon.py`` with the full set of
+        flags ``daemon_manager.start`` uses (``--poll-issues``,
+        ``--auto-commit``, ``--auto-push``, ``--auto-include-code``).
+    Operators can paste it directly into a host terminal or wrap it in
+    ``ssh host -- '…'`` and feed that back via
+    ``AI_DEV_FACTORY_HOST_DAEMON_COMMAND``.
+    """
+    runtime_root = os.environ.get(
+        "AI_DEV_FACTORY_RUNTIME_ROOT", "~/runtime/ai-dev-factory"
+    )
+    host_clone = os.environ.get(
+        "AI_DEV_FACTORY_PROJECT_ROOT",
+        f"{runtime_root}/clones/ai-dev-factory",
+    )
+    host_clone = _expand_user(host_clone)
+    runtime_root_display = _expand_user(runtime_root)
+    issue_repo = repo_slug or os.environ.get("AI_DEV_FACTORY_ISSUE_REPO", "<owner>/<repo>")
+
+    return (
+        f"cd {host_clone} && "
+        f"source .venv/bin/activate && "
+        f"export AI_DEV_FACTORY_RUNTIME_ROOT={runtime_root_display} && "
+        f"python tools/agent_runner/run_daemon.py "
+        f'--exec-cmd "{exec_cmd}" '
+        f"--poll-issues "
+        f"--issue-repo {issue_repo} "
+        f"--auto-commit "
+        f"--auto-push "
+        f"--auto-include-code "
+        f"--interval 30"
+    )
+
+
+def _host_daemon_command_env() -> str | None:
+    cmd = os.environ.get("AI_DEV_FACTORY_HOST_DAEMON_COMMAND")
+    if cmd and cmd.strip():
+        return cmd
+    return None
+
+
 def _last_heartbeat(project_root: Path) -> str | None:
     path = _log_path(project_root)
     if not path.exists():
@@ -212,34 +296,141 @@ def _format_environment_banner(facts: dict[str, str]) -> str:
         "project_root", "cwd", "runtime_root",
         "runs_dir", "worktrees_dir", "logs_dir",
         "python", "git_path", "gh_path",
+        "in_docker",
     ):
-        lines.append(f"  {key}={facts.get(key, '<unknown>')}")
+        if key in facts:
+            lines.append(f"  {key}={facts.get(key, '<unknown>')}")
     return "\n".join(lines)
 
 
+def _refuse_with_log(project_root: Path, message: str, errors: list[str], facts: dict[str, str]) -> None:
+    """Persist a startup refusal to ``daemon.log`` for dashboard visibility."""
+    try:
+        log = _log_path(project_root)
+        log.parent.mkdir(parents=True, exist_ok=True)
+        with open(log, "a", encoding="utf-8") as log_fh:
+            log_fh.write(f"[{datetime.datetime.now(datetime.timezone.utc).isoformat()}] startup refused\n")
+            log_fh.write(_format_environment_banner(facts) + "\n")
+            log_fh.write(f"  reason: {message}\n")
+            for err in errors:
+                log_fh.write(f"  ERROR: {err}\n")
+    except OSError:
+        pass
+
+
+def _start_via_host_command(project_root: Path, host_cmd: str) -> ActionResult:
+    """Execute ``AI_DEV_FACTORY_HOST_DAEMON_COMMAND`` (typically an SSH wrapper).
+
+    The shell is responsible for the full setup — venv activation, env vars,
+    ``cd`` into the host clone, …. We pass the command verbatim through
+    ``shell=True`` and do not write a PID file ourselves: the host daemon
+    writes its own ``runs/daemon.pid`` from inside the canonical runtime
+    root, and the dashboard discovers it on the next poll.
+    """
+    log = _log_path(project_root)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    started_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    try:
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        with open(log, "a", encoding="utf-8") as log_fh:
+            log_fh.write(
+                f"[{started_at}] launching daemon via "
+                f"AI_DEV_FACTORY_HOST_DAEMON_COMMAND\n"
+                f"  command={host_cmd}\n"
+            )
+            log_fh.flush()
+            # ``shell=True`` is intentional: the configured command is a free
+            # shell snippet (typically `ssh host -- 'cd ... && python ...'`).
+            # Operators configuring this env var accept the responsibility.
+            proc = subprocess.Popen(
+                host_cmd,
+                shell=True,
+                stdout=log_fh,
+                stderr=log_fh,
+                start_new_session=True,
+                env=env,
+            )
+        logger.info("api: launched host daemon wrapper pid=%d", proc.pid)
+        return ActionResult(
+            ok=True,
+            message=(
+                "host daemon launcher started (pid="
+                f"{proc.pid}). PID file is written by the host process."
+            ),
+        )
+    except OSError as exc:
+        return ActionResult(
+            ok=False,
+            message=f"host daemon launcher failed: {exc}",
+        )
+
+
 def start(project_root: Path, exec_cmd: str) -> ActionResult:
+    """Start the daemon — host-side, never inside Docker.
+
+    Three paths:
+
+    1. **Host launcher configured** (``AI_DEV_FACTORY_HOST_DAEMON_COMMAND``):
+       run the configured shell command verbatim (typically ``ssh host -- …``).
+       This is the only mode that works when the API is in Docker.
+
+    2. **API in Docker, no host launcher**: refuse with a clear message and
+       a copy-paste ``host_command`` field. Do NOT write a PID file.
+
+    3. **API on host**: existing preflight + Popen flow.
+    """
     logger.info("api: daemon start requested")
     status = get_status(project_root)
     if status.running:
         return ActionResult(ok=False, message=f"daemon already running (pid={status.pid})")
 
+    host_cmd = _host_daemon_command_env()
+    in_docker = _is_running_in_docker()
+
+    # ── path 1: explicit host launcher (works from Docker too) ────────────
+    if host_cmd:
+        logger.info("api: AI_DEV_FACTORY_HOST_DAEMON_COMMAND set, delegating to host launcher")
+        return _start_via_host_command(project_root, host_cmd)
+
+    # ── path 2: Docker without a host launcher → hard refusal ─────────────
+    if in_docker:
+        recommended = _recommended_host_command(project_root, exec_cmd)
+        message = (
+            "Daemon cannot start inside Docker. Run it on the host (where "
+            "gh, claude and the git worktrees live), or configure "
+            "AI_DEV_FACTORY_HOST_DAEMON_COMMAND with a shell command that "
+            "starts the daemon on the host (e.g. an ssh wrapper)."
+        )
+        facts = {
+            "project_root": str(project_root),
+            "cwd": str(project_root),
+            "runs_dir": str(resolve_runs_dir(project_root)),
+            "worktrees_dir": str(resolve_worktrees_dir(project_root)),
+            "logs_dir": str(resolve_logs_dir(project_root)),
+            "runtime_root": os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT", "<unset>"),
+            "python": sys.executable,
+            "gh_path": shutil.which("gh") or "<missing>",
+            "git_path": shutil.which("git") or "<missing>",
+            "in_docker": "true",
+        }
+        _refuse_with_log(
+            project_root,
+            message,
+            errors=["API runs in Docker — daemon must run on host."],
+            facts=facts,
+        )
+        logger.warning("api: daemon start refused — running in Docker, no host launcher")
+        return ActionResult(
+            ok=False,
+            message=message,
+            host_command=recommended,
+        )
+
+    # ── path 3: API runs on the host — preflight + Popen ──────────────────
     ok, errors, facts = check_environment(project_root)
     if not ok:
-        # NEVER write a fake PID file on failure — dashboard would otherwise
-        # report the daemon as "running" when it never actually started.
         msg = "daemon refused to start — invalid environment:\n  " + "\n  ".join(errors)
-        # Also persist the failure to daemon.log so the dashboard's
-        # /daemon/activity endpoint can surface it.
-        try:
-            log = _log_path(project_root)
-            log.parent.mkdir(parents=True, exist_ok=True)
-            with open(log, "a", encoding="utf-8") as log_fh:
-                log_fh.write(f"[{datetime.datetime.now(datetime.timezone.utc).isoformat()}] startup refused\n")
-                log_fh.write(_format_environment_banner(facts) + "\n")
-                for err in errors:
-                    log_fh.write(f"  ERROR: {err}\n")
-        except OSError:
-            pass
+        _refuse_with_log(project_root, msg, errors, facts)
         logger.warning("api: daemon start refused — %s", errors)
         return ActionResult(ok=False, message=msg)
 

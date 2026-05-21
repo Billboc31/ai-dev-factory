@@ -71,4 +71,39 @@ describe('DaemonPage', () => {
     renderPage()
     expect(await screen.findByRole('alert')).toHaveTextContent('Connection refused')
   })
+
+  it('shows host command copy block when API refuses to start daemon in Docker', async () => {
+    daemonApi.getDaemonStatus.mockResolvedValue({ data: { running: false, pid: null, started_at: null } })
+    const hostCmd = 'cd ~/runtime/ai-dev-factory/clones/ai-dev-factory && source .venv/bin/activate && python tools/agent_runner/run_daemon.py --poll-issues --auto-commit'
+    daemonApi.startDaemon.mockResolvedValue({
+      data: {
+        ok: false,
+        message: 'Daemon cannot start inside Docker.',
+        host_command: hostCmd,
+      },
+    })
+
+    renderPage()
+    const btn = await screen.findByRole('button', { name: 'Start' })
+    await userEvent.click(btn)
+
+    // The host command must be rendered verbatim so the operator can copy it.
+    expect(await screen.findByText(/Daemon must be started on the host/i)).toBeInTheDocument()
+    expect(screen.getByText(hostCmd)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /copy/i })).toBeInTheDocument()
+  })
+
+  it('does not render the host command panel on a successful start', async () => {
+    daemonApi.getDaemonStatus.mockResolvedValue({ data: { running: false, pid: null, started_at: null } })
+    daemonApi.startDaemon.mockResolvedValue({
+      data: { ok: true, message: 'daemon started (pid=42)' },
+    })
+
+    renderPage()
+    const btn = await screen.findByRole('button', { name: 'Start' })
+    await userEvent.click(btn)
+
+    expect(await screen.findByText('daemon started (pid=42)')).toBeInTheDocument()
+    expect(screen.queryByText(/Daemon must be started on the host/i)).not.toBeInTheDocument()
+  })
 })
