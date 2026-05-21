@@ -10,7 +10,7 @@ const TABS = ['timeline', 'overview', 'logs', 'plan', 'review', 'tests', 'artifa
 
 const TAB_FETCHERS = {
   timeline: (id) => api.getTicketTimeline(id),
-  overview: (id) => api.getTicketState(id),
+  overview: (id) => api.getTicketTimeline(id),
   logs: (id) => api.getTicketLogs(id),
   plan: (id) => api.getTicketPlan(id),
   review: (id) => api.getTicketReview(id),
@@ -22,6 +22,37 @@ function renderContent(content) {
   if (content === undefined || content === null) return ''
   if (typeof content === 'string') return content
   return JSON.stringify(content, null, 2)
+}
+
+function OverviewTab({ timeline }) {
+  if (!timeline) return <p className="text-gray-500 text-sm">No data available.</p>
+  const ri = timeline.retry_info
+  return (
+    <div className="space-y-4">
+      {ri && (
+        <div className="bg-white border border-gray-200 rounded p-4">
+          <h3 className="text-sm font-semibold text-gray-700 mb-2">Retry status</h3>
+          <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
+            <dt className="text-gray-500">Attempt</dt>
+            <dd className="font-mono">{ri.retry_count}</dd>
+            <dt className="text-gray-500">Failure class</dt>
+            <dd className="font-mono">{ri.failure_class ?? '—'}</dd>
+            <dt className="text-gray-500">Cooldown until</dt>
+            <dd className="font-mono">{ri.cooldown_until ?? '—'}</dd>
+          </dl>
+        </div>
+      )}
+      {timeline.last_error && (
+        <div className="bg-red-50 border border-red-200 rounded p-4">
+          <h3 className="text-sm font-semibold text-red-700 mb-1">Last error</h3>
+          <p className="text-xs font-mono text-red-800 break-all">{timeline.last_error}</p>
+        </div>
+      )}
+      {!ri && !timeline.last_error && (
+        <p className="text-gray-500 text-sm">No retry or error information available.</p>
+      )}
+    </div>
+  )
 }
 
 export default function TicketDetailPage() {
@@ -53,7 +84,7 @@ export default function TicketDetailPage() {
         const newTicket = res.data
         if (prevStateRef.current !== null && prevStateRef.current !== newTicket.state) {
           setTabContent({})
-        } else if (activeTabRef.current === 'logs' || activeTabRef.current === 'timeline') {
+        } else if (activeTabRef.current === 'logs' || activeTabRef.current === 'timeline' || activeTabRef.current === 'overview') {
           setTabContent(prev => { const n = { ...prev }; delete n[activeTabRef.current]; return n })
         }
         prevStateRef.current = newTicket.state
@@ -141,9 +172,11 @@ export default function TicketDetailPage() {
           ? <p className="text-gray-500 text-sm">Loading…</p>
           : tab === 'timeline'
             ? <WorkflowTimeline timeline={tabContent.timeline} />
-            : <pre className="bg-white border border-gray-200 rounded p-4 text-xs overflow-auto whitespace-pre-wrap max-h-96">
-                {renderContent(tabContent[tab]) || 'No content available.'}
-              </pre>
+            : tab === 'overview'
+              ? <OverviewTab timeline={tabContent.overview} />
+              : <pre className="bg-white border border-gray-200 rounded p-4 text-xs overflow-auto whitespace-pre-wrap max-h-96">
+                  {renderContent(tabContent[tab]) || 'No content available.'}
+                </pre>
         }
       </div>
 

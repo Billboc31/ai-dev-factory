@@ -7,7 +7,7 @@ import re
 from pathlib import Path
 from typing import Any
 
-from ..models.schemas import TicketSummary, TimelineStep, TimelineResponse
+from ..models.schemas import RetryInfo, TicketSummary, TimelineStep, TimelineResponse
 from .runtime_resolver import resolve_ticket_run_dir, resolve_runs_dir
 
 
@@ -27,6 +27,35 @@ def _last_log_line(log_file: Path) -> str | None:
             stripped = line.strip()
             if stripped:
                 return stripped
+    except OSError:
+        pass
+    return None
+
+
+def _read_retry_state(run_dir: Path) -> RetryInfo | None:
+    path = run_dir / "retry-state.json"
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return RetryInfo(
+            failure_class=data.get("failure_class"),
+            retry_count=int(data.get("retry_count", 0)),
+            cooldown_until=data.get("cooldown_until"),
+        )
+    except (json.JSONDecodeError, OSError, ValueError):
+        return None
+
+
+def _read_last_error(run_dir: Path) -> str | None:
+    log_file = run_dir / "runtime.log"
+    if not log_file.exists():
+        return None
+    try:
+        text = log_file.read_text(encoding="utf-8")
+        for line in reversed(text.splitlines()):
+            if "ERROR" in line and line.strip():
+                return line.strip()
     except OSError:
         pass
     return None
@@ -108,6 +137,7 @@ def get_ticket(project_root: Path, ticket_id: str, worktrees_dir: Path | None = 
             branch=data.get("branch"),
             issue_number=data.get("issue_number"),
             updated_at=data.get("updated_at"),
+            retry_info=_read_retry_state(run_dir),
         )
     except (json.JSONDecodeError, OSError):
         return None
@@ -240,6 +270,8 @@ def get_ticket_timeline(project_root: Path, ticket_id: str, worktrees_dir: Path 
         human_gate=human_gate,
         last_event=last_event,
         steps=steps,
+        retry_info=_read_retry_state(run_dir),
+        last_error=_read_last_error(run_dir),
     )
 
 
