@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useCallback, useState } from 'react'
 import { getRuntimeStatus } from '../api/daemon'
 import usePolling from '../hooks/usePolling'
 
@@ -64,15 +64,17 @@ function QueueSection({ intakeQueue }) {
   )
 }
 
-export default function RuntimeStatusPanel() {
+export default function RuntimeStatusPanel({ projectId }) {
   const [runtimeStatus, setRuntimeStatus] = useState(null)
   const [error, setError] = useState(null)
 
-  usePolling(() => {
-    getRuntimeStatus()
+  const fetchStatus = useCallback(() => {
+    getRuntimeStatus(projectId)
       .then(res => { setRuntimeStatus(res.data); setError(null) })
       .catch(err => setError(err.response?.data?.detail || err.message))
-  }, 5000)
+  }, [projectId])
+
+  usePolling(fetchStatus, 5000, projectId)
 
   if (error) {
     return (

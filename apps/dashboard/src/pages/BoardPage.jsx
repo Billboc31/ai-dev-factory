@@ -81,19 +81,19 @@ function BoardColumn({ column }) {
   )
 }
 
-export default function BoardPage() {
+export default function BoardPage({ projectId }) {
   const [columns, setColumns] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
   const fetchBoard = useCallback(() => {
-    daemonApi.getBoardData()
+    daemonApi.getBoardData(projectId)
       .then(res => { setColumns(res.data.columns); setError(null) })
       .catch(err => setError(err.response?.data?.detail || err.message))
       .finally(() => setLoading(false))
-  }, [])
+  }, [projectId])
 
-  usePolling(fetchBoard, 10000)
+  usePolling(fetchBoard, 10000, projectId)
 
   return (
     <div>

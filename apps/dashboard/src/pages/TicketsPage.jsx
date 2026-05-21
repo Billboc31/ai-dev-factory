@@ -18,14 +18,14 @@ function stateBadgeClass(state) {
   return match ? match[1] : 'bg-gray-100 text-gray-700'
 }
 
-export default function TicketsPage() {
+export default function TicketsPage({ projectId }) {
   const [tickets, setTickets] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [lastUpdated, setLastUpdated] = useState(null)
 
   const fetchTickets = useCallback(() => {
-    listTickets()
+    listTickets(projectId)
       .then(res => {
         setTickets(res.data)
         setLastUpdated(new Date())
@@ -33,9 +33,9 @@ export default function TicketsPage() {
       })
       .catch(err => setError(err.response?.data?.detail || err.message))
       .finally(() => setLoading(false))
-  }, [])
+  }, [projectId])
 
-  usePolling(fetchTickets, 5000)
+  usePolling(fetchTickets, 5000, projectId)
 
   if (loading) return <p className="text-gray-500">Loading tickets…</p>
 
