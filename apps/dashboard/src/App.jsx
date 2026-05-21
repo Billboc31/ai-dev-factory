@@ -7,6 +7,7 @@ import BoardPage from './pages/BoardPage'
 import ProjectMapPage from './pages/ProjectMapPage'
 import IssueMapperActivityPage from './pages/IssueMapperActivityPage'
 import DeployerPage from './pages/DeployerPage'
+import SandboxPanel from './components/SandboxPanel'
 import ProjectSidebar from './components/ProjectSidebar'
 import useProjects from './hooks/useProjects'
 
@@ -25,6 +26,7 @@ function Nav({ activeProject }) {
       <NavLink to="/project-map" className={linkClass}>Project Map</NavLink>
       <NavLink to="/mapper-activity" className={linkClass}>Mapper Activity</NavLink>
       <NavLink to="/deployer" className={linkClass}>Deployer</NavLink>
+      <NavLink to="/sandboxes" className={linkClass}>Sandboxes</NavLink>
     </nav>
   )
 }
@@ -59,6 +61,7 @@ export default function App() {
                 <Route path="/project-map" element={<ProjectMapPage projectId={activeProject} />} />
                 <Route path="/mapper-activity" element={<IssueMapperActivityPage projectId={activeProject} />} />
                 <Route path="/deployer" element={<DeployerPage projectId={activeProject} />} />
+                <Route path="/sandboxes" element={<SandboxPanel />} />
               </Routes>
             </ActiveProjectContext.Provider>
           </main>
