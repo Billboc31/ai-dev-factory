@@ -36,13 +36,16 @@ def _log_action(request: Request, ticket_id: str, action: str, result: ActionRes
     if db is None:
         return
     msg = f"{action} ok" if result.ok else f"{action} failed: {result.stderr or result.message}"
-    runtime_db.append_runtime_event(
-        db,
-        ticket_id,
-        event_type=f"action:{action}",
-        message=msg,
-        metadata={"ok": result.ok, "returncode": result.returncode},
-    )
+    try:
+        runtime_db.append_runtime_event(
+            db,
+            ticket_id,
+            event_type=f"action:{action}",
+            message=msg,
+            metadata={"ok": result.ok, "returncode": result.returncode},
+        )
+    except Exception:
+        logger.exception("audit log write failed for %s/%s (non-fatal)", ticket_id, action)
 
 
 def _get_or_404(project_root: Path, ticket_id: str, worktrees_dir: Path | None = None) -> TicketSummary:
