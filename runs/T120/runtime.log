@@ -77,3 +77,5 @@
 [2026-05-21T07:19:37Z] auto-run: auto-push triggered
 [2026-05-21T07:19:37Z] push: refused — DIRTY_RUNTIME_CHECKPOINT — uncommitted changes present before push
 [2026-05-21T07:19:37Z] auto-run: auto-push failed rc=2
+[2026-05-21T07:24:29Z] human-approval: approve-plan — PLAN_REVIEW_NEEDED → PLAN_APPROVED
+[2026-05-21T07:25:04Z] commit-checkpoint: refused — failed to determine current git branch
