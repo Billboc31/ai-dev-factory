@@ -13,8 +13,9 @@ from ..models.schemas import (
     DeployLogsResponse,
     DeployerStatus,
     ScanResult,
+    ScriptsStatus,
 )
-from ..services import analysis_manager, deployer_runner, project_scanner
+from ..services import analysis_manager, deployer_runner, project_scanner, scripts_manager
 
 logger = logging.getLogger("control-api")
 
@@ -132,4 +133,57 @@ def get_analysis_logs(
 ) -> DeployLogsResponse:
     supervisor_url = os.environ.get("AI_DEV_FACTORY_SUPERVISOR_URL", "").rstrip("/") or None
     log_lines = analysis_manager.get_analysis_logs(project_id, supervisor_url, lines)
+    return DeployLogsResponse(lines=log_lines)
+
+
+@project_router.post(
+    "/{project_id}/deployer/generate-scripts",
+    response_model=ScriptsStatus,
+    status_code=202,
+)
+def generate_scripts(
+    project_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+) -> ScriptsStatus:
+    logger.info("api: POST /projects/%s/deployer/generate-scripts", project_id)
+    exec_cmd = getattr(request.app.state, "daemon_exec_cmd", "claude --dangerously-skip-permissions")
+    supervisor_url = os.environ.get("AI_DEV_FACTORY_SUPERVISOR_URL", "").rstrip("/") or None
+
+    result = scripts_manager.start_scripts(
+        project_id, str(project_root), exec_cmd, supervisor_url
+    )
+    if result.error in ("no_supervisor_url", "supervisor_unreachable"):
+        raise HTTPException(status_code=503, detail=result.message)
+    if result.error == "locked":
+        raise HTTPException(status_code=409, detail="scripts generation already in progress")
+    if not result.ok:
+        raise HTTPException(status_code=500, detail=result.message)
+
+    return scripts_manager.get_scripts_status(project_id, supervisor_url)
+
+
+@project_router.get(
+    "/{project_id}/deployer/scripts/status",
+    response_model=ScriptsStatus,
+)
+def get_scripts_status(
+    project_id: str,
+    project_root: Path = Depends(resolve_project),
+) -> ScriptsStatus:
+    supervisor_url = os.environ.get("AI_DEV_FACTORY_SUPERVISOR_URL", "").rstrip("/") or None
+    return scripts_manager.get_scripts_status(project_id, supervisor_url)
+
+
+@project_router.get(
+    "/{project_id}/deployer/scripts/logs",
+    response_model=DeployLogsResponse,
+)
+def get_scripts_logs(
+    project_id: str,
+    project_root: Path = Depends(resolve_project),
+    lines: int = Query(default=100, ge=1, le=10000),
+) -> DeployLogsResponse:
+    supervisor_url = os.environ.get("AI_DEV_FACTORY_SUPERVISOR_URL", "").rstrip("/") or None
+    log_lines = scripts_manager.get_scripts_logs(project_id, supervisor_url, lines)
     return DeployLogsResponse(lines=log_lines)

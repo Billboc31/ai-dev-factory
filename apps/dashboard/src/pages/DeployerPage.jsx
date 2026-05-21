@@ -138,6 +138,73 @@ function AnalysisLogsPanel({ projectId, isRunning }) {
   )
 }
 
+function ScriptsStatusPanel({ status }) {
+  if (!status || status.state === 'idle') return null
+  const colorClass = STATE_COLORS[status.state] || STATE_COLORS.idle
+  return (
+    <div className="bg-white border border-gray-200 rounded p-4 mt-4 space-y-2">
+      <div className="flex items-center gap-3">
+        <span className="text-sm font-semibold text-gray-700">Scripts</span>
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${colorClass}`}>
+          {status.state === 'running' && <span className="animate-spin inline-block">↻</span>}
+          {status.state}
+        </span>
+      </div>
+      {status.branch && (
+        <p className="text-xs text-gray-600 font-mono">Branch: {status.branch}</p>
+      )}
+      {status.pr_url && (
+        <p className="text-xs">
+          <a href={status.pr_url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">
+            View PR →
+          </a>
+        </p>
+      )}
+      {status.error && (
+        <p className="text-xs text-red-600">Error: {status.error}</p>
+      )}
+    </div>
+  )
+}
+
+function ScriptsLogsPanel({ projectId, isRunning }) {
+  const [logs, setLogs] = useState([])
+  const [open, setOpen] = useState(false)
+
+  const fetchLogs = useCallback(() => {
+    deployerApi.getScriptsLogs(projectId, 100)
+      .then(res => setLogs(res.data.lines))
+      .catch(() => {})
+  }, [projectId])
+
+  useEffect(() => {
+    if (open) fetchLogs()
+  }, [open]) // eslint-disable-line
+
+  usePolling(fetchLogs, (open && isRunning) ? 5000 : null, projectId)
+
+  return (
+    <div className="mt-2 border border-gray-200 rounded">
+      <button
+        className="w-full flex items-center justify-between px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        onClick={() => setOpen(o => !o)}
+      >
+        <span>Scripts Logs</span>
+        <span className="text-gray-400">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="p-4 bg-gray-900 rounded-b max-h-80 overflow-y-auto">
+          {logs.length === 0 ? (
+            <p className="text-gray-400 text-xs">No logs yet.</p>
+          ) : (
+            <pre className="text-xs text-green-300 whitespace-pre-wrap">{logs.join('\n')}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ScanResultPanel({ result }) {
   if (!result) return null
   return (
@@ -190,14 +257,17 @@ function ScanResultPanel({ result }) {
 export default function DeployerPage({ projectId }) {
   const [status, setStatus] = useState(null)
   const [analysisStatus, setAnalysisStatus] = useState(null)
+  const [scriptsStatus, setScriptsStatus] = useState(null)
   const [scanResult, setScanResult] = useState(null)
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState(null)
 
   const isRunning = status?.state === 'running'
   const isAnalysing = analysisStatus?.state === 'running'
+  const isGeneratingScripts = scriptsStatus?.state === 'running'
   const pollingDelay = !status || status.state === 'idle' || isRunning ? 5000 : null
   const analysisPollingDelay = isAnalysing ? 5000 : null
+  const scriptsPollingDelay = isGeneratingScripts ? 5000 : null
 
   const refreshStatus = useCallback(() => {
     deployerApi.getDeployerStatus(projectId)
@@ -211,11 +281,19 @@ export default function DeployerPage({ projectId }) {
       .catch(() => {})
   }, [projectId])
 
+  const refreshScriptsStatus = useCallback(() => {
+    deployerApi.getScriptsStatus(projectId)
+      .then(res => setScriptsStatus(res.data))
+      .catch(() => {})
+  }, [projectId])
+
   usePolling(refreshStatus, pollingDelay, projectId)
   usePolling(refreshAnalysisStatus, analysisPollingDelay, projectId)
+  usePolling(refreshScriptsStatus, scriptsPollingDelay, projectId)
 
   useEffect(() => {
     refreshAnalysisStatus()
+    refreshScriptsStatus()
   }, [projectId]) // eslint-disable-line
 
   const handleScan = async () => {
@@ -236,6 +314,16 @@ export default function DeployerPage({ projectId }) {
     try {
       const res = await deployerApi.analyzeProject(projectId)
       setAnalysisStatus(res.data)
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message)
+    }
+  }
+
+  const handleGenerateScripts = async () => {
+    setError(null)
+    try {
+      const res = await deployerApi.generateScripts(projectId)
+      setScriptsStatus(res.data)
     } catch (err) {
       setError(err.response?.data?.detail || err.message)
     }
@@ -269,10 +357,17 @@ export default function DeployerPage({ projectId }) {
           action={handleAnalyze}
           disabled={isAnalysing}
         />
+        <ActionButton
+          label="Generate Scripts"
+          action={handleGenerateScripts}
+          disabled={isGeneratingScripts}
+        />
       </div>
       <LogsPanel projectId={projectId} isRunning={isRunning} />
       <AnalysisStatusPanel status={analysisStatus} />
       <AnalysisLogsPanel projectId={projectId} isRunning={isAnalysing} />
+      <ScriptsStatusPanel status={scriptsStatus} />
+      <ScriptsLogsPanel projectId={projectId} isRunning={isGeneratingScripts} />
       <ScanResultPanel result={scanResult} />
     </div>
   )

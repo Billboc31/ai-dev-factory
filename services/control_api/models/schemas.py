@@ -257,3 +257,12 @@ class AnalysisStatus(BaseModel):
     error: str | None = None
     branch: str | None = None
     pr_url: str | None = None
+
+
+class ScriptsStatus(BaseModel):
+    state: Literal["idle", "running", "success", "failed"] = "idle"
+    started_at: str | None = None
+    finished_at: str | None = None
+    error: str | None = None
+    branch: str | None = None
+    pr_url: str | None = None
