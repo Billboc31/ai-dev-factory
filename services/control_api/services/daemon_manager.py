@@ -139,6 +139,10 @@ def start(project_root: Path, exec_cmd: str) -> ActionResult:
     log = _log_path(project_root)
     log.parent.mkdir(parents=True, exist_ok=True)
     try:
+        # Suppress .pyc generation for the entire daemon process tree so the
+        # workflow does not pollute worktrees with __pycache__ entries that
+        # would later show up as dirty paths and block git pull --rebase.
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
         with open(log, "a", encoding="utf-8") as log_fh:
             proc = subprocess.Popen(
                 [
@@ -158,6 +162,7 @@ def start(project_root: Path, exec_cmd: str) -> ActionResult:
                 stdout=log_fh,
                 stderr=log_fh,
                 start_new_session=True,
+                env=env,
             )
         _write_pid_file(project_root, proc.pid, started_at)
         logger.info("api: daemon started pid=%d", proc.pid)

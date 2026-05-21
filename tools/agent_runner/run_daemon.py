@@ -20,6 +20,14 @@ import time
 from pathlib import Path
 
 
+# Suppress .pyc generation for this process *and* every subprocess we spawn.
+# `.pyc` files in __pycache__/ are the #1 source of runtime dirty trees that
+# block daemon sync/rebase, and they leak into worktrees that are otherwise
+# expected to stay clean.
+os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+sys.dont_write_bytecode = True
+
+
 ROOT = Path(__file__).resolve().parent
 REPO_ROOT = ROOT.parent.parent
 RUN_TICKET = ROOT / "run_ticket.py"
@@ -50,7 +58,24 @@ _rc_spec.loader.exec_module(_rc_mod)  # type: ignore[union-attr]
 checkpoint_transition = _rc_mod.checkpoint_transition
 CheckpointError = _rc_mod.CheckpointError
 DirtyTreeError = _rc_mod.DirtyTreeError
+is_runtime_ignored_path = _rc_mod.is_runtime_ignored_path
+classify_intake_dirty_paths = _rc_mod.classify_intake_dirty_paths
+parse_porcelain_paths = _rc_mod.parse_porcelain_paths
 del _rc_spec, _rc_mod
+
+
+def _no_bytecode_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """Return a copy of ``os.environ`` with ``PYTHONDONTWRITEBYTECODE=1`` forced.
+
+    Used for every subprocess this daemon spawns (planner, coder, reviewer,
+    tester, run_ticket workers, issue intake, …) so they never write ``.pyc``
+    files into the worktree and salt the working tree between cycles.
+    """
+    env = dict(os.environ)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+    if extra:
+        env.update(extra)
+    return env
 
 _rdb_spec = importlib.util.spec_from_file_location("_runtime_db", ROOT / "runtime_db.py")
 _rdb_mod = importlib.util.module_from_spec(_rdb_spec)  # type: ignore[arg-type]
@@ -860,12 +885,107 @@ def build_run_ticket_command(
     return cmd
 
 
+def _clean_runtime_before_sync(ticket_id: str, cwd: str | None = None) -> tuple[list[str], list[str]]:
+    """Aggressively clean *runtime garbage* before a sync/rebase.
+
+    The rebase refuses to run as long as any tracked file is dirty or any
+    untracked file would be overwritten. Runtime garbage (``runtime.log``,
+    ``__pycache__/*.pyc``, daemon lock/pid, SQLite live DB, …) must never be
+    the reason a sync fails. This helper:
+
+    1. Parses ``git status --porcelain``.
+    2. Splits dirty paths into runtime-ignored vs real-dirty.
+    3. For each runtime-ignored path:
+       - if it is tracked → ``git checkout HEAD -- path`` to discard the change;
+       - if it is untracked (``??`` in porcelain) → ``rm -f`` from disk so the
+         rebase has no untracked files to worry about;
+       - ``__pycache__`` directories are removed recursively.
+
+    Real-dirty paths are left untouched: they remain visible to the caller
+    (and to git) so the regular clean-gate or auto-commit logic gets to
+    decide what to do. The rebase will simply refuse if they are still
+    around, which is the intended behaviour.
+
+    Returns ``(cleaned, real_dirty)`` for logging/auditing.
+    """
+    # ``-uall`` expands untracked *directories* into their individual files so
+    # we don't see ``?? runs/`` and treat it as a single mysterious path —
+    # we need each ``.pyc`` / ``runtime.log`` to be classifiable.
+    status = subprocess.run(
+        ["git", "status", "--porcelain", "-uall"],
+        capture_output=True, text=True, check=False,
+        cwd=cwd,
+    )
+    cleaned: list[str] = []
+    real_dirty: list[str] = []
+    if status.returncode != 0 or not status.stdout.strip():
+        return cleaned, real_dirty
+
+    base = Path(cwd) if cwd else Path(".")
+    for line in status.stdout.splitlines():
+        if len(line) < 4:
+            continue
+        flags = line[:2]
+        path = line[3:]
+        if " -> " in path:
+            path = path.split(" -> ", 1)[1]
+        path = path.strip()
+        if not path:
+            continue
+
+        if not is_runtime_ignored_path(path):
+            real_dirty.append(path)
+            continue
+
+        full = base / path
+        is_untracked = flags == "??"
+        if is_untracked:
+            try:
+                if full.is_dir():
+                    import shutil
+                    shutil.rmtree(full, ignore_errors=True)
+                else:
+                    full.unlink(missing_ok=True)
+                cleaned.append(f"rm:{path}")
+            except OSError:
+                pass
+        else:
+            # Tracked but dirty (legacy commits before .gitignore): reset to HEAD
+            reset = subprocess.run(
+                ["git", "checkout", "HEAD", "--", path],
+                capture_output=True, text=True, check=False, cwd=cwd,
+            )
+            if reset.returncode == 0:
+                cleaned.append(f"reset:{path}")
+            else:
+                # Last-resort: physically remove the working-tree copy
+                try:
+                    full.unlink(missing_ok=True)
+                    cleaned.append(f"rm-fallback:{path}")
+                except OSError:
+                    pass
+
+    if cleaned:
+        _log(f"{ticket_id}: pre-sync hygiene cleaned {len(cleaned)} runtime path(s): {cleaned[:10]}")
+    if real_dirty:
+        _log(f"{ticket_id}: pre-sync hygiene preserved {len(real_dirty)} real dirty path(s): {real_dirty[:10]}")
+    return cleaned, real_dirty
+
+
 def _sync_ticket_branch(ticket_id: str, branch: str, cwd: str | None = None) -> bool:
     """Pull latest commits from remote with fast-forward only.
 
+    Before pulling, ``_clean_runtime_before_sync`` discards runtime garbage
+    so the rebase is not blocked by ``runtime.log``, ``.pyc`` files, locks,
+    or any other path classified as runtime-ignored. Real code changes are
+    left untouched — if they prevent the rebase, the regular failure path
+    handles it.
+
     Returns True if in sync or remote branch not yet published.
-    Returns False if diverged (caller should skip the ticket).
+    Returns False if diverged or rebase failed.
     """
+    _clean_runtime_before_sync(ticket_id, cwd=cwd)
+
     result = subprocess.run(
         ["git", "pull", "--rebase", "origin", branch],
         capture_output=True, text=True, check=False,
@@ -956,6 +1076,7 @@ def launch_ticket(
                 capture_output=True,
                 check=False,
                 cwd=str(worktree_path),
+                env=_no_bytecode_env(),
             )
             for line in result.stdout.splitlines():
                 _log(f"{ticket_id}: {line}")
@@ -1006,6 +1127,7 @@ def launch_ticket(
                 text=True,
                 capture_output=True,
                 check=False,
+                env=_no_bytecode_env(),
             )
             for line in result.stdout.splitlines():
                 _log(f"{ticket_id}: {line}")
@@ -1132,7 +1254,14 @@ def call_issue_intake(issue_number: int, ticket_id: str, branch_slug: str, repo:
         cmd += ["--repo", repo]
     if push:
         cmd.append("--push")
-    result = subprocess.run(cmd, capture_output=True, text=True, check=False, cwd=cwd)
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        check=False,
+        cwd=cwd,
+        env=_no_bytecode_env(),
+    )
     for line in result.stdout.splitlines():
         _log(f"intake {ticket_id}: {line}")
     for line in result.stderr.splitlines():

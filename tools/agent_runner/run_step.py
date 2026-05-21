@@ -5,11 +5,19 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import os
 import re
 import shlex
 import subprocess
 import sys
 from pathlib import Path
+
+
+# Step processes (planner/coder/reviewer/tester) spawn an external agent
+# via ``execute_external_command``. Suppress .pyc generation in this process
+# and every subprocess so the worktree stays clean between steps.
+os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+sys.dont_write_bytecode = True
 
 
 RUN_SUBDIRS = ["prompts", "reviews", "fixes", "tests", "memory"]
@@ -279,6 +287,13 @@ def execute_external_command(command_text: str, prompt_content: str) -> tuple[st
     if not command:
         raise RunnerError("external command must not be empty")
 
+    # Force ``PYTHONDONTWRITEBYTECODE=1`` in the environment of the spawned
+    # planner/coder/reviewer/tester so they cannot leave ``.pyc`` files behind
+    # in the worktree. The variable is harmless for non-Python agents
+    # (claude, openai, etc.).
+    env = dict(os.environ)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+
     completed = subprocess.run(
         command,
         input=prompt_content,
@@ -286,6 +301,7 @@ def execute_external_command(command_text: str, prompt_content: str) -> tuple[st
         capture_output=True,
         shell=False,
         check=False,
+        env=env,
     )
     return completed.stdout, completed.stderr, completed.returncode
 

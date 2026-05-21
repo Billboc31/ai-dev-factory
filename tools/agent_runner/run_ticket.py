@@ -13,10 +13,18 @@ import argparse
 import datetime
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
 from pathlib import Path
+
+
+# Worker processes must not leave .pyc files behind in the worktree —
+# they pollute the working tree between steps and would otherwise show up
+# as dirty between commit and push.
+os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
+sys.dont_write_bytecode = True
 
 
 ROOT = Path(__file__).resolve().parent
@@ -124,12 +132,19 @@ def branch_name(ticket_id: str, slug: str | None) -> str:
 
 
 def run_command(args: list[str], cwd: str | None = None) -> subprocess.CompletedProcess[str]:
+    # Force PYTHONDONTWRITEBYTECODE=1 for any subprocess we spawn so we never
+    # leak .pyc files into the worktree mid-step (the run_step.py invocation
+    # below would otherwise import the agent_runner package and write its
+    # cache files into the worker's worktree).
+    env = dict(os.environ)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
     return subprocess.run(
         args,
         text=True,
         capture_output=True,
         check=False,
         cwd=cwd,
+        env=env,
     )
 
 
