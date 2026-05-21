@@ -130,8 +130,32 @@ version: "1"
     assert exc_info.value.code == 1
     state = json.loads((tmp_path / "state" / "analysis-proj3.json").read_text())
     assert state["state"] == "failed"
-    assert "outside .ai-dev-factory" in state["error"]
+    assert "escaping project root" in state["error"]
     assert not (tmp_path / "etc" / "passwd").exists()
+
+
+def test_main_path_traversal_with_prefix_bypass_rejected(tmp_path, monkeypatch):
+    """Path starting with .ai-dev-factory/ but using .. to escape is rejected after resolve."""
+    traversal_output = """\
+--- BEGIN FILE: .ai-dev-factory/../../../etc/passwd ---
+rooted
+--- END FILE ---
+--- BEGIN FILE: .ai-dev-factory/deploy.yml ---
+version: "1"
+--- END FILE ---
+--- BEGIN FILE: .ai-dev-factory/deployment.md ---
+# Deployment
+--- END FILE ---
+"""
+    _patch_main(monkeypatch, tmp_path, traversal_output, project_id="proj5")
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_analysis.main()
+
+    assert exc_info.value.code == 1
+    state = json.loads((tmp_path / "state" / "analysis-proj5.json").read_text())
+    assert state["state"] == "failed"
+    assert "escaping project root" in state["error"]
 
 
 def test_main_llm_failure_sets_failed_state(tmp_path, monkeypatch):

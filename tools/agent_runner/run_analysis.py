@@ -181,17 +181,26 @@ def main() -> None:
                 raise RuntimeError(f"LLM output missing required block: {rel}")
 
         logger.info("writing %d generated file(s)", len(generated_files))
-        ai_dir = project_root / ".ai-dev-factory"
-        ai_dir.mkdir(exist_ok=True)
+        (project_root / ".ai-dev-factory").mkdir(exist_ok=True)
         for rel_path, content in generated_files.items():
-            if not rel_path.startswith(".ai-dev-factory/"):
+            target = (project_root / rel_path).resolve()
+            if not str(target).startswith(str(project_root) + "/"):
                 raise RuntimeError(
-                    f"LLM returned unexpected path outside .ai-dev-factory/: {rel_path}"
+                    f"LLM returned path escaping project root: {rel_path}"
                 )
-            target = project_root / rel_path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")
             logger.info("wrote %s", rel_path)
+
+        deploy_path = project_root / ".ai-dev-factory" / "deploy.yml"
+        try:
+            import yaml as _yaml
+            _yaml.safe_load(deploy_path.read_text(encoding="utf-8"))
+            logger.info("deploy.yml YAML validation passed")
+        except ImportError:
+            logger.warning("pyyaml not available — skipping deploy.yml validation")
+        except Exception as exc:
+            raise RuntimeError(f"deploy.yml is not valid YAML: {exc}") from exc
 
         logger.info("committing and pushing")
         branch, pr_url = commit_and_push(project_root, project_id)

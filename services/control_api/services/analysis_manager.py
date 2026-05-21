@@ -59,6 +59,8 @@ def get_analysis_status(project_id: str, supervisor_url: str | None) -> Analysis
             timeout=5.0,
         )
         return AnalysisStatus(**resp.json())
+    except httpx.ConnectError:
+        return AnalysisStatus(state="failed", error="supervisor_unreachable")
     except Exception:
         return AnalysisStatus()
 
