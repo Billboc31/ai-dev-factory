@@ -111,6 +111,7 @@ export default function DaemonPage() {
         <ActionButton label="Start" action={daemonApi.startDaemon} onSuccess={fetchStatus} />
         <ActionButton label="Stop" action={daemonApi.stopDaemon} variant="danger" onSuccess={fetchStatus} />
         <ActionButton label="Restart" action={daemonApi.restartDaemon} variant="secondary" onSuccess={fetchStatus} />
+        <ActionButton label="Sync Main" action={daemonApi.syncMain} variant="secondary" onSuccess={fetchStatus} />
       </div>
 
       <WorkersList columns={columns} />

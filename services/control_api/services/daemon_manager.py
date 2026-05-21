@@ -13,6 +13,7 @@ import sys
 from pathlib import Path
 
 from ..models.schemas import ActionResult, DaemonStatus
+from .runtime_resolver import resolve_logs_dir, resolve_runs_dir, resolve_worktrees_dir
 
 
 logger = logging.getLogger("control-api")
@@ -26,11 +27,11 @@ _TICKET_RE = re.compile(r"^T\d{3,}$")
 
 
 def _pid_path(project_root: Path) -> Path:
-    return project_root / "runs" / _PID_FILENAME
+    return resolve_runs_dir(project_root) / _PID_FILENAME
 
 
 def _log_path(project_root: Path) -> Path:
-    return project_root / "runs" / _LOG_FILENAME
+    return resolve_logs_dir(project_root) / _LOG_FILENAME
 
 
 def _read_pid_file(project_root: Path) -> dict | None:
@@ -78,7 +79,7 @@ def _last_heartbeat(project_root: Path) -> str | None:
 
 
 def _current_ticket(project_root: Path) -> str | None:
-    runs = project_root / "runs"
+    runs = resolve_runs_dir(project_root)
     if not runs.exists():
         return None
     for ticket_dir in sorted(runs.iterdir(), reverse=True):
@@ -136,6 +137,7 @@ def start(project_root: Path, exec_cmd: str) -> ActionResult:
 
     started_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     log = _log_path(project_root)
+    log.parent.mkdir(parents=True, exist_ok=True)
     try:
         with open(log, "a", encoding="utf-8") as log_fh:
             proc = subprocess.Popen(
@@ -150,7 +152,7 @@ def start(project_root: Path, exec_cmd: str) -> ActionResult:
                     "--auto-commit",
                     "--auto-push",
                     "--worktrees-dir",
-                    str(project_root / "worktrees"),
+                    str(resolve_worktrees_dir(project_root)),
                 ],
                 cwd=project_root,
                 stdout=log_fh,
@@ -184,3 +186,22 @@ def restart(project_root: Path, exec_cmd: str) -> ActionResult:
     if not stop_result.ok and "not running" not in stop_result.message:
         return stop_result
     return start(project_root, exec_cmd)
+
+
+def sync_main(project_root: Path) -> ActionResult:
+    logger.info("api: sync-main requested")
+    try:
+        result = subprocess.run(
+            ["git", "fetch", "origin", "main"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            timeout=60,
+        )
+        if result.returncode == 0:
+            return ActionResult(ok=True, message="Fetched origin/main successfully")
+        return ActionResult(ok=False, message=result.stderr.strip() or "git fetch failed")
+    except subprocess.TimeoutExpired:
+        return ActionResult(ok=False, message="git fetch timed out")
+    except OSError as exc:
+        return ActionResult(ok=False, message=str(exc))

@@ -1,3 +1,4 @@
+The ticket follows.
 # Generic Planner Task Read the ticket below and produce a detailed implementation plan. 
 
 ## Required output structure (strict) Your reply **MUST** be a Markdown document containing **exactly** these four level-2 headings, in this order, spelled exactly as shown:
@@ -23,4 +24,6 @@ naming convention. Behaviour is preserved.
 - `utils.py` no longer defines `foo`.
 - `pytest tests/test_utils.py` passes.
 - No other file references the old name.
+
 The ticket follows.
+
