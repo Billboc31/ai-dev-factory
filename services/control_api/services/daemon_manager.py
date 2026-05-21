@@ -12,8 +12,8 @@ import subprocess
 import sys
 from pathlib import Path
 
-from ..models.schemas import ActionResult, DaemonStatus
-from .runtime_resolver import resolve_logs_dir, resolve_runs_dir, resolve_worktrees_dir
+from ..models.schemas import ActionResult, DaemonStatus, QueueEntry, RetryBlockedTicket, RuntimeStatus, WorkerInfo
+from .runtime_resolver import resolve_logs_dir, resolve_runs_dir, resolve_state_dir, resolve_worktrees_dir
 
 
 logger = logging.getLogger("control-api")
@@ -197,6 +197,132 @@ def restart(project_root: Path, exec_cmd: str) -> ActionResult:
     if not stop_result.ok and "not running" not in stop_result.message:
         return stop_result
     return start(project_root, exec_cmd)
+
+
+def get_workers(project_root: Path) -> list[WorkerInfo]:
+    runs_dir = resolve_runs_dir(project_root)
+    state_dir = resolve_state_dir(project_root)
+    workers_path = state_dir / "workers.json"
+    if not workers_path.exists():
+        workers_path = runs_dir / "workers.json"
+    try:
+        raw: dict = json.loads(workers_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return []
+    result = []
+    for ticket_id, info in raw.items():
+        wt_path = info.get("worktree_path")
+        state = None
+        for candidate in [
+            Path(wt_path) / "runs" / ticket_id / "state.json" if wt_path else None,
+            runs_dir / ticket_id / "state.json",
+        ]:
+            if candidate and candidate.exists():
+                try:
+                    state = json.loads(candidate.read_text(encoding="utf-8")).get("state")
+                    break
+                except (json.JSONDecodeError, OSError):
+                    pass
+        result.append(WorkerInfo(
+            ticket_id=ticket_id,
+            pid=info.get("pid"),
+            worktree_path=wt_path,
+            state=state,
+        ))
+    return result
+
+
+def get_retry_blocked(project_root: Path) -> list[RetryBlockedTicket]:
+    runs_dir = resolve_runs_dir(project_root)
+    if not runs_dir.exists():
+        return []
+    result = []
+    for ticket_dir in sorted(runs_dir.iterdir()):
+        if not _TICKET_RE.match(ticket_dir.name):
+            continue
+        retry_file = ticket_dir / "retry-state.json"
+        if not retry_file.exists():
+            continue
+        try:
+            data = json.loads(retry_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        retry_count = data.get("retry_count", 0)
+        cooldown_until = data.get("cooldown_until")
+        if retry_count == 0 and not cooldown_until:
+            continue
+        result.append(RetryBlockedTicket(
+            ticket_id=ticket_dir.name,
+            failure_class=data.get("failure_class"),
+            retry_count=retry_count,
+            cooldown_until=cooldown_until,
+        ))
+    return result
+
+
+def get_intake_queue(project_root: Path) -> list[QueueEntry]:
+    runs_dir = resolve_runs_dir(project_root)
+    if not runs_dir.exists():
+        return []
+    state_dir = resolve_state_dir(project_root)
+    workers_path = state_dir / "workers.json"
+    if not workers_path.exists():
+        workers_path = runs_dir / "workers.json"
+    try:
+        active_tickets: set[str] = set(json.loads(workers_path.read_text(encoding="utf-8")).keys())
+    except (json.JSONDecodeError, OSError):
+        active_tickets = set()
+    result = []
+    for ticket_dir in sorted(runs_dir.iterdir()):
+        if not _TICKET_RE.match(ticket_dir.name):
+            continue
+        if ticket_dir.name in active_tickets:
+            continue
+        state_file = ticket_dir / "state.json"
+        if not state_file.exists():
+            continue
+        try:
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            continue
+        state = data.get("state", "")
+        if data.get("daemon_archived") or data.get("issue_closed"):
+            continue
+        if "RUNNING" in state:
+            continue
+        if any(s in state for s in ("DONE", "MERGED", "CLOSED", "ARCHIVED")):
+            continue
+        result.append(QueueEntry(
+            issue_number=data.get("issue_number"),
+            title=data.get("title") or ticket_dir.name,
+        ))
+    return result
+
+
+def get_last_error(project_root: Path) -> str | None:
+    path = _log_path(project_root)
+    if not path.exists():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        for line in reversed(text.splitlines()):
+            if line.strip() and any(kw in line.lower() for kw in ("error", "exception", "failed", "traceback")):
+                return line.strip()
+        return None
+    except OSError:
+        return None
+
+
+def get_runtime_status(project_root: Path) -> RuntimeStatus:
+    status = get_status(project_root)
+    return RuntimeStatus(
+        daemon_online=status.running,
+        workers=get_workers(project_root),
+        retry_blocked=get_retry_blocked(project_root),
+        intake_queue=get_intake_queue(project_root),
+        last_action=_last_heartbeat(project_root),
+        last_error=get_last_error(project_root),
+    )
 
 
 def sync_main(project_root: Path) -> ActionResult:

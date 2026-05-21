@@ -3,6 +3,7 @@ import * as daemonApi from '../api/daemon'
 import ActionButton from '../components/ActionButton'
 import DaemonActivityFeed from '../components/DaemonActivityFeed'
 import ErrorBanner from '../components/ErrorBanner'
+import RuntimeStatusPanel from '../components/RuntimeStatusPanel'
 import usePolling from '../hooks/usePolling'
 
 function formatUptime(startedAt) {
@@ -115,6 +116,13 @@ export default function DaemonPage() {
       </div>
 
       <WorkersList columns={columns} />
+
+      <div className="mb-6">
+        <h2 className="text-lg font-semibold mb-2">Runtime Status</h2>
+        <div className="bg-white border border-gray-200 rounded p-4">
+          <RuntimeStatusPanel />
+        </div>
+      </div>
 
       <div>
         <h2 className="text-lg font-semibold mb-2">Activity Feed</h2>

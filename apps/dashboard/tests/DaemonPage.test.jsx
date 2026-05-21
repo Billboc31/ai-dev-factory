@@ -17,6 +17,10 @@ function renderPage() {
 describe('DaemonPage', () => {
   beforeEach(() => {
     daemonApi.getDaemonActivity.mockResolvedValue({ data: { lines: [] } })
+    daemonApi.getBoardData.mockResolvedValue({ data: { columns: [] } })
+    daemonApi.getRuntimeStatus.mockResolvedValue({
+      data: { daemon_online: false, workers: [], retry_blocked: [], intake_queue: [], last_action: null, last_error: null },
+    })
   })
 
   it('renders the page heading', async () => {
