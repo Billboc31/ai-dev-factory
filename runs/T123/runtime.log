@@ -21,3 +21,23 @@
 [2026-05-21T13:32:22Z] push: tolerating runtime dirty files (not blocking): ['runs/T123/runtime.log']
 [2026-05-21T13:32:22Z] push: pushing branch=ticket/T123-t123-persistent-daemon-runtime-status-streaming-in
 [2026-05-21T13:32:24Z] push: done branch=ticket/T123-t123-persistent-daemon-runtime-status-streaming-in
+[2026-05-21T13:51:39Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-21T13:51:39Z] auto-run: running step=tester
+[2026-05-21T13:51:39Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-21T13:51:39Z] prompt: generic fallback — injecting runs/T123/ticket.md
+[2026-05-21T13:51:39Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T13:51:39Z] compose: role=ai/roles/tester.md
+[2026-05-21T13:51:39Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T13:51:39Z] compose: skill=ai/skills/testing.md
+[2026-05-21T13:51:39Z] compose: skill=ai/skills/debugging.md
+[2026-05-21T13:51:39Z] compose: task (canonical prompt)
+[2026-05-21T13:51:39Z] snapshot: runtime-prompt=runs/T123/prompts/tester-attempt-1.md
+[2026-05-21T13:57:27Z] auto-run: step=tester done rc=0
+[2026-05-21T13:57:27Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-21T13:57:27Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-21T13:57:27Z] commit-checkpoint: unstaged runtime garbage: ['runs/T123/runtime.log']
+[2026-05-21T13:57:27Z] commit-checkpoint: sha=e9af08b files=4 title='test(T123/workflow): tester — update 4 file(s)'
+[2026-05-21T13:57:27Z] auto-run: auto-push triggered
+[2026-05-21T13:57:27Z] push: tolerating runtime dirty files (not blocking): ['runs/T123/runtime.log']
+[2026-05-21T13:57:27Z] push: pushing branch=ticket/T123-t123-persistent-daemon-runtime-status-streaming-in
+[2026-05-21T13:57:29Z] push: done branch=ticket/T123-t123-persistent-daemon-runtime-status-streaming-in
