@@ -1,0 +1,71 @@
+Now I have enough context to write the plan.
+
+## Objective
+
+Introduce a project deployer subsystem: a deploy profile format (`.ai-dev-factory/deploy.yml`), a project scanner, a Claude-assisted profile generator, a deterministic Python deployment executor, and dashboard actions to trigger and observe deployments. The ai-dev-factory project itself ships the first deploy profile.
+
+## Included
+
+### Deploy profile format
+- Define `.ai-dev-factory/deploy.yml` schema (version, project name, components list, required\_tools list, deploy steps sequence).
+- Components support two types: `docker` (references a docker-compose service + healthcheck URL) and `host` (command + PID/file healthcheck).
+- Deploy steps support actions: `git_pull`, `docker_build`, `docker_compose_up`, `host_restart`, `healthcheck`.
+- Create `.ai-dev-factory/deploy.yml` for ai-dev-factory covering: `api` (docker), `web` (docker), `daemon` (host), required tools `gh`, `git`, `docker`, `claude`.
+
+### Backend — new router and services
+- `services/control_api/routes/deployer.py` — register as `/projects/{project_id}/deployer/`:
+  - `POST /scan` — run project scanner, return `ScanResult`
+  - `POST /generate-profile` — Claude-assisted profile generation from scan result
+  - `POST /deploy` — execute deploy (body: `{ branch: str }`, default `"main"`)
+  - `POST /restart` — restart all services defined in profile
+  - `GET /logs` — return last N log entries from deployment log file
+  - `GET /status` — return current `DeploymentStatus`
+- `services/control_api/services/project_scanner.py` — detect: docker-compose services, `package.json` (frontend), `requirements.txt`/`pyproject.toml` (Python backend), healthcheck patterns, host tool requirements (`gh`, `git`, `docker`, `claude`). Returns structured `ScanResult`.
+- `services/control_api/services/deployer_service.py` — load and validate `deploy.yml`; execute steps sequentially via `subprocess_runner`; write JSON-lines log to `{runtime_root}/deployments/{project_id}/YYYYMMDD_HHMMSS.log`; expose `get_status()` / `get_logs(n)`.
+- `services/control_api/services/profile_generator.py` — call Claude (via subprocess, reusing `run_step.py` patterns) with `ScanResult` as context, write generated YAML to `.ai-dev-factory/deploy.yml` in the project directory.
+- Register deployer router in `services/control_api/main.py`.
+
+### Backend — new schema models
+- `services/control_api/models/schemas.py` additions:
+  - `ScanResult` — detected components, stacks, tools, healthchecks
+  - `DeployProfile` — parsed deploy.yml structure
+  - `DeploymentStatus` — `{ state: idle|running|success|failed, started_at, finished_at, branch, last_error }`
+  - `DeploymentLogEntry` — `{ timestamp, level, message, step }`
+
+### Frontend — deployer page and API client
+- `apps/dashboard/src/api/deployer.js` — `scan()`, `generateProfile()`, `deploy(branch)`, `restart()`, `getLogs()`, `getStatus()`.
+- `apps/dashboard/src/pages/DeployerPage.jsx` — layout: status badge (idle/running/success/failed), six `ActionButton` components (Scan Project, Generate Profile, Deploy Main, Deploy Branch, Restart Services, View Logs), scrollable log viewer with auto-scroll, branch selector for "Deploy Branch".
+- Add route `/projects/:projectId/deployer` in `apps/dashboard/src/App.jsx`.
+- Add "Deployer" nav link in `apps/dashboard/src/components/ProjectSidebar.jsx`.
+- Poll `getStatus()` and `getLogs()` at 5 s using the existing `usePolling` hook; surface running state as disabled buttons.
+
+### Tests
+- `tests/test_project_scanner.py` — unit tests for each detector (docker-compose, package.json, pyproject.toml, tool detection) using temp filesystem fixtures.
+- `tests/test_deployer_service.py` — unit tests for step execution (mocked subprocess), log writing, `get_status()`, structured error on step failure.
+- `tests/test_deployer_routes.py` — FastAPI test-client integration tests for all six endpoints: scan, generate-profile, deploy, restart, logs, status.
+
+## Excluded
+
+- Kubernetes, cloud autoscaling, multi-host deployment.
+- Production secret management or encrypted credentials in `deploy.yml`.
+- SaaS billing or licensing.
+- Full CI/CD replacement (no webhook triggers, no PR-gating on deploy).
+- Daemon state-machine changes — deployment is orthogonal to the ticket workflow.
+- New SQLite tables — log storage is filesystem JSON-lines only.
+- Concurrent branch deploys (single lock per project; second deploy request returns 409 while one is running).
+- Multi-project parallel deploys (out of scope; each project deploys independently via its own route).
+- Dashboard build/serve changes — only new React files and route registration.
+
+## Acceptance criteria
+
+- `GET /projects/{id}/deployer/status` returns `{ state: "idle" }` when no deploy has run.
+- `POST /projects/{id}/deployer/scan` returns a `ScanResult` listing detected components and tools for ai-dev-factory.
+- `POST /projects/{id}/deployer/generate-profile` writes `.ai-dev-factory/deploy.yml` into the target project directory and returns the parsed profile.
+- `POST /projects/{id}/deployer/deploy` with `{ branch: "main" }` executes all steps in the profile sequentially; status transitions to `running` then `success` on clean run.
+- A step failure returns `{ state: "failed", last_error: "<structured message>" }` — no silent failures.
+- `GET /projects/{id}/deployer/logs` returns ordered log entries covering the last deploy run.
+- Healthcheck steps are executed after docker/host service steps; a failing healthcheck causes the deploy to fail with a structured error.
+- Dashboard `/projects/:id/deployer` page renders all six action buttons; buttons are disabled while state is `running`.
+- `DeployerPage` polls status every 5 s and updates the log viewer without page reload.
+- The ai-dev-factory `.ai-dev-factory/deploy.yml` file declares: `api` (docker), `web` (docker), `daemon` (host), required tools `gh`, `git`, `docker`, `claude`.
+- `pytest tests/test_project_scanner.py tests/test_deployer_service.py tests/test_deployer_routes.py` passes.
