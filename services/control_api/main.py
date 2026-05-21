@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import sys
 import time
 from pathlib import Path
 
@@ -13,6 +14,11 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .routes import daemon, health, issues, project_map, providers, tickets
 from .services.runtime_resolver import resolve_worktrees_dir
+
+_TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools" / "agent_runner"
+if str(_TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_DIR))
+import runtime_db as _runtime_db  # noqa: E402
 
 
 logging.basicConfig(
@@ -37,6 +43,7 @@ def create_app(
     app.state.project_root = _root
     app.state.daemon_exec_cmd = daemon_exec_cmd
     app.state.worktrees_dir = worktrees_dir or resolve_worktrees_dir(_root)
+    app.state.db_path = _runtime_db.get_db_path()
 
     app.add_middleware(
         CORSMiddleware,

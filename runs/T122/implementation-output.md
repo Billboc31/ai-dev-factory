@@ -1,0 +1,1 @@
+Fix applied. `_log_action` now wraps `append_runtime_event` in a `try/except Exception`, logging the error via `logger.exception` without re-raising — so a SQLite failure during audit logging can never cause a completed action to return HTTP 500.

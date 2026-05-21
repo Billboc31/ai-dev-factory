@@ -2,11 +2,12 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import * as api from '../api/tickets'
 import ActionButton from '../components/ActionButton'
+import AuditLog from '../components/AuditLog'
 import ErrorBanner from '../components/ErrorBanner'
 import WorkflowTimeline from '../components/WorkflowTimeline'
 import usePolling from '../hooks/usePolling'
 
-const TABS = ['timeline', 'overview', 'logs', 'plan', 'review', 'tests', 'artifacts']
+const TABS = ['timeline', 'overview', 'logs', 'plan', 'review', 'tests', 'artifacts', 'audit']
 
 const TAB_FETCHERS = {
   timeline: (id) => api.getTicketTimeline(id),
@@ -168,15 +169,17 @@ export default function TicketDetailPage() {
       </div>
 
       <div className="mb-6 min-h-32">
-        {tabLoading
-          ? <p className="text-gray-500 text-sm">Loading…</p>
-          : tab === 'timeline'
-            ? <WorkflowTimeline timeline={tabContent.timeline} />
-            : tab === 'overview'
-              ? <OverviewTab timeline={tabContent.overview} />
-              : <pre className="bg-white border border-gray-200 rounded p-4 text-xs overflow-auto whitespace-pre-wrap max-h-96">
-                  {renderContent(tabContent[tab]) || 'No content available.'}
-                </pre>
+        {tab === 'audit'
+          ? <AuditLog ticketId={id} />
+          : tabLoading
+            ? <p className="text-gray-500 text-sm">Loading…</p>
+            : tab === 'timeline'
+              ? <WorkflowTimeline timeline={tabContent.timeline} />
+              : tab === 'overview'
+                ? <OverviewTab timeline={tabContent.overview} />
+                : <pre className="bg-white border border-gray-200 rounded p-4 text-xs overflow-auto whitespace-pre-wrap max-h-96">
+                    {renderContent(tabContent[tab]) || 'No content available.'}
+                  </pre>
         }
       </div>
 
