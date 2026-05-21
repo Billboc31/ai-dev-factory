@@ -1,3 +1,11 @@
+# Fix artifact — IMPLEMENTATION_FIX_REQUIRED
+
+- decision: IMPLEMENTATION_FIX_REQUIRED
+- review source: runs/T130/reviews/implementation-review.md
+- generated at: 2026-05-21T21:36:52Z
+
+---
+
 ---
 
 # PR Review — T130: AI-assisted operational project analysis and deploy profile generation
