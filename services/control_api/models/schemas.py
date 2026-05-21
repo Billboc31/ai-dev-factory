@@ -29,6 +29,12 @@ class ActionResult(BaseModel):
     stderr: str | None = None
 
 
+class RetryInfo(BaseModel):
+    failure_class: str | None = None
+    retry_count: int = 0
+    cooldown_until: str | None = None
+
+
 class TicketSummary(BaseModel):
     ticket_id: str
     state: str
@@ -36,6 +42,7 @@ class TicketSummary(BaseModel):
     issue_number: int | None = None
     updated_at: str | None = None
     last_log: str | None = None
+    retry_info: RetryInfo | None = None
 
 
 class TicketDetail(TicketSummary):
@@ -56,6 +63,8 @@ class TimelineResponse(BaseModel):
     human_gate: bool = False
     last_event: str | None = None
     steps: list[TimelineStep]
+    retry_info: RetryInfo | None = None
+    last_error: str | None = None
 
 
 class IntakeRequest(BaseModel):

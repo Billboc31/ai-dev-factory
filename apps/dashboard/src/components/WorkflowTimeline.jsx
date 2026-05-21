@@ -10,10 +10,13 @@ const STATUS_CONFIG = {
 export default function WorkflowTimeline({ timeline }) {
   if (!timeline) return <p className="text-gray-500 text-sm">No timeline data.</p>
 
+  const ri = timeline.retry_info
+
   return (
     <div className="space-y-1">
       {timeline.steps.map((step) => {
         const cfg = STATUS_CONFIG[step.status] ?? STATUS_CONFIG.pending
+        const showRetryAnnotation = step.status === 'failed' && ri
         return (
           <div
             key={step.id}
@@ -21,6 +24,11 @@ export default function WorkflowTimeline({ timeline }) {
           >
             <span className="w-5 text-center text-sm select-none">{cfg.icon}</span>
             <span className={`text-sm font-medium ${cfg.color}`}>{step.label}</span>
+            {showRetryAnnotation && (
+              <span className="text-xs text-red-500 font-mono ml-1">
+                attempt {ri.retry_count}{ri.failure_class ? ` — ${ri.failure_class}` : ''}
+              </span>
+            )}
             {step.agent && (
               <span className="text-xs text-gray-500 font-mono ml-auto">{step.agent}</span>
             )}
