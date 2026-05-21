@@ -7,11 +7,13 @@ import logging
 import os
 import sys
 import time
+import traceback
 from pathlib import Path
 
 import uvicorn
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 from .routes import daemon, health, issues, project_map, providers, tickets
 from .services.project_registry import ProjectRegistry
@@ -80,6 +82,11 @@ def create_app(
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.exception_handler(Exception)
+    async def _unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+        logger.error("unhandled exception: %s\n%s", exc, traceback.format_exc())
+        return JSONResponse(status_code=500, content={"detail": str(exc) or "internal server error"})
 
     @app.middleware("http")
     async def _log_requests(request: Request, call_next) -> Response:
