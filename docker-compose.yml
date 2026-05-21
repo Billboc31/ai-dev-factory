@@ -21,7 +21,7 @@ services:
       # The supervisor manages the daemon lifecycle on the host so the dashboard
       # can start/stop/monitor it without SSH. host.docker.internal resolves to
       # the Docker host on macOS and Linux with host-gateway configured.
-      # - AI_DEV_FACTORY_SUPERVISOR_URL=http://host.docker.internal:8090
+       - AI_DEV_FACTORY_SUPERVISOR_URL=http://host.docker.internal:8090
     volumes:
       - ~/runtime/ai-dev-factory:/runtime
       - ~/.ssh:/root/.ssh:ro
