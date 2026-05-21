@@ -144,3 +144,7 @@
 [2026-05-21T07:46:28Z] auto-run: step=coder done rc=0
 [2026-05-21T07:46:28Z] auto-run: transition IMPLEMENTATION_FIX_REQUIRED → IMPLEMENTATION_REVIEW_NEEDED
 [2026-05-21T07:46:28Z] auto-run: auto-commit triggered
+[2026-05-21T07:46:28Z] commit-checkpoint: sha=19d1894 message='T120: checkpoint [IMPLEMENTATION_REVIEW_NEEDED] — update workflow artifacts'
+[2026-05-21T07:46:28Z] auto-run: auto-push triggered
+[2026-05-21T07:46:28Z] push: refused — DIRTY_RUNTIME_CHECKPOINT — uncommitted changes present before push
+[2026-05-21T07:46:28Z] auto-run: auto-push failed rc=2
