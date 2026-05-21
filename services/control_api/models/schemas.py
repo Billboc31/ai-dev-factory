@@ -160,3 +160,31 @@ class AuditEvent(BaseModel):
     message: str
     metadata: dict | None = None
     created_at: str
+
+
+class WorkerInfo(BaseModel):
+    ticket_id: str
+    pid: int | None = None
+    worktree_path: str | None = None
+    state: str | None = None
+
+
+class RetryBlockedTicket(BaseModel):
+    ticket_id: str
+    failure_class: str | None = None
+    retry_count: int = 0
+    cooldown_until: str | None = None
+
+
+class QueueEntry(BaseModel):
+    issue_number: int | None = None
+    title: str | None = None
+
+
+class RuntimeStatus(BaseModel):
+    daemon_online: bool
+    workers: list[WorkerInfo] = []
+    retry_blocked: list[RetryBlockedTicket] = []
+    intake_queue: list[QueueEntry] = []
+    last_action: str | None = None
+    last_error: str | None = None

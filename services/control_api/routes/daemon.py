@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Query, Request
-from ..models.schemas import ActionResult, DaemonActivity, DaemonStatus, BoardResponse
+from ..models.schemas import ActionResult, DaemonActivity, DaemonStatus, BoardResponse, RuntimeStatus
 from ..services import daemon_manager, board_service
 
 router = APIRouter(prefix="/daemon", tags=["daemon"])
@@ -45,3 +45,8 @@ def daemon_sync_main(request: Request) -> ActionResult:
 def daemon_board(request: Request) -> BoardResponse:
     worktrees_dir = getattr(request.app.state, "worktrees_dir", None)
     return board_service.get_board(_root(request), worktrees_dir=worktrees_dir)
+
+
+@router.get("/runtime-status", response_model=RuntimeStatus)
+def daemon_runtime_status(request: Request) -> RuntimeStatus:
+    return daemon_manager.get_runtime_status(_root(request))

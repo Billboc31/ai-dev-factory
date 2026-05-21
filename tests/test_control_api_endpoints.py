@@ -200,3 +200,55 @@ def test_list_projects(tmp_path):
     projects = r.json()
     assert len(projects) == 1
     assert projects[0]["tickets_count"] == 0
+
+
+# ── /daemon/runtime-status ────────────────────────────────────────────────────
+
+def test_runtime_status_daemon_offline(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    (tmp_path / "runs").mkdir()
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/daemon/runtime-status")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["daemon_online"] is False
+    assert body["workers"] == []
+    assert body["intake_queue"] == []
+    assert body["retry_blocked"] == []
+
+
+def test_runtime_status_daemon_online(tmp_path, monkeypatch):
+    import os
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    (tmp_path / "runs").mkdir()
+    pid = os.getpid()
+    (tmp_path / "runs" / "daemon.pid").write_text(json.dumps({"pid": pid, "started_at": "2026-01-01T00:00:00Z"}))
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/daemon/runtime-status")
+    assert r.status_code == 200
+    assert r.json()["daemon_online"] is True
+
+
+def test_runtime_status_intake_queue(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    _make_ticket(tmp_path, "T001", "PLAN_APPROVED")
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/daemon/runtime-status")
+    assert r.status_code == 200
+    queue = r.json()["intake_queue"]
+    assert any(e.get("title") == "T001" for e in queue)
+
+
+def test_runtime_status_retry_blocked(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    _make_ticket(tmp_path, "T001", "PLAN_APPROVED")
+    (tmp_path / "runs" / "T001" / "retry-state.json").write_text(
+        json.dumps({"failure_class": "tool_error", "retry_count": 2, "cooldown_until": "2026-05-21T14:00:00Z"})
+    )
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/daemon/runtime-status")
+    assert r.status_code == 200
+    blocked = r.json()["retry_blocked"]
+    assert len(blocked) == 1
+    assert blocked[0]["ticket_id"] == "T001"
+    assert blocked[0]["retry_count"] == 2
