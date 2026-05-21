@@ -238,6 +238,12 @@ def get_status(project_root: Path) -> DaemonStatus:
                 started_at=sup_data.get("started_at"),
                 last_heartbeat=_last_heartbeat(project_root),
                 current_ticket=_current_ticket(project_root),
+                last_exit_code=sup_data.get("last_exit_code"),
+                last_exit_time=sup_data.get("last_exit_time"),
+                last_error=sup_data.get("last_error"),
+                exit_unexpected=sup_data.get("exit_unexpected"),
+                restart_count=sup_data.get("restart_count"),
+                restart_policy=sup_data.get("restart_policy"),
             )
         # Supervisor unreachable — fall back to local check (may not work in
         # Docker since os.kill cannot reach host PIDs, but returns False safely)

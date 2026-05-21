@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -12,6 +13,7 @@ from fastapi.testclient import TestClient
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
+import services.supervisor.main as sup_mod
 from services.supervisor.main import app as supervisor_app
 
 
@@ -103,3 +105,91 @@ def test_supervisor_unreachable_returns_structured_error(monkeypatch, tmp_path):
     assert result.error == "supervisor_unreachable"
     assert result.host_command is not None
     assert "start_supervisor" in result.host_command
+
+
+# ── 5. Unexpected daemon exit sets exit_unexpected=True ───────────────────────
+
+def test_unexpected_exit_detected(monkeypatch, tmp_path):
+    """Simulating an unexpected daemon exit sets exit_unexpected=True."""
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path))
+    monkeypatch.setattr(sup_mod, "_daemon_state", sup_mod.DaemonState())
+    monkeypatch.setattr(sup_mod, "_daemon_proc", None)
+    monkeypatch.setattr(sup_mod, "_voluntary_stop", False)
+
+    # Simulate a daemon that was running but the process is now gone
+    dead_pid = 999999
+    sup_mod._daemon_state.pid = dead_pid
+
+    pid_path = tmp_path / "runs" / "daemon.pid"
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text(json.dumps({"pid": dead_pid, "started_at": "2026-01-01T00:00:00Z"}))
+
+    sup_mod._check_and_maybe_restart()
+
+    assert sup_mod._daemon_state.pid is None
+    assert sup_mod._daemon_state.exit_unexpected is True
+    assert not pid_path.exists()
+
+
+# ── 6. Stale PID file is removed and status returns running=False ─────────────
+
+def test_stale_pid_recovery(monkeypatch, tmp_path):
+    """GET /daemon/status removes a stale PID file and returns running=False."""
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path))
+    monkeypatch.setattr(sup_mod, "_daemon_state", sup_mod.DaemonState())
+
+    pid_path = tmp_path / "runs" / "daemon.pid"
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text(json.dumps({"pid": 999999, "started_at": "2026-01-01T00:00:00Z"}))
+
+    client = TestClient(supervisor_app)
+    resp = client.get("/daemon/status")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["running"] is False
+    assert not pid_path.exists()
+
+
+# ── 7. Restart-on-crash policy relaunches the daemon ─────────────────────────
+
+def test_restart_on_crash_policy(monkeypatch, tmp_path):
+    """restart-on-crash policy increments restart_count and respawns the daemon."""
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path))
+    monkeypatch.setattr(sup_mod, "_daemon_state", sup_mod.DaemonState())
+    monkeypatch.setattr(sup_mod, "_daemon_proc", None)
+    monkeypatch.setattr(sup_mod, "_voluntary_stop", False)
+    monkeypatch.setattr(sup_mod, "_daemon_exec_cmd", "echo test")
+
+    sup_mod._daemon_state.pid = 999999
+    sup_mod._daemon_state.restart_policy = "restart-on-crash"
+
+    spawned: list[str] = []
+
+    def mock_spawn(exec_cmd: str):
+        spawned.append(exec_cmd)
+        return 42000, "2026-01-01T01:00:00Z", None
+
+    monkeypatch.setattr(sup_mod, "_spawn_daemon", mock_spawn)
+
+    sup_mod._check_and_maybe_restart()
+
+    assert sup_mod._daemon_state.restart_count == 1
+    assert sup_mod._daemon_state.pid == 42000
+    assert len(spawned) == 1
+
+
+# ── 8. Voluntary stop is not flagged as unexpected ────────────────────────────
+
+def test_voluntary_stop_not_flagged_unexpected(monkeypatch, tmp_path):
+    """Stopping via API (voluntary_stop=True) does not set exit_unexpected."""
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path))
+    monkeypatch.setattr(sup_mod, "_daemon_state", sup_mod.DaemonState())
+    monkeypatch.setattr(sup_mod, "_daemon_proc", None)
+    monkeypatch.setattr(sup_mod, "_voluntary_stop", True)
+
+    sup_mod._daemon_state.pid = 999999
+
+    sup_mod._check_and_maybe_restart()
+
+    assert sup_mod._daemon_state.exit_unexpected is False
+    assert sup_mod._voluntary_stop is False

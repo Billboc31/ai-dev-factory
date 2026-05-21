@@ -17,6 +17,12 @@ class DaemonStatus(BaseModel):
     current_ticket: str | None = None
     supervisor_available: bool | None = None
     supervisor_url: str | None = None
+    last_exit_code: int | None = None
+    last_exit_time: str | None = None
+    last_error: str | None = None
+    exit_unexpected: bool | None = None
+    restart_count: int | None = None
+    restart_policy: str | None = None
 
 
 class DaemonActivity(BaseModel):

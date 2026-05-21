@@ -93,6 +93,32 @@ describe('DaemonPage', () => {
     expect(screen.getByRole('button', { name: /copy/i })).toBeInTheDocument()
   })
 
+  it('shows crash banner when daemon exited unexpectedly', async () => {
+    daemonApi.getDaemonStatus.mockResolvedValue({
+      data: {
+        running: false,
+        pid: null,
+        started_at: null,
+        exit_unexpected: true,
+        last_exit_code: 1,
+        last_exit_time: '2026-05-22T10:00:00Z',
+        restart_count: 0,
+      },
+    })
+    renderPage()
+    expect(await screen.findByText(/Daemon crashed unexpectedly/i)).toBeInTheDocument()
+    expect(await screen.findByText(/Exit code/i)).toBeInTheDocument()
+  })
+
+  it('does not show crash banner on normal stopped state', async () => {
+    daemonApi.getDaemonStatus.mockResolvedValue({
+      data: { running: false, pid: null, started_at: null, exit_unexpected: false },
+    })
+    renderPage()
+    expect(await screen.findByText('Stopped')).toBeInTheDocument()
+    expect(screen.queryByText(/Daemon crashed unexpectedly/i)).not.toBeInTheDocument()
+  })
+
   it('does not render the host command panel on a successful start', async () => {
     daemonApi.getDaemonStatus.mockResolvedValue({ data: { running: false, pid: null, started_at: null } })
     daemonApi.startDaemon.mockResolvedValue({
