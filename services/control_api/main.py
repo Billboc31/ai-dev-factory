@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 
 from .routes import daemon, health, issues, project_map, providers, tickets
+from .services.project_registry import ProjectRegistry
 from .services.runtime_resolver import resolve_worktrees_dir
 
 _TOOLS_DIR = Path(__file__).resolve().parents[2] / "tools" / "agent_runner"
@@ -50,6 +51,7 @@ def create_app(
     project_root: Path | None = None,
     daemon_exec_cmd: str = "claude --dangerously-skip-permissions",
     worktrees_dir: Path | None = None,
+    projects_root: Path | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="ai-dev-factory Control API",
@@ -62,6 +64,15 @@ def create_app(
     app.state.daemon_exec_cmd = daemon_exec_cmd
     app.state.worktrees_dir = worktrees_dir or resolve_worktrees_dir(_root)
     app.state.db_path = _runtime_db.get_db_path()
+
+    _pr = projects_root or (
+        Path(os.environ["AI_DEV_FACTORY_PROJECTS_ROOT"]).expanduser().resolve()
+        if os.environ.get("AI_DEV_FACTORY_PROJECTS_ROOT")
+        else None
+    )
+    app.state.project_registry = (
+        ProjectRegistry(projects_root=_pr) if _pr else ProjectRegistry.from_single_root(_root)
+    )
 
     app.add_middleware(
         CORSMiddleware,
@@ -106,9 +117,11 @@ if __name__ == "__main__":
     parser.add_argument("--project-root", default=None)
     parser.add_argument("--exec-cmd", default="claude --dangerously-skip-permissions")
     parser.add_argument("--worktrees-dir", default=None)
+    parser.add_argument("--projects-root", default=None)
     args = parser.parse_args()
 
     root = Path(args.project_root).resolve() if args.project_root else _resolve_default_project_root()
     wt_dir = Path(args.worktrees_dir).resolve() if args.worktrees_dir else None
-    _app = create_app(project_root=root, daemon_exec_cmd=args.exec_cmd, worktrees_dir=wt_dir)
+    pr = Path(args.projects_root).resolve() if args.projects_root else None
+    _app = create_app(project_root=root, daemon_exec_cmd=args.exec_cmd, worktrees_dir=wt_dir, projects_root=pr)
     uvicorn.run(_app, host=args.host, port=args.port)

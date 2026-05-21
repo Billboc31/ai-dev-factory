@@ -37,12 +37,5 @@ def providers_status() -> list[ProviderStatus]:
 
 @router.get("/projects", response_model=list[ProjectInfo])
 def list_projects(request: Request) -> list[ProjectInfo]:
-    root = _root(request)
-    tickets = artifact_reader.list_tickets(root)
-    return [
-        ProjectInfo(
-            name=root.name,
-            root=str(root),
-            tickets_count=len(tickets),
-        )
-    ]
+    registry = request.app.state.project_registry
+    return registry.list_projects(artifact_reader)
