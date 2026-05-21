@@ -1080,11 +1080,23 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
         _write_fix_artifact(ticket_id, next_state, output_path)
 
     if auto_commit:
-        _log_runtime(ticket_id, f"auto-run: auto-commit triggered (step={step})")
+        # Sematically, "auto-commit" means "commit *every* useful change the
+        # workflow just produced". Restricting the staging surface here is
+        # what caused T122: the coder modified apps/dashboard/, services/…
+        # but `commit_ticket(include_code=False)` only staged
+        # `runs/<ticket>/`, leaving real code dirty and breaking the next
+        # `git pull --rebase`. We therefore always stage the full set when
+        # auto-commit is enabled. The narrow `runs/<ticket>/`-only mode is
+        # still reachable via manual `--commit` (without `--include-code`).
+        effective_include_code = True if auto_commit else include_code
+        _log_runtime(
+            ticket_id,
+            f"auto-run: auto-commit triggered (step={step}, include_code={effective_include_code})",
+        )
         commit_rc = commit_ticket(
             ticket_id,
             None,
-            include_code=include_code,
+            include_code=effective_include_code,
             workflow_step=step,
         )
         if commit_rc == 0 and auto_push:

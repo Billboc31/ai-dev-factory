@@ -972,19 +972,96 @@ def _clean_runtime_before_sync(ticket_id: str, cwd: str | None = None) -> tuple[
     return cleaned, real_dirty
 
 
-def _sync_ticket_branch(ticket_id: str, branch: str, cwd: str | None = None) -> bool:
+def _auto_commit_useful_dirty(
+    ticket_id: str,
+    real_dirty: list[str],
+    cwd: str | None,
+    push: bool,
+) -> bool:
+    """Auto-commit a non-empty ``real_dirty`` set via ``checkpoint_transition``.
+
+    Used as a fallback right before ``git pull --rebase``: if the worker
+    left real implementation files unstaged (T122: coder did not commit),
+    we cannot rebase, so we commit them here on its behalf rather than
+    refusing the cycle. Returns True on success, False otherwise.
+    """
+    message_lines = [
+        f"chore({ticket_id}): pre-sync auto-commit",
+        "",
+        "Auto-committed by the daemon before `git pull --rebase` because the",
+        "previous worker left useful implementation changes unstaged.",
+        "",
+        "Files:",
+    ]
+    for p in real_dirty[:20]:
+        message_lines.append(f"- {p}")
+    if len(real_dirty) > 20:
+        message_lines.append(f"- … and {len(real_dirty) - 20} more")
+    message_lines += ["", f"refs {ticket_id}"]
+    message = "\n".join(message_lines)
+    try:
+        checkpoint_transition(
+            ticket_id,
+            message,
+            push=push,
+            include_code=True,
+            cwd=cwd,
+        )
+        _log(
+            f"{ticket_id}: pre-sync auto-commit ok "
+            f"({len(real_dirty)} useful file(s), push={push})"
+        )
+        return True
+    except CheckpointError as exc:
+        _log(f"{ticket_id}: pre-sync auto-commit failed — {exc}")
+        return False
+    except DirtyTreeError as exc:
+        _log(f"{ticket_id}: pre-sync auto-commit left dirty tree — {exc}")
+        return False
+
+
+def _sync_ticket_branch(
+    ticket_id: str,
+    branch: str,
+    cwd: str | None = None,
+    auto_commit: bool = False,
+    auto_push: bool = False,
+) -> bool:
     """Pull latest commits from remote with fast-forward only.
 
-    Before pulling, ``_clean_runtime_before_sync`` discards runtime garbage
-    so the rebase is not blocked by ``runtime.log``, ``.pyc`` files, locks,
-    or any other path classified as runtime-ignored. Real code changes are
-    left untouched — if they prevent the rebase, the regular failure path
-    handles it.
+    Before pulling, runtime garbage is discarded and any remaining *useful*
+    dirty paths are handled depending on configuration:
+
+    - ``auto_commit=True``  → auto-commit the useful dirty (via
+      ``checkpoint_transition(include_code=True)``) and, if ``auto_push``
+      is set, push the resulting commit. This is the path that fixes T122:
+      the coder finished but did not stage its own changes, so we commit
+      them here rather than failing the rebase.
+    - ``auto_commit=False`` → log a clear error and refuse to rebase.
+      The caller skips the ticket without touching the user's changes.
 
     Returns True if in sync or remote branch not yet published.
-    Returns False if diverged or rebase failed.
+    Returns False if diverged, rebase failed, or we refused to proceed.
     """
-    _clean_runtime_before_sync(ticket_id, cwd=cwd)
+    cleaned, real_dirty = _clean_runtime_before_sync(ticket_id, cwd=cwd)
+
+    if real_dirty:
+        if auto_commit:
+            _log(
+                f"{ticket_id}: pre-sync useful dirty detected, "
+                f"auto-committing before rebase: {real_dirty[:10]}"
+            )
+            if not _auto_commit_useful_dirty(
+                ticket_id, real_dirty, cwd=cwd, push=auto_push
+            ):
+                _log(f"{ticket_id}: pre-sync auto-commit failed — sync skipped")
+                return False
+        else:
+            _log(
+                f"{ticket_id}: pre-sync refused — useful files dirty and "
+                f"--auto-commit is disabled: {real_dirty[:10]}"
+            )
+            return False
 
     result = subprocess.run(
         ["git", "pull", "--rebase", "origin", branch],
@@ -1063,7 +1140,13 @@ def launch_ticket(
             ticket_state = _load_state_json(worktree_run_dir)
             branch = ticket_state.get("branch")
 
-            if branch and not _sync_ticket_branch(ticket_id, branch, cwd=str(worktree_path)):
+            if branch and not _sync_ticket_branch(
+                ticket_id,
+                branch,
+                cwd=str(worktree_path),
+                auto_commit=auto_commit,
+                auto_push=auto_push,
+            ):
                 _log(f"skipping {ticket_id}: branch sync failed in worktree")
                 return
 
@@ -1113,7 +1196,12 @@ def launch_ticket(
                 if current_branch != expected_branch:
                     _log(f"skipping {ticket_id}: branch mismatch current={current_branch!r} expected={expected_branch!r}")
                     return
-                if not _sync_ticket_branch(ticket_id, expected_branch):
+                if not _sync_ticket_branch(
+                    ticket_id,
+                    expected_branch,
+                    auto_commit=auto_commit,
+                    auto_push=auto_push,
+                ):
                     _log(f"skipping {ticket_id}: branch sync failed — diverged from remote")
                     return
 

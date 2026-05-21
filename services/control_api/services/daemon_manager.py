@@ -155,6 +155,12 @@ def start(project_root: Path, exec_cmd: str) -> ActionResult:
                     "ai-ready",
                     "--auto-commit",
                     "--auto-push",
+                    # ``--auto-include-code`` is required for auto-commit to
+                    # stage real implementation files (apps/, services/, …)
+                    # alongside the workflow artifacts. Without it the coder
+                    # leaves the worktree dirty and the next `git pull --rebase`
+                    # fails.
+                    "--auto-include-code",
                     "--worktrees-dir",
                     str(resolve_worktrees_dir(project_root)),
                 ],
