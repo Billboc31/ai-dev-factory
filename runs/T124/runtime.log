@@ -21,3 +21,6 @@
 [2026-05-21T15:22:28Z] push: tolerating runtime dirty files (not blocking): ['runs/T124/runtime.log']
 [2026-05-21T15:22:28Z] push: pushing branch=ticket/T124-t124-multi-project-runtime-boards-and-project-isol
 [2026-05-21T15:22:31Z] push: done branch=ticket/T124-t124-multi-project-runtime-boards-and-project-isol
+[2026-05-21T15:27:17Z] commit-checkpoint: refused — failed to determine current git branch
+[2026-05-21T15:27:20Z] commit-checkpoint: refused — failed to determine current git branch
+[2026-05-21T15:27:21Z] commit-checkpoint: refused — failed to determine current git branch
