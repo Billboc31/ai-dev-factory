@@ -33,3 +33,17 @@
 [2026-05-21T18:52:22Z] push: tolerating runtime dirty files (not blocking): ['runs/T128/runtime.log']
 [2026-05-21T18:52:22Z] push: pushing branch=ticket/T128-t128-host-supervisor-for-daemon-and-deployment-job
 [2026-05-21T18:52:25Z] push: done branch=ticket/T128-t128-host-supervisor-for-daemon-and-deployment-job
+[2026-05-21T18:57:38Z] auto-run start: state=PLAN_APPROVED
+[2026-05-21T18:57:38Z] auto-run: running step=coder
+[2026-05-21T18:57:38Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-21T18:57:38Z] prompt: generic fallback — injecting runs/T128/ticket.md
+[2026-05-21T18:57:38Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T18:57:38Z] compose: role=ai/roles/coder.md
+[2026-05-21T18:57:38Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T18:57:38Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-21T18:57:38Z] compose: skill=ai/skills/code-quality.md
+[2026-05-21T18:57:38Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-21T18:57:38Z] compose: skill=ai/skills/security.md
+[2026-05-21T18:57:38Z] compose: task (canonical prompt)
+[2026-05-21T18:57:38Z] snapshot: runtime-prompt=runs/T128/prompts/coder-attempt-1.md
+[2026-05-21T19:07:28Z] human-approval: refused 'approve-plan' — expected 'PLAN_REVIEW_NEEDED', got 'PLAN_APPROVED'

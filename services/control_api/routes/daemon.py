@@ -1,5 +1,7 @@
+import os
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, Depends, Query, Request
 
 from ..dependencies import resolve_project
@@ -15,9 +17,24 @@ def _root(request: Request):
     return request.app.state.project_root
 
 
+def _enrich_with_supervisor(status: DaemonStatus) -> DaemonStatus:
+    """Ping the supervisor health endpoint and set supervisor_available/supervisor_url."""
+    sup_url = os.environ.get("AI_DEV_FACTORY_SUPERVISOR_URL", "").rstrip("/") or None
+    if sup_url is None:
+        return status
+    status.supervisor_url = sup_url
+    try:
+        resp = httpx.get(f"{sup_url}/health", timeout=2.0)
+        status.supervisor_available = resp.status_code == 200
+    except Exception:
+        status.supervisor_available = False
+    return status
+
+
 @router.get("/status", response_model=DaemonStatus)
 def daemon_status(request: Request) -> DaemonStatus:
-    return daemon_manager.get_status(_root(request))
+    status = daemon_manager.get_status(_root(request))
+    return _enrich_with_supervisor(status)
 
 
 @router.post("/start", response_model=ActionResult)
@@ -62,7 +79,8 @@ def daemon_runtime_status(request: Request) -> RuntimeStatus:
 
 @project_router.get("/{project_id}/daemon/status", response_model=DaemonStatus)
 def project_daemon_status(project_root: Path = Depends(resolve_project)) -> DaemonStatus:
-    return daemon_manager.get_status(project_root)
+    status = daemon_manager.get_status(project_root)
+    return _enrich_with_supervisor(status)
 
 
 @project_router.post("/{project_id}/daemon/start", response_model=ActionResult)

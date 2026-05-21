@@ -13,6 +13,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import httpx
+
 from ..models.schemas import ActionResult, DaemonStatus, QueueEntry, RetryBlockedTicket, RuntimeStatus, WorkerInfo
 from .runtime_resolver import resolve_logs_dir, resolve_runs_dir, resolve_state_dir, resolve_worktrees_dir
 
@@ -152,6 +154,50 @@ def _host_daemon_command_env() -> str | None:
     return None
 
 
+# ── Supervisor delegation ─────────────────────────────────────────────────────
+
+def _supervisor_url() -> str | None:
+    url = os.environ.get("AI_DEV_FACTORY_SUPERVISOR_URL")
+    return url.rstrip("/") if url and url.strip() else None
+
+
+def _supervisor_start_command() -> str:
+    """Return the host command to launch the supervisor itself."""
+    runtime_root = os.environ.get(
+        "AI_DEV_FACTORY_RUNTIME_ROOT", "~/runtime/ai-dev-factory"
+    )
+    host_clone = os.environ.get(
+        "AI_DEV_FACTORY_PROJECT_ROOT",
+        f"{runtime_root}/clones/ai-dev-factory",
+    )
+    host_clone = _expand_user(host_clone)
+    return f"cd {host_clone} && bash deploy/start_supervisor.sh"
+
+
+def _call_supervisor(
+    method: str,
+    path: str,
+    json_body: dict | None = None,
+    timeout: float = 2.0,
+) -> tuple[dict | None, str | None]:
+    """Call the supervisor API. Returns (data, error_code)."""
+    url = _supervisor_url()
+    if url is None:
+        return None, "no_supervisor_url"
+    full_url = f"{url}{path}"
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            if method == "GET":
+                resp = client.get(full_url)
+            else:
+                resp = client.post(full_url, json=json_body or {})
+        return resp.json(), None
+    except httpx.ConnectError:
+        return None, "supervisor_unreachable"
+    except httpx.TimeoutException:
+        return None, "supervisor_unreachable"
+
+
 def _last_heartbeat(project_root: Path) -> str | None:
     path = _log_path(project_root)
     if not path.exists():
@@ -183,6 +229,19 @@ def _current_ticket(project_root: Path) -> str | None:
 
 
 def get_status(project_root: Path) -> DaemonStatus:
+    if _supervisor_url():
+        sup_data, error = _call_supervisor("GET", "/daemon/status")
+        if error is None and sup_data:
+            return DaemonStatus(
+                running=sup_data.get("running", False),
+                pid=sup_data.get("pid"),
+                started_at=sup_data.get("started_at"),
+                last_heartbeat=_last_heartbeat(project_root),
+                current_ticket=_current_ticket(project_root),
+            )
+        # Supervisor unreachable — fall back to local check (may not work in
+        # Docker since os.kill cannot reach host PIDs, but returns False safely)
+
     data = _read_pid_file(project_root)
     if data is None:
         return DaemonStatus(running=False)
@@ -368,7 +427,12 @@ def _start_via_host_command(project_root: Path, host_cmd: str) -> ActionResult:
 def start(project_root: Path, exec_cmd: str) -> ActionResult:
     """Start the daemon — host-side, never inside Docker.
 
-    Three paths:
+    Four paths:
+
+    0. **Supervisor configured** (``AI_DEV_FACTORY_SUPERVISOR_URL``): delegate
+       to the host supervisor HTTP API. If unreachable, return a structured
+       error with ``error="supervisor_unreachable"`` and a copy-paste
+       ``host_command`` to launch the supervisor.
 
     1. **Host launcher configured** (``AI_DEV_FACTORY_HOST_DAEMON_COMMAND``):
        run the configured shell command verbatim (typically ``ssh host -- …``).
@@ -383,6 +447,33 @@ def start(project_root: Path, exec_cmd: str) -> ActionResult:
     status = get_status(project_root)
     if status.running:
         return ActionResult(ok=False, message=f"daemon already running (pid={status.pid})")
+
+    # ── path 0: supervisor delegation ─────────────────────────────────────
+    if _supervisor_url():
+        data, error = _call_supervisor("POST", "/daemon/start", {"exec_cmd": exec_cmd})
+        if error == "supervisor_unreachable":
+            logger.warning("api: supervisor unreachable at %s", _supervisor_url())
+            return ActionResult(
+                ok=False,
+                message=(
+                    "Supervisor unreachable. Start it on the host first: "
+                    "bash deploy/start_supervisor.sh"
+                ),
+                error="supervisor_unreachable",
+                host_command=_supervisor_start_command(),
+            )
+        if data:
+            if data.get("ok"):
+                logger.info("api: supervisor started daemon pid=%s", data.get("pid"))
+                return ActionResult(
+                    ok=True,
+                    message=f"supervisor started daemon (pid={data.get('pid')})",
+                )
+            return ActionResult(
+                ok=False,
+                message=data.get("error") or "supervisor start failed",
+                error=data.get("error"),
+            )
 
     host_cmd = _host_daemon_command_env()
     in_docker = _is_running_in_docker()
@@ -489,6 +580,26 @@ def start(project_root: Path, exec_cmd: str) -> ActionResult:
 
 def stop(project_root: Path) -> ActionResult:
     logger.info("api: daemon stop requested")
+
+    if _supervisor_url():
+        data, error = _call_supervisor("POST", "/daemon/stop")
+        if error == "supervisor_unreachable":
+            logger.warning("api: supervisor unreachable at %s", _supervisor_url())
+            return ActionResult(
+                ok=False,
+                message="Supervisor unreachable — cannot stop daemon remotely",
+                error="supervisor_unreachable",
+            )
+        if data:
+            if data.get("ok"):
+                logger.info("api: daemon stopped via supervisor")
+                return ActionResult(ok=True, message="daemon stopped via supervisor")
+            return ActionResult(
+                ok=False,
+                message=data.get("error") or "supervisor stop failed",
+                error=data.get("error"),
+            )
+
     status = get_status(project_root)
     if not status.running or status.pid is None:
         return ActionResult(ok=False, message="daemon is not running")
