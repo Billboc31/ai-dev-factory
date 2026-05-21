@@ -386,7 +386,20 @@ def test_daemon_manager_start_passes_auto_include_code(tmp_path):
         captured["env"] = kwargs.get("env")
         return FakeProc()
 
+    # Stub the preflight to pass so this test isolates the spawn args.
+    facts = {
+        "project_root": str(tmp_path),
+        "cwd": str(tmp_path),
+        "runs_dir": str(daemon_manager.resolve_runs_dir(tmp_path)),
+        "worktrees_dir": "/wt",
+        "logs_dir": str(daemon_manager.resolve_logs_dir(tmp_path)),
+        "runtime_root": "<unset>",
+        "python": sys.executable,
+        "git_path": "/usr/bin/git",
+        "gh_path": "/usr/bin/gh",
+    }
     with patch.object(daemon_manager, "get_status") as gs, \
+         patch.object(daemon_manager, "check_environment", return_value=(True, [], facts)), \
          patch.object(daemon_manager.subprocess, "Popen", side_effect=fake_popen), \
          patch.object(daemon_manager, "_write_pid_file"):
         status_mock = MagicMock()

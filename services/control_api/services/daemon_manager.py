@@ -7,6 +7,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -129,41 +130,157 @@ def get_activity(project_root: Path, lines: int = 50) -> list[str]:
         return []
 
 
+def check_environment(project_root: Path) -> tuple[bool, list[str], dict[str, str]]:
+    """Return ``(ok, errors, facts)`` describing the canonical daemon env.
+
+    The dashboard daemon must run in the same environment as a host-side
+    manual daemon. This helper records every fact and refuses anything that
+    is *quietly* broken — silent degraded mode is precisely what broke the
+    T123/T124 dashboard launch (no ``gh``, no ``.git``, wrong ``cwd``).
+
+    Facts (always populated, even on failure):
+      - project_root: absolute path the daemon will be spawned in
+      - cwd: same as project_root, kept for clarity in logs
+      - runs_dir / worktrees_dir / logs_dir: canonical resolved locations
+      - runtime_root: ``AI_DEV_FACTORY_RUNTIME_ROOT`` (or "<unset>")
+      - gh_path: absolute path to ``gh`` if found, "<missing>" otherwise
+      - git_path: absolute path to ``git``
+      - python: ``sys.executable``
+
+    Errors (the daemon refuses to start when any are present):
+      - missing ``gh`` CLI in PATH
+      - missing ``git`` CLI in PATH
+      - ``project_root`` is not a directory or not a git repo (no ``.git``)
+      - ``runs_dir`` cannot be created/written to
+    """
+    errors: list[str] = []
+    facts: dict[str, str] = {
+        "project_root": str(project_root),
+        "cwd": str(project_root),
+        "runs_dir": str(resolve_runs_dir(project_root)),
+        "worktrees_dir": str(resolve_worktrees_dir(project_root)),
+        "logs_dir": str(resolve_logs_dir(project_root)),
+        "runtime_root": os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT", "<unset>"),
+        "python": sys.executable,
+        "gh_path": shutil.which("gh") or "<missing>",
+        "git_path": shutil.which("git") or "<missing>",
+    }
+
+    if facts["gh_path"] == "<missing>":
+        errors.append(
+            "gh CLI not found in PATH — daemon cannot poll issues, "
+            "create or update PRs. Install gh or ensure the API process "
+            "PATH includes the host gh binary."
+        )
+    if facts["git_path"] == "<missing>":
+        errors.append("git not found in PATH — daemon cannot run.")
+
+    if not project_root.is_dir():
+        errors.append(f"project_root is not a directory: {project_root}")
+    elif not (project_root / ".git").exists():
+        # Could be a bare worktree dir; check `git rev-parse` to be safe.
+        try:
+            result = subprocess.run(
+                ["git", "-C", str(project_root), "rev-parse", "--git-dir"],
+                capture_output=True, text=True, check=False, timeout=5,
+            )
+            if result.returncode != 0:
+                errors.append(
+                    f"project_root has no .git and is not a git working tree: "
+                    f"{project_root} — daemon needs git access for worktree sync."
+                )
+        except (OSError, subprocess.SubprocessError) as exc:
+            errors.append(f"git rev-parse failed at {project_root}: {exc}")
+
+    runs_dir = Path(facts["runs_dir"])
+    try:
+        runs_dir.mkdir(parents=True, exist_ok=True)
+        # Touch a sentinel to confirm writability
+        sentinel = runs_dir / ".preflight-write-check"
+        sentinel.write_text("ok", encoding="utf-8")
+        sentinel.unlink()
+    except OSError as exc:
+        errors.append(f"runs_dir not writable: {runs_dir} — {exc}")
+
+    return (not errors), errors, facts
+
+
+def _format_environment_banner(facts: dict[str, str]) -> str:
+    """Multiline banner suitable for writing into ``daemon.log`` before spawn."""
+    lines = ["daemon environment:"]
+    for key in (
+        "project_root", "cwd", "runtime_root",
+        "runs_dir", "worktrees_dir", "logs_dir",
+        "python", "git_path", "gh_path",
+    ):
+        lines.append(f"  {key}={facts.get(key, '<unknown>')}")
+    return "\n".join(lines)
+
+
 def start(project_root: Path, exec_cmd: str) -> ActionResult:
     logger.info("api: daemon start requested")
     status = get_status(project_root)
     if status.running:
         return ActionResult(ok=False, message=f"daemon already running (pid={status.pid})")
 
+    ok, errors, facts = check_environment(project_root)
+    if not ok:
+        # NEVER write a fake PID file on failure — dashboard would otherwise
+        # report the daemon as "running" when it never actually started.
+        msg = "daemon refused to start — invalid environment:\n  " + "\n  ".join(errors)
+        # Also persist the failure to daemon.log so the dashboard's
+        # /daemon/activity endpoint can surface it.
+        try:
+            log = _log_path(project_root)
+            log.parent.mkdir(parents=True, exist_ok=True)
+            with open(log, "a", encoding="utf-8") as log_fh:
+                log_fh.write(f"[{datetime.datetime.now(datetime.timezone.utc).isoformat()}] startup refused\n")
+                log_fh.write(_format_environment_banner(facts) + "\n")
+                for err in errors:
+                    log_fh.write(f"  ERROR: {err}\n")
+        except OSError:
+            pass
+        logger.warning("api: daemon start refused — %s", errors)
+        return ActionResult(ok=False, message=msg)
+
     started_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     log = _log_path(project_root)
     log.parent.mkdir(parents=True, exist_ok=True)
+
+    cmd = [
+        sys.executable,
+        str(_RUN_DAEMON),
+        "--exec-cmd",
+        exec_cmd,
+        "--poll-issues",
+        "--issue-label",
+        "ai-ready",
+        "--auto-commit",
+        "--auto-push",
+        # ``--auto-include-code`` is required for auto-commit to stage real
+        # implementation files (apps/, services/, …) alongside the workflow
+        # artifacts. Without it the coder leaves the worktree dirty and the
+        # next `git pull --rebase` fails.
+        "--auto-include-code",
+        "--worktrees-dir",
+        facts["worktrees_dir"],
+    ]
+
     try:
         # Suppress .pyc generation for the entire daemon process tree so the
         # workflow does not pollute worktrees with __pycache__ entries that
         # would later show up as dirty paths and block git pull --rebase.
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
         with open(log, "a", encoding="utf-8") as log_fh:
+            # Banner BEFORE Popen so any spawn failure is still observable.
+            log_fh.write(
+                f"[{started_at}] preparing to spawn daemon\n"
+                + _format_environment_banner(facts) + "\n"
+                f"  command={' '.join(cmd)}\n"
+            )
+            log_fh.flush()
             proc = subprocess.Popen(
-                [
-                    sys.executable,
-                    str(_RUN_DAEMON),
-                    "--exec-cmd",
-                    exec_cmd,
-                    "--poll-issues",
-                    "--issue-label",
-                    "ai-ready",
-                    "--auto-commit",
-                    "--auto-push",
-                    # ``--auto-include-code`` is required for auto-commit to
-                    # stage real implementation files (apps/, services/, …)
-                    # alongside the workflow artifacts. Without it the coder
-                    # leaves the worktree dirty and the next `git pull --rebase`
-                    # fails.
-                    "--auto-include-code",
-                    "--worktrees-dir",
-                    str(resolve_worktrees_dir(project_root)),
-                ],
+                cmd,
                 cwd=project_root,
                 stdout=log_fh,
                 stderr=log_fh,
@@ -174,7 +291,9 @@ def start(project_root: Path, exec_cmd: str) -> ActionResult:
         logger.info("api: daemon started pid=%d", proc.pid)
         return ActionResult(ok=True, message=f"daemon started (pid={proc.pid})")
     except OSError as exc:
-        return ActionResult(ok=False, message=str(exc))
+        # Popen failure (rare: usually permission / fd / missing python).
+        # No PID file is written — dashboard status remains accurate.
+        return ActionResult(ok=False, message=f"daemon spawn failed: {exc}")
 
 
 def stop(project_root: Path) -> ActionResult:

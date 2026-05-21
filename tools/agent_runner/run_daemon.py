@@ -169,9 +169,22 @@ def _now_iso() -> str:
 
 
 def _log(message: str) -> None:
+    """Log one daemon line.
+
+    Avoids the historical "every line written twice" issue that the
+    dashboard logs surfaced: when the daemon is spawned by
+    ``daemon_manager.start`` its ``stdout`` is already redirected to
+    ``daemon.log`` via Popen. Mirroring the same line into ``_LOG_FILE``
+    (which resolves to the same path) would double every entry.
+
+    Rule:
+      - always ``print(line)`` — captured by the parent's redirection or
+        shown on the terminal when running interactively;
+      - mirror to ``_LOG_FILE`` *only* in interactive mode (TTY stdout).
+    """
     line = f"[{_now_iso()}] [daemon] {message}"
     print(line, flush=True)
-    if _LOG_FILE:
+    if _LOG_FILE and sys.stdout.isatty():
         try:
             with _LOG_FILE.open("a", encoding="utf-8") as fh:
                 fh.write(line + "\n")
@@ -1649,8 +1662,53 @@ def main(argv: list[str]) -> int:
         print(f"error: runs dir not found: {runs_dir}", file=sys.stderr)
         return 2
 
-    _log(f"starting daemon exec-cmd={args.exec_cmd!r} interval={args.interval}s dry-run={args.dry_run}")
-    _log(f"worktrees-dir={worktrees_dir} max-workers={args.max_workers}")
+    # ── boot banner ──────────────────────────────────────────────────────
+    # Print every piece of environment context up front so dashboard logs
+    # let operators diagnose "daemon launched but degraded" issues without
+    # extra digging.
+    import shutil as _shutil  # local import to keep top-level imports clean
+    gh_path = _shutil.which("gh") or "<missing>"
+    git_path = _shutil.which("git") or "<missing>"
+    try:
+        repo_check = subprocess.run(
+            ["git", "-C", str(REPO_ROOT), "rev-parse", "--show-toplevel"],
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+        repo_top = repo_check.stdout.strip() if repo_check.returncode == 0 else "<not-a-git-repo>"
+    except (OSError, subprocess.SubprocessError):
+        repo_top = "<git-check-failed>"
+
+    _log("=" * 60)
+    _log("daemon boot — environment")
+    _log(f"  repo_root      = {REPO_ROOT}")
+    _log(f"  repo_toplevel  = {repo_top}")
+    _log(f"  cwd            = {Path.cwd()}")
+    _log(f"  runs_dir       = {runs_dir}")
+    _log(f"  worktrees_dir  = {worktrees_dir}")
+    _log(f"  state_dir      = {state_dir}")
+    _log(f"  runtime_root   = {runtime_root or '<unset>'}")
+    _log(f"  python         = {sys.executable}")
+    _log(f"  git            = {git_path}")
+    _log(f"  gh             = {gh_path}")
+    _log(f"  exec_cmd       = {args.exec_cmd!r}")
+    _log(f"  interval       = {args.interval}s  dry-run={args.dry_run}")
+    _log(f"  max-workers    = {args.max_workers}")
+    _log("=" * 60)
+
+    # Strict refuse mode: if gh is missing while issue polling is requested,
+    # fail fast rather than running a degraded loop.
+    if args.poll_issues and gh_path == "<missing>":
+        _log("FATAL: gh CLI not found in PATH — issue polling requested but cannot proceed.")
+        _log("       Install gh or unset --poll-issues.")
+        return 2
+    if git_path == "<missing>":
+        _log("FATAL: git not found in PATH — daemon cannot run.")
+        return 2
+    if repo_top.startswith("<"):
+        _log(f"FATAL: REPO_ROOT is not a git working tree ({REPO_ROOT}).")
+        _log("       Ensure the daemon launches from a git clone, not a stripped image.")
+        return 2
+
     if not runtime_root:
         _log("WARNING: AI_DEV_FACTORY_RUNTIME_ROOT not set — using dev fallback paths")
     if args.poll_issues:

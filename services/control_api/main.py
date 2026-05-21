@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import time
 from pathlib import Path
@@ -28,6 +29,23 @@ logging.basicConfig(
 logger = logging.getLogger("control-api")
 
 
+def _resolve_default_project_root() -> Path:
+    """Pick a project root for ``create_app`` when no explicit value is given.
+
+    Precedence:
+      1. ``AI_DEV_FACTORY_PROJECT_ROOT`` env var (Docker / systemd use this).
+      2. ``Path.cwd()`` (developer launching uvicorn from the clone).
+
+    Using an env var is the safe escape hatch when the API process runs in
+    a container whose CWD (``/app``) is not a git working tree. Operators
+    can mount the canonical host clone and point this env var at it.
+    """
+    explicit = os.environ.get("AI_DEV_FACTORY_PROJECT_ROOT")
+    if explicit:
+        return Path(explicit).expanduser().resolve()
+    return Path.cwd()
+
+
 def create_app(
     project_root: Path | None = None,
     daemon_exec_cmd: str = "claude --dangerously-skip-permissions",
@@ -39,7 +57,7 @@ def create_app(
         version="1.0.0",
     )
 
-    _root = project_root or Path.cwd()
+    _root = project_root or _resolve_default_project_root()
     app.state.project_root = _root
     app.state.daemon_exec_cmd = daemon_exec_cmd
     app.state.worktrees_dir = worktrees_dir or resolve_worktrees_dir(_root)
@@ -90,7 +108,7 @@ if __name__ == "__main__":
     parser.add_argument("--worktrees-dir", default=None)
     args = parser.parse_args()
 
-    root = Path(args.project_root).resolve() if args.project_root else Path.cwd()
+    root = Path(args.project_root).resolve() if args.project_root else _resolve_default_project_root()
     wt_dir = Path(args.worktrees_dir).resolve() if args.worktrees_dir else None
     _app = create_app(project_root=root, daemon_exec_cmd=args.exec_cmd, worktrees_dir=wt_dir)
     uvicorn.run(_app, host=args.host, port=args.port)

@@ -129,7 +129,20 @@ def test_daemon_start_stop(tmp_path):
     (tmp_path / "runs").mkdir()
     from services.control_api.services import daemon_manager
 
-    with patch("subprocess.Popen") as mock_popen:
+    # Stub the preflight check so this test can focus on Popen/stop wiring.
+    facts = {
+        "project_root": str(tmp_path),
+        "cwd": str(tmp_path),
+        "runs_dir": str(daemon_manager.resolve_runs_dir(tmp_path)),
+        "worktrees_dir": "/wt",
+        "logs_dir": str(daemon_manager.resolve_logs_dir(tmp_path)),
+        "runtime_root": "<unset>",
+        "python": "/usr/bin/python3",
+        "git_path": "/usr/bin/git",
+        "gh_path": "/usr/bin/gh",
+    }
+    with patch("subprocess.Popen") as mock_popen, \
+         patch.object(daemon_manager, "check_environment", return_value=(True, [], facts)):
         mock_proc = MagicMock()
         mock_proc.pid = 99999
         mock_popen.return_value = mock_proc

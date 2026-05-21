@@ -32,7 +32,22 @@ Only **one mandatory human gate**: `PLAN_REVIEW_NEEDED`.
 
 ## Daemon Start
 
-The daemon is launched from the dashboard (POST /daemon/start) or restart endpoint. The control API calls `daemon_manager.start(project_root, exec_cmd)` which spawns `run_daemon.py` as a background subprocess with these flags:
+The daemon is launched from the dashboard (POST /daemon/start) or restart endpoint. The control API calls `daemon_manager.start(project_root, exec_cmd)` which:
+
+1. **Runs `check_environment(project_root)`** — a strict preflight that records
+   every fact (project_root, cwd, runtime_root, runs_dir, worktrees_dir,
+   logs_dir, python, git_path, gh_path) and **refuses** the launch when:
+   - `gh` is missing from PATH,
+   - `git` is missing from PATH,
+   - `project_root` is not a git working tree (no `.git` and `git rev-parse`
+     fails),
+   - `runs_dir` cannot be written to.
+   On refusal, the environment banner and each `ERROR:` line are appended
+   to `runs/daemon.log` so the dashboard's `/daemon/activity` endpoint
+   surfaces the cause; **no PID file is written**. The dashboard therefore
+   never reports a degraded daemon as "running".
+
+2. **Spawns** `run_daemon.py` as a background subprocess with these flags:
 
 ```
 run_daemon.py
@@ -41,13 +56,28 @@ run_daemon.py
   --issue-label ai-ready
   --auto-commit
   --auto-push
-  --worktrees-dir <project_root>/worktrees
+  --auto-include-code         # always stage real code, not just runs/<TID>/
+  --worktrees-dir <facts.worktrees_dir>
 ```
 
-- `--auto-commit` / `--auto-push`: checkpoint runtime artifacts after each step and push to the ticket branch
+The daemon process itself logs a boot banner at startup with the same
+facts, plus a `git rev-parse --show-toplevel` check and a fatal-fail if
+`gh` is required but missing.
+
+- `--auto-commit` / `--auto-push`: checkpoint runtime artifacts and code after each step and push to the ticket branch
+- `--auto-include-code`: required for the coder's real implementation
+  files (apps/, services/, …) to be committed alongside `runs/<TID>/`
 - `--worktrees-dir`: canonical path for per-ticket worktrees (fallback when `AI_DEV_FACTORY_RUNTIME_ROOT` is not set)
 
-The daemon PID is written to `runs/daemon.pid`. Stdout/stderr are appended to `runs/daemon.log`.
+The daemon PID is written to `runs/daemon.pid` only on a successful spawn. Stdout/stderr are appended to `runs/daemon.log` (the daemon process itself avoids double-writing the same line — `_log` only mirrors to the log file when running interactively, i.e. with a TTY stdout).
+
+### Overriding `project_root` from the environment
+
+When the API runs in a container whose CWD is *not* a git working tree
+(e.g. Docker `working_dir: /app` without `.git` mounted), set
+`AI_DEV_FACTORY_PROJECT_ROOT` to the path of the host clone that *is*
+mounted into the container. `create_app()` reads this variable before
+falling back to `Path.cwd()`.
 
 ---
 
