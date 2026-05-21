@@ -333,11 +333,17 @@ def analysis_start(body: AnalysisStartRequest):
 def analysis_status(project_id: str):
     state = _read_analysis_state(project_id)
     if state.get("state") == "running":
-        pid = _analysis_current_pid(project_id)
-        if pid is None:
-            pid_path = _analysis_pid_path(project_id)
+        if _analysis_current_pid(project_id) is None:
+            state["state"] = "failed"
+            state["error"] = "analysis process disappeared"
+            state["finished_at"] = datetime.datetime.now(datetime.timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            _analysis_state_path(project_id).write_text(
+                json.dumps(state, indent=2), encoding="utf-8"
+            )
             try:
-                pid_path.unlink()
+                _analysis_pid_path(project_id).unlink()
             except OSError:
                 pass
     return state
