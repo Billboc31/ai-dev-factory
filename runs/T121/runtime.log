@@ -40,3 +40,22 @@
 [2026-05-21T09:12:55Z] human-approval: approve-plan — PLAN_REVIEW_NEEDED → PLAN_APPROVED
 [2026-05-21T09:13:07Z] commit-checkpoint: refused — failed to determine current git branch
 [2026-05-21T09:13:08Z] push: refused — failed to determine current git branch
+[2026-05-21T09:25:22Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-21T09:25:22Z] auto-run: running step=tester
+[2026-05-21T09:25:22Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-21T09:25:22Z] prompt: generic fallback — injecting runs/T121/ticket.md
+[2026-05-21T09:25:22Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T09:25:22Z] compose: role=ai/roles/tester.md
+[2026-05-21T09:25:22Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T09:25:22Z] compose: skill=ai/skills/testing.md
+[2026-05-21T09:25:22Z] compose: skill=ai/skills/debugging.md
+[2026-05-21T09:25:22Z] compose: task (canonical prompt)
+[2026-05-21T09:25:22Z] snapshot: runtime-prompt=runs/T121/prompts/tester-attempt-1.md
+[2026-05-21T09:30:34Z] auto-run: step=tester done rc=0
+[2026-05-21T09:30:34Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-21T09:30:34Z] auto-run: auto-commit triggered (step=tester)
+[2026-05-21T09:30:34Z] commit-checkpoint: sha=aa70127 files=4 title='test(T121/workflow): tester — update 4 file(s)'
+[2026-05-21T09:30:34Z] auto-run: auto-push triggered
+[2026-05-21T09:30:34Z] push: tolerating runtime dirty files (not blocking): ['runs/T121/runtime.log']
+[2026-05-21T09:30:34Z] push: pushing branch=ticket/T121-t121-reconnect-dashboard-controls-to-canonical-run
+[2026-05-21T09:30:37Z] push: done branch=ticket/T121-t121-reconnect-dashboard-controls-to-canonical-run
