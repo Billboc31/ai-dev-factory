@@ -50,10 +50,11 @@ class DirtyTreeError(Exception):
     """
 
 
-# Runtime/generated files that should never block the intake preflight or the
-# auto-loop clean gate. These are produced or mutated by the daemon itself
-# (bytecode caches, logs, project-map snapshots, worker registry, etc.) and
-# are not "real" code edits.
+# Runtime/generated files that should never block the intake preflight, the
+# auto-loop clean gate, the auto-commit, or the auto-push preflight. These
+# are produced or mutated by the daemon/workflow itself (bytecode caches,
+# logs, locks, project-map snapshots, worker registry, retry state, SQLite
+# runtime DB, etc.) and are not "real" code edits.
 _RUNTIME_IGNORABLE_PATHS: frozenset[str] = frozenset({
     "runs/.project-map.json",
     "runs/.project-map-activity.json",
@@ -63,36 +64,90 @@ _RUNTIME_IGNORABLE_PATHS: frozenset[str] = frozenset({
     "runs/workers.json.tmp",
     "runs/daemon.log",
     "runs/daemon.pid",
+    "runs/daemon.lock",
     "runs/runtime.log",
 })
+
+# Suffixes/extensions of mutable runtime files
+_RUNTIME_IGNORABLE_SUFFIXES: tuple[str, ...] = (
+    ".pyc",
+    ".pyo",
+    ".sqlite",
+    ".sqlite-wal",
+    ".sqlite-shm",
+    ".sqlite-journal",
+    ".pid",
+    ".lock",
+)
+
+# Directory prefixes whose contents are always runtime garbage
+_RUNTIME_IGNORABLE_PREFIXES: tuple[str, ...] = (
+    ".runtime/",
+    ".pytest_cache/",
+    ".mypy_cache/",
+    ".ruff_cache/",
+)
 
 
 def is_ignorable_runtime_dirty_path(path: str) -> bool:
     """Return True if `path` is a runtime/generated artifact safe to ignore.
 
-    Examples of ignorable paths:
-      - any *.pyc
-      - any path containing __pycache__/
-      - runs/.project-map.json, runs/.project-map-activity.json
-      - runs/daemon.log, runs/runtime.log, runs/<ticket>/runtime.log
-      - runs/workers.json, runs/.issue-intake.json
-      - .runtime/ live SQLite DB and its WAL/SHM sidecars
+    A "runtime ignored" path is one that the workflow may freely mutate without
+    the dirty tree blocking any of: clean gate, auto-commit staging, auto-push
+    preflight, retry/recovery, or transition checkpoints.
+
+    Covered patterns:
+      - bytecode: ``*.pyc`` / ``*.pyo`` / anywhere under ``__pycache__/``
+      - test/lint caches: ``.pytest_cache/`` / ``.mypy_cache/`` / ``.ruff_cache/``
+      - daemon control files: ``runs/daemon.log`` / ``runs/daemon.pid`` /
+        ``runs/daemon.lock`` / ``runs/runtime.log``
+      - ticket runtime logs/locks: ``runs/<TID>/runtime.log`` /
+        ``runs/<TID>/daemon.lock`` / ``runs/<TID>/*.lock`` /
+        ``runs/<TID>/*.pid``
+      - project map / issue intake snapshots / worker registry under ``runs/``
+      - live SQLite DB and its WAL/SHM/journal sidecars
+      - anything under ``.runtime/``
     """
     if not path:
         return False
-    if path.endswith(".pyc"):
+    # Strip leading "./" if any (porcelain sometimes emits it). Note we cannot
+    # use ``.lstrip("./")`` because that strips characters one-by-one and would
+    # eat the leading dot of legitimate hidden paths like ``.pytest_cache/``.
+    if path.startswith("./"):
+        path = path[2:]
+
+    # Bytecode anywhere
+    if "__pycache__/" in path or path.endswith("/__pycache__"):
         return True
-    if "__pycache__/" in path or path.endswith("/__pycache__") or path.startswith("__pycache__/"):
-        return True
+
+    # Exact-match files
     if path in _RUNTIME_IGNORABLE_PATHS:
         return True
-    if path.startswith("runs/") and path.endswith("/runtime.log"):
+
+    # Runtime directories (caches, .runtime/)
+    if path.startswith(_RUNTIME_IGNORABLE_PREFIXES):
         return True
-    if path.startswith(".runtime/"):
+
+    # Ticket-scoped runtime/lock/log files: runs/<TID>/{runtime.log,*.lock,*.pid}
+    if path.startswith("runs/"):
+        if path.endswith(("/runtime.log", "/daemon.lock", "/daemon.pid")):
+            return True
+        if path.endswith((".lock", ".pid")) and "/" in path[len("runs/"):]:
+            # e.g. runs/T120/.intake.lock
+            return True
+
+    # Suffix-based catch-all (.pyc, .sqlite*, .lock, .pid)
+    if path.endswith(_RUNTIME_IGNORABLE_SUFFIXES):
         return True
-    if path.endswith((".sqlite", ".sqlite-wal", ".sqlite-shm")):
-        return True
+
     return False
+
+
+# Canonical alias — the centralised helper requested by the runtime hardening
+# work. Prefer ``is_runtime_ignored_path`` in new code; the older
+# ``is_ignorable_runtime_dirty_path`` is kept for backward compatibility with
+# existing imports.
+is_runtime_ignored_path = is_ignorable_runtime_dirty_path
 
 
 def classify_intake_dirty_paths(paths: list[str]) -> tuple[list[str], list[str]]:
@@ -179,7 +234,14 @@ def _run_git(args: list[str], cwd: str | None = None) -> subprocess.CompletedPro
 
 
 def verify_clean_tree(ticket_id: str, cwd: str | None = None) -> None:
-    """Assert the working tree is clean. Raises DirtyTreeError if dirty.
+    """Assert the working tree is clean of *real* changes.
+
+    Runtime/generated paths (runtime.log, daemon.log, .pytest_cache/, locks,
+    SQLite live DB, etc.) are tolerated: they can be mutated by the daemon
+    process itself in the time between a successful commit/push and this
+    verification step (for example, ``_log_runtime`` writing the "pushed" log
+    line). Only paths classified as "real dirty" by
+    :func:`classify_intake_dirty_paths` raise.
 
     The error message embeds DIRTY_RUNTIME_CHECKPOINT so upstream code and
     grep-based monitoring can identify persistence failures.
@@ -190,11 +252,14 @@ def verify_clean_tree(ticket_id: str, cwd: str | None = None) -> None:
             f"{ticket_id}: DIRTY_RUNTIME_CHECKPOINT — git status failed, cannot verify clean tree"
         )
     dirty = result.stdout.strip()
-    if dirty:
-        files = [line[3:] for line in dirty.splitlines() if len(line) >= 4]
+    if not dirty:
+        return
+    paths = parse_porcelain_paths(result.stdout)
+    _, real = classify_intake_dirty_paths(paths)
+    if real:
         raise DirtyTreeError(
             f"{ticket_id}: DIRTY_RUNTIME_CHECKPOINT — working tree not clean after checkpoint: "
-            + ", ".join(files)
+            + ", ".join(real)
         )
 
 

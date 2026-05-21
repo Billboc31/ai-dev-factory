@@ -90,10 +90,10 @@ def test_checkpoint_transition_push_failure(tmp_path):
             checkpoint_transition("T042", "T042: checkpoint", push=True, cwd=str(tmp_path))
 
 
-# ── test 3: dirty tree after commit raises DirtyTreeError ────────────────────
+# ── test 3a: real dirty tree after commit raises DirtyTreeError ─────────────
 
-def test_checkpoint_transition_dirty_tree_remaining(tmp_path):
-    """If the tree is still dirty after commit+push, DirtyTreeError must be raised."""
+def test_checkpoint_transition_real_dirty_tree_remaining(tmp_path):
+    """If a *real* (non-runtime) path remains dirty after commit+push, raise."""
     run_dir = tmp_path / "runs" / "T042"
     run_dir.mkdir(parents=True)
     (run_dir / "state.json").write_text("{}", encoding="utf-8")
@@ -111,13 +111,48 @@ def test_checkpoint_transition_dirty_tree_remaining(tmp_path):
         if cmd == "push":
             return _git_ok()
         if cmd == "status":
-            return _git_ok(" M runs/T042/runtime.log")  # still dirty
+            # Real code change still dirty — must trigger DirtyTreeError
+            return _git_ok(" M tools/agent_runner/run_ticket.py")
         return _git_ok()
 
     import pytest
     with patch("runtime_checkpoint.subprocess.run", side_effect=fake_git):
         with pytest.raises(DirtyTreeError, match="DIRTY_RUNTIME_CHECKPOINT"):
             checkpoint_transition("T042", "T042: checkpoint", push=True, cwd=str(tmp_path))
+
+
+# ── test 3b: runtime dirty after commit is *tolerated* ──────────────────────
+
+def test_checkpoint_transition_runtime_dirty_tree_remaining_is_tolerated(tmp_path):
+    """``runtime.log`` mutates between the commit and the verify_clean_tree
+    call (because ``_log_runtime`` itself writes to it). This must NOT raise."""
+    run_dir = tmp_path / "runs" / "T042"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text("{}", encoding="utf-8")
+
+    def fake_git(args, **kwargs):
+        cmd = args[1] if len(args) > 1 else ""
+        if cmd == "rev-parse":
+            return _git_ok("ticket/T042-work")
+        if cmd == "add":
+            return _git_ok()
+        if cmd == "diff":
+            return _git_ok("runs/T042/state.json")
+        if cmd == "commit":
+            return _git_ok()
+        if cmd == "push":
+            return _git_ok()
+        if cmd == "status":
+            return _git_ok(
+                " M runs/T042/runtime.log\n"
+                " M runs/daemon.log\n"
+                " M tools/agent_runner/__pycache__/run_ticket.cpython-314.pyc\n"
+            )
+        return _git_ok()
+
+    with patch("runtime_checkpoint.subprocess.run", side_effect=fake_git):
+        # Must not raise: every dirty file is runtime-ignored
+        checkpoint_transition("T042", "T042: checkpoint", push=True, cwd=str(tmp_path))
 
 
 # ── test 4: resolve_ticket_cwd reads workers.json ────────────────────────────

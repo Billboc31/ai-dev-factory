@@ -35,6 +35,7 @@ _rc_mod = importlib.util.module_from_spec(_rc_spec)  # type: ignore[arg-type]
 _rc_spec.loader.exec_module(_rc_mod)  # type: ignore[union-attr]
 classify_intake_dirty_paths = _rc_mod.classify_intake_dirty_paths
 parse_porcelain_paths = _rc_mod.parse_porcelain_paths
+is_runtime_ignored_path = _rc_mod.is_runtime_ignored_path
 checkpoint_transition = _rc_mod.checkpoint_transition
 CheckpointError = _rc_mod.CheckpointError
 DirtyTreeError = _rc_mod.DirtyTreeError
@@ -197,30 +198,186 @@ def checkout_branch(ticket_id: str, slug: str | None) -> int:
     return rc
 
 
-def _warn_out_of_scope(ticket_id: str, run_dir: str) -> None:
-    """Print and log files modified outside run_dir and COMMIT_SCOPE — never stages them."""
-    allowed = (run_dir,) + COMMIT_SCOPE
-    result = run_command(["git", "status", "--porcelain"])
-    if result.returncode != 0:
-        return
-    out_of_scope = []
-    for line in result.stdout.splitlines():
-        if len(line) < 4:
-            continue
-        path = line[3:]
-        if " -> " in path:
-            path = path.split(" -> ")[-1]
-        if not any(path.startswith(prefix) for prefix in allowed):
-            out_of_scope.append(path)
-    if out_of_scope:
-        print(f"warning: {len(out_of_scope)} file(s) modified outside commit scope — not staged:")
-        for p in out_of_scope:
-            print(f"  {p}")
-        _log_runtime(ticket_id, f"commit-checkpoint: out-of-scope skipped: {out_of_scope!r}")
+def _staged_paths() -> list[str]:
+    """Return the list of paths currently staged for commit."""
+    res = run_command(["git", "diff", "--cached", "--name-only"])
+    if res.returncode != 0:
+        return []
+    return [line.strip() for line in res.stdout.splitlines() if line.strip()]
 
 
-def commit_ticket(ticket_id: str, message: str | None, include_code: bool = False) -> int:
-    # Validate branch against state.json before touching anything
+def _unstage_runtime_garbage(ticket_id: str) -> list[str]:
+    """Unstage any runtime-ignored path that ``git add -A`` may have picked up.
+
+    Returns the list of paths that were unstaged so the caller can log them.
+    """
+    unstaged: list[str] = []
+    for path in _staged_paths():
+        if is_runtime_ignored_path(path):
+            reset = run_command(["git", "reset", "HEAD", "--", path])
+            if reset.returncode == 0:
+                unstaged.append(path)
+            else:
+                _log_runtime(
+                    ticket_id,
+                    f"commit-checkpoint: failed to unstage runtime path {path!r}: "
+                    f"{reset.stderr.strip()}",
+                )
+    return unstaged
+
+
+def _stage_useful_changes(ticket_id: str, include_code: bool) -> tuple[list[str], list[str]]:
+    """Stage all useful changes for the auto-commit.
+
+    Strategy (when ``include_code`` is True — the typical autonomous flow):
+
+    1. ``git add -A`` to pick up code, tests, prompts, docs, dashboard, API,
+       workflow artifacts, *and* anything else the worker may legitimately
+       have touched outside the predefined COMMIT_SCOPE.
+    2. Unstage any path that :func:`is_runtime_ignored_path` classifies as
+       runtime garbage (logs, locks, caches, SQLite live DB, etc.).
+    3. Return ``(useful, dropped)`` where ``useful`` is the list of paths
+       remaining in the index and ``dropped`` is the list of runtime paths
+       that were filtered out.
+
+    When ``include_code`` is False the historical narrow behaviour is kept:
+    only ``runs/<ticket>/`` is staged. This path is still used by tooling
+    that explicitly does not want to ship code in a checkpoint commit.
+    """
+    run_dir = f"runs/{ticket_id}/"
+    dropped: list[str] = []
+
+    if include_code:
+        add_result = run_command(["git", "add", "-A"])
+        if add_result.returncode != 0:
+            _log_runtime(
+                ticket_id,
+                f"commit-checkpoint: git add -A failed: {add_result.stderr.strip()}",
+            )
+            return [], []
+        dropped = _unstage_runtime_garbage(ticket_id)
+        if dropped:
+            print(f"unstaged runtime garbage ({len(dropped)}): {', '.join(dropped)}")
+            _log_runtime(
+                ticket_id,
+                f"commit-checkpoint: unstaged runtime garbage: {dropped!r}",
+            )
+        return _staged_paths(), dropped
+
+    if not Path(run_dir).exists():
+        return [], []
+    add_result = run_command(["git", "add", run_dir])
+    if add_result.returncode != 0:
+        _log_runtime(
+            ticket_id,
+            f"commit-checkpoint: git add {run_dir} failed: {add_result.stderr.strip()}",
+        )
+        return [], []
+    # Drop runtime garbage even from the narrow scope (runs/<ticket>/runtime.log)
+    dropped = _unstage_runtime_garbage(ticket_id)
+    return _staged_paths(), dropped
+
+
+def _infer_commit_type(step: str | None, staged: list[str]) -> str:
+    """Conventional-commit type derived from the workflow step and staged paths."""
+    if step == "planner":
+        return "docs"
+    if step == "review":
+        return "chore"
+    if step == "tester":
+        return "test"
+    # coder, fix, manual checkpoint: classify by content
+    if any(p.startswith(("tests/", "runs/")) and p.endswith(".py") for p in staged):
+        pass  # fall through
+    if all(p.startswith("runs/") for p in staged) and staged:
+        return "chore"
+    return "feat"
+
+
+def _summarize_scope(staged: list[str], ticket_id: str) -> str:
+    """Short human label of *which* parts of the repo changed."""
+    scopes: list[str] = []
+    seen: set[str] = set()
+    def _add(label: str) -> None:
+        if label not in seen:
+            seen.add(label)
+            scopes.append(label)
+
+    for p in staged:
+        if p.startswith("apps/") or "dashboard" in p:
+            _add("dashboard")
+        elif p.startswith("services/control_api"):
+            _add("control-api")
+        elif p.startswith("services/"):
+            _add("services")
+        elif p.startswith("tools/agent_runner"):
+            _add("runtime")
+        elif p.startswith("tools/"):
+            _add("tools")
+        elif p.startswith("tests/"):
+            _add("tests")
+        elif p.startswith("prompts/"):
+            _add("prompts")
+        elif p.startswith("docs/") or p.startswith("ai/"):
+            _add("docs")
+        elif p.startswith(f"runs/{ticket_id}/"):
+            _add("workflow")
+    if not scopes:
+        return "workflow"
+    return ",".join(scopes[:3])
+
+
+def _build_commit_message(
+    ticket_id: str,
+    workflow_step: str | None,
+    workflow_state: str,
+    staged: list[str],
+) -> str:
+    """Generate a conventional commit message from runtime context.
+
+    Falls back to a generic checkpoint message if no staged files are
+    available. The body lists up to ten staged files and always closes with
+    ``refs <ticket_id>`` so the commit is traceable to its ticket.
+    """
+    if not staged:
+        return f"chore({ticket_id}): checkpoint [{workflow_state}]"
+
+    commit_type = _infer_commit_type(workflow_step, staged)
+    scope = _summarize_scope(staged, ticket_id)
+    step_label = workflow_step or workflow_state.lower()
+
+    title = f"{commit_type}({ticket_id}/{scope}): {step_label} — update {len(staged)} file(s)"
+
+    body_lines = [f"workflow step: {step_label}", f"state: {workflow_state}", ""]
+    body_lines.append("Files:")
+    for p in staged[:10]:
+        body_lines.append(f"- {p}")
+    if len(staged) > 10:
+        body_lines.append(f"- … and {len(staged) - 10} more")
+    body_lines += ["", f"refs {ticket_id}"]
+
+    return title + "\n\n" + "\n".join(body_lines)
+
+
+def commit_ticket(
+    ticket_id: str,
+    message: str | None,
+    include_code: bool = False,
+    workflow_step: str | None = None,
+) -> int:
+    """Commit useful changes for ``ticket_id``.
+
+    Strategy:
+      1. Verify the current branch matches state.json.
+      2. Stage useful changes (``_stage_useful_changes``): ``git add -A``
+         then unstage runtime garbage (logs, caches, locks, SQLite, etc.).
+      3. If nothing useful remains staged → return 1 (no-op, soft failure).
+      4. Auto-generate a contextual commit message (``_build_commit_message``)
+         unless an explicit one is supplied.
+
+    Runtime ignored paths (runtime.log, daemon.log, *.lock, etc.) are *never*
+    committed, regardless of how ``git add -A`` picks them up.
+    """
     try:
         state = load_state(ticket_id)
         current_state = state.get("state", "unknown")
@@ -242,59 +399,44 @@ def commit_ticket(ticket_id: str, message: str | None, include_code: bool = Fals
             _log_runtime(ticket_id, f"commit-checkpoint: refused — {msg}")
             return 2
 
-    run_dir = f"runs/{ticket_id}/"
-    requested_stage_paths = [run_dir] + (list(COMMIT_SCOPE) if include_code else [])
+    if include_code:
+        print(f"staging (include-code): git add -A then unstage runtime garbage")
+    else:
+        print(f"staging: runs/{ticket_id}/ only")
 
-    stage_paths = [path for path in requested_stage_paths if Path(path).exists()]
-    missing_stage_paths = [path for path in requested_stage_paths if not Path(path).exists()]
+    staged, dropped = _stage_useful_changes(ticket_id, include_code=include_code)
 
-    if missing_stage_paths:
-        _log_runtime(
-            ticket_id,
-            "commit-checkpoint: skipped missing scope paths: " + ", ".join(missing_stage_paths),
-        )
-
-    status_result = run_command(["git", "status", "--porcelain"] + stage_paths)
-    if status_result.returncode != 0:
-        print("error: failed to check git status", file=sys.stderr)
-        _log_runtime(ticket_id, "commit-checkpoint: failed to check git status")
-        return 2
-    if not status_result.stdout.strip():
+    if not staged:
+        # Nothing useful staged. The auto loop treats rc=1 as "no-op",
+        # rc=2 as "hard failure". A clean tree (after dropping runtime
+        # garbage) is a no-op, not a failure.
         print(
-            "nothing to commit in runs/ artifacts — stage other changes manually or check status",
+            "nothing useful to commit (only runtime ignored files were dirty)",
             file=sys.stderr,
         )
-        _log_runtime(ticket_id, "commit-checkpoint: refused — nothing to commit in runs/")
+        _log_runtime(
+            ticket_id,
+            "commit-checkpoint: nothing useful to commit"
+            + (f" (dropped runtime: {dropped!r})" if dropped else ""),
+        )
         return 1
 
     if message is None:
-        message = f"{ticket_id}: checkpoint [{current_state}] — update workflow artifacts"
+        message = _build_commit_message(ticket_id, workflow_step, current_state, staged)
 
-    if include_code:
-        _warn_out_of_scope(ticket_id, run_dir)
-
-    print(f"staging: {run_dir}")
-    if include_code:
-        print(f"staging (include-code): {', '.join(stage_paths)}")
-        if missing_stage_paths:
-            print(f"skipping missing scope paths: {', '.join(missing_stage_paths)}")
-        print("note: staging runs/ and allowed scope paths — never git add .")
-    else:
-        print("note: only runs/ artifacts are auto-staged — stage other changes manually before running --commit")
-
-    for path in stage_paths:
-        add_result = run_command(["git", "add", path])
-        print_result(add_result)
-        if add_result.returncode != 0:
-            _log_runtime(ticket_id, f"commit-checkpoint: failed to stage {path}")
-            return add_result.returncode
+    print(f"staged files ({len(staged)}):")
+    for p in staged[:20]:
+        print(f"  {p}")
+    if len(staged) > 20:
+        print(f"  … and {len(staged) - 20} more")
 
     commit_result = run_command(["git", "commit", "-m", message])
     rc = print_result(commit_result)
     if rc == 0:
         sha_result = run_command(["git", "rev-parse", "--short", "HEAD"])
         sha = sha_result.stdout.strip() if sha_result.returncode == 0 else "unknown"
-        _log_runtime(ticket_id, f"commit-checkpoint: sha={sha} message={message!r}")
+        title = message.splitlines()[0]
+        _log_runtime(ticket_id, f"commit-checkpoint: sha={sha} files={len(staged)} title={title!r}")
     else:
         _log_runtime(ticket_id, "commit-checkpoint: failed")
     return rc
@@ -325,13 +467,28 @@ def push_branch(ticket_id: str, slug: str | None) -> int:
     else:
         push_target = branch_name(ticket_id, slug)
 
-    # Blocking check: uncommitted changes must not be silently left behind
+    # Blocking check: only *real* uncommitted code changes block the push.
+    # Runtime garbage (runtime.log churning between commit and push, daemon
+    # logs, caches, locks, SQLite live DB) is tolerated — these files would
+    # otherwise reliably make the push fail every single cycle for purely
+    # cosmetic reasons.
     wt_result = run_command(["git", "status", "--porcelain"])
     if wt_result.returncode == 0 and wt_result.stdout.strip():
-        msg = "DIRTY_RUNTIME_CHECKPOINT — uncommitted changes present before push"
-        print(f"error: {msg}", file=sys.stderr)
-        _log_runtime(ticket_id, f"push: refused — {msg}")
-        return 2
+        paths = parse_porcelain_paths(wt_result.stdout)
+        ignorable, real = classify_intake_dirty_paths(paths)
+        if real:
+            msg = (
+                "DIRTY_RUNTIME_CHECKPOINT — uncommitted real changes present "
+                f"before push: {real!r}"
+            )
+            print(f"error: {msg}", file=sys.stderr)
+            _log_runtime(ticket_id, f"push: refused — {msg}")
+            return 2
+        if ignorable:
+            _log_runtime(
+                ticket_id,
+                f"push: tolerating runtime dirty files (not blocking): {ignorable!r}",
+            )
 
     print(f"push branch: {push_target}")
     _log_runtime(ticket_id, f"push: pushing branch={push_target}")
@@ -908,8 +1065,13 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
         _write_fix_artifact(ticket_id, next_state, output_path)
 
     if auto_commit:
-        _log_runtime(ticket_id, "auto-run: auto-commit triggered")
-        commit_rc = commit_ticket(ticket_id, None, include_code=include_code)
+        _log_runtime(ticket_id, f"auto-run: auto-commit triggered (step={step})")
+        commit_rc = commit_ticket(
+            ticket_id,
+            None,
+            include_code=include_code,
+            workflow_step=step,
+        )
         if commit_rc == 0 and auto_push:
             _log_runtime(ticket_id, "auto-run: auto-push triggered")
             push_rc = push_branch(ticket_id, None)
