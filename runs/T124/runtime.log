@@ -76,3 +76,12 @@
 [2026-05-21T15:49:32Z] compose: skill=ai/skills/debugging.md
 [2026-05-21T15:49:32Z] compose: task (canonical prompt)
 [2026-05-21T15:49:32Z] snapshot: runtime-prompt=runs/T124/prompts/tester-attempt-1.md
+[2026-05-21T15:53:24Z] auto-run: step=tester done rc=0
+[2026-05-21T15:53:24Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-21T15:53:24Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-21T15:53:24Z] commit-checkpoint: unstaged runtime garbage: ['runs/T124/runtime.log']
+[2026-05-21T15:53:24Z] commit-checkpoint: sha=07f9b691 files=4 title='test(T124/workflow): tester — update 4 file(s)'
+[2026-05-21T15:53:24Z] auto-run: auto-push triggered
+[2026-05-21T15:53:24Z] push: tolerating runtime dirty files (not blocking): ['runs/T124/runtime.log']
+[2026-05-21T15:53:24Z] push: pushing branch=ticket/T124-t124-multi-project-runtime-boards-and-project-isol
+[2026-05-21T15:53:26Z] push: done branch=ticket/T124-t124-multi-project-runtime-boards-and-project-isol
