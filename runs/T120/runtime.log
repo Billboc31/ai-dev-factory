@@ -51,3 +51,8 @@
 [2026-05-20T06:50:40Z] compose: task (canonical prompt)
 [2026-05-20T06:50:40Z] snapshot: runtime-prompt=runs/T120/prompts/planner-attempt-4.md
 [2026-05-20T06:55:31Z] auto-run: step=planner done rc=0
+[2026-05-20T06:55:33Z] planner checkpoint: committed
+[2026-05-20T06:55:33Z] planner checkpoint: pushed
+[2026-05-20T06:55:33Z] planner validation failed: plan sans section reconnue (Objective/Included/Excluded/Acceptance criteria — ou équivalents FR)
+[2026-05-20T06:55:33Z] planner validation: rejected — state unchanged
+[2026-05-20T06:55:33Z] runtime failure: planner_invalid
