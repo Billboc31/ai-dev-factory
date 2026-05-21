@@ -22,3 +22,14 @@
 [2026-05-21T18:50:29Z] compose: task (canonical prompt)
 [2026-05-21T18:50:29Z] snapshot: runtime-prompt=runs/T128/prompts/planner-attempt-2.md
 [2026-05-21T18:52:20Z] auto-run: step=planner done rc=0
+[2026-05-21T18:52:22Z] planner checkpoint: committed
+[2026-05-21T18:52:22Z] planner checkpoint: pushed
+[2026-05-21T18:52:22Z] planner validation success
+[2026-05-21T18:52:22Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-21T18:52:22Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-21T18:52:22Z] commit-checkpoint: unstaged runtime garbage: ['runs/T128/runtime.log']
+[2026-05-21T18:52:22Z] commit-checkpoint: sha=07f60b6d files=2 title='docs(T128/workflow): planner — update 2 file(s)'
+[2026-05-21T18:52:22Z] auto-run: auto-push triggered
+[2026-05-21T18:52:22Z] push: tolerating runtime dirty files (not blocking): ['runs/T128/runtime.log']
+[2026-05-21T18:52:22Z] push: pushing branch=ticket/T128-t128-host-supervisor-for-daemon-and-deployment-job
+[2026-05-21T18:52:25Z] push: done branch=ticket/T128-t128-host-supervisor-for-daemon-and-deployment-job
