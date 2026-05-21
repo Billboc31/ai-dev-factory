@@ -185,3 +185,7 @@
 [2026-05-21T08:03:14Z] auto-run: step=tester done rc=0
 [2026-05-21T08:03:14Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
 [2026-05-21T08:03:14Z] auto-run: auto-commit triggered
+[2026-05-21T08:03:14Z] commit-checkpoint: sha=50b1362 message='T120: checkpoint [TEST_COMPLETE] — update workflow artifacts'
+[2026-05-21T08:03:14Z] auto-run: auto-push triggered
+[2026-05-21T08:03:14Z] push: refused — DIRTY_RUNTIME_CHECKPOINT — uncommitted changes present before push
+[2026-05-21T08:03:14Z] auto-run: auto-push failed rc=2
