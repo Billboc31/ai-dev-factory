@@ -6,6 +6,7 @@ Start via deploy/start_supervisor.sh.
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import json
 import logging
@@ -14,6 +15,8 @@ import signal
 import subprocess
 import sys
 import threading
+from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import FastAPI, Query
@@ -24,6 +27,8 @@ logger = logging.getLogger("supervisor")
 _PID_FILENAME = "daemon.pid"
 _LOG_FILENAME = "daemon.log"
 
+
+# ── Path helpers ──────────────────────────────────────────────────────────────
 
 def _project_root() -> Path:
     return Path(os.environ.get("AI_DEV_FACTORY_PROJECT_ROOT", Path.cwd()))
@@ -74,6 +79,8 @@ def _log_path() -> Path:
     return _logs_dir() / _LOG_FILENAME
 
 
+# ── PID file helpers ──────────────────────────────────────────────────────────
+
 def _read_pid_file() -> dict | None:
     path = _pid_path()
     if not path.exists():
@@ -84,11 +91,11 @@ def _read_pid_file() -> dict | None:
         return None
 
 
-def _write_pid_file(pid: int, started_at: str) -> None:
+def _write_pid_file(pid: int, started_at: str, exec_cmd: str = "", restart_policy: str = "no-restart") -> None:
     path = _pid_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps({"pid": pid, "started_at": started_at}),
+        json.dumps({"pid": pid, "started_at": started_at, "exec_cmd": exec_cmd, "restart_policy": restart_policy}),
         encoding="utf-8",
     )
 
@@ -108,17 +115,149 @@ def _is_alive(pid: int) -> bool:
         return False
 
 
-def _current_pid() -> int | None:
+# ── Daemon in-memory state ────────────────────────────────────────────────────
+
+@dataclass
+class DaemonState:
+    pid: int | None = None
+    started_at: str | None = None
+    last_exit_code: int | None = None
+    last_exit_time: str | None = None
+    last_error: str | None = None
+    restart_count: int = 0
+    restart_policy: str = "no-restart"
+    exit_unexpected: bool = False
+
+
+_daemon_state = DaemonState()
+_daemon_proc: subprocess.Popen | None = None
+_voluntary_stop: bool = False
+_daemon_exec_cmd: str = "claude --dangerously-skip-permissions"
+
+
+# ── Daemon spawn helper ───────────────────────────────────────────────────────
+
+def _spawn_daemon(exec_cmd: str) -> tuple[int | None, str | None, str | None]:
+    """Spawn the daemon. Returns (pid, started_at, error_str)."""
+    global _daemon_proc
+    started_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    log = _log_path()
+    log.parent.mkdir(parents=True, exist_ok=True)
+    cmd = [
+        sys.executable,
+        str(_run_daemon_path()),
+        "--exec-cmd", exec_cmd,
+        "--poll-issues",
+        "--issue-label", "ai-ready",
+        "--auto-commit",
+        "--auto-push",
+        "--auto-include-code",
+        "--worktrees-dir", str(_worktrees_dir()),
+    ]
+    try:
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        with open(log, "a", encoding="utf-8") as log_fh:
+            log_fh.write(
+                f"[{started_at}] supervisor spawning daemon\n"
+                f"  command={' '.join(cmd)}\n"
+            )
+            log_fh.flush()
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(_project_root()),
+                stdout=log_fh,
+                stderr=log_fh,
+                start_new_session=True,
+                env=env,
+            )
+        _daemon_proc = proc
+        _write_pid_file(proc.pid, started_at, exec_cmd, _daemon_state.restart_policy)
+        logger.info("supervisor: daemon started pid=%d", proc.pid)
+        return proc.pid, started_at, None
+    except OSError as exc:
+        return None, None, str(exc)
+
+
+# ── Monitor ───────────────────────────────────────────────────────────────────
+
+def _check_and_maybe_restart() -> None:
+    """Single monitor cycle: detect daemon exit, update state, restart if policy says so."""
+    global _daemon_proc, _voluntary_stop
+    if _daemon_state.pid is None:
+        return
+    if _is_alive(_daemon_state.pid):
+        return
+
+    # Process is gone — record exit info
+    exit_code: int | None = None
+    if _daemon_proc is not None:
+        exit_code = _daemon_proc.poll()
+
+    now = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    _daemon_state.last_exit_code = exit_code
+    _daemon_state.last_exit_time = now
+    _daemon_state.last_error = f"process exited with code {exit_code}"
+    _daemon_state.exit_unexpected = not _voluntary_stop
+    if _voluntary_stop:
+        _voluntary_stop = False
+
+    old_pid = _daemon_state.pid
+    _daemon_state.pid = None
+    _daemon_proc = None
+    _remove_pid_file()
+
+    logger.info(
+        "supervisor: daemon pid=%d exited (code=%s, unexpected=%s)",
+        old_pid, exit_code, _daemon_state.exit_unexpected,
+    )
+
+    if _daemon_state.exit_unexpected and _daemon_state.restart_policy == "restart-on-crash":
+        _daemon_state.restart_count += 1
+        logger.info(
+            "supervisor: restart-on-crash — respawning (attempt=%d)",
+            _daemon_state.restart_count,
+        )
+        pid, started_at, err = _spawn_daemon(_daemon_exec_cmd)
+        if pid is not None:
+            _daemon_state.pid = pid
+            _daemon_state.started_at = started_at
+            _daemon_state.exit_unexpected = False
+        else:
+            _daemon_state.last_error = err
+
+
+async def _monitor_daemon() -> None:
+    while True:
+        await asyncio.sleep(5)
+        _check_and_maybe_restart()
+
+
+# ── FastAPI lifespan ──────────────────────────────────────────────────────────
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global _daemon_exec_cmd
+    # Initialise in-memory state from PID file so a supervisor restart
+    # reconnects to a live daemon, and cleans up stale PID files.
     data = _read_pid_file()
-    if data is None:
-        return None
-    pid = data.get("pid")
-    if not isinstance(pid, int):
-        return None
-    if not _is_alive(pid):
-        _remove_pid_file()
-        return None
-    return pid
+    if data is not None:
+        pid = data.get("pid")
+        if isinstance(pid, int):
+            if _is_alive(pid):
+                _daemon_state.pid = pid
+                _daemon_state.started_at = data.get("started_at")
+                _daemon_exec_cmd = data.get("exec_cmd", _daemon_exec_cmd)
+                _daemon_state.restart_policy = data.get("restart_policy", "no-restart")
+            else:
+                _remove_pid_file()
+
+    task = asyncio.create_task(_monitor_daemon())
+    yield
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
 
 
 # ── analysis per-project locking ──────────────────────────────────────────────
@@ -180,93 +319,108 @@ def _analysis_current_pid(project_id: str) -> int | None:
     return pid
 
 
-app = FastAPI(title="AI Dev Factory Supervisor", version="1.0.0")
+# ── FastAPI app ───────────────────────────────────────────────────────────────
+
+app = FastAPI(title="AI Dev Factory Supervisor", version="1.0.0", lifespan=lifespan)
 
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "daemon_pid": _current_pid()}
+    pid = _daemon_state.pid
+    return {"status": "ok", "daemon_pid": pid if (pid and _is_alive(pid)) else None}
 
 
 @app.get("/daemon/status")
-def daemon_status():
-    data = _read_pid_file()
-    if data is None:
-        return {"running": False, "pid": None, "started_at": None}
-    pid = data.get("pid")
-    if not isinstance(pid, int) or not _is_alive(pid):
+def daemon_status():  # noqa: C901
+    global _daemon_exec_cmd
+    pid = _daemon_state.pid
+
+    if pid is not None and not _is_alive(pid):
+        # Process died between monitor cycles — clean up PID file proactively.
+        # The monitor will update exit_unexpected etc. on its next cycle.
         _remove_pid_file()
-        return {"running": False, "pid": None, "started_at": None}
-    return {"running": True, "pid": pid, "started_at": data.get("started_at")}
+        running = False
+        pid = None
+    elif pid is None:
+        # No in-memory state: check the PID file for live processes or stale
+        # entries (handles fresh supervisor start and stale PID recovery).
+        data = _read_pid_file()
+        if data is not None:
+            file_pid = data.get("pid")
+            if isinstance(file_pid, int) and _is_alive(file_pid):
+                _daemon_state.pid = file_pid
+                _daemon_state.started_at = data.get("started_at")
+                _daemon_exec_cmd = data.get("exec_cmd", _daemon_exec_cmd)
+                _daemon_state.restart_policy = data.get("restart_policy", "no-restart")
+                pid = file_pid
+                running = True
+            else:
+                _remove_pid_file()
+                running = False
+        else:
+            running = False
+    else:
+        running = True
+
+    return {
+        "running": running,
+        "pid": pid,
+        "started_at": _daemon_state.started_at,
+        "last_exit_code": _daemon_state.last_exit_code,
+        "last_exit_time": _daemon_state.last_exit_time,
+        "last_error": _daemon_state.last_error,
+        "exit_unexpected": _daemon_state.exit_unexpected,
+        "restart_count": _daemon_state.restart_count,
+        "restart_policy": _daemon_state.restart_policy,
+    }
 
 
 class StartRequest(BaseModel):
     exec_cmd: str = "claude --dangerously-skip-permissions"
+    restart_policy: str = "no-restart"
 
 
 @app.post("/daemon/start")
 def daemon_start(body: StartRequest = None):  # noqa: B008
+    global _daemon_exec_cmd
     if body is None:
         body = StartRequest()
 
-    pid = _current_pid()
-    if pid is not None:
+    pid = _daemon_state.pid
+    if pid is not None and _is_alive(pid):
         return {"ok": False, "pid": pid, "error": "already_running"}
 
-    started_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    log = _log_path()
-    log.parent.mkdir(parents=True, exist_ok=True)
+    _daemon_state.restart_policy = body.restart_policy
+    _daemon_exec_cmd = body.exec_cmd
 
-    cmd = [
-        sys.executable,
-        str(_run_daemon_path()),
-        "--exec-cmd", body.exec_cmd,
-        "--poll-issues",
-        "--issue-label", "ai-ready",
-        "--auto-commit",
-        "--auto-push",
-        "--auto-include-code",
-        "--worktrees-dir", str(_worktrees_dir()),
-    ]
+    pid, started_at, err = _spawn_daemon(body.exec_cmd)
+    if pid is None:
+        return {"ok": False, "pid": None, "error": err}
 
-    try:
-        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
-        with open(log, "a", encoding="utf-8") as log_fh:
-            log_fh.write(
-                f"[{started_at}] supervisor spawning daemon\n"
-                f"  command={' '.join(cmd)}\n"
-            )
-            log_fh.flush()
-            proc = subprocess.Popen(
-                cmd,
-                cwd=str(_project_root()),
-                stdout=log_fh,
-                stderr=log_fh,
-                start_new_session=True,
-                env=env,
-            )
-        _write_pid_file(proc.pid, started_at)
-        logger.info("supervisor: daemon started pid=%d", proc.pid)
-        return {"ok": True, "pid": proc.pid}
-    except OSError as exc:
-        return {"ok": False, "pid": None, "error": str(exc)}
+    _daemon_state.pid = pid
+    _daemon_state.started_at = started_at
+    _daemon_state.exit_unexpected = False
+    return {"ok": True, "pid": pid}
 
 
 @app.post("/daemon/stop")
 def daemon_stop():
-    data = _read_pid_file()
-    if data is None:
-        return {"ok": False, "error": "not_running"}
-    pid = data.get("pid")
-    if not isinstance(pid, int) or not _is_alive(pid):
+    global _voluntary_stop
+    pid = _daemon_state.pid
+    if pid is None or not _is_alive(pid):
         _remove_pid_file()
         return {"ok": False, "error": "not_running"}
+
+    _voluntary_stop = True
     try:
         os.kill(pid, signal.SIGTERM)
+        _daemon_state.pid = None
+        _daemon_state.started_at = None
         _remove_pid_file()
         logger.info("supervisor: daemon stopped pid=%d", pid)
         return {"ok": True}
     except OSError as exc:
+        _voluntary_stop = False
         return {"ok": False, "error": str(exc)}
 
 
