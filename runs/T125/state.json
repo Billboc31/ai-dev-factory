@@ -1,7 +1,7 @@
 {
   "ticket_id": "T125",
-  "state": "IMPLEMENTATION_REVIEW_NEEDED",
+  "state": "IMPLEMENTATION_APPROVED",
   "branch": "ticket/T125-t125-project-scoped-runtime-apis-and-daemon-isolat",
   "issue_number": 89,
-  "updated_at": "2026-05-21T16:31:53Z"
+  "updated_at": "2026-05-21T16:34:34Z"
 }
