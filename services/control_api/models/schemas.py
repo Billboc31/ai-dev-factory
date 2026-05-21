@@ -248,3 +248,12 @@ class DeployerStatus(BaseModel):
 
 class DeployLogsResponse(BaseModel):
     lines: list[str]
+
+
+class AnalysisStatus(BaseModel):
+    state: Literal["idle", "running", "success", "failed"] = "idle"
+    started_at: str | None = None
+    finished_at: str | None = None
+    error: str | None = None
+    branch: str | None = None
+    pr_url: str | None = None

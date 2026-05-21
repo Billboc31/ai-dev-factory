@@ -9,3 +9,6 @@ export const scanProject = (projectId) => client.post(`${_pfx(projectId)}/deploy
 export const triggerDeploy = (projectId) => client.post(`${_pfx(projectId)}/deployer/deploy`)
 export const triggerRestart = (projectId) => client.post(`${_pfx(projectId)}/deployer/restart`)
 export const getDeployLogs = (projectId, lines = 100) => client.get(`${_pfx(projectId)}/deployer/logs`, { params: { lines } })
+export const analyzeProject = (projectId) => client.post(`${_pfx(projectId)}/deployer/analyze`)
+export const getAnalysisStatus = (projectId) => client.get(`${_pfx(projectId)}/deployer/analysis/status`)
+export const getAnalysisLogs = (projectId, lines = 100) => client.get(`${_pfx(projectId)}/deployer/analysis/logs`, { params: { lines } })
