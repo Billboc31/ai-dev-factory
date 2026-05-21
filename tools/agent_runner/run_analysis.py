@@ -184,6 +184,10 @@ def main() -> None:
         ai_dir = project_root / ".ai-dev-factory"
         ai_dir.mkdir(exist_ok=True)
         for rel_path, content in generated_files.items():
+            if not rel_path.startswith(".ai-dev-factory/"):
+                raise RuntimeError(
+                    f"LLM returned unexpected path outside .ai-dev-factory/: {rel_path}"
+                )
             target = project_root / rel_path
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(content, encoding="utf-8")

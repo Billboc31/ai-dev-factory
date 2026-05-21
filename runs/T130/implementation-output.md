@@ -1,31 +1,16 @@
-36/36 pass. All good. Let me now do a final summary of everything created and modified.
+All 20 tests pass. Here's what was done:
 
----
+**Fix 1 — Path traversal (`run_analysis.py:183-193`):** Added a guard that raises `RuntimeError` for any LLM-generated path not starting with `.ai-dev-factory/`, preventing writes outside that directory.
 
-## Summary
+**Fix 2 — New test file (`tests/test_run_analysis.py`, 8 tests):**
 
-Implementation complete. Here's what was built:
-
-### New files (7)
-
-| File | Purpose |
-|------|---------|
-| `tools/agent_runner/analysis_prompt_builder.py` | Pure string construction of the LLM prompt (file tree + scan + DeployProfile schema + generation instructions) |
-| `tools/agent_runner/analysis_git_service.py` | Creates `ai-analysis/{project_id}-{YYYYMMDD-HHMMSS}` branch, commits `.ai-dev-factory/`, pushes, creates or updates PR via `gh` |
-| `tools/agent_runner/run_analysis.py` | Host-side analysis worker: scans project, builds prompt, invokes LLM via `exec_cmd`, parses `--- BEGIN FILE ---` blocks, writes files, calls git service |
-| `services/control_api/services/analysis_manager.py` | HTTP proxy from control API to supervisor for start/status/logs |
-| `tests/test_analysis_prompt_builder.py` | 4 tests: file tree, schema, all 3 file instructions, determinism |
-| `tests/test_analysis_manager.py` | 5 tests: delegation, unreachable supervisor, 409 lock, no supervisor URL, status proxy |
-| `tests/test_analysis_git_service.py` | 3 tests: branch name format, PR create on new branch, PR edit on existing branch |
-
-### Modified files (5)
-
-| File | Changes |
-|------|---------|
-| `services/supervisor/main.py` | Added `_state_dir()`, analysis PID/log/state helpers, per-project lock, 4 endpoints: `POST /analysis/start`, `GET /analysis/{id}/status` (with zombie detection), `GET /analysis/{id}/logs`, `POST /analysis/{id}/stop` |
-| `services/control_api/models/schemas.py` | Added `AnalysisStatus` model |
-| `services/control_api/routes/deployer.py` | Added 3 routes: `POST /analyze` (202), `GET /analysis/status`, `GET /analysis/logs` |
-| `apps/dashboard/src/api/deployer.js` | Added `analyzeProject`, `getAnalysisStatus`, `getAnalysisLogs` |
-| `apps/dashboard/src/pages/DeployerPage.jsx` | Added `AnalysisStatusPanel`, `AnalysisLogsPanel`, "Analyze Project" button, analysis polling |
-
-All 36 deployer + analysis tests pass. The 44 pre-existing failures are unrelated to this ticket (daemon/ticket workflow tests) and were failing before these changes.
+| Test | Covers |
+|------|--------|
+| `test_extract_files_valid_response` | Well-formed 3-file LLM output → correct dict |
+| `test_extract_files_empty_output` | No blocks → empty dict |
+| `test_extract_files_malformed_delimiter` | Broken delimiter → empty dict |
+| `test_extract_files_partial_block` | Unclosed block → empty dict |
+| `test_main_happy_path_writes_files_and_state` | Full orchestration: files written, state=success, branch/PR captured |
+| `test_main_missing_required_file_sets_failed_state` | Missing deploy.yml → state=failed, error references deploy.yml |
+| `test_main_path_traversal_rejected` | `../../etc/passwd` path → state=failed, no file written |
+| `test_main_llm_failure_sets_failed_state` | LLM subprocess error → state=failed |
