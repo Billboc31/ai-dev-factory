@@ -1,0 +1,43 @@
+[2026-05-21T16:45:34Z] auto-run start: state=INIT
+[2026-05-21T16:45:34Z] auto-run: running step=planner
+[2026-05-21T16:45:34Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-05-21T16:45:34Z] prompt: generic fallback — injecting runs/T126/ticket.md
+[2026-05-21T16:45:34Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T16:45:34Z] compose: role=ai/roles/planner.md
+[2026-05-21T16:45:34Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T16:45:34Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-21T16:45:34Z] compose: skill=ai/skills/documentation.md
+[2026-05-21T16:45:34Z] compose: task (canonical prompt)
+[2026-05-21T16:45:34Z] snapshot: runtime-prompt=runs/T126/prompts/planner-attempt-1.md
+[2026-05-21T16:50:33Z] auto-run: step=planner done rc=0
+[2026-05-21T16:50:35Z] planner checkpoint: committed
+[2026-05-21T16:50:35Z] planner checkpoint: pushed
+[2026-05-21T16:50:35Z] planner validation success
+[2026-05-21T16:50:35Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-21T16:50:35Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-21T16:50:36Z] commit-checkpoint: unstaged runtime garbage: ['runs/T126/runtime.log']
+[2026-05-21T16:50:36Z] commit-checkpoint: sha=7e5a713e files=2 title='docs(T126/workflow): planner — update 2 file(s)'
+[2026-05-21T16:50:36Z] auto-run: auto-push triggered
+[2026-05-21T16:50:36Z] push: tolerating runtime dirty files (not blocking): ['runs/T126/runtime.log']
+[2026-05-21T16:50:36Z] push: pushing branch=ticket/T126-t126-fix-dashboard-500-errors-after-project-scoped
+[2026-05-21T16:50:38Z] push: done branch=ticket/T126-t126-fix-dashboard-500-errors-after-project-scoped
+[2026-05-21T17:02:52Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-21T17:02:52Z] auto-run: running step=tester
+[2026-05-21T17:02:52Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-21T17:02:52Z] prompt: generic fallback — injecting runs/T126/ticket.md
+[2026-05-21T17:02:52Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T17:02:52Z] compose: role=ai/roles/tester.md
+[2026-05-21T17:02:52Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T17:02:52Z] compose: skill=ai/skills/testing.md
+[2026-05-21T17:02:52Z] compose: skill=ai/skills/debugging.md
+[2026-05-21T17:02:52Z] compose: task (canonical prompt)
+[2026-05-21T17:02:52Z] snapshot: runtime-prompt=runs/T126/prompts/tester-attempt-1.md
+[2026-05-21T17:06:39Z] auto-run: step=tester done rc=0
+[2026-05-21T17:06:39Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-21T17:06:39Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-21T17:06:39Z] commit-checkpoint: unstaged runtime garbage: ['runs/T126/runtime.log']
+[2026-05-21T17:06:40Z] commit-checkpoint: sha=f8a2ef03 files=5 title='test(T126/dashboard,workflow): tester — update 5 file(s)'
+[2026-05-21T17:06:40Z] auto-run: auto-push triggered
+[2026-05-21T17:06:40Z] push: tolerating runtime dirty files (not blocking): ['runs/T126/runtime.log']
+[2026-05-21T17:06:40Z] push: pushing branch=ticket/T126-t126-fix-dashboard-500-errors-after-project-scoped
+[2026-05-21T17:06:42Z] push: done branch=ticket/T126-t126-fix-dashboard-500-errors-after-project-scoped

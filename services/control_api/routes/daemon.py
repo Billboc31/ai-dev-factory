@@ -96,8 +96,9 @@ def project_daemon_sync_main(project_root: Path = Depends(resolve_project)) -> A
 
 
 @project_router.get("/{project_id}/daemon/board", response_model=BoardResponse)
-def project_daemon_board(project_root: Path = Depends(resolve_project)) -> BoardResponse:
-    return board_service.get_board(project_root, worktrees_dir=resolve_worktrees_dir(project_root))
+def project_daemon_board(request: Request, project_root: Path = Depends(resolve_project)) -> BoardResponse:
+    worktrees_dir = getattr(request.app.state, "worktrees_dir", None) or resolve_worktrees_dir(project_root)
+    return board_service.get_board(project_root, worktrees_dir=worktrees_dir)
 
 
 @project_router.get("/{project_id}/daemon/runtime-status", response_model=RuntimeStatus)

@@ -55,7 +55,7 @@ export default function App() {
                 <Route path="/daemon" element={<DaemonPage projectId={activeProject} />} />
                 <Route path="/board" element={<BoardPage projectId={activeProject} />} />
                 <Route path="/project-map" element={<ProjectMapPage projectId={activeProject} />} />
-                <Route path="/mapper-activity" element={<IssueMapperActivityPage />} />
+                <Route path="/mapper-activity" element={<IssueMapperActivityPage projectId={activeProject} />} />
               </Routes>
             </ActiveProjectContext.Provider>
           </main>

@@ -54,13 +54,15 @@ def project_get_project_map_activity(project_root: Path = Depends(resolve_projec
 
 @project_router.post("/{project_id}/project-map/refresh", response_model=ActionResult)
 def project_refresh_project_map(
+    request: Request,
     background_tasks: BackgroundTasks,
     project_root: Path = Depends(resolve_project),
 ) -> ActionResult:
     logger.info("api: POST /projects/.../project-map/refresh")
+    worktrees_dir = getattr(request.app.state, "worktrees_dir", None) or resolve_worktrees_dir(project_root)
     background_tasks.add_task(
         project_map_service.refresh_project_map,
         project_root,
-        worktrees_dir=resolve_worktrees_dir(project_root),
+        worktrees_dir=worktrees_dir,
     )
     return ActionResult(ok=True, message="issue mapper started in background")

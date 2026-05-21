@@ -83,17 +83,17 @@ function ActivityEntry({ entry }) {
   )
 }
 
-export default function IssueMapperActivityPage() {
+export default function IssueMapperActivityPage({ projectId }) {
   const [activity, setActivity] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
 
   const fetchActivity = useCallback(() => {
-    mapApi.getProjectMapActivity()
+    mapApi.getProjectMapActivity(projectId)
       .then(res => { setActivity(res.data); setError(null) })
       .catch(err => setError(err.response?.data?.detail || err.message))
       .finally(() => setLoading(false))
-  }, [])
+  }, [projectId])
 
   usePolling(fetchActivity, 15000)
 
