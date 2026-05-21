@@ -1,15 +1,24 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import * as deployerApi from '../api/deployer'
 import ActionButton from '../components/ActionButton'
 import ErrorBanner from '../components/ErrorBanner'
 import usePolling from '../hooks/usePolling'
 
+const STATE_COLORS = {
+  idle: 'bg-gray-100 text-gray-700',
+  running: 'bg-yellow-100 text-yellow-700',
+  success: 'bg-green-100 text-green-700',
+  failed: 'bg-red-100 text-red-700',
+}
+
 function StatusBadge({ status }) {
   if (!status) return null
+  const colorClass = STATE_COLORS[status.state] || STATE_COLORS.idle
   return (
     <div className="bg-white border border-gray-200 rounded p-4 mb-6 space-y-2">
       <div className="flex items-center gap-3">
-        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${colorClass}`}>
+          {status.state === 'running' && <span className="animate-spin inline-block">↻</span>}
           {status.state}
         </span>
         <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${status.profile_present ? 'bg-green-400' : 'bg-gray-300'}`} aria-hidden="true" />
@@ -17,6 +26,47 @@ function StatusBadge({ status }) {
           {status.profile_present ? 'deploy.yml present' : 'no deploy profile'}
         </span>
       </div>
+      {status.error && (
+        <p className="text-xs text-red-600">Last error: {status.error}</p>
+      )}
+    </div>
+  )
+}
+
+function LogsPanel({ projectId, isRunning }) {
+  const [logs, setLogs] = useState([])
+  const [open, setOpen] = useState(false)
+
+  const fetchLogs = useCallback(() => {
+    deployerApi.getDeployLogs(projectId, 100)
+      .then(res => setLogs(res.data.lines))
+      .catch(() => {})
+  }, [projectId])
+
+  useEffect(() => {
+    if (open) fetchLogs()
+  }, [open]) // eslint-disable-line
+
+  usePolling(fetchLogs, (open && isRunning) ? 5000 : null, projectId)
+
+  return (
+    <div className="mt-4 border border-gray-200 rounded">
+      <button
+        className="w-full flex items-center justify-between px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        onClick={() => setOpen(o => !o)}
+      >
+        <span>Deploy Logs</span>
+        <span className="text-gray-400">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="p-4 bg-gray-900 rounded-b max-h-80 overflow-y-auto">
+          {logs.length === 0 ? (
+            <p className="text-gray-400 text-xs">No logs yet.</p>
+          ) : (
+            <pre className="text-xs text-green-300 whitespace-pre-wrap">{logs.join('\n')}</pre>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -76,13 +126,16 @@ export default function DeployerPage({ projectId }) {
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState(null)
 
+  const isRunning = status?.state === 'running'
+  const pollingDelay = !status || status.state === 'idle' || isRunning ? 5000 : null
+
   const refreshStatus = useCallback(() => {
     deployerApi.getDeployerStatus(projectId)
       .then(res => { setStatus(res.data); setError(null) })
       .catch(err => setError(err.response?.data?.detail || err.message))
   }, [projectId])
 
-  usePolling(refreshStatus, 5000, projectId)
+  usePolling(refreshStatus, pollingDelay, projectId)
 
   const handleScan = async () => {
     setScanning(true)
@@ -102,11 +155,26 @@ export default function DeployerPage({ projectId }) {
       <h1 className="text-2xl font-bold mb-4">Deployer</h1>
       <ErrorBanner message={error} onClose={() => setError(null)} />
       <StatusBadge status={status} />
-      <ActionButton
-        label="Scan Project"
-        action={handleScan}
-        disabled={scanning}
-      />
+      <div className="flex gap-2 flex-wrap">
+        <ActionButton
+          label="Deploy"
+          action={() => deployerApi.triggerDeploy(projectId)}
+          disabled={isRunning}
+          onSuccess={refreshStatus}
+        />
+        <ActionButton
+          label="Restart"
+          action={() => deployerApi.triggerRestart(projectId)}
+          disabled={isRunning}
+          onSuccess={refreshStatus}
+        />
+        <ActionButton
+          label="Scan Project"
+          action={handleScan}
+          disabled={scanning}
+        />
+      </div>
+      <LogsPanel projectId={projectId} isRunning={isRunning} />
       <ScanResultPanel result={scanResult} />
     </div>
   )

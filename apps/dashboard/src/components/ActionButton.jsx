@@ -6,7 +6,7 @@ const VARIANT_CLASSES = {
   danger: 'bg-red-600 text-white hover:bg-red-700'
 }
 
-export default function ActionButton({ label, action, variant = 'primary', onSuccess, onResult }) {
+export default function ActionButton({ label, action, variant = 'primary', onSuccess, onResult, disabled: externalDisabled }) {
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState(null)
 
@@ -34,7 +34,7 @@ export default function ActionButton({ label, action, variant = 'primary', onSuc
     <div className="inline-flex flex-col items-start gap-1">
       <button
         onClick={handleClick}
-        disabled={loading}
+        disabled={loading || !!externalDisabled}
         className={`px-3 py-1.5 rounded text-sm font-medium disabled:opacity-50 ${VARIANT_CLASSES[variant] || VARIANT_CLASSES.primary}`}
       >
         {loading ? '…' : label}
