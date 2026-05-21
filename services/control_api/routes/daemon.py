@@ -36,6 +36,11 @@ def daemon_activity(request: Request, lines: int = Query(default=50, ge=1, le=50
     return DaemonActivity(lines=daemon_manager.get_activity(_root(request), lines))
 
 
+@router.post("/sync-main", response_model=ActionResult)
+def daemon_sync_main(request: Request) -> ActionResult:
+    return daemon_manager.sync_main(_root(request))
+
+
 @router.get("/board", response_model=BoardResponse)
 def daemon_board(request: Request) -> BoardResponse:
     worktrees_dir = getattr(request.app.state, "worktrees_dir", None)
