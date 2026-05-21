@@ -10,3 +10,14 @@
 [2026-05-21T22:45:23Z] compose: task (canonical prompt)
 [2026-05-21T22:45:23Z] snapshot: runtime-prompt=runs/T133/prompts/planner-attempt-1.md
 [2026-05-21T22:47:46Z] auto-run: step=planner done rc=0
+[2026-05-21T22:47:48Z] planner checkpoint: committed
+[2026-05-21T22:47:48Z] planner checkpoint: pushed
+[2026-05-21T22:47:48Z] planner validation success
+[2026-05-21T22:47:48Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-21T22:47:48Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-21T22:47:48Z] commit-checkpoint: unstaged runtime garbage: ['runs/T133/runtime.log']
+[2026-05-21T22:47:48Z] commit-checkpoint: sha=80bef886 files=2 title='docs(T133/workflow): planner — update 2 file(s)'
+[2026-05-21T22:47:48Z] auto-run: auto-push triggered
+[2026-05-21T22:47:48Z] push: tolerating runtime dirty files (not blocking): ['runs/T133/runtime.log']
+[2026-05-21T22:47:48Z] push: pushing branch=ticket/T133-t133-isolated-sandbox-deployment-runtime
+[2026-05-21T22:47:50Z] push: done branch=ticket/T133-t133-isolated-sandbox-deployment-runtime
