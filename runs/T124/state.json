@@ -1,7 +1,7 @@
 {
   "ticket_id": "T124",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_FIX_REQUIRED",
   "branch": "ticket/T124-t124-multi-project-runtime-boards-and-project-isol",
   "issue_number": 87,
-  "updated_at": "2026-05-21T15:22:28Z"
+  "updated_at": "2026-05-21T15:26:56Z"
 }
