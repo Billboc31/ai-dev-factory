@@ -5,7 +5,7 @@ import httpx
 from fastapi import APIRouter, Depends, Query, Request
 
 from ..dependencies import resolve_project
-from ..models.schemas import ActionResult, DaemonActivity, DaemonStatus, BoardResponse, RuntimeStatus
+from ..models.schemas import ActionResult, DaemonActivity, DaemonStartRequest, DaemonStatus, BoardResponse, RuntimeStatus
 from ..services import daemon_manager, board_service
 from ..services.runtime_resolver import resolve_worktrees_dir
 
@@ -38,9 +38,10 @@ def daemon_status(request: Request) -> DaemonStatus:
 
 
 @router.post("/start", response_model=ActionResult)
-def daemon_start(request: Request) -> ActionResult:
+def daemon_start(request: Request, body: DaemonStartRequest = None) -> ActionResult:
     exec_cmd = getattr(request.app.state, "daemon_exec_cmd", "claude --dangerously-skip-permissions")
-    return daemon_manager.start(_root(request), exec_cmd)
+    restart_policy = body.restart_policy if body else "no-restart"
+    return daemon_manager.start(_root(request), exec_cmd, restart_policy)
 
 
 @router.post("/stop", response_model=ActionResult)
@@ -49,9 +50,10 @@ def daemon_stop(request: Request) -> ActionResult:
 
 
 @router.post("/restart", response_model=ActionResult)
-def daemon_restart(request: Request) -> ActionResult:
+def daemon_restart(request: Request, body: DaemonStartRequest = None) -> ActionResult:
     exec_cmd = getattr(request.app.state, "daemon_exec_cmd", "claude --dangerously-skip-permissions")
-    return daemon_manager.restart(_root(request), exec_cmd)
+    restart_policy = body.restart_policy if body else "no-restart"
+    return daemon_manager.restart(_root(request), exec_cmd, restart_policy)
 
 
 @router.get("/activity", response_model=DaemonActivity)
@@ -84,9 +86,10 @@ def project_daemon_status(project_root: Path = Depends(resolve_project)) -> Daem
 
 
 @project_router.post("/{project_id}/daemon/start", response_model=ActionResult)
-def project_daemon_start(request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
+def project_daemon_start(request: Request, body: DaemonStartRequest = None, project_root: Path = Depends(resolve_project)) -> ActionResult:
     exec_cmd = getattr(request.app.state, "daemon_exec_cmd", "claude --dangerously-skip-permissions")
-    return daemon_manager.start(project_root, exec_cmd)
+    restart_policy = body.restart_policy if body else "no-restart"
+    return daemon_manager.start(project_root, exec_cmd, restart_policy)
 
 
 @project_router.post("/{project_id}/daemon/stop", response_model=ActionResult)
@@ -95,9 +98,10 @@ def project_daemon_stop(project_root: Path = Depends(resolve_project)) -> Action
 
 
 @project_router.post("/{project_id}/daemon/restart", response_model=ActionResult)
-def project_daemon_restart(request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
+def project_daemon_restart(request: Request, body: DaemonStartRequest = None, project_root: Path = Depends(resolve_project)) -> ActionResult:
     exec_cmd = getattr(request.app.state, "daemon_exec_cmd", "claude --dangerously-skip-permissions")
-    return daemon_manager.restart(project_root, exec_cmd)
+    restart_policy = body.restart_policy if body else "no-restart"
+    return daemon_manager.restart(project_root, exec_cmd, restart_policy)
 
 
 @project_router.get("/{project_id}/daemon/activity", response_model=DaemonActivity)

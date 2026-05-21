@@ -430,7 +430,7 @@ def _start_via_host_command(project_root: Path, host_cmd: str) -> ActionResult:
         )
 
 
-def start(project_root: Path, exec_cmd: str) -> ActionResult:
+def start(project_root: Path, exec_cmd: str, restart_policy: str = "no-restart") -> ActionResult:
     """Start the daemon — host-side, never inside Docker.
 
     Four paths:
@@ -456,7 +456,7 @@ def start(project_root: Path, exec_cmd: str) -> ActionResult:
 
     # ── path 0: supervisor delegation ─────────────────────────────────────
     if _supervisor_url():
-        data, error = _call_supervisor("POST", "/daemon/start", {"exec_cmd": exec_cmd})
+        data, error = _call_supervisor("POST", "/daemon/start", {"exec_cmd": exec_cmd, "restart_policy": restart_policy})
         if error == "supervisor_unreachable":
             logger.warning("api: supervisor unreachable at %s", _supervisor_url())
             return ActionResult(
@@ -618,12 +618,12 @@ def stop(project_root: Path) -> ActionResult:
         return ActionResult(ok=False, message=str(exc))
 
 
-def restart(project_root: Path, exec_cmd: str) -> ActionResult:
+def restart(project_root: Path, exec_cmd: str, restart_policy: str = "no-restart") -> ActionResult:
     logger.info("api: daemon restart requested")
     stop_result = stop(project_root)
     if not stop_result.ok and "not running" not in stop_result.message:
         return stop_result
-    return start(project_root, exec_cmd)
+    return start(project_root, exec_cmd, restart_policy)
 
 
 def get_workers(project_root: Path) -> list[WorkerInfo]:

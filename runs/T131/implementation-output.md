@@ -1,17 +1,13 @@
-Implementation complete. Here's a summary of what was done:
-
----
+Both fixes applied and verified. Here's what changed:
 
 **Files modified:**
 
-- **`services/supervisor/main.py`** — Full rewrite: added `DaemonState` dataclass, module globals (`_daemon_state`, `_daemon_proc`, `_voluntary_stop`, `_daemon_exec_cmd`), `_spawn_daemon()` helper, `_check_and_maybe_restart()` sync monitor step, `_monitor_daemon()` async background task, FastAPI `lifespan` (init from PID file + task management). Updated `daemon_status()` to return all new fields + stale PID recovery, `daemon_start()` to accept `restart_policy`, `daemon_stop()` to set `_voluntary_stop` flag.
+- **`docker-compose.yml`** — Removed the extra leading space on line 24 before `- AI_DEV_FACTORY_SUPERVISOR_URL=...`. YAML now parses correctly and the env var is picked up by the container.
 
-- **`services/control_api/models/schemas.py`** — Extended `DaemonStatus` with 6 optional fields: `last_exit_code`, `last_exit_time`, `last_error`, `exit_unexpected`, `restart_count`, `restart_policy`.
+- **`services/control_api/models/schemas.py`** — Added `DaemonStartRequest` model with `restart_policy: str = "no-restart"`.
 
-- **`services/control_api/services/daemon_manager.py`** — `get_status()` now forwards all new fields from the supervisor `/daemon/status` response.
+- **`services/control_api/services/daemon_manager.py`** — Added `restart_policy: str = "no-restart"` to `start()` and `restart()`. The supervisor call now passes `{"exec_cmd": exec_cmd, "restart_policy": restart_policy}`.
 
-- **`apps/dashboard/src/pages/DaemonPage.jsx`** — Added `CrashBanner` component (shown when `exit_unexpected=true`, displays exit code / time / restart count) and a "Restarting…" badge inside the status card when `restart-on-crash` policy is active.
+- **`services/control_api/routes/daemon.py`** — Updated all four start/restart endpoints (default and project-scoped) to accept an optional `DaemonStartRequest` body and forward `restart_policy` to the manager.
 
-- **`tests/supervisor/test_supervisor.py`** — Added 4 new tests (8 total, all pass): unexpected exit detection, stale PID recovery, restart-on-crash policy, voluntary stop not flagged unexpected.
-
-- **`apps/dashboard/tests/DaemonPage.test.jsx`** — Added 2 new tests (10 total, all pass): crash banner shown / not shown on normal stop.
+The `restart_policy` flows fully: dashboard → `POST /daemon/start` → `daemon_manager.start()` → `_call_supervisor(...)` → supervisor `POST /daemon/start`.

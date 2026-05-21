@@ -25,6 +25,10 @@ class DaemonStatus(BaseModel):
     restart_policy: str | None = None
 
 
+class DaemonStartRequest(BaseModel):
+    restart_policy: str = "no-restart"
+
+
 class DaemonActivity(BaseModel):
     lines: list[str]
 
