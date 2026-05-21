@@ -171,3 +171,17 @@
 [2026-05-21T07:51:23Z] auto-run: auto-push triggered
 [2026-05-21T07:51:23Z] push: refused — DIRTY_RUNTIME_CHECKPOINT — uncommitted changes present before push
 [2026-05-21T07:51:23Z] auto-run: auto-push failed rc=2
+[2026-05-21T07:57:47Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-21T07:57:47Z] auto-run: running step=tester
+[2026-05-21T07:57:47Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-21T07:57:47Z] prompt: generic fallback — injecting runs/T120/ticket.md
+[2026-05-21T07:57:47Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T07:57:47Z] compose: role=ai/roles/tester.md
+[2026-05-21T07:57:47Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T07:57:47Z] compose: skill=ai/skills/testing.md
+[2026-05-21T07:57:47Z] compose: skill=ai/skills/debugging.md
+[2026-05-21T07:57:47Z] compose: task (canonical prompt)
+[2026-05-21T07:57:47Z] snapshot: runtime-prompt=runs/T120/prompts/tester-attempt-1.md
+[2026-05-21T08:03:14Z] auto-run: step=tester done rc=0
+[2026-05-21T08:03:14Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-21T08:03:14Z] auto-run: auto-commit triggered
