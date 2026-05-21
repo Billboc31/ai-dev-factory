@@ -13,9 +13,10 @@ import os
 import signal
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from pydantic import BaseModel
 
 logger = logging.getLogger("supervisor")
@@ -50,8 +51,19 @@ def _worktrees_dir() -> Path:
     return root.parent / (root.name + "-worktrees")
 
 
+def _state_dir() -> Path:
+    runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if runtime_root:
+        return Path(runtime_root) / "state"
+    return _project_root() / "state"
+
+
 def _run_daemon_path() -> Path:
     return Path(__file__).resolve().parents[2] / "tools" / "agent_runner" / "run_daemon.py"
+
+
+def _run_analysis_path() -> Path:
+    return Path(__file__).resolve().parents[2] / "tools" / "agent_runner" / "run_analysis.py"
 
 
 def _pid_path() -> Path:
@@ -105,6 +117,65 @@ def _current_pid() -> int | None:
         return None
     if not _is_alive(pid):
         _remove_pid_file()
+        return None
+    return pid
+
+
+# ── analysis per-project locking ──────────────────────────────────────────────
+
+_analysis_locks: dict[str, threading.Lock] = {}
+_analysis_locks_mutex = threading.Lock()
+
+
+def _get_analysis_lock(project_id: str) -> threading.Lock:
+    with _analysis_locks_mutex:
+        if project_id not in _analysis_locks:
+            _analysis_locks[project_id] = threading.Lock()
+        return _analysis_locks[project_id]
+
+
+def _analysis_pid_path(project_id: str) -> Path:
+    return _runs_dir() / f"analysis-{project_id}.pid"
+
+
+def _analysis_log_path(project_id: str) -> Path:
+    d = _logs_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"analysis-{project_id}.log"
+
+
+def _analysis_state_path(project_id: str) -> Path:
+    d = _state_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"analysis-{project_id}.json"
+
+
+def _read_analysis_state(project_id: str) -> dict:
+    path = _analysis_state_path(project_id)
+    if not path.exists():
+        return {"state": "idle"}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {"state": "idle"}
+
+
+def _analysis_current_pid(project_id: str) -> int | None:
+    path = _analysis_pid_path(project_id)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    pid = data.get("pid")
+    if not isinstance(pid, int):
+        return None
+    if not _is_alive(pid):
+        try:
+            path.unlink()
+        except OSError:
+            pass
         return None
     return pid
 
@@ -194,6 +265,106 @@ def daemon_stop():
         os.kill(pid, signal.SIGTERM)
         _remove_pid_file()
         logger.info("supervisor: daemon stopped pid=%d", pid)
+        return {"ok": True}
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+# ── analysis endpoints ────────────────────────────────────────────────────────
+
+class AnalysisStartRequest(BaseModel):
+    project_root: str
+    project_id: str
+    exec_cmd: str = "claude --dangerously-skip-permissions"
+
+
+@app.post("/analysis/start")
+def analysis_start(body: AnalysisStartRequest):
+    from fastapi.responses import JSONResponse
+
+    lock = _get_analysis_lock(body.project_id)
+    if not lock.acquire(blocking=False):
+        return JSONResponse(status_code=409, content={"ok": False, "error": "locked"})
+
+    try:
+        if _analysis_current_pid(body.project_id) is not None:
+            return JSONResponse(status_code=409, content={"ok": False, "error": "locked"})
+
+        started_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        log = _analysis_log_path(body.project_id)
+        cmd = [
+            sys.executable,
+            str(_run_analysis_path()),
+            "--project-root", body.project_root,
+            "--project-id", body.project_id,
+            "--exec-cmd", body.exec_cmd,
+        ]
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        try:
+            with open(log, "a", encoding="utf-8") as log_fh:
+                log_fh.write(
+                    f"[{started_at}] supervisor spawning analysis for {body.project_id}\n"
+                    f"  project_root={body.project_root}\n"
+                )
+                log_fh.flush()
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=str(_project_root()),
+                    stdout=log_fh,
+                    stderr=log_fh,
+                    start_new_session=True,
+                    env=env,
+                )
+            pid_path = _analysis_pid_path(body.project_id)
+            pid_path.parent.mkdir(parents=True, exist_ok=True)
+            pid_path.write_text(
+                json.dumps({"pid": proc.pid, "started_at": started_at}),
+                encoding="utf-8",
+            )
+            logger.info("supervisor: analysis started pid=%d project_id=%s", proc.pid, body.project_id)
+            return {"ok": True, "pid": proc.pid}
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+    finally:
+        lock.release()
+
+
+@app.get("/analysis/{project_id}/status")
+def analysis_status(project_id: str):
+    state = _read_analysis_state(project_id)
+    if state.get("state") == "running":
+        pid = _analysis_current_pid(project_id)
+        if pid is None:
+            pid_path = _analysis_pid_path(project_id)
+            try:
+                pid_path.unlink()
+            except OSError:
+                pass
+    return state
+
+
+@app.get("/analysis/{project_id}/logs")
+def analysis_logs(project_id: str, lines: int = Query(default=100, ge=1, le=10000)):
+    log_path = _analysis_log_path(project_id)
+    if not log_path.exists():
+        return {"lines": []}
+    text = log_path.read_text(encoding="utf-8")
+    all_lines = text.splitlines()
+    return {"lines": all_lines[-lines:] if len(all_lines) > lines else all_lines}
+
+
+@app.post("/analysis/{project_id}/stop")
+def analysis_stop(project_id: str):
+    pid = _analysis_current_pid(project_id)
+    if pid is None:
+        return {"ok": False, "error": "not_running"}
+    try:
+        os.kill(pid, signal.SIGTERM)
+        try:
+            _analysis_pid_path(project_id).unlink()
+        except OSError:
+            pass
+        logger.info("supervisor: analysis stopped pid=%d project_id=%s", pid, project_id)
         return {"ok": True}
     except OSError as exc:
         return {"ok": False, "error": str(exc)}

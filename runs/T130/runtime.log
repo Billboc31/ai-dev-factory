@@ -49,3 +49,16 @@
 [2026-05-21T20:50:07Z] push: tolerating runtime dirty files (not blocking): ['runs/T130/runtime.log']
 [2026-05-21T20:50:07Z] push: pushing branch=ticket/T130-t130-ai-assisted-operational-project-analysis-and
 [2026-05-21T20:50:09Z] push: done branch=ticket/T130-t130-ai-assisted-operational-project-analysis-and
+[2026-05-21T20:51:23Z] auto-run start: state=PLAN_APPROVED
+[2026-05-21T20:51:23Z] auto-run: running step=coder
+[2026-05-21T20:51:23Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-21T20:51:23Z] prompt: generic fallback — injecting runs/T130/ticket.md
+[2026-05-21T20:51:23Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T20:51:23Z] compose: role=ai/roles/coder.md
+[2026-05-21T20:51:23Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T20:51:23Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-21T20:51:23Z] compose: skill=ai/skills/code-quality.md
+[2026-05-21T20:51:23Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-21T20:51:23Z] compose: skill=ai/skills/security.md
+[2026-05-21T20:51:23Z] compose: task (canonical prompt)
+[2026-05-21T20:51:23Z] snapshot: runtime-prompt=runs/T130/prompts/coder-attempt-1.md
