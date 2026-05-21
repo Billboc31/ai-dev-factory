@@ -254,23 +254,20 @@ def get_audit_log(ticket_id: str, request: Request) -> list[AuditEvent]:
 
 # ── project-scoped routes ─────────────────────────────────────────────────────
 
-def _project_worktrees_dir(project_root: Path) -> Path:
-    return resolve_worktrees_dir(project_root)
-
 
 @project_router.get("/{project_id}/tickets", response_model=list[TicketSummary])
 def project_list_tickets(project_root: Path = Depends(resolve_project)) -> list[TicketSummary]:
-    return artifact_reader.list_tickets(project_root, worktrees_dir=_project_worktrees_dir(project_root))
+    return artifact_reader.list_tickets(project_root, worktrees_dir=resolve_worktrees_dir(project_root))
 
 
 @project_router.get("/{project_id}/tickets/{ticket_id}", response_model=TicketSummary)
 def project_get_ticket(ticket_id: str, project_root: Path = Depends(resolve_project)) -> TicketSummary:
-    return _get_or_404(project_root, ticket_id, _project_worktrees_dir(project_root))
+    return _get_or_404(project_root, ticket_id, resolve_worktrees_dir(project_root))
 
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/state")
 def project_get_state(ticket_id: str, project_root: Path = Depends(resolve_project)) -> dict:
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     state = artifact_reader.get_ticket_state(project_root, ticket_id, worktrees_dir=wt_dir)
     if state is None:
@@ -280,7 +277,7 @@ def project_get_state(ticket_id: str, project_root: Path = Depends(resolve_proje
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/logs", response_class=PlainTextResponse)
 def project_get_logs(ticket_id: str, project_root: Path = Depends(resolve_project)) -> str:
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     logs = artifact_reader.get_ticket_logs(project_root, ticket_id, worktrees_dir=wt_dir)
     if logs is None:
@@ -290,14 +287,14 @@ def project_get_logs(ticket_id: str, project_root: Path = Depends(resolve_projec
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/artifacts")
 def project_get_artifacts(ticket_id: str, project_root: Path = Depends(resolve_project)) -> dict:
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     return artifact_reader.get_ticket_artifacts(project_root, ticket_id, worktrees_dir=wt_dir)
 
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/plan", response_class=PlainTextResponse)
 def project_get_plan(ticket_id: str, project_root: Path = Depends(resolve_project)) -> str:
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     content = artifact_reader.get_ticket_plan(project_root, ticket_id, worktrees_dir=wt_dir)
     if content is None:
@@ -307,7 +304,7 @@ def project_get_plan(ticket_id: str, project_root: Path = Depends(resolve_projec
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/review", response_class=PlainTextResponse)
 def project_get_review(ticket_id: str, project_root: Path = Depends(resolve_project)) -> str:
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     content = artifact_reader.get_ticket_review(project_root, ticket_id, worktrees_dir=wt_dir)
     if content is None:
@@ -317,7 +314,7 @@ def project_get_review(ticket_id: str, project_root: Path = Depends(resolve_proj
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/tests", response_class=PlainTextResponse)
 def project_get_tests(ticket_id: str, project_root: Path = Depends(resolve_project)) -> str:
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     content = artifact_reader.get_ticket_tests(project_root, ticket_id, worktrees_dir=wt_dir)
     if content is None:
@@ -327,7 +324,7 @@ def project_get_tests(ticket_id: str, project_root: Path = Depends(resolve_proje
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/timeline", response_model=TimelineResponse)
 def project_get_timeline(ticket_id: str, project_root: Path = Depends(resolve_project)) -> TimelineResponse:
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     timeline = artifact_reader.get_ticket_timeline(project_root, ticket_id, worktrees_dir=wt_dir)
     if timeline is None:
@@ -338,7 +335,7 @@ def project_get_timeline(ticket_id: str, project_root: Path = Depends(resolve_pr
 @project_router.post("/{project_id}/tickets/{ticket_id}/approve-plan", response_model=ActionResult)
 def project_approve_plan(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
     logger.info("api: POST /projects/%s/tickets/%s/approve-plan", request.path_params["project_id"], ticket_id)
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.approve_plan(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "approve-plan", result)
@@ -347,7 +344,7 @@ def project_approve_plan(ticket_id: str, request: Request, project_root: Path = 
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/request-plan-fix", response_model=ActionResult)
 def project_request_plan_fix(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.request_plan_fix(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "request-plan-fix", result)
@@ -356,7 +353,7 @@ def project_request_plan_fix(ticket_id: str, request: Request, project_root: Pat
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/approve-implementation", response_model=ActionResult)
 def project_approve_implementation(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.approve_implementation(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "approve-implementation", result)
@@ -365,7 +362,7 @@ def project_approve_implementation(ticket_id: str, request: Request, project_roo
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/request-implementation-fix", response_model=ActionResult)
 def project_request_implementation_fix(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.request_implementation_fix(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "request-implementation-fix", result)
@@ -374,7 +371,7 @@ def project_request_implementation_fix(ticket_id: str, request: Request, project
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/run-next", response_model=ActionResult, status_code=202)
 def project_run_next(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
 
     import threading
@@ -391,7 +388,7 @@ def project_run_next(ticket_id: str, request: Request, project_root: Path = Depe
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/commit", response_model=ActionResult)
 def project_commit(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.commit_ticket(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "commit", result)
@@ -400,7 +397,7 @@ def project_commit(ticket_id: str, request: Request, project_root: Path = Depend
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/push", response_model=ActionResult)
 def project_push(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.push_ticket(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "push", result)
@@ -409,7 +406,7 @@ def project_push(ticket_id: str, request: Request, project_root: Path = Depends(
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/checkpoint", response_model=ActionResult)
 def project_checkpoint(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.checkpoint_ticket(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "checkpoint", result)
@@ -418,7 +415,7 @@ def project_checkpoint(ticket_id: str, request: Request, project_root: Path = De
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/archive", response_model=ActionResult)
 def project_archive(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.archive_ticket(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "archive", result)
@@ -427,7 +424,7 @@ def project_archive(ticket_id: str, request: Request, project_root: Path = Depen
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/audit-log", response_model=list[AuditEvent])
 def project_get_audit_log(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> list[AuditEvent]:
-    wt_dir = _project_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     db = _db_path(request)
     if db is None:

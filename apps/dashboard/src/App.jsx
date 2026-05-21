@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, createContext } from 'react'
 import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
 import TicketsPage from './pages/TicketsPage'
 import TicketDetailPage from './pages/TicketDetailPage'
@@ -8,6 +8,8 @@ import ProjectMapPage from './pages/ProjectMapPage'
 import IssueMapperActivityPage from './pages/IssueMapperActivityPage'
 import ProjectSidebar from './components/ProjectSidebar'
 import useProjects from './hooks/useProjects'
+
+export const ActiveProjectContext = createContext(null)
 
 function Nav({ activeProject }) {
   const linkClass = ({ isActive }) =>
@@ -46,14 +48,16 @@ export default function App() {
             onSelect={setActiveProject}
           />
           <main className="p-6 flex-1">
-            <Routes>
-              <Route path="/" element={<TicketsPage projectId={activeProject} />} />
-              <Route path="/tickets/:id" element={<TicketDetailPage />} />
-              <Route path="/daemon" element={<DaemonPage projectId={activeProject} />} />
-              <Route path="/board" element={<BoardPage projectId={activeProject} />} />
-              <Route path="/project-map" element={<ProjectMapPage projectId={activeProject} />} />
-              <Route path="/mapper-activity" element={<IssueMapperActivityPage />} />
-            </Routes>
+            <ActiveProjectContext.Provider value={activeProject}>
+              <Routes>
+                <Route path="/" element={<TicketsPage projectId={activeProject} />} />
+                <Route path="/tickets/:id" element={<TicketDetailPage />} />
+                <Route path="/daemon" element={<DaemonPage projectId={activeProject} />} />
+                <Route path="/board" element={<BoardPage projectId={activeProject} />} />
+                <Route path="/project-map" element={<ProjectMapPage projectId={activeProject} />} />
+                <Route path="/mapper-activity" element={<IssueMapperActivityPage />} />
+              </Routes>
+            </ActiveProjectContext.Provider>
           </main>
         </div>
       </div>

@@ -7,17 +7,17 @@ function StatusBadge({ ok }) {
     : <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-red-100 text-red-800">error</span>
 }
 
-export default function AuditLog({ ticketId }) {
+export default function AuditLog({ ticketId, projectId }) {
   const [events, setEvents] = useState(null)
   const [error, setError] = useState(null)
 
   useEffect(() => {
     setEvents(null)
     setError(null)
-    api.getAuditLog(ticketId)
+    api.getAuditLog(ticketId, projectId)
       .then(res => setEvents(res.data))
       .catch(err => setError(err.response?.data?.detail || err.message))
-  }, [ticketId])
+  }, [ticketId, projectId])
 
   if (error) return <p className="text-red-600 text-sm">{error}</p>
   if (events === null) return <p className="text-gray-500 text-sm">Loading…</p>

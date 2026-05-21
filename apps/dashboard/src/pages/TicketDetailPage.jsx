@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useContext, useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import * as api from '../api/tickets'
+import { ActiveProjectContext } from '../App'
 import ActionButton from '../components/ActionButton'
 import AuditLog from '../components/AuditLog'
 import ErrorBanner from '../components/ErrorBanner'
@@ -10,13 +11,13 @@ import usePolling from '../hooks/usePolling'
 const TABS = ['timeline', 'overview', 'logs', 'plan', 'review', 'tests', 'artifacts', 'audit']
 
 const TAB_FETCHERS = {
-  timeline: (id) => api.getTicketTimeline(id),
-  overview: (id) => api.getTicketTimeline(id),
-  logs: (id) => api.getTicketLogs(id),
-  plan: (id) => api.getTicketPlan(id),
-  review: (id) => api.getTicketReview(id),
-  tests: (id) => api.getTicketTests(id),
-  artifacts: (id) => api.getTicketArtifacts(id)
+  timeline:  (id, projectId) => api.getTicketTimeline(id, projectId),
+  overview:  (id, projectId) => api.getTicketTimeline(id, projectId),
+  logs:      (id, projectId) => api.getTicketLogs(id, projectId),
+  plan:      (id, projectId) => api.getTicketPlan(id, projectId),
+  review:    (id, projectId) => api.getTicketReview(id, projectId),
+  tests:     (id, projectId) => api.getTicketTests(id, projectId),
+  artifacts: (id, projectId) => api.getTicketArtifacts(id, projectId),
 }
 
 function renderContent(content) {
@@ -58,6 +59,7 @@ function OverviewTab({ timeline }) {
 
 export default function TicketDetailPage() {
   const { id } = useParams()
+  const projectId = useContext(ActiveProjectContext)
   const [ticket, setTicket] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -80,7 +82,7 @@ export default function TicketDetailPage() {
   useEffect(() => { activeTabRef.current = tab }, [tab])
 
   const fetchTicket = useCallback(() => {
-    api.getTicket(id)
+    api.getTicket(id, projectId)
       .then(res => {
         const newTicket = res.data
         if (prevStateRef.current !== null && prevStateRef.current !== newTicket.state) {
@@ -94,7 +96,7 @@ export default function TicketDetailPage() {
       })
       .catch(err => setError(err.response?.data?.detail || err.message))
       .finally(() => setLoading(false))
-  }, [id])
+  }, [id, projectId])
 
   // Restart polling and fetch immediately when id changes
   usePolling(fetchTicket, 5000, id)
@@ -106,22 +108,22 @@ export default function TicketDetailPage() {
     if (!fetcher) return
 
     setTabLoading(true)
-    fetcher(id)
+    fetcher(id, projectId)
       .then(res => setTabContent(prev => ({ ...prev, [tab]: res.data })))
       .catch(err => setTabContent(prev => ({
         ...prev,
         [tab]: `Error: ${err.response?.data?.detail || err.message}`
       })))
       .finally(() => setTabLoading(false))
-  }, [tab, id, tabContent])
+  }, [tab, id, projectId, tabContent])
 
   const refreshTicket = useCallback(() => {
     prevStateRef.current = null
     setTabContent({})
-    api.getTicket(id)
+    api.getTicket(id, projectId)
       .then(res => setTicket(res.data))
       .catch(err => setError(err.response?.data?.detail || err.message))
-  }, [id])
+  }, [id, projectId])
 
   if (loading) return <p className="text-gray-500">Loading…</p>
 
@@ -170,7 +172,7 @@ export default function TicketDetailPage() {
 
       <div className="mb-6 min-h-32">
         {tab === 'audit'
-          ? <AuditLog ticketId={id} />
+          ? <AuditLog ticketId={id} projectId={projectId} />
           : tabLoading
             ? <p className="text-gray-500 text-sm">Loading…</p>
             : tab === 'timeline'
@@ -187,20 +189,20 @@ export default function TicketDetailPage() {
         <div>
           <h2 className="text-sm font-semibold text-gray-700 mb-2">Workflow</h2>
           <div className="flex flex-wrap gap-2">
-            <ActionButton label="Run Next" action={() => api.runNextStep(id)} onSuccess={refreshTicket} />
-            <ActionButton label="Approve Plan" action={() => api.approvePlan(id)} variant="secondary" onSuccess={refreshTicket} />
-            <ActionButton label="Request Plan Fix" action={() => api.requestPlanFix(id)} variant="danger" onSuccess={refreshTicket} />
-            <ActionButton label="Approve Implementation" action={() => api.approveImplementation(id)} variant="secondary" onSuccess={refreshTicket} />
-            <ActionButton label="Request Impl Fix" action={() => api.requestImplementationFix(id)} variant="danger" onSuccess={refreshTicket} />
+            <ActionButton label="Run Next" action={() => api.runNextStep(id, projectId)} onSuccess={refreshTicket} />
+            <ActionButton label="Approve Plan" action={() => api.approvePlan(id, projectId)} variant="secondary" onSuccess={refreshTicket} />
+            <ActionButton label="Request Plan Fix" action={() => api.requestPlanFix(id, projectId)} variant="danger" onSuccess={refreshTicket} />
+            <ActionButton label="Approve Implementation" action={() => api.approveImplementation(id, projectId)} variant="secondary" onSuccess={refreshTicket} />
+            <ActionButton label="Request Impl Fix" action={() => api.requestImplementationFix(id, projectId)} variant="danger" onSuccess={refreshTicket} />
           </div>
         </div>
         <div>
           <h2 className="text-sm font-semibold text-gray-700 mb-2">Git / Runtime</h2>
           <div className="flex flex-wrap gap-2">
-            <ActionButton label="Commit" action={() => api.commitChanges(id)} variant="secondary" onSuccess={refreshTicket} />
-            <ActionButton label="Push" action={() => api.pushChanges(id)} variant="secondary" onSuccess={refreshTicket} />
-            <ActionButton label="Checkpoint" action={() => api.createCheckpoint(id)} variant="secondary" onSuccess={refreshTicket} />
-            <ActionButton label="Archive daemon" action={() => api.archiveDaemon(id)} variant="danger" onSuccess={refreshTicket} />
+            <ActionButton label="Commit" action={() => api.commitChanges(id, projectId)} variant="secondary" onSuccess={refreshTicket} />
+            <ActionButton label="Push" action={() => api.pushChanges(id, projectId)} variant="secondary" onSuccess={refreshTicket} />
+            <ActionButton label="Checkpoint" action={() => api.createCheckpoint(id, projectId)} variant="secondary" onSuccess={refreshTicket} />
+            <ActionButton label="Archive daemon" action={() => api.archiveDaemon(id, projectId)} variant="danger" onSuccess={refreshTicket} />
           </div>
         </div>
       </div>

@@ -7,7 +7,7 @@ export default function DaemonActivityFeed({ lines = 50, projectId }) {
   const [error, setError] = useState(null)
 
   const fetchActivity = useCallback(() => {
-    getDaemonActivity(lines, projectId)
+    getDaemonActivity(projectId, lines)
       .then(res => { setActivity(res.data.lines || []); setError(null) })
       .catch(() => setError('Unable to load activity feed'))
   }, [lines, projectId])
