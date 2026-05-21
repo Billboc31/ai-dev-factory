@@ -32,3 +32,12 @@
 [2026-05-21T17:02:52Z] compose: skill=ai/skills/debugging.md
 [2026-05-21T17:02:52Z] compose: task (canonical prompt)
 [2026-05-21T17:02:52Z] snapshot: runtime-prompt=runs/T126/prompts/tester-attempt-1.md
+[2026-05-21T17:06:39Z] auto-run: step=tester done rc=0
+[2026-05-21T17:06:39Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-21T17:06:39Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-21T17:06:39Z] commit-checkpoint: unstaged runtime garbage: ['runs/T126/runtime.log']
+[2026-05-21T17:06:40Z] commit-checkpoint: sha=f8a2ef03 files=5 title='test(T126/dashboard,workflow): tester — update 5 file(s)'
+[2026-05-21T17:06:40Z] auto-run: auto-push triggered
+[2026-05-21T17:06:40Z] push: tolerating runtime dirty files (not blocking): ['runs/T126/runtime.log']
+[2026-05-21T17:06:40Z] push: pushing branch=ticket/T126-t126-fix-dashboard-500-errors-after-project-scoped
+[2026-05-21T17:06:42Z] push: done branch=ticket/T126-t126-fix-dashboard-500-errors-after-project-scoped
