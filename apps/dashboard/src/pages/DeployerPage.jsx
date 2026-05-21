@@ -1,0 +1,113 @@
+import { useCallback, useState } from 'react'
+import * as deployerApi from '../api/deployer'
+import ActionButton from '../components/ActionButton'
+import ErrorBanner from '../components/ErrorBanner'
+import usePolling from '../hooks/usePolling'
+
+function StatusBadge({ status }) {
+  if (!status) return null
+  return (
+    <div className="bg-white border border-gray-200 rounded p-4 mb-6 space-y-2">
+      <div className="flex items-center gap-3">
+        <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700">
+          {status.state}
+        </span>
+        <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${status.profile_present ? 'bg-green-400' : 'bg-gray-300'}`} aria-hidden="true" />
+        <span className="text-sm text-gray-600">
+          {status.profile_present ? 'deploy.yml present' : 'no deploy profile'}
+        </span>
+      </div>
+    </div>
+  )
+}
+
+function ScanResultPanel({ result }) {
+  if (!result) return null
+  return (
+    <div className="bg-white border border-gray-200 rounded p-4 mt-4 space-y-3">
+      <h2 className="text-sm font-semibold text-gray-700">Scan Result</h2>
+      {result.docker_services.length > 0 && (
+        <div>
+          <p className="text-xs text-gray-500 mb-1">Docker services</p>
+          <ul className="flex flex-wrap gap-1">
+            {result.docker_services.map(s => (
+              <li key={s} className="px-2 py-0.5 bg-blue-50 border border-blue-200 rounded text-xs font-mono">{s}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {result.required_tools.length > 0 && (
+        <div>
+          <p className="text-xs text-gray-500 mb-1">Required tools (present on host)</p>
+          <ul className="flex flex-wrap gap-1">
+            {result.required_tools.map(t => (
+              <li key={t} className="px-2 py-0.5 bg-green-50 border border-green-200 rounded text-xs font-mono">{t}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <div className="flex gap-4 text-xs text-gray-600">
+        <span>Python backend: <strong>{result.python_backend ? 'yes' : 'no'}</strong></span>
+        <span>Node frontend: <strong>{result.node_frontend ? 'yes' : 'no'}</strong></span>
+      </div>
+      {result.deploy_profile && (
+        <div>
+          <p className="text-xs text-gray-500 mb-1">Deploy profile — {result.deploy_profile.project} v{result.deploy_profile.version}</p>
+          <ul className="space-y-1">
+            {result.deploy_profile.components.map(c => (
+              <li key={c.name} className="text-xs font-mono text-gray-700">
+                <span className="font-semibold">{c.name}</span>
+                {' '}
+                <span className="text-gray-400">({c.type})</span>
+                {' '}
+                {c.service || c.command}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function DeployerPage({ projectId }) {
+  const [status, setStatus] = useState(null)
+  const [scanResult, setScanResult] = useState(null)
+  const [scanning, setScanning] = useState(false)
+  const [error, setError] = useState(null)
+
+  const refreshStatus = useCallback(() => {
+    deployerApi.getDeployerStatus(projectId)
+      .then(res => { setStatus(res.data); setError(null) })
+      .catch(err => setError(err.response?.data?.detail || err.message))
+  }, [projectId])
+
+  usePolling(refreshStatus, 5000, projectId)
+
+  const handleScan = async () => {
+    setScanning(true)
+    setError(null)
+    try {
+      const res = await deployerApi.scanProject(projectId)
+      setScanResult(res.data)
+    } catch (err) {
+      setError(err.response?.data?.detail || err.message)
+    } finally {
+      setScanning(false)
+    }
+  }
+
+  return (
+    <div className="max-w-2xl">
+      <h1 className="text-2xl font-bold mb-4">Deployer</h1>
+      <ErrorBanner message={error} onClose={() => setError(null)} />
+      <StatusBadge status={status} />
+      <ActionButton
+        label="Scan Project"
+        action={handleScan}
+        disabled={scanning}
+      />
+      <ScanResultPanel result={scanResult} />
+    </div>
+  )
+}

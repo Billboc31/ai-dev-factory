@@ -15,7 +15,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .routes import daemon, health, issues, project_map, providers, tickets
+from .routes import daemon, deployer, health, issues, project_map, providers, tickets
 from .services.project_registry import ProjectRegistry
 from .services.runtime_resolver import resolve_worktrees_dir
 
@@ -111,6 +111,7 @@ def create_app(
     app.include_router(providers.router)
     app.include_router(project_map.router)
     app.include_router(project_map.project_router)
+    app.include_router(deployer.project_router)
 
     return app
 

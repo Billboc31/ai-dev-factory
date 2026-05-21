@@ -1,0 +1,17 @@
+version: 1
+project: ai-dev-factory
+required_tools:
+  - gh
+  - git
+  - docker
+  - claude
+components:
+  - name: api
+    type: docker
+    service: api
+  - name: web
+    type: docker
+    service: web
+  - name: daemon
+    type: host
+    command: python services/daemon/main.py
