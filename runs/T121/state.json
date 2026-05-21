@@ -1,7 +1,7 @@
 {
   "ticket_id": "T121",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T121-t121-reconnect-dashboard-controls-to-canonical-run",
   "issue_number": 80,
-  "updated_at": "2026-05-21T08:40:21Z"
+  "updated_at": "2026-05-21T09:04:27Z"
 }
