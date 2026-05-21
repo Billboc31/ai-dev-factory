@@ -167,3 +167,7 @@
 [2026-05-21T07:51:23Z] auto-run: review keyword detected: IMPLEMENTATION_APPROVED
 [2026-05-21T07:51:23Z] auto-run: transition IMPLEMENTATION_REVIEW_NEEDED → IMPLEMENTATION_APPROVED
 [2026-05-21T07:51:23Z] auto-run: auto-commit triggered
+[2026-05-21T07:51:23Z] commit-checkpoint: sha=26ce297 message='T120: checkpoint [IMPLEMENTATION_APPROVED] — update workflow artifacts'
+[2026-05-21T07:51:23Z] auto-run: auto-push triggered
+[2026-05-21T07:51:23Z] push: refused — DIRTY_RUNTIME_CHECKPOINT — uncommitted changes present before push
+[2026-05-21T07:51:23Z] auto-run: auto-push failed rc=2
