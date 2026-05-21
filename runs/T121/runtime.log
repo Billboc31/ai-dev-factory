@@ -37,3 +37,6 @@
 [2026-05-21T09:04:27Z] push: tolerating runtime dirty files (not blocking): ['runs/T121/runtime.log']
 [2026-05-21T09:04:27Z] push: pushing branch=ticket/T121-t121-reconnect-dashboard-controls-to-canonical-run
 [2026-05-21T09:04:29Z] push: done branch=ticket/T121-t121-reconnect-dashboard-controls-to-canonical-run
+[2026-05-21T09:12:55Z] human-approval: approve-plan — PLAN_REVIEW_NEEDED → PLAN_APPROVED
+[2026-05-21T09:13:07Z] commit-checkpoint: refused — failed to determine current git branch
+[2026-05-21T09:13:08Z] push: refused — failed to determine current git branch
