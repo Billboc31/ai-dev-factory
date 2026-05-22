@@ -81,6 +81,28 @@ def test_prompt_contains_hard_constraints_block():
     assert "deployment.md" in prompt
 
 
+def test_prompt_contains_safety_block():
+    """The Safety block (rules B1..B8) drives the LLM toward
+    project-scoped, supervisor-aware, PID-file-based operations and
+    away from broad killers like `pkill -f run_daemon.py`."""
+    prompt = build_scripts_prompt("/project", _MOCK_SCAN, "", "tree")
+    # Rule headers and key concepts.
+    assert "project-scoped" in prompt
+    assert "supervisor" in prompt.lower()
+    assert "PID file" in prompt or "PID files" in prompt
+    # Explicit anti-patterns the validator rejects.
+    assert "pkill -f run_daemon.py" in prompt
+    assert "killall" in prompt
+    assert "docker system prune" in prompt
+    # Explicit guard syntax the validator accepts.
+    assert "${TARGET:?" in prompt or ":?" in prompt
+    # Hard-coded user paths must be called out.
+    assert "/Users/" in prompt
+    assert "/home/" in prompt
+    # deploy/.env must be presented as the source of truth.
+    assert "deploy/.env" in prompt
+
+
 # ── run_scripts ───────────────────────────────────────────────────────────────
 
 import run_scripts  # noqa: E402

@@ -72,6 +72,180 @@ def _looks_like_shell(body: str) -> bool:
     return any(tok in body for tok in _SHELL_TOKENS)
 
 
+# ── Safety checks for dangerous shell patterns ────────────────────────────────
+#
+# Each entry is (regex, message_template). The validator scans every `.sh`
+# file body line-by-line and flags any match. Patterns are tuned to the
+# real failure modes observed in PR #114-style outputs (broad `pkill -f`,
+# system-wide docker prunes, hard-coded user homes).
+#
+# The `pkill -F <pidfile>` form (uppercase `-F`, reads PIDs from a file)
+# is the safe alternative and is NOT flagged.
+
+# Match `rm -rf` whose first non-flag argument starts with a variable
+# expansion. The capture group lets us inspect whether the expansion uses
+# the bash `:?` "fail-if-unset-or-empty" guard.
+_RM_RF_VAR_RE = re.compile(
+    r"\brm\s+-rf\b(?:\s+-[A-Za-z]+)*\s+\"?(\$\{?[A-Za-z_][A-Za-z0-9_]*[^\s\"]*)"
+)
+
+_PROCESS_KILL_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"\bpkill\s+(?:-[a-eg-zA-EG-Z0-9]+\s+)*-f\b"),
+        "uses `pkill -f` (broad process matching) — prefer the supervisor "
+        "HTTP API or `pkill -F <pidfile>` (uppercase F, reads PIDs from a "
+        "file). See safety rule B2/B3.",
+    ),
+    (
+        re.compile(r"\bpgrep\s+-f\s+\S*run_daemon\.py\b"),
+        "looks for `run_daemon.py` system-wide — this matches every "
+        "developer's daemon on the host. Use a project-scoped marker "
+        "(absolute project path) or a PID file. See safety rule B3.",
+    ),
+    (
+        re.compile(r"\bkillall\b"),
+        "uses `killall` (kills every matching process system-wide) — use "
+        "PID files or the supervisor HTTP API instead. See safety rule B3.",
+    ),
+)
+
+_DESTRUCTIVE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"\brm\s+-rf\s+/(?:\s|$|\*)"),
+        "`rm -rf /` or `rm -rf /*` — catastrophic. See safety rule B4.",
+    ),
+    (
+        re.compile(r"\brm\s+-rf\s+\"?\$HOME\b"),
+        "`rm -rf $HOME` — wipes the user's home directory. See safety "
+        "rule B4.",
+    ),
+    (
+        re.compile(r"\brm\s+-rf\s+~/?(?:\s|$)"),
+        "`rm -rf ~` — wipes the user's home directory. See safety rule B4.",
+    ),
+)
+
+_HARDCODED_PATH_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"/Users/[A-Za-z][\w.-]*/"),
+        "hard-coded macOS user path (`/Users/<name>/…`) — read it from "
+        "`deploy/.env` via $AI_DEV_FACTORY_PROJECT_ROOT / $HOST_PROJECT_ROOT "
+        "or compute it from `$(cd \"$(dirname \"${BASH_SOURCE[0]}\")\" …)`. "
+        "See safety rule B5.",
+    ),
+    (
+        re.compile(r"/home/[A-Za-z][\w.-]*/"),
+        "hard-coded Linux user path (`/home/<name>/…`) — read it from "
+        "`deploy/.env` or compute it from `$(cd \"$(dirname …)\")`. "
+        "See safety rule B5.",
+    ),
+)
+
+_DOCKER_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (
+        re.compile(r"\bdocker\s+system\s+prune\b"),
+        "`docker system prune` wipes images/containers/networks from "
+        "*every* stack on the host. See safety rule B6.",
+    ),
+    (
+        re.compile(r"\bdocker\s+(?:container|volume|image|network)\s+prune\b"),
+        "broad `docker … prune` — affects resources from other projects. "
+        "See safety rule B6.",
+    ),
+)
+
+
+def _check_rm_rf_variables(content: str) -> list[str]:
+    """Flag ``rm -rf "$VAR"`` unless the expansion uses ``${VAR:?…}``.
+
+    Bash's ``${VAR:?msg}`` parameter expansion aborts the script when
+    ``VAR`` is unset or empty, which is the idiomatic guard for any
+    ``rm -rf`` whose target comes from a variable.
+    """
+    errors: list[str] = []
+    for m in _RM_RF_VAR_RE.finditer(content):
+        target = m.group(1)
+        # Strip leading quote that may have been swallowed back by the
+        # capture (the regex already consumes the opening `"` outside
+        # the group, but be defensive).
+        target = target.lstrip('"')
+        # ``${VAR:?...}`` and ``${VAR:?msg}`` are both safe.
+        if re.match(r"^\$\{[A-Za-z_][A-Za-z0-9_]*:\?", target):
+            continue
+        errors.append(
+            f"unguarded `rm -rf {target}` — wrap the variable as "
+            f"`${{VAR:?VAR must be set}}` so an unset/empty variable "
+            f"aborts the script instead of deleting from /. "
+            f"See safety rule B4."
+        )
+    return errors
+
+
+def _check_docker_compose_destructive(content: str) -> list[str]:
+    """Flag ``docker compose down -v`` (or ``--volumes``) when no
+    ``--project-name``/``-p`` scoping flag is present on the same line.
+
+    Tearing down volumes without an explicit project scope can delete
+    volumes from any compose stack sharing the default project name.
+    """
+    errors: list[str] = []
+    for line in content.splitlines():
+        if not re.search(r"\bdocker\s+compose\b.*\bdown\b", line):
+            continue
+        if not re.search(r"\s(?:-v|--volumes)\b", line):
+            continue
+        if re.search(r"\s(?:-p|--project-name)\s+\S+", line):
+            continue
+        errors.append(
+            "`docker compose down -v` without `-p <name>`/"
+            "`--project-name <name>` — may destroy volumes from other "
+            "stacks. Scope it explicitly. See safety rule B6."
+        )
+    return errors
+
+
+# Strip bash line comments before running the safety lint so that a
+# script can legitimately *document* what NOT to do without tripping
+# the rules. A `#` introduces a comment only when it appears at the
+# start of a line or right after whitespace — `${VAR#prefix}` parameter
+# expansion is preserved by anchoring the strip to `(^|\s)#`.
+_COMMENT_RE = re.compile(r"(?m)(^|\s)#.*$")
+
+
+def _strip_comments(content: str) -> str:
+    return _COMMENT_RE.sub(r"\1", content)
+
+
+def _check_dangerous_patterns(path: str, content: str) -> list[str]:
+    """Run every category of safety check on a single `.sh` file body.
+
+    All matches are reported — the validator does not silently allow a
+    broad ``pkill -f`` even when a safer ``pkill -F <pidfile>`` form
+    also appears, because the broad line would still execute and kill
+    unrelated processes when the pidfile is missing or empty.
+
+    Comments are stripped before scanning so that operational scripts
+    can document anti-patterns ("# never use: pkill -f run_daemon.py")
+    without failing validation.
+    """
+    errors: list[str] = []
+    scan = _strip_comments(content)
+
+    for pattern, message in (
+        _PROCESS_KILL_PATTERNS
+        + _DESTRUCTIVE_PATTERNS
+        + _HARDCODED_PATH_PATTERNS
+        + _DOCKER_PATTERNS
+    ):
+        if pattern.search(scan):
+            errors.append(f"{path}: {message}")
+
+    errors.extend(f"{path}: {e}" for e in _check_rm_rf_variables(scan))
+    errors.extend(f"{path}: {e}" for e in _check_docker_compose_destructive(scan))
+
+    return errors
+
+
 def _strip_leading_blank_lines(text: str) -> str:
     """Strip leading whitespace/blank lines so the shebang check is robust
     to the LLM emitting a stray newline after ``--- BEGIN FILE ---``."""
@@ -113,6 +287,11 @@ def _validate_shell_script(path: str, content: str) -> list[str]:
             f"`if`, `cd`, `echo`, `docker`, … tokens found) — likely a "
             f"natural-language description"
         )
+
+    # Run the safety lint on every shell script. Catches operationally
+    # dangerous patterns (broad killers, hard-coded user homes, …)
+    # whether or not the structural checks above passed.
+    errors.extend(_check_dangerous_patterns(path, content))
 
     return errors
 
