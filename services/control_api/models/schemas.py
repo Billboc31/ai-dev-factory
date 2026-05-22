@@ -288,6 +288,9 @@ class SandboxValidationState(BaseModel):
     error: str | None = None
     last_step: str | None = None
     steps: list[SandboxValidationStep] = []
+    ports: dict[str, int] = {}
+    worktree_path: str | None = None
+    compose_project: str | None = None
 
 
 class SandboxValidationStatus(BaseModel):
@@ -299,6 +302,9 @@ class SandboxValidationStatus(BaseModel):
     error: str | None = None
     last_step: str | None = None
     steps: list[SandboxValidationStep] = []
+    ports: dict[str, int] = {}
+    worktree_path: str | None = None
+    compose_project: str | None = None
 
 
 class SandboxValidationLogsResponse(BaseModel):

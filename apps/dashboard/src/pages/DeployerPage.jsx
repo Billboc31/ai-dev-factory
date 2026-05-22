@@ -10,9 +10,10 @@ const STEP_COLORS = {
   failed: 'text-red-600',
 }
 
-function SandboxStatusPanel({ status }) {
+function SandboxStatusPanel({ status, onRefresh }) {
   if (!status || status.state === 'idle') return null
   const colorClass = STATE_COLORS[status.state] || STATE_COLORS.idle
+  const portEntries = status.ports ? Object.entries(status.ports) : []
   return (
     <div className="bg-white border border-gray-200 rounded p-4 mt-4 space-y-2">
       <div className="flex items-center gap-3">
@@ -24,9 +25,31 @@ function SandboxStatusPanel({ status }) {
         {status.sandbox_id && (
           <span className="text-xs text-gray-400 font-mono">{status.sandbox_id}</span>
         )}
+        {onRefresh && (
+          <button
+            className="ml-auto text-xs text-blue-600 hover:underline"
+            onClick={onRefresh}
+          >
+            Refresh
+          </button>
+        )}
       </div>
       {status.error && (
         <p className="text-xs text-red-600">Error: {status.error}</p>
+      )}
+      {portEntries.length > 0 && (
+        <div className="flex flex-wrap gap-3 mt-1">
+          {portEntries.map(([k, v]) => (
+            <span key={k} className="text-xs font-mono text-gray-600">
+              <span className="text-gray-400">{k}:</span> {v}
+            </span>
+          ))}
+        </div>
+      )}
+      {status.worktree_path && (
+        <p className="text-xs text-gray-400 font-mono truncate" title={status.worktree_path}>
+          {status.worktree_path}
+        </p>
       )}
       {status.steps && status.steps.length > 0 && (
         <ul className="space-y-0.5 mt-1">
@@ -469,7 +492,7 @@ export default function DeployerPage({ projectId }) {
       <ScriptsStatusPanel status={scriptsStatus} />
       <ScriptsLogsPanel projectId={projectId} isRunning={isGeneratingScripts} />
       <ScanResultPanel result={scanResult} />
-      <SandboxStatusPanel status={sandboxStatus} />
+      <SandboxStatusPanel status={sandboxStatus} onRefresh={refreshSandboxStatus} />
       <SandboxLogsPanel projectId={projectId} isRunning={isSandboxRunning} />
     </div>
   )

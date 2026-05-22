@@ -116,6 +116,8 @@ def create_app(
     app.include_router(sandbox.router)
     # T134: /projects/{id}/sandbox/* — one-shot deploy-validation pipeline.
     app.include_router(sandbox.project_router)
+    # T137: /sandbox-runs — historical validation run listing and cleanup.
+    app.include_router(sandbox.runs_router)
 
     return app
 
