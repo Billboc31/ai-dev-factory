@@ -49,6 +49,28 @@ function WorkersList({ columns }) {
   )
 }
 
+function CrashBanner({ status }) {
+  if (!status?.exit_unexpected) return null
+  return (
+    <div role="alert" className="bg-red-50 border border-red-300 rounded p-4 mb-6">
+      <p className="text-sm font-semibold text-red-900">Daemon crashed unexpectedly</p>
+      {status.last_exit_code != null && (
+        <p className="text-xs text-red-800 mt-1">
+          Exit code: <code className="font-mono">{status.last_exit_code}</code>
+        </p>
+      )}
+      {status.last_exit_time && (
+        <p className="text-xs text-red-800">
+          At: {new Date(status.last_exit_time).toLocaleTimeString()}
+        </p>
+      )}
+      {status.restart_count > 0 && (
+        <p className="text-xs text-red-800">Restarts: {status.restart_count}</p>
+      )}
+    </div>
+  )
+}
+
 function HostCommandPanel({ command, onDismiss }) {
   const [copied, setCopied] = useState(false)
   if (!command) return null
@@ -127,6 +149,7 @@ export default function DaemonPage({ projectId }) {
     <div className="max-w-2xl">
       <h1 className="text-2xl font-bold mb-4">Daemon</h1>
       <ErrorBanner message={error} onClose={() => setError(null)} />
+      <CrashBanner status={status} />
       <HostCommandPanel command={hostCommand} onDismiss={() => setHostCommand(null)} />
 
       {loading && !status && <p className="text-gray-500">Loading…</p>}
@@ -139,6 +162,11 @@ export default function DaemonPage({ projectId }) {
               aria-hidden="true"
             />
             <span className="font-semibold">{status.running ? 'Running' : 'Stopped'}</span>
+            {status.restart_policy === 'restart-on-crash' && status.exit_unexpected && !status.running && (
+              <span className="text-xs bg-yellow-100 text-yellow-800 px-2 py-0.5 rounded-full font-medium">
+                Restarting…
+              </span>
+            )}
           </div>
           {status.pid != null && (
             <p className="text-sm text-gray-600">PID: <code className="font-mono">{status.pid}</code></p>
