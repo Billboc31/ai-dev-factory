@@ -73,3 +73,11 @@
 [2026-05-22T07:04:23Z] compose: skill=ai/skills/debugging.md
 [2026-05-22T07:04:23Z] compose: task (canonical prompt)
 [2026-05-22T07:04:23Z] snapshot: runtime-prompt=runs/T135/prompts/tester-attempt-1.md
+[2026-05-22T07:09:35Z] auto-run: step=tester done rc=0
+[2026-05-22T07:09:35Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-22T07:09:35Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-22T07:09:35Z] commit-checkpoint: unstaged runtime garbage: ['runs/T135/runtime.log']
+[2026-05-22T07:09:35Z] commit-checkpoint: sha=27ec6553 files=3 title='test(T135/workflow): tester — update 3 file(s)'
+[2026-05-22T07:09:35Z] auto-run: auto-push triggered
+[2026-05-22T07:09:35Z] push: tolerating runtime dirty files (not blocking): ['runs/T135/runtime.log']
+[2026-05-22T07:09:35Z] push: pushing branch=ticket/T135-t135-isolated-analysis-and-deploy-worktrees
