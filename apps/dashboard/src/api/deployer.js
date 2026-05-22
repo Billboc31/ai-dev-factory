@@ -20,3 +20,7 @@ export const getScriptsLogs = (projectId, lines = 100) => client.get(`${_pfx(pro
 export const startSandboxValidation = (projectId) => client.post(`${_pfx(projectId)}/sandbox/start`)
 export const getSandboxStatus = (projectId) => client.get(`${_pfx(projectId)}/sandbox/status`)
 export const getSandboxLogs = (projectId, lines = 100) => client.get(`${_pfx(projectId)}/sandbox/logs`, { params: { lines } })
+// T137 — historical sandbox-runs listing and cleanup (`/sandbox-runs`).
+export const listSandboxRuns = () => client.get('/sandbox-runs')
+export const getSandboxRunLogs = (sandboxId, lines = 500) => client.get(`/sandbox-runs/${sandboxId}/logs`, { params: { lines } })
+export const cleanupSandboxRun = (sandboxId) => client.delete(`/sandbox-runs/${sandboxId}`)

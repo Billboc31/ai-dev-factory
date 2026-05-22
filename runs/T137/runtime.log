@@ -1,0 +1,42 @@
+[2026-05-22T14:30:29Z] auto-run start: state=INIT
+[2026-05-22T14:30:29Z] auto-run: running step=planner
+[2026-05-22T14:30:29Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-05-22T14:30:29Z] prompt: generic fallback — injecting runs/T137/ticket.md
+[2026-05-22T14:30:29Z] compose: global-context=docs/ai/global-context.md
+[2026-05-22T14:30:29Z] compose: role=ai/roles/planner.md
+[2026-05-22T14:30:29Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-22T14:30:29Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-22T14:30:29Z] compose: skill=ai/skills/documentation.md
+[2026-05-22T14:30:29Z] compose: task (canonical prompt)
+[2026-05-22T14:30:29Z] snapshot: runtime-prompt=runs/T137/prompts/planner-attempt-1.md
+[2026-05-22T14:37:54Z] auto-run: step=planner done rc=0
+[2026-05-22T14:37:56Z] planner checkpoint: committed
+[2026-05-22T14:37:56Z] planner checkpoint: pushed
+[2026-05-22T14:37:56Z] planner validation success
+[2026-05-22T14:37:56Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-22T14:37:56Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-22T14:37:56Z] commit-checkpoint: unstaged runtime garbage: ['runs/T137/runtime.log']
+[2026-05-22T14:37:56Z] commit-checkpoint: sha=dab82d23 files=2 title='docs(T137/workflow): planner — update 2 file(s)'
+[2026-05-22T14:37:56Z] auto-run: auto-push triggered
+[2026-05-22T14:37:56Z] push: tolerating runtime dirty files (not blocking): ['runs/T137/runtime.log']
+[2026-05-22T14:37:56Z] push: pushing branch=ticket/T137-t137-sandbox-isolated-ports-and-ui-management
+[2026-05-22T14:37:58Z] push: done branch=ticket/T137-t137-sandbox-isolated-ports-and-ui-management
+[2026-05-22T14:55:16Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-22T14:55:16Z] auto-run: running step=tester
+[2026-05-22T14:55:16Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-22T14:55:16Z] prompt: generic fallback — injecting runs/T137/ticket.md
+[2026-05-22T14:55:16Z] compose: global-context=docs/ai/global-context.md
+[2026-05-22T14:55:16Z] compose: role=ai/roles/tester.md
+[2026-05-22T14:55:16Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-22T14:55:16Z] compose: skill=ai/skills/testing.md
+[2026-05-22T14:55:16Z] compose: skill=ai/skills/debugging.md
+[2026-05-22T14:55:16Z] compose: task (canonical prompt)
+[2026-05-22T14:55:16Z] snapshot: runtime-prompt=runs/T137/prompts/tester-attempt-1.md
+[2026-05-22T14:58:54Z] auto-run: step=tester done rc=0
+[2026-05-22T14:58:54Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-22T14:58:54Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-22T14:58:54Z] commit-checkpoint: unstaged runtime garbage: ['runs/T137/runtime.log']
+[2026-05-22T14:58:55Z] commit-checkpoint: sha=f9898d58 files=3 title='test(T137/workflow): tester — update 3 file(s)'
+[2026-05-22T14:58:55Z] auto-run: auto-push triggered
+[2026-05-22T14:58:55Z] push: tolerating runtime dirty files (not blocking): ['runs/T137/runtime.log']
+[2026-05-22T14:58:55Z] push: pushing branch=ticket/T137-t137-sandbox-isolated-ports-and-ui-management

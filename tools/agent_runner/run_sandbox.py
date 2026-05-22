@@ -55,6 +55,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import fcntl
 import json
 import logging
 import os
@@ -135,6 +136,81 @@ def _now_iso() -> str:
 def _make_sandbox_id(project_id: str) -> str:
     ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S")
     return f"{project_id}-{ts}"
+
+
+# ── Port registry ────────────────────────────────────────────────────────────
+
+# Slot 0 is reserved for the main runtime (API 8080, web 3000).
+# Each sandbox gets its own slot ≥ 1: api_port = 8080 + slot*100,
+# web_port = 3000 + slot*100.
+
+def _port_registry_paths() -> tuple[Path, Path]:
+    base = _runtime_root() / "sandboxes"
+    base.mkdir(parents=True, exist_ok=True)
+    return base / "port-registry.json", base / ".port-registry.lock"
+
+
+def _allocate_port_slot(sandbox_id: str) -> int:
+    registry_path, lock_path = _port_registry_paths()
+    lock_path.touch(exist_ok=True)
+    with lock_path.open("r+") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            registry: dict[str, int] = {}
+            if registry_path.exists():
+                try:
+                    registry = json.loads(registry_path.read_text())
+                except (json.JSONDecodeError, OSError):
+                    registry = {}
+            used_slots = set(registry.values())
+            slot = 1
+            while slot in used_slots:
+                slot += 1
+            registry[sandbox_id] = slot
+            registry_path.write_text(json.dumps(registry, indent=2))
+            return slot
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+
+
+def _release_port_slot(sandbox_id: str) -> None:
+    registry_path, lock_path = _port_registry_paths()
+    if not registry_path.exists():
+        return
+    lock_path.touch(exist_ok=True)
+    with lock_path.open("r+") as lf:
+        fcntl.flock(lf, fcntl.LOCK_EX)
+        try:
+            try:
+                registry: dict[str, int] = json.loads(registry_path.read_text())
+            except (json.JSONDecodeError, OSError):
+                return
+            registry.pop(sandbox_id, None)
+            registry_path.write_text(json.dumps(registry, indent=2))
+        finally:
+            fcntl.flock(lf, fcntl.LOCK_UN)
+
+
+def _write_sandbox_env(
+    sandbox_dir: Path,
+    sandbox_id: str,
+    runtime_root: Path,
+    project_root: Path,
+    api_port: int,
+    web_port: int,
+    compose_project: str,
+) -> None:
+    supervisor_port = os.environ.get("AI_DEV_FACTORY_SUPERVISOR_PORT", "8090")
+    lines = [
+        f"AI_DEV_FACTORY_RUNTIME_ROOT={runtime_root}",
+        f"AI_DEV_FACTORY_PROJECT_ROOT={project_root}",
+        f"AI_DEV_FACTORY_SUPERVISOR_PORT={supervisor_port}",
+        f"API_PORT={api_port}",
+        f"WEB_PORT={web_port}",
+        f"COMPOSE_PROJECT_NAME={compose_project}",
+        f"SANDBOX_ID={sandbox_id}",
+    ]
+    (sandbox_dir / "deploy.env").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
 def _write_state(state_path: Path, latest_state_path: Path, data: dict) -> None:
@@ -313,6 +389,7 @@ def _run_scripts(
     latest_state_path: Path,
     log_path: Path,
     state_base: dict,
+    extra_env: dict | None = None,
 ) -> tuple[bool, str | None, list[dict]]:
     steps: list[dict] = []
     scripts_dir_abs = worktree_path / _SCRIPTS_DIR
@@ -354,6 +431,7 @@ def _run_scripts(
 
         # Run from the worktree root so scripts can use project-relative
         # paths (e.g. `npm install`, `docker compose up`).
+        script_env = {**os.environ, **(extra_env or {})}
         try:
             result = subprocess.run(
                 ["bash", script_rel],
@@ -363,6 +441,7 @@ def _run_scripts(
                 stdin=subprocess.DEVNULL,
                 start_new_session=True,
                 timeout=_SCRIPT_TIMEOUT_SECONDS,
+                env=script_env,
             )
         except subprocess.TimeoutExpired:
             step = {
@@ -408,6 +487,19 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
     worktree_path = sandbox_dir / "worktree"
     latest_state_path = _latest_state_path(project_id)
 
+    # Allocate an isolated port slot before creating the worktree so ports
+    # are visible in state from the very first write.
+    slot = _allocate_port_slot(sandbox_id)
+    api_port = 8080 + slot * 100
+    web_port = 3000 + slot * 100
+    compose_project = f"sandbox-{sandbox_id}"
+    ports = {"api_port": api_port, "web_port": web_port}
+
+    _write_sandbox_env(
+        sandbox_dir, sandbox_id, _runtime_root(), project_root,
+        api_port, web_port, compose_project,
+    )
+
     started_at = _now_iso()
     state_base = {
         "state": "running",
@@ -418,12 +510,25 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
         "error": None,
         "last_step": "worktree",
         "steps": [],
+        "ports": ports,
+        "worktree_path": str(worktree_path),
+        "compose_project": compose_project,
+        "project_root": str(project_root),
     }
     _write_state(state_path, latest_state_path, state_base)
     _append_log(log_path, f"=== sandbox {sandbox_id} started {started_at} ===\n")
     _append_log(log_path, f"project_root: {project_root}\n")
     _append_log(log_path, f"runtime_root: {_runtime_root()}\n")
     _append_log(log_path, f"sandbox_dir: {sandbox_dir}\n")
+    _append_log(log_path, f"port_slot: {slot}  api_port: {api_port}  web_port: {web_port}\n")
+    _append_log(log_path, f"compose_project: {compose_project}\n")
+
+    extra_env = {
+        "API_PORT": str(api_port),
+        "WEB_PORT": str(web_port),
+        "COMPOSE_PROJECT_NAME": compose_project,
+        "SANDBOX_ID": sandbox_id,
+    }
 
     try:
         ok, error = _create_worktree(project_root, worktree_path, log_path)
@@ -438,7 +543,8 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
             return 1
 
         success, error, steps = _run_scripts(
-            worktree_path, state_path, latest_state_path, log_path, state_base
+            worktree_path, state_path, latest_state_path, log_path, state_base,
+            extra_env=extra_env,
         )
 
         finished_at = _now_iso()
@@ -469,6 +575,8 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
             "error": f"unhandled exception in sandbox runner: {e}",
         })
         return 1
+    finally:
+        _release_port_slot(sandbox_id)
 
 
 def main() -> None:

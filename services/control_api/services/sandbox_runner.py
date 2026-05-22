@@ -69,6 +69,9 @@ def _state_from_payload(raw: dict) -> SandboxValidationState:
         error=raw.get("error"),
         last_step=raw.get("last_step"),
         steps=steps,
+        ports=raw.get("ports") or {},
+        worktree_path=raw.get("worktree_path"),
+        compose_project=raw.get("compose_project"),
     )
 
 
