@@ -32,3 +32,11 @@
 [2026-05-22T07:37:06Z] compose: skill=ai/skills/debugging.md
 [2026-05-22T07:37:06Z] compose: task (canonical prompt)
 [2026-05-22T07:37:06Z] snapshot: runtime-prompt=runs/T136/prompts/tester-attempt-1.md
+[2026-05-22T07:44:31Z] auto-run: step=tester done rc=0
+[2026-05-22T07:44:31Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-22T07:44:31Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-22T07:44:31Z] commit-checkpoint: unstaged runtime garbage: ['runs/T136/runtime.log']
+[2026-05-22T07:44:31Z] commit-checkpoint: sha=5b81f686 files=3 title='test(T136/workflow): tester — update 3 file(s)'
+[2026-05-22T07:44:31Z] auto-run: auto-push triggered
+[2026-05-22T07:44:31Z] push: tolerating runtime dirty files (not blocking): ['runs/T136/runtime.log']
+[2026-05-22T07:44:31Z] push: pushing branch=ticket/T136-t136-deploy-sandbox-isolation-and-runtime-separati
