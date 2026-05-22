@@ -25,6 +25,11 @@ if str(_RUNNER_DIR) not in sys.path:
 
 from analysis_prompt_builder import build_analysis_prompt  # noqa: E402
 from analysis_git_service import commit_and_push  # noqa: E402
+from worktree_manager import (  # noqa: E402
+    create_ticket_branch_and_worktree,
+    get_ticket_worktree_path,
+    remove_ticket_worktree,
+)
 
 logger = logging.getLogger("run_analysis")
 
@@ -140,13 +145,19 @@ def main() -> None:
     parser.add_argument("--project-root", required=True)
     parser.add_argument("--project-id", required=True)
     parser.add_argument("--exec-cmd", required=True)
+    parser.add_argument("--worktrees-dir", default=None)
     args = parser.parse_args()
 
     project_root = Path(args.project_root).resolve()
     project_id = args.project_id
     exec_cmd = args.exec_cmd
+    worktrees_dir = Path(args.worktrees_dir).resolve() if args.worktrees_dir else None
 
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S")
+    job_id = f"analysis-{project_id}-{ts}"
+    worktree_path: Path | None = None
 
     started_at = _now()
     _write_state(project_id, {
@@ -156,10 +167,31 @@ def main() -> None:
         "error": None,
         "branch": None,
         "pr_url": None,
+        "worktree_path": None,
     })
     logger.info("analysis started project_id=%s root=%s", project_id, project_root)
 
     try:
+        if worktrees_dir is not None:
+            ok, msg = create_ticket_branch_and_worktree(
+                job_id, f"analysis/{job_id}", worktrees_dir, repo_root=project_root
+            )
+            if not ok:
+                raise RuntimeError(f"failed to create analysis worktree: {msg}")
+            worktree_path = get_ticket_worktree_path(job_id, worktrees_dir)
+            logger.info("analysis worktree created: %s", worktree_path)
+            _write_state(project_id, {
+                "state": "running",
+                "started_at": started_at,
+                "finished_at": None,
+                "error": None,
+                "branch": None,
+                "pr_url": None,
+                "worktree_path": str(worktree_path),
+            })
+
+        write_root = worktree_path if worktree_path is not None else project_root
+
         logger.info("scanning project")
         scan_result = _scan_project(project_root)
 
@@ -181,10 +213,10 @@ def main() -> None:
                 raise RuntimeError(f"LLM output missing required block: {rel}")
 
         logger.info("writing %d generated file(s)", len(generated_files))
-        (project_root / ".ai-dev-factory").mkdir(exist_ok=True)
+        (write_root / ".ai-dev-factory").mkdir(exist_ok=True)
         for rel_path, content in generated_files.items():
-            target = (project_root / rel_path).resolve()
-            if not str(target).startswith(str(project_root) + "/"):
+            target = (write_root / rel_path).resolve()
+            if not str(target).startswith(str(write_root) + "/"):
                 raise RuntimeError(
                     f"LLM returned path escaping project root: {rel_path}"
                 )
@@ -192,7 +224,7 @@ def main() -> None:
             target.write_text(content, encoding="utf-8")
             logger.info("wrote %s", rel_path)
 
-        deploy_path = project_root / ".ai-dev-factory" / "deploy.yml"
+        deploy_path = write_root / ".ai-dev-factory" / "deploy.yml"
         try:
             import yaml as _yaml
             _yaml.safe_load(deploy_path.read_text(encoding="utf-8"))
@@ -203,7 +235,7 @@ def main() -> None:
             raise RuntimeError(f"deploy.yml is not valid YAML: {exc}") from exc
 
         logger.info("committing and pushing")
-        branch, pr_url = commit_and_push(project_root, project_id)
+        branch, pr_url = commit_and_push(write_root, project_id)
 
         finished_at = _now()
         _write_state(project_id, {
@@ -213,6 +245,7 @@ def main() -> None:
             "error": None,
             "branch": branch,
             "pr_url": pr_url,
+            "worktree_path": str(worktree_path) if worktree_path is not None else None,
         })
         logger.info("analysis complete branch=%s pr_url=%s", branch, pr_url)
 
@@ -226,8 +259,17 @@ def main() -> None:
             "error": str(exc),
             "branch": None,
             "pr_url": None,
+            "worktree_path": str(worktree_path) if worktree_path is not None else None,
         })
         sys.exit(1)
+
+    finally:
+        if worktrees_dir is not None and worktree_path is not None:
+            ok, msg = remove_ticket_worktree(job_id, worktrees_dir, force=True)
+            if not ok:
+                logger.warning("failed to remove analysis worktree %s: %s", job_id, msg)
+            else:
+                logger.info("analysis worktree removed: %s", job_id)
 
 
 if __name__ == "__main__":

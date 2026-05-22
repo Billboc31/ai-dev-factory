@@ -24,6 +24,14 @@ from pydantic import BaseModel
 
 logger = logging.getLogger("supervisor")
 
+_SUPERVISOR_DIR = Path(__file__).resolve().parent
+if str(_SUPERVISOR_DIR) not in sys.path:
+    sys.path.insert(0, str(_SUPERVISOR_DIR))
+
+from path_mapper import ContainerToHostMapper  # noqa: E402
+
+mapper = ContainerToHostMapper()
+
 _PID_FILENAME = "daemon.pid"
 _LOG_FILENAME = "daemon.log"
 
@@ -391,6 +399,14 @@ def health():
     return {"status": "ok", "daemon_pid": pid if (pid and _is_alive(pid)) else None}
 
 
+@app.get("/supervisor/status")
+def supervisor_status():
+    return {
+        "container_runtime_root": mapper.container_root or None,
+        "host_runtime_root": mapper.host_root or None,
+    }
+
+
 @app.get("/daemon/status")
 def daemon_status():  # noqa: C901
     global _daemon_exec_cmd
@@ -505,21 +521,28 @@ def analysis_start(body: AnalysisStartRequest):
         if _analysis_current_pid(body.project_id) is not None:
             return JSONResponse(status_code=409, content={"ok": False, "error": "locked"})
 
+        mapped_root = mapper.map(body.project_root)
+        logger.info(
+            "supervisor: analysis start project_id=%s project_root=%r -> %r",
+            body.project_id, body.project_root, mapped_root,
+        )
+
         started_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         log = _analysis_log_path(body.project_id)
         cmd = [
             sys.executable,
             str(_run_analysis_path()),
-            "--project-root", body.project_root,
+            "--project-root", mapped_root,
             "--project-id", body.project_id,
             "--exec-cmd", body.exec_cmd,
+            "--worktrees-dir", str(_worktrees_dir()),
         ]
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
         try:
             with open(log, "a", encoding="utf-8") as log_fh:
                 log_fh.write(
                     f"[{started_at}] supervisor spawning analysis for {body.project_id}\n"
-                    f"  project_root={body.project_root}\n"
+                    f"  project_root={body.project_root} -> {mapped_root}\n"
                 )
                 log_fh.flush()
                 proc = subprocess.Popen(

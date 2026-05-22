@@ -93,6 +93,9 @@ function AnalysisStatusPanel({ status }) {
           </a>
         </p>
       )}
+      {status.worktree_path && (
+        <p className="text-xs text-gray-400 font-mono">Worktree: {status.worktree_path}</p>
+      )}
       {status.error && (
         <p className="text-xs text-red-600">Error: {status.error}</p>
       )}
