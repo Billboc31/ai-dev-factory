@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import * as deployerApi from '../api/deployer'
 import ActionButton from '../components/ActionButton'
 import ErrorBanner from '../components/ErrorBanner'
+import SandboxRunsPanel from '../components/SandboxRunsPanel'
 import usePolling from '../hooks/usePolling'
 
 const STEP_COLORS = {
@@ -494,6 +495,7 @@ export default function DeployerPage({ projectId }) {
       <ScanResultPanel result={scanResult} />
       <SandboxStatusPanel status={sandboxStatus} onRefresh={refreshSandboxStatus} />
       <SandboxLogsPanel projectId={projectId} isRunning={isSandboxRunning} />
+      <SandboxRunsPanel />
     </div>
   )
 }
