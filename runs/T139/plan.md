@@ -1,100 +1,108 @@
-Now I have a thorough picture of the existing stack. Here is the implementation plan.
-
----
+Now I have a clear picture of the codebase. Writing the V1 implementation plan.
 
 ## Objective
 
-Add a dedicated **Runtime Dashboard** page to the existing React SPA that gives operators a unified view of sandbox runs, proposal runs, and runtime health, with safe cleanup actions and live log tailing — all driven by generic metadata with no project-specific assumptions.
-
----
+Add a read-only Runtime Dashboard page to the existing React/FastAPI stack that gives operators visibility into sandbox runs, proposal runs, runtime health, and log tailing, with safe cleanup restricted to completed or failed artifacts only.
 
 ## Included
 
-### Backend — `services/control_api/routes/`
+### Backend — `services/control_api/routes/runtime_dashboard.py` (new file)
 
-**New file: `runtime_dashboard.py`** — registers a `/runtime-dashboard` router with these endpoints:
+New FastAPI router registered at `/runtime-dashboard`:
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/runtime-dashboard/sandbox-runs` | List all sandbox runs: id, status, timestamps, ports, worktree path |
-| `GET` | `/runtime-dashboard/sandbox-runs/{id}/logs` | Stream or page sandbox run logs |
-| `POST` | `/runtime-dashboard/sandbox-runs/{id}/rerun` | Trigger rerun of sandbox validation |
-| `POST` | `/runtime-dashboard/sandbox-runs/{id}/stop` | Stop a running sandbox |
-| `DELETE` | `/runtime-dashboard/sandbox-runs/{id}` | Cleanup sandbox (safety check: reject if active) |
-| `GET` | `/runtime-dashboard/proposal-runs` | List all proposal runs: proposal id, sandbox id, status, changed files |
-| `GET` | `/runtime-dashboard/proposal-runs/{id}/patch` | Return raw patch for a proposal |
-| `DELETE` | `/runtime-dashboard/proposal-runs/{id}` | Delete a proposal (safety check: reject if active) |
-| `GET` | `/runtime-dashboard/health` | Supervisor status, active jobs count, stale pid files, stale locks |
-| `POST` | `/runtime-dashboard/cleanup/stale-worktrees` | Delete worktrees with no active lock (dry-run flag) |
-| `POST` | `/runtime-dashboard/cleanup/stale-sandboxes` | Delete sandbox dirs with no active lock (dry-run flag) |
-| `POST` | `/runtime-dashboard/cleanup/orphan-artifacts` | Delete pid/lock files whose PID is dead (dry-run flag) |
+| `GET` | `/runtime-dashboard/sandbox-runs` | List sandbox runs: id, project\_id, status, started\_at, finished\_at, ports, worktree\_path, compose\_project |
+| `GET` | `/runtime-dashboard/sandbox-runs/{id}/logs` | Return sandbox log content with optional `offset` query param for incremental polling |
+| `DELETE` | `/runtime-dashboard/sandbox-runs/{id}` | Cleanup sandbox — reject with `409` if status is active or `daemon.lock` holds a live PID |
+| `GET` | `/runtime-dashboard/proposal-runs` | List proposal runs: proposal\_id, sandbox\_id, status, changed\_files\_count, started\_at, finished\_at |
+| `GET` | `/runtime-dashboard/proposal-runs/{id}` | Open proposal summary (returns proposal state metadata) |
+| `DELETE` | `/runtime-dashboard/proposal-runs/{id}` | Delete completed proposal — reject with `409` if active |
+| `GET` | `/runtime-dashboard/health` | Return: supervisor\_status (up/down), active\_jobs count, stale\_pid\_files list, stale\_locks list |
 
-Safety rules enforced in all DELETE/cleanup handlers:
-- Reject if target has an active `daemon.lock` (PID alive)
-- Reject if target is the main runtime root (`runs/`, `sandboxes/`, repo clone)
-- Return `409 Conflict` with reason on safety failure
+Data sources (all generic, no project-specific assumptions):
+- Sandbox runs: read `sandboxes/*/state.json`, check `sandboxes/*/daemon.lock`
+- Proposal runs: read supervisor HTTP `/auto-fix/{id}/proposals` or equivalent state files under `runs/`
+- Runtime health: read `runs/daemon.pid`, scan `runs/*/daemon.lock` for stale locks (PID not alive), scan for orphan `.pid` files
+- Safety check helper: shared function that verifies PID liveness from a lock file and rejects cleanup of main runtime paths (`runs/`, `sandboxes/`, repo clone root)
 
-Data sources: read `runs/*/state.json`, `runs/daemon.pid`, `runs/*/daemon.lock`, supervisor HTTP (`/supervisor/status`, `/auto-fix/{id}/proposals`).
+### `services/control_api/main.py`
 
-**`services/control_api/main.py`** — register the new router.
+Register the new `runtime_dashboard` router (one import + one `app.include_router()` call, following the existing pattern).
 
----
+### Frontend — `apps/dashboard/src/pages/RuntimeDashboardPage.jsx` (new file)
 
-### Frontend — `apps/dashboard/src/`
+Single page with four collapsible sections:
 
-**New page: `src/pages/RuntimeDashboardPage.tsx`**
+1. **Sandbox Runs** — table columns: id, status badge, project\_id, started\_at, finished\_at, ports, worktree\_path, compose\_project; per-row actions: Refresh (re-fetches list), Open Logs (opens log drawer), Delete (disabled and visually greyed out if status is active/running)
+2. **Proposal Runs** — table columns: proposal\_id, sandbox\_id, status badge, changed\_files\_count, started\_at, finished\_at; per-row actions: Open Summary (fetches and renders proposal state in a modal), Delete (disabled if active)
+3. **Runtime Health** — read-only cards: supervisor status indicator, active job count, list of stale pid files, list of stale lock files
+4. **Log Viewer** — slide-out drawer triggered by row action; polls `GET /runtime-dashboard/sandbox-runs/{id}/logs?offset=N` every 2 s, auto-scrolls to bottom; polling stops when drawer closes
 
-Sections rendered as collapsible panels:
-1. **Sandbox Runs** — table with columns: id, status badge, started\_at, finished\_at, ports, worktree path; per-row actions: Refresh, Rerun, Stop, Delete (disabled if active)
-2. **Proposal Runs** — table with columns: proposal id, sandbox id, status badge, changed files count; per-row actions: Open (link to ticket), View Patch (modal), Delete (disabled if active)
-3. **Runtime Health** — cards for: supervisor up/down, active job count, stale pid file list, stale lock file list
-4. **Cleanup Tools** — three buttons (Stale Worktrees, Stale Sandboxes, Orphan Artifacts), each with a Dry Run toggle and a confirmation dialog before destructive execution; results shown inline
-5. **Log Viewer** — slide-out panel, triggered by clicking a sandbox run row; polls `GET /runtime-dashboard/sandbox-runs/{id}/logs?offset=N` every 2 s, auto-scrolls to bottom; Stop button halts polling
+### New components — `apps/dashboard/src/components/runtime-dashboard/` (new directory)
 
-**New components** (under `src/components/runtime-dashboard/`):
-- `SandboxRunsTable.tsx`
-- `ProposalRunsTable.tsx`
-- `RuntimeHealthPanel.tsx`
-- `CleanupToolsPanel.tsx`
-- `LogViewerDrawer.tsx`
-- `ConfirmDialog.tsx` (reusable if not already present)
+- `SandboxRunsTable.jsx` — renders sandbox run rows with action buttons
+- `ProposalRunsTable.jsx` — renders proposal run rows with action buttons
+- `RuntimeHealthPanel.jsx` — read-only health cards
+- `LogViewerDrawer.jsx` — slide-out log panel with polling logic and stop-on-close
+- `ProposalSummaryModal.jsx` — modal showing proposal state metadata
+- `ConfirmDialog.jsx` — reusable confirmation dialog before destructive actions (DELETE)
 
-**Route registration: `src/App.tsx`** — add `/runtime-dashboard` route pointing to `RuntimeDashboardPage`.
+### `apps/dashboard/src/api/runtimeDashboard.js` (new file)
 
-**Navigation: `src/components/Sidebar.tsx`** (or equivalent nav file) — add "Runtime Dashboard" link.
+Typed Axios wrappers using the same `client = axios.create({ baseURL: '/api' })` pattern as existing clients:
+- `listSandboxRuns()`, `getSandboxLogs(id, offset)`, `deleteSandboxRun(id)`
+- `listProposalRuns()`, `getProposalSummary(id)`, `deleteProposalRun(id)`
+- `getRuntimeHealth()`
 
-**API client: `src/api/runtimeDashboard.ts`** — typed Axios wrappers for all new endpoints, using the existing Axios base client.
+### `apps/dashboard/src/App.jsx`
 
----
+Add route `/runtime-dashboard` → `RuntimeDashboardPage` following the existing route declaration pattern.
+
+### `apps/dashboard/src/components/ProjectSidebar.jsx` (or equivalent nav file)
+
+Add "Runtime Dashboard" nav link pointing to `/runtime-dashboard`, styled consistently with existing sidebar links.
 
 ### Tests
 
-- `tests/test_runtime_dashboard_api.py` — pytest unit tests for each new endpoint covering: happy path, safety rejection (active lock), missing resource (404), dry-run cleanup
-- `apps/dashboard/src/pages/RuntimeDashboardPage.test.tsx` — Vitest + React Testing Library: renders sections, shows "active" badge disabling delete button, cleanup confirm dialog flow
+**`tests/test_runtime_dashboard_api.py`** (new file, pytest):
+- `GET /runtime-dashboard/sandbox-runs` returns list with required fields; returns `[]` when no runs exist
+- `GET /runtime-dashboard/sandbox-runs/{id}/logs` returns log content; returns `404` for unknown id
+- `DELETE /runtime-dashboard/sandbox-runs/{id}` returns `409` when lock holds live PID; returns `204` when lock absent or stale
+- `GET /runtime-dashboard/proposal-runs` returns list with required fields
+- `DELETE /runtime-dashboard/proposal-runs/{id}` returns `409` for active proposal; `204` for completed
+- `GET /runtime-dashboard/health` returns object with keys `supervisor_status`, `active_jobs`, `stale_pid_files`, `stale_locks`
 
----
+**`apps/dashboard/tests/RuntimeDashboardPage.test.jsx`** (new file, Vitest + React Testing Library):
+- Page renders all four sections
+- Delete button is disabled when sandbox status is `running`
+- Delete button is enabled when status is `completed`; clicking shows confirm dialog
+- Log drawer opens when "Open Logs" is clicked; polling stops when drawer is closed
+- Proposal summary modal renders proposal metadata on "Open Summary" click
 
 ## Excluded
 
-- Automatic proposal apply or merge
+- Sandbox rerun and sandbox stop actions
+- Global stale worktree cleanup, stale sandbox directory cleanup, and orphan artifact cleanup automation
+- Patch apply and proposal execution
+- Automatic merge
 - Cloud deployment or remote environment support
 - Tester-agent orchestration
-- Modifying existing ticket workflow pages (TicketsPage, DeployerPage, etc.)
-- Any project-specific column or assumption (all metadata comes from generic state files)
-- Real-time WebSocket/SSE streaming (polling every 2 s is sufficient for this ticket)
+- Real-time WebSocket or SSE streaming (polling every 2 s is sufficient)
 - Authentication or access control on new endpoints
-
----
+- Modifications to existing pages (TicketsPage, DeployerPage, SandboxPanel, AutoFixPanel, etc.)
+- Any project-specific columns, filters, or rendering logic
 
 ## Acceptance criteria
 
-1. `GET /runtime-dashboard/sandbox-runs` returns a list containing at minimum: `id`, `status`, `started_at`, `worktree_path`; an empty list when no runs exist.
-2. `DELETE /runtime-dashboard/sandbox-runs/{id}` returns `409` when `runs/{id}/daemon.lock` holds a live PID; returns `204` when the lock is absent or stale.
-3. `POST /runtime-dashboard/cleanup/stale-worktrees` with `dry_run=true` returns the list of candidate paths without deleting anything.
-4. `GET /runtime-dashboard/health` returns `supervisor_status`, `active_jobs`, `stale_pid_files`, `stale_locks` keys.
-5. The React page renders at `/runtime-dashboard` and displays at least the four sections (Sandbox Runs, Proposal Runs, Runtime Health, Cleanup Tools).
-6. Delete and Stop action buttons are disabled (visually and functionally) for rows whose status is active/running.
-7. The Log Viewer panel opens for a sandbox run row, displays log content, and stops polling when closed.
-8. All new pytest tests pass (`pytest tests/test_runtime_dashboard_api.py`).
-9. All new Vitest tests pass (`npm run test` in `apps/dashboard/`).
-10. No existing test suite regresses.
+1. `GET /runtime-dashboard/sandbox-runs` returns a JSON list where each item contains at minimum `id`, `status`, `started_at`, `worktree_path`; returns `[]` when no sandbox runs exist.
+2. `DELETE /runtime-dashboard/sandbox-runs/{id}` returns `409 Conflict` with an error reason when `daemon.lock` holds a live PID or status is active; returns `204 No Content` when the run is completed or failed.
+3. `DELETE /runtime-dashboard/proposal-runs/{id}` returns `409 Conflict` for active proposals; `204 No Content` for completed or failed ones.
+4. `GET /runtime-dashboard/health` returns a JSON object containing exactly the keys `supervisor_status`, `active_jobs`, `stale_pid_files`, `stale_locks`.
+5. `GET /runtime-dashboard/sandbox-runs/{id}/logs` returns log content; supports `?offset=N` for incremental retrieval.
+6. The React page renders at `/runtime-dashboard` and displays the four sections: Sandbox Runs, Proposal Runs, Runtime Health, Log Viewer.
+7. Delete action buttons are visually disabled and non-clickable for rows whose status is `running` or `active`.
+8. The Log Viewer drawer opens for a sandbox run, displays log content with auto-scroll, and halts polling when closed.
+9. `pytest tests/test_runtime_dashboard_api.py` passes with all cases green.
+10. `npm run test` in `apps/dashboard/` passes all new Vitest cases green.
+11. No existing pytest or Vitest test regresses.
