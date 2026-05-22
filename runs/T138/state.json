@@ -1,7 +1,7 @@
 {
   "ticket_id": "T138",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_FIX_REQUIRED",
   "branch": "ticket/T138-t138-generic-ai-sandbox-auto-fix-loop",
   "issue_number": 124,
-  "updated_at": "2026-05-22T15:16:18Z"
+  "updated_at": "2026-05-22T15:24:12Z"
 }
