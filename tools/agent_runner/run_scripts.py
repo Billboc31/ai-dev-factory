@@ -26,6 +26,7 @@ if str(_RUNNER_DIR) not in sys.path:
 
 from scripts_prompt_builder import build_scripts_prompt  # noqa: E402
 from scripts_git_service import commit_and_push  # noqa: E402
+from scripts_validator import validate_generated_files  # noqa: E402
 
 logger = logging.getLogger("run_scripts")
 
@@ -200,9 +201,30 @@ def main() -> None:
         logger.info("parsing LLM output (%d chars)", len(llm_output))
         generated_files = _extract_files(llm_output)
 
-        for rel in _REQUIRED_SCRIPTS:
-            if rel not in generated_files:
-                raise RuntimeError(f"LLM output missing required block: {rel}")
+        if not generated_files:
+            raise RuntimeError(
+                "LLM output contained no parseable FILE blocks "
+                "(no `--- BEGIN FILE: ... ---` / `--- END FILE ---` pairs)"
+            )
+
+        logger.info("validating generated scripts (%d file blocks)", len(generated_files))
+        validation_errors = validate_generated_files(
+            generated_files, required=_REQUIRED_SCRIPTS
+        )
+        if validation_errors:
+            for err in validation_errors:
+                logger.error("validation failed: %s", err)
+            logger.error(
+                "generation aborted before commit: %d validation error(s) — "
+                "no files written, no git operation performed",
+                len(validation_errors),
+            )
+            raise RuntimeError(
+                "scripts validation failed:\n  - "
+                + "\n  - ".join(validation_errors)
+            )
+        logger.info("validation passed — all %d file(s) look like real artifacts",
+                    len(generated_files))
 
         logger.info("writing %d generated file(s)", len(generated_files))
         (effective_root / ".ai-dev-factory" / "scripts").mkdir(parents=True, exist_ok=True)

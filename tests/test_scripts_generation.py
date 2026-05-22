@@ -65,46 +65,56 @@ def test_prompt_fallback_when_no_deploy_profile():
     assert "(not available)" in prompt
 
 
+def test_prompt_contains_hard_constraints_block():
+    """The prompt must spell out the rules that caused PR #114 to fail
+    (markdown fences inside scripts, prose-as-script, summary deployment.md).
+    Otherwise the LLM keeps re-producing the same broken outputs."""
+    prompt = build_scripts_prompt("/project", _MOCK_SCAN, "", "tree")
+    assert "CRITICAL" in prompt
+    assert "markdown code fence" in prompt or "markdown" in prompt
+    assert "#!/usr/bin/env bash" in prompt
+    assert "set -euo pipefail" in prompt
+    # The prompt must explicitly forbid replacing a script by prose
+    # (the start.sh / stop.sh / healthcheck.sh failure mode).
+    assert "natural-language" in prompt or "description" in prompt
+    # And explicitly require deployment.md to remain a real document.
+    assert "deployment.md" in prompt
+
+
 # ── run_scripts ───────────────────────────────────────────────────────────────
 
 import run_scripts  # noqa: E402
 from run_scripts import _extract_files  # noqa: E402
 
-_VALID_SCRIPTS_OUTPUT = """\
---- BEGIN FILE: .ai-dev-factory/scripts/bootstrap.sh ---
+_SH_BODY = """\
 #!/usr/bin/env bash
 set -euo pipefail
-echo bootstrap
---- END FILE ---
---- BEGIN FILE: .ai-dev-factory/scripts/build.sh ---
-#!/usr/bin/env bash
-set -euo pipefail
-echo build
---- END FILE ---
---- BEGIN FILE: .ai-dev-factory/scripts/start.sh ---
-#!/usr/bin/env bash
-set -euo pipefail
-echo start
---- END FILE ---
---- BEGIN FILE: .ai-dev-factory/scripts/stop.sh ---
-#!/usr/bin/env bash
-set -euo pipefail
-echo stop
---- END FILE ---
---- BEGIN FILE: .ai-dev-factory/scripts/restart.sh ---
-#!/usr/bin/env bash
-set -euo pipefail
-echo restart
---- END FILE ---
---- BEGIN FILE: .ai-dev-factory/scripts/healthcheck.sh ---
-#!/usr/bin/env bash
-set -euo pipefail
-echo ok
---- END FILE ---
---- BEGIN FILE: .ai-dev-factory/deployment.md ---
-# Deployment Guide
---- END FILE ---
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR/../.."
+echo "running"
 """
+
+_VALID_SCRIPTS_OUTPUT = (
+    f"--- BEGIN FILE: .ai-dev-factory/scripts/bootstrap.sh ---\n{_SH_BODY}--- END FILE ---\n"
+    f"--- BEGIN FILE: .ai-dev-factory/scripts/build.sh ---\n{_SH_BODY}--- END FILE ---\n"
+    f"--- BEGIN FILE: .ai-dev-factory/scripts/start.sh ---\n{_SH_BODY}--- END FILE ---\n"
+    f"--- BEGIN FILE: .ai-dev-factory/scripts/stop.sh ---\n{_SH_BODY}--- END FILE ---\n"
+    f"--- BEGIN FILE: .ai-dev-factory/scripts/restart.sh ---\n{_SH_BODY}--- END FILE ---\n"
+    f"--- BEGIN FILE: .ai-dev-factory/scripts/healthcheck.sh ---\n{_SH_BODY}--- END FILE ---\n"
+    "--- BEGIN FILE: .ai-dev-factory/deployment.md ---\n"
+    "# Deployment Guide\n\n"
+    "## Overview\n"
+    "A complete operational document, large enough and structured enough\n"
+    "to clear the validator thresholds (300 bytes, >= 2 headings).\n\n"
+    "## Scripts\n"
+    "- bootstrap.sh — first-time setup\n"
+    "- build.sh — build containers\n"
+    "- start.sh / stop.sh / restart.sh — lifecycle\n"
+    "- healthcheck.sh — liveness probes\n\n"
+    "## Environment variables\n"
+    "See deploy/.env.example for the full list.\n"
+    "--- END FILE ---\n"
+)
 
 
 def test_extract_files_valid_scripts_output():
@@ -161,8 +171,7 @@ def test_main_happy_path_writes_scripts_and_state(tmp_path, monkeypatch):
 
 def test_main_missing_required_file_sets_failed_state(tmp_path, monkeypatch):
     output_missing_stop = _VALID_SCRIPTS_OUTPUT.replace(
-        "--- BEGIN FILE: .ai-dev-factory/scripts/stop.sh ---\n"
-        "#!/usr/bin/env bash\nset -euo pipefail\necho stop\n--- END FILE ---\n",
+        f"--- BEGIN FILE: .ai-dev-factory/scripts/stop.sh ---\n{_SH_BODY}--- END FILE ---\n",
         "",
     )
     _patch_run_scripts(monkeypatch, tmp_path, output_missing_stop, project_id="proj2")
@@ -191,6 +200,144 @@ def test_main_path_traversal_rejected(tmp_path, monkeypatch):
     assert state["state"] == "failed"
     assert "escaping project root" in state["error"]
     assert not (tmp_path / "etc" / "passwd").exists()
+
+
+def _bad_output_with_markdown_fences() -> str:
+    """Reproduces PR #114's bootstrap.sh bug."""
+    return _VALID_SCRIPTS_OUTPUT.replace(
+        f"--- BEGIN FILE: .ai-dev-factory/scripts/bootstrap.sh ---\n{_SH_BODY}--- END FILE ---",
+        "--- BEGIN FILE: .ai-dev-factory/scripts/bootstrap.sh ---\n"
+        "```bash\n#!/usr/bin/env bash\nset -euo pipefail\necho bootstrap\n```\n"
+        "--- END FILE ---",
+    )
+
+
+def _bad_output_with_prose_script() -> str:
+    """Reproduces PR #114's start.sh bug."""
+    return _VALID_SCRIPTS_OUTPUT.replace(
+        f"--- BEGIN FILE: .ai-dev-factory/scripts/start.sh ---\n{_SH_BODY}--- END FILE ---",
+        "--- BEGIN FILE: .ai-dev-factory/scripts/start.sh ---\n"
+        "Starts supervisor then Docker stack then daemon.\n"
+        "--- END FILE ---",
+    )
+
+
+def _bad_output_with_summary_deployment_md() -> str:
+    """Reproduces PR #114's deployment.md bug."""
+    # Replace the (good, multi-section) deployment.md block with a one-liner.
+    md_start = _VALID_SCRIPTS_OUTPUT.index(
+        "--- BEGIN FILE: .ai-dev-factory/deployment.md ---"
+    )
+    return _VALID_SCRIPTS_OUTPUT[:md_start] + (
+        "--- BEGIN FILE: .ai-dev-factory/deployment.md ---\n"
+        "Updated — covers overview, scripts, and env variables.\n"
+        "--- END FILE ---\n"
+    )
+
+
+def test_main_rejects_markdown_fences_before_writing_or_committing(tmp_path, monkeypatch):
+    """Real PR #114 regression: bootstrap.sh wrapped in ```bash ... ```."""
+    commit_calls: list = []
+    _patch_run_scripts(monkeypatch, tmp_path, _bad_output_with_markdown_fences(), project_id="badfence")
+    monkeypatch.setattr(
+        run_scripts,
+        "commit_and_push",
+        lambda *a, **kw: commit_calls.append(a) or ("br", "url"),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_scripts.main()
+
+    assert exc_info.value.code == 1
+    assert commit_calls == [], "commit_and_push must not run when validation fails"
+    assert not (tmp_path / ".ai-dev-factory" / "scripts" / "bootstrap.sh").exists(), \
+        "no file may be written when validation fails"
+    state = json.loads((tmp_path / "state" / "scripts-badfence.json").read_text())
+    assert state["state"] == "failed"
+    assert "markdown code fence" in state["error"]
+    assert "bootstrap.sh" in state["error"]
+
+
+def test_main_rejects_prose_script_before_writing_or_committing(tmp_path, monkeypatch):
+    commit_calls: list = []
+    _patch_run_scripts(monkeypatch, tmp_path, _bad_output_with_prose_script(), project_id="badprose")
+    monkeypatch.setattr(
+        run_scripts,
+        "commit_and_push",
+        lambda *a, **kw: commit_calls.append(a) or ("br", "url"),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_scripts.main()
+
+    assert exc_info.value.code == 1
+    assert commit_calls == []
+    assert not (tmp_path / ".ai-dev-factory" / "scripts" / "start.sh").exists()
+    state = json.loads((tmp_path / "state" / "scripts-badprose.json").read_text())
+    assert state["state"] == "failed"
+    assert "start.sh" in state["error"]
+
+
+def test_main_rejects_summary_deployment_md(tmp_path, monkeypatch):
+    commit_calls: list = []
+    _patch_run_scripts(monkeypatch, tmp_path, _bad_output_with_summary_deployment_md(), project_id="badmd")
+    monkeypatch.setattr(
+        run_scripts,
+        "commit_and_push",
+        lambda *a, **kw: commit_calls.append(a) or ("br", "url"),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_scripts.main()
+
+    assert exc_info.value.code == 1
+    assert commit_calls == []
+    state = json.loads((tmp_path / "state" / "scripts-badmd.json").read_text())
+    assert state["state"] == "failed"
+    assert "deployment.md" in state["error"]
+
+
+def test_main_rejects_empty_llm_output(tmp_path, monkeypatch):
+    commit_calls: list = []
+    _patch_run_scripts(monkeypatch, tmp_path, "no FILE blocks here", project_id="empty")
+    monkeypatch.setattr(
+        run_scripts,
+        "commit_and_push",
+        lambda *a, **kw: commit_calls.append(a) or ("br", "url"),
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        run_scripts.main()
+
+    assert exc_info.value.code == 1
+    assert commit_calls == []
+    state = json.loads((tmp_path / "state" / "scripts-empty.json").read_text())
+    assert state["state"] == "failed"
+    assert "no parseable FILE blocks" in state["error"]
+
+
+def test_main_logs_validation_aborted_message(tmp_path, monkeypatch, caplog):
+    _patch_run_scripts(monkeypatch, tmp_path, _bad_output_with_prose_script(), project_id="logabort")
+    monkeypatch.setattr(run_scripts, "commit_and_push", lambda *a, **kw: ("br", "url"))
+
+    caplog.set_level("INFO", logger="run_scripts")
+    with pytest.raises(SystemExit):
+        run_scripts.main()
+
+    messages = "\n".join(r.message for r in caplog.records)
+    assert "validation failed" in messages
+    assert "generation aborted before commit" in messages
+
+
+def test_main_logs_validation_passed_on_clean_output(tmp_path, monkeypatch, caplog):
+    _patch_run_scripts(monkeypatch, tmp_path, _VALID_SCRIPTS_OUTPUT, project_id="logok")
+    caplog.set_level("INFO", logger="run_scripts")
+
+    run_scripts.main()
+
+    messages = "\n".join(r.message for r in caplog.records)
+    assert "validating generated scripts" in messages
+    assert "validation passed" in messages
 
 
 def test_main_llm_failure_sets_failed_state(tmp_path, monkeypatch):
