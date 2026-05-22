@@ -1,0 +1,42 @@
+[2026-05-22T07:12:32Z] auto-run start: state=INIT
+[2026-05-22T07:12:32Z] auto-run: running step=planner
+[2026-05-22T07:12:32Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-05-22T07:12:32Z] prompt: generic fallback — injecting runs/T136/ticket.md
+[2026-05-22T07:12:32Z] compose: global-context=docs/ai/global-context.md
+[2026-05-22T07:12:32Z] compose: role=ai/roles/planner.md
+[2026-05-22T07:12:32Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-22T07:12:32Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-22T07:12:32Z] compose: skill=ai/skills/documentation.md
+[2026-05-22T07:12:32Z] compose: task (canonical prompt)
+[2026-05-22T07:12:32Z] snapshot: runtime-prompt=runs/T136/prompts/planner-attempt-1.md
+[2026-05-22T07:17:14Z] auto-run: step=planner done rc=0
+[2026-05-22T07:17:16Z] planner checkpoint: committed
+[2026-05-22T07:17:16Z] planner checkpoint: pushed
+[2026-05-22T07:17:16Z] planner validation success
+[2026-05-22T07:17:16Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-22T07:17:16Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-22T07:17:16Z] commit-checkpoint: unstaged runtime garbage: ['runs/T136/runtime.log']
+[2026-05-22T07:17:17Z] commit-checkpoint: sha=a4c278f2 files=2 title='docs(T136/workflow): planner — update 2 file(s)'
+[2026-05-22T07:17:17Z] auto-run: auto-push triggered
+[2026-05-22T07:17:17Z] push: tolerating runtime dirty files (not blocking): ['runs/T136/runtime.log']
+[2026-05-22T07:17:17Z] push: pushing branch=ticket/T136-t136-deploy-sandbox-isolation-and-runtime-separati
+[2026-05-22T07:17:19Z] push: done branch=ticket/T136-t136-deploy-sandbox-isolation-and-runtime-separati
+[2026-05-22T07:37:06Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-22T07:37:06Z] auto-run: running step=tester
+[2026-05-22T07:37:06Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-22T07:37:06Z] prompt: generic fallback — injecting runs/T136/ticket.md
+[2026-05-22T07:37:06Z] compose: global-context=docs/ai/global-context.md
+[2026-05-22T07:37:06Z] compose: role=ai/roles/tester.md
+[2026-05-22T07:37:06Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-22T07:37:06Z] compose: skill=ai/skills/testing.md
+[2026-05-22T07:37:06Z] compose: skill=ai/skills/debugging.md
+[2026-05-22T07:37:06Z] compose: task (canonical prompt)
+[2026-05-22T07:37:06Z] snapshot: runtime-prompt=runs/T136/prompts/tester-attempt-1.md
+[2026-05-22T07:44:31Z] auto-run: step=tester done rc=0
+[2026-05-22T07:44:31Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-22T07:44:31Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-22T07:44:31Z] commit-checkpoint: unstaged runtime garbage: ['runs/T136/runtime.log']
+[2026-05-22T07:44:31Z] commit-checkpoint: sha=5b81f686 files=3 title='test(T136/workflow): tester — update 3 file(s)'
+[2026-05-22T07:44:31Z] auto-run: auto-push triggered
+[2026-05-22T07:44:31Z] push: tolerating runtime dirty files (not blocking): ['runs/T136/runtime.log']
+[2026-05-22T07:44:31Z] push: pushing branch=ticket/T136-t136-deploy-sandbox-isolation-and-runtime-separati

@@ -87,10 +87,20 @@ function SandboxRow({ sandbox, onRefresh }) {
           <StatusBadge status={sandbox.status} />
           <span className="text-sm font-mono text-gray-700">{sandbox.id}</span>
           <span className="text-xs text-gray-400">ticket: {sandbox.ticket_id}</span>
+          {sandbox.job_type && (
+            <span className="text-xs bg-blue-50 text-blue-600 px-1.5 py-0.5 rounded font-mono">
+              {sandbox.job_type}
+            </span>
+          )}
         </div>
         <span className="text-xs text-gray-400">{sandbox.created_at}</span>
       </div>
       <PortsTable ports={sandbox.ports} />
+      {sandbox.worktree_path && (
+        <p className="text-xs text-gray-400 font-mono truncate">
+          worktree: {sandbox.worktree_path}
+        </p>
+      )}
       <div className="flex gap-2 flex-wrap pt-1">
         <ActionButton
           label="Start"

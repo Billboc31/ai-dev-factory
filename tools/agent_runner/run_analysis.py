@@ -153,6 +153,11 @@ def main() -> None:
     exec_cmd = args.exec_cmd
     worktrees_dir = Path(args.worktrees_dir).resolve() if args.worktrees_dir else None
 
+    # When the supervisor injected SANDBOX_WORKTREE, use that isolated directory
+    # for all file writes and git operations instead of the main project root.
+    sandbox_worktree = os.environ.get("SANDBOX_WORKTREE", "").strip()
+    effective_root = Path(sandbox_worktree).resolve() if sandbox_worktree else project_root
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%S")
@@ -190,19 +195,23 @@ def main() -> None:
                 "worktree_path": str(worktree_path),
             })
 
-        write_root = worktree_path if worktree_path is not None else project_root
+        # T135: isolated analysis worktree (highest priority) wins for I/O.
+        # T136: otherwise, write into the sandbox worktree when SANDBOX_WORKTREE
+        # is set; falling back to the canonical project_root preserves the
+        # original single-tree behavior.
+        write_root = worktree_path if worktree_path is not None else effective_root
 
         logger.info("scanning project")
-        scan_result = _scan_project(project_root)
+        scan_result = _scan_project(effective_root)
 
         logger.info("building file tree")
-        file_tree = _build_file_tree(project_root)
+        file_tree = _build_file_tree(effective_root)
 
         logger.info("building analysis prompt")
-        prompt = build_analysis_prompt(str(project_root), scan_result, file_tree)
+        prompt = build_analysis_prompt(str(effective_root), scan_result, file_tree)
 
         logger.info("invoking LLM via exec_cmd=%r", exec_cmd.split()[0])
-        llm_output = _invoke_llm(exec_cmd, prompt, project_root)
+        llm_output = _invoke_llm(exec_cmd, prompt, effective_root)
 
         logger.info("parsing LLM output (%d chars)", len(llm_output))
         generated_files = _extract_files(llm_output)
@@ -213,6 +222,11 @@ def main() -> None:
                 raise RuntimeError(f"LLM output missing required block: {rel}")
 
         logger.info("writing %d generated file(s)", len(generated_files))
+        # T135: when --worktrees-dir is passed we created an isolated analysis
+        # worktree (`worktree_path`) and write into it.
+        # T136: otherwise, if the supervisor injected SANDBOX_WORKTREE,
+        # `effective_root` already points at the sandbox copy — write there.
+        # Otherwise fall back to the canonical project root.
         (write_root / ".ai-dev-factory").mkdir(exist_ok=True)
         for rel_path, content in generated_files.items():
             target = (write_root / rel_path).resolve()
@@ -235,6 +249,7 @@ def main() -> None:
             raise RuntimeError(f"deploy.yml is not valid YAML: {exc}") from exc
 
         logger.info("committing and pushing")
+        # Commit/push from the same root we wrote into so the diff is captured.
         branch, pr_url = commit_and_push(write_root, project_id)
 
         finished_at = _now()

@@ -165,9 +165,70 @@ class SandboxManager:
         self._write_state(state)
         return state
 
+    def create_with_worktree(
+        self,
+        ticket_id: str,
+        project_root: str,
+        branch: str | None = None,
+        job_type: str = "deploy",
+    ) -> SandboxState:
+        state = self.create(ticket_id, project_root)
+        worktree_path = self._sandbox_dir(state.id) / "worktree"
+        if branch:
+            cmd = ["git", "worktree", "add", str(worktree_path), branch]
+        else:
+            cmd = ["git", "worktree", "add", "--detach", str(worktree_path)]
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, cwd=project_root, check=False
+        )
+        if result.returncode != 0:
+            self.destroy(state.id)
+            raise RuntimeError(
+                f"git worktree add failed: {result.stderr.strip()}"
+            )
+        state = state.model_copy(
+            update={"worktree_path": str(worktree_path), "job_type": job_type}
+        )
+        self._write_state(state)
+        logger.info(
+            "sandbox worktree created: %s job_type=%s path=%s",
+            state.id, job_type, worktree_path,
+        )
+        return state
+
+    def mark_completed(self, sandbox_id: str) -> SandboxState:
+        state = self._read_state(sandbox_id)
+        state = state.model_copy(
+            update={"completed_at": _now_iso(), "status": SandboxStatus.stopped}
+        )
+        self._write_state(state)
+        return state
+
+    def cleanup_completed(self, max_age_minutes: int = 30) -> int:
+        cutoff = datetime.now(timezone.utc) - timedelta(minutes=max_age_minutes)
+        destroyed = 0
+        for sandbox in self.list():
+            if sandbox.completed_at is None:
+                continue
+            try:
+                completed = datetime.fromisoformat(sandbox.completed_at)
+                if completed.tzinfo is None:
+                    completed = completed.replace(tzinfo=timezone.utc)
+                if completed < cutoff:
+                    self.destroy(sandbox.id)
+                    destroyed += 1
+            except Exception:
+                pass
+        return destroyed
+
     def destroy(self, sandbox_id: str) -> None:
         try:
             state = self._read_state(sandbox_id)
+            if state.worktree_path:
+                subprocess.run(
+                    ["git", "worktree", "remove", "--force", state.worktree_path],
+                    capture_output=True, text=True, check=False,
+                )
             self._run_compose(state, "down")
         except SandboxNotFoundError:
             pass
