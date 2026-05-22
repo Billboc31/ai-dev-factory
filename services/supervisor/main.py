@@ -15,6 +15,7 @@ import signal
 import subprocess
 import sys
 import threading
+import uuid
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -1043,3 +1044,144 @@ def sandbox_stop(project_id: str):
         return {"ok": True}
     except OSError as exc:
         return {"ok": False, "error": str(exc)}
+
+
+# ── auto-fix proposal endpoints ───────────────────────────────────────────────
+#
+# Architecture:
+#   Dashboard → API container (routes/auto_fix.py)
+#              → services/auto_fix_runner.py (HTTP client)
+#              → POST /auto-fix/{project_id}/propose (this endpoint)
+#              → background thread → auto_fix_proposer.py
+#
+# The proposal runs in a background daemon thread so the HTTP response
+# returns immediately with a proposal_id. The GET endpoints poll state.json.
+
+try:
+    from auto_fix_proposer import (  # noqa: E402
+        collect_failure_context,
+        call_ai_runtime,
+        validate_patches,
+        make_proposal,
+        make_proposal_id,
+        persist_proposal,
+        load_proposal,
+        list_proposals as _list_proposals_disk,
+    )
+    _auto_fix_available = True
+except ImportError:
+    _auto_fix_available = False
+
+
+def _auto_fix_runtime_root() -> Path:
+    return _runtime_root()
+
+
+class AutoFixProposeRequest(BaseModel):
+    project_root: str
+    exec_cmd: str = "claude --dangerously-skip-permissions"
+    sandbox_id: str
+    failing_step: str | None = None
+
+
+def _run_proposal_bg(
+    proposal: dict,
+    project_root: Path,
+    exec_cmd: str,
+    runtime_root: Path,
+) -> None:
+    """Background thread: collect context, call AI, validate, persist."""
+    project_id = proposal["project_id"]
+    sandbox_id = proposal["sandbox_id"]
+    failing_step = proposal.get("failing_step")
+
+    try:
+        context = collect_failure_context(sandbox_id, project_root, runtime_root)
+        raw_patches = call_ai_runtime(context, exec_cmd, project_root, failing_step)
+        validated = validate_patches(raw_patches, project_root)
+
+        any_invalid = any(not p["valid"] for p in validated)
+        proposal["status"] = "rejected" if any_invalid else "ready"
+        proposal["patches"] = validated
+        proposal["context_snapshot"] = {
+            "deploy_profile_present": bool(context.get("deploy_profile")),
+            "log_lines": len(context.get("logs") or []),
+            "script_files": list((context.get("operational_scripts") or {}).keys()),
+        }
+        logger.info(
+            "supervisor: auto-fix proposal %s status=%s patches=%d",
+            proposal["proposal_id"], proposal["status"], len(validated),
+        )
+    except Exception as exc:
+        proposal["status"] = "error"
+        proposal["error"] = str(exc)
+        logger.warning(
+            "supervisor: auto-fix proposal %s failed: %s",
+            proposal["proposal_id"], exc,
+        )
+
+    try:
+        persist_proposal(project_id, proposal, runtime_root)
+    except Exception as exc:
+        logger.error("supervisor: failed to persist proposal %s: %s", proposal["proposal_id"], exc)
+
+
+@app.post("/auto-fix/{project_id}/propose")
+def auto_fix_propose(project_id: str, body: AutoFixProposeRequest):
+    from fastapi.responses import JSONResponse
+
+    if not _auto_fix_available:
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "error": "auto_fix_proposer not available"},
+        )
+
+    mapped_root = mapper.map(body.project_root)
+    runtime_root = _auto_fix_runtime_root()
+
+    proposal_id = uuid.uuid4().hex[:12]
+    proposal = make_proposal(
+        proposal_id=proposal_id,
+        project_id=project_id,
+        sandbox_id=body.sandbox_id,
+        failing_step=body.failing_step,
+    )
+    persist_proposal(project_id, proposal, runtime_root)
+
+    threading.Thread(
+        target=_run_proposal_bg,
+        args=(proposal, Path(mapped_root), body.exec_cmd, runtime_root),
+        daemon=True,
+    ).start()
+
+    logger.info(
+        "supervisor: auto-fix proposal %s started project_id=%s sandbox_id=%s",
+        proposal_id, project_id, body.sandbox_id,
+    )
+    return {"ok": True, "proposal_id": proposal_id}
+
+
+@app.get("/auto-fix/{project_id}/proposal/{proposal_id}")
+def auto_fix_get_proposal(project_id: str, proposal_id: str):
+    from fastapi.responses import JSONResponse
+
+    if not _auto_fix_available:
+        return JSONResponse(status_code=503, content={"error": "auto_fix_proposer not available"})
+
+    runtime_root = _auto_fix_runtime_root()
+    proposal = load_proposal(project_id, proposal_id, runtime_root)
+    if proposal is None:
+        return JSONResponse(status_code=404, content={"error": f"proposal not found: {proposal_id}"})
+    return proposal
+
+
+@app.get("/auto-fix/{project_id}/proposals")
+def auto_fix_list_proposals(project_id: str):
+    from fastapi.responses import JSONResponse
+
+    if not _auto_fix_available:
+        return JSONResponse(status_code=503, content={"error": "auto_fix_proposer not available"})
+
+    runtime_root = _auto_fix_runtime_root()
+    proposals = _list_proposals_disk(project_id, runtime_root)
+    return {"proposals": proposals}

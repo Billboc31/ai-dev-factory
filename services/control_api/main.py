@@ -15,7 +15,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .routes import daemon, deployer, health, issues, project_map, providers, sandbox, tickets
+from .routes import auto_fix, daemon, deployer, health, issues, project_map, providers, sandbox, tickets
 from .services.project_registry import ProjectRegistry
 from .services.runtime_resolver import resolve_worktrees_dir
 
@@ -118,6 +118,8 @@ def create_app(
     app.include_router(sandbox.project_router)
     # T137: /sandbox-runs — historical validation run listing and cleanup.
     app.include_router(sandbox.runs_router)
+    # T138: /projects/{id}/auto-fix/* — read-only AI fix proposals.
+    app.include_router(auto_fix.router)
 
     return app
 
