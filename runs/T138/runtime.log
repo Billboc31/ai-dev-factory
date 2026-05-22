@@ -77,3 +77,4 @@
 [2026-05-22T15:35:28Z] push: tolerating runtime dirty files (not blocking): ['runs/T138/runtime.log']
 [2026-05-22T15:35:28Z] push: pushing branch=ticket/T138-t138-generic-ai-sandbox-auto-fix-loop
 [2026-05-22T15:35:30Z] push: done branch=ticket/T138-t138-generic-ai-sandbox-auto-fix-loop
+[2026-05-22T15:37:45Z] human-approval: approve-plan — PLAN_REVIEW_NEEDED → PLAN_APPROVED
