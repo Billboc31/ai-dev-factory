@@ -189,6 +189,83 @@ def test_worker_latest_state_mirrors_per_run_state(tmp_path):
     assert latest == per_run
 
 
+# ── Compose project name normalisation ───────────────────────────────────────
+
+
+def _read_deploy_env(tmp_path: Path, sandbox_id: str) -> dict[str, str]:
+    env_path = tmp_path / "runtime" / "sandboxes" / sandbox_id / "deploy.env"
+    out: dict[str, str] = {}
+    for line in env_path.read_text().splitlines():
+        if "=" in line and line.strip():
+            k, v = line.split("=", 1)
+            out[k] = v
+    return out
+
+
+def test_compose_project_name_is_normalised_in_state(tmp_path):
+    """Regression for the production failure:
+
+        invalid project name "sandbox-ai-dev-factory-20260522T204456"
+
+    The sandbox_id contains a UTC timestamp with an uppercase ``T``.
+    The persisted ``compose_project`` MUST be lowercase, never the raw
+    ``sandbox-<id>`` form.
+    """
+    proj = _make_git_project(tmp_path)
+    raw_sandbox_id = "ai-dev-factory-20260522T204456"
+    run_sandbox._do_sandbox("ai-dev-factory", proj, raw_sandbox_id)
+
+    state = _read_latest_state(tmp_path, project_id="ai-dev-factory")
+    compose_project = state["compose_project"]
+
+    import re
+    assert re.match(r"^[a-z0-9][a-z0-9_-]*$", compose_project), (
+        f"compose_project {compose_project!r} is not Compose-valid"
+    )
+    assert "T" not in compose_project, "uppercase T must be lowered"
+    assert compose_project == "sandbox-ai-dev-factory-20260522t204456"
+
+
+def test_compose_project_name_is_normalised_in_deploy_env(tmp_path):
+    """The COMPOSE_PROJECT_NAME env var the generated scripts read MUST
+    carry the normalised name — otherwise scripts would re-introduce
+    the broken value the moment they call ``docker compose``."""
+    proj = _make_git_project(tmp_path)
+    raw_sandbox_id = "ai-dev-factory-20260522T204456"
+    run_sandbox._do_sandbox("ai-dev-factory", proj, raw_sandbox_id)
+
+    env = _read_deploy_env(tmp_path, raw_sandbox_id)
+    assert env["COMPOSE_PROJECT_NAME"] == "sandbox-ai-dev-factory-20260522t204456"
+    assert "T" not in env["COMPOSE_PROJECT_NAME"]
+    # SANDBOX_ID is informational only and may keep the raw form.
+    assert env["SANDBOX_ID"] == raw_sandbox_id
+
+
+def test_compose_project_name_logged_with_normalisation_note(tmp_path):
+    """When normalisation actually changes the name, the log must say so
+    — that's the only way a developer can tell from logs alone that the
+    pipeline self-healed instead of silently ignoring the issue."""
+    proj = _make_git_project(tmp_path)
+    raw_sandbox_id = "ai-dev-factory-20260522T204456"
+    run_sandbox._do_sandbox("ai-dev-factory", proj, raw_sandbox_id)
+
+    log = _read_latest_log(tmp_path, project_id="ai-dev-factory")
+    assert "compose_project: sandbox-ai-dev-factory-20260522t204456" in log
+    assert "normalised from 'sandbox-ai-dev-factory-20260522T204456'" in log
+
+
+def test_already_valid_compose_name_is_not_annotated(tmp_path):
+    """If the sandbox_id is already lowercase alphanumeric, the log
+    must NOT show a misleading 'normalised from …' note."""
+    proj = _make_git_project(tmp_path)
+    sid = "myproject-cleanid"
+    run_sandbox._do_sandbox("myproject", proj, sid)
+
+    log = _read_latest_log(tmp_path)
+    assert "compose_project: sandbox-myproject-cleanid" in log
+    assert "normalised from" not in log
+
+
 # ── Script lookup + missing-script policy ─────────────────────────────────────
 
 
