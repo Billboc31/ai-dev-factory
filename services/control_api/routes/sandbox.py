@@ -19,6 +19,7 @@ that imports and call sites never silently shadow each other.
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -33,6 +34,10 @@ from ..models.schemas import (
 )
 from ..services import sandbox_runner
 from ..services.sandbox_manager import SandboxManager, SandboxNotFoundError
+
+
+def _supervisor_url() -> str | None:
+    return os.environ.get("AI_DEV_FACTORY_SUPERVISOR_URL", "").rstrip("/") or None
 
 logger = logging.getLogger("control-api")
 
@@ -146,9 +151,12 @@ project_router = APIRouter(prefix="/projects", tags=["sandbox"])
 )
 def get_project_sandbox_status(
     project_id: str,
-    project_root: Path = Depends(resolve_project),
+    project_root: Path = Depends(resolve_project),  # registry validation only
 ) -> SandboxValidationStatus:
-    state = sandbox_runner.get_sandbox_state(project_root)
+    # The host-side supervisor is the source of truth; project_root is
+    # resolved by the dependency purely for registry validation (404 if
+    # the project is unknown).
+    state = sandbox_runner.get_sandbox_state(project_id, _supervisor_url())
     return SandboxValidationStatus(
         state=state.state,
         project_id=project_id,
@@ -170,10 +178,32 @@ def start_project_sandbox(
     project_id: str,
     project_root: Path = Depends(resolve_project),
 ) -> ActionResult:
-    logger.info("api: POST /projects/%s/sandbox/start", project_id)
-    result = sandbox_runner.start_sandbox_validation(project_id, project_root)
+    supervisor_url = _supervisor_url()
+    logger.info(
+        "api: POST /projects/%s/sandbox/start (supervisor=%s)",
+        project_id, supervisor_url or "<not configured>",
+    )
+    # Pass the project_root the dashboard sees (which is the API's view —
+    # potentially a container path like /app). The supervisor will map it
+    # to the corresponding host path before spawning the worker.
+    result = sandbox_runner.start_sandbox_validation(
+        project_id, str(project_root), supervisor_url
+    )
     if result.error == "locked":
         raise HTTPException(status_code=409, detail="sandbox already running")
+    if result.error == "no_supervisor_url":
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "supervisor not configured — set AI_DEV_FACTORY_SUPERVISOR_URL "
+                "and ensure the host supervisor is running"
+            ),
+        )
+    if result.error == "supervisor_unreachable":
+        raise HTTPException(
+            status_code=503,
+            detail="supervisor unreachable — is the host supervisor running?",
+        )
     return result
 
 
@@ -183,8 +213,8 @@ def start_project_sandbox(
 )
 def get_project_sandbox_logs(
     project_id: str,
-    project_root: Path = Depends(resolve_project),
+    project_root: Path = Depends(resolve_project),  # registry validation only
     lines: int = Query(default=100, ge=1, le=10000),
 ) -> SandboxValidationLogsResponse:
-    log_lines = sandbox_runner.get_sandbox_logs(project_root, lines)
+    log_lines = sandbox_runner.get_sandbox_logs(project_id, _supervisor_url(), lines)
     return SandboxValidationLogsResponse(lines=log_lines)

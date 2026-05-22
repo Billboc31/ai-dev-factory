@@ -55,6 +55,18 @@ def _project_root() -> Path:
     return Path(os.environ.get("AI_DEV_FACTORY_PROJECT_ROOT", Path.cwd()))
 
 
+def _runtime_root() -> Path:
+    """Canonical host runtime root used by sandbox workers and other jobs.
+
+    Mirrors the logic baked into the per-subsystem helpers below so that
+    log statements can reference a single, consistent value.
+    """
+    rr = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if rr:
+        return Path(rr)
+    return _project_root() / ".ai-dev-factory"
+
+
 def _runs_dir() -> Path:
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
     if runtime_root:
@@ -94,6 +106,10 @@ def _run_analysis_path() -> Path:
 
 def _run_scripts_path() -> Path:
     return Path(__file__).resolve().parents[2] / "tools" / "agent_runner" / "run_scripts.py"
+
+
+def _run_sandbox_path() -> Path:
+    return Path(__file__).resolve().parents[2] / "tools" / "agent_runner" / "run_sandbox.py"
 
 
 def _pid_path() -> Path:
@@ -372,6 +388,71 @@ def _get_scripts_lock(project_id: str) -> threading.Lock:
         if project_id not in _scripts_locks:
             _scripts_locks[project_id] = threading.Lock()
         return _scripts_locks[project_id]
+
+
+# ── sandbox per-project locking ───────────────────────────────────────────────
+#
+# Mirrors the scripts/analysis pattern: one lock per project_id, plus a PID
+# file under runs/ so a supervisor restart can re-bind to a live worker. The
+# worker itself (tools/agent_runner/run_sandbox.py) writes the state file
+# under state/sandbox-{project_id}.json and a per-run log under
+# sandboxes/{sandbox_id}/run.log.
+
+_sandbox_locks: dict[str, threading.Lock] = {}
+_sandbox_locks_mutex = threading.Lock()
+
+
+def _get_sandbox_lock(project_id: str) -> threading.Lock:
+    with _sandbox_locks_mutex:
+        if project_id not in _sandbox_locks:
+            _sandbox_locks[project_id] = threading.Lock()
+        return _sandbox_locks[project_id]
+
+
+def _sandbox_pid_path(project_id: str) -> Path:
+    return _runs_dir() / f"sandbox-{project_id}.pid"
+
+
+def _sandbox_log_path(project_id: str) -> Path:
+    d = _logs_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"sandbox-{project_id}.log"
+
+
+def _sandbox_state_path(project_id: str) -> Path:
+    d = _state_dir()
+    d.mkdir(parents=True, exist_ok=True)
+    return d / f"sandbox-{project_id}.json"
+
+
+def _read_sandbox_state(project_id: str) -> dict:
+    path = _sandbox_state_path(project_id)
+    if not path.exists():
+        return {"state": "idle"}
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {"state": "idle"}
+
+
+def _sandbox_current_pid(project_id: str) -> int | None:
+    path = _sandbox_pid_path(project_id)
+    if not path.exists():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+    pid = data.get("pid")
+    if not isinstance(pid, int):
+        return None
+    if not _is_alive(pid):
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        return None
+    return pid
 
 
 def _scripts_pid_path(project_id: str) -> Path:
@@ -815,6 +896,150 @@ def scripts_stop(project_id: str):
         except OSError:
             pass
         logger.info("supervisor: scripts stopped pid=%d project_id=%s", pid, project_id)
+        return {"ok": True}
+    except OSError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
+# ── sandbox-validation endpoints ──────────────────────────────────────────────
+#
+# Architecture (mirrors /analysis and /scripts):
+#   Dashboard → API container (routes/sandbox.py)
+#              → services/sandbox_runner.py (HTTP client)
+#              → POST /sandbox/start (this endpoint, host-side supervisor)
+#              → subprocess Popen → tools/agent_runner/run_sandbox.py
+#
+# The supervisor's job is path translation + process management. ALL git
+# worktree manipulation and script execution happens host-side inside
+# run_sandbox.py — the API Docker container no longer touches host git
+# repos directly.
+
+
+class SandboxStartRequest(BaseModel):
+    project_root: str
+    project_id: str
+
+
+@app.post("/sandbox/start")
+def sandbox_start(body: SandboxStartRequest):
+    from fastapi.responses import JSONResponse
+
+    lock = _get_sandbox_lock(body.project_id)
+    if not lock.acquire(blocking=False):
+        return JSONResponse(status_code=409, content={"ok": False, "error": "locked"})
+
+    try:
+        if _sandbox_current_pid(body.project_id) is not None:
+            return JSONResponse(status_code=409, content={"ok": False, "error": "locked"})
+
+        # Translate the container-side project_root to its host equivalent.
+        # The mapper is the SAME instance used by /analysis/start so the
+        # mapping rules are consistent across all supervisor-managed jobs.
+        mapped_root = mapper.map(body.project_root)
+        sandbox_root = str(_runtime_root() / "sandboxes")
+        logger.info(
+            "supervisor spawning sandbox validation project_id=%s",
+            body.project_id,
+        )
+        logger.info(
+            "  project_root(container)=%r -> project_root(host)=%r",
+            body.project_root, mapped_root,
+        )
+        logger.info("  sandbox_root(host)=%s", sandbox_root)
+
+        started_at = datetime.datetime.now(datetime.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+        log = _sandbox_log_path(body.project_id)
+        cmd = [
+            sys.executable,
+            str(_run_sandbox_path()),
+            "--project-root", mapped_root,
+            "--project-id", body.project_id,
+        ]
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+
+        try:
+            with open(log, "a", encoding="utf-8") as log_fh:
+                log_fh.write(
+                    f"[{started_at}] supervisor spawning sandbox validation for {body.project_id}\n"
+                    f"  project_root(container)={body.project_root}\n"
+                    f"  project_root(host)={mapped_root}\n"
+                    f"  sandbox_root(host)={sandbox_root}\n"
+                    f"  command={' '.join(cmd)}\n"
+                )
+                log_fh.flush()
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=str(_project_root()),
+                    stdout=log_fh,
+                    stderr=log_fh,
+                    start_new_session=True,
+                    env=env,
+                )
+            pid_path = _sandbox_pid_path(body.project_id)
+            pid_path.parent.mkdir(parents=True, exist_ok=True)
+            pid_path.write_text(
+                json.dumps({"pid": proc.pid, "started_at": started_at}),
+                encoding="utf-8",
+            )
+            logger.info(
+                "supervisor: sandbox started pid=%d project_id=%s",
+                proc.pid, body.project_id,
+            )
+            return {"ok": True, "pid": proc.pid}
+        except OSError as exc:
+            return {"ok": False, "error": str(exc)}
+    finally:
+        lock.release()
+
+
+@app.get("/sandbox/{project_id}/status")
+def sandbox_status_endpoint(project_id: str):
+    state = _read_sandbox_state(project_id)
+    if state.get("state") == "running":
+        if _sandbox_current_pid(project_id) is None:
+            # Worker process disappeared without finalising state. Don't
+            # let the dashboard poll a phantom "running" forever.
+            state["state"] = "failed"
+            state["error"] = "sandbox process disappeared"
+            state["finished_at"] = datetime.datetime.now(
+                datetime.timezone.utc
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+            _sandbox_state_path(project_id).write_text(
+                json.dumps(state, indent=2), encoding="utf-8"
+            )
+            try:
+                _sandbox_pid_path(project_id).unlink()
+            except OSError:
+                pass
+    return state
+
+
+@app.get("/sandbox/{project_id}/logs")
+def sandbox_logs(project_id: str, lines: int = Query(default=100, ge=1, le=10000)):
+    log_path = _sandbox_log_path(project_id)
+    if not log_path.exists():
+        return {"lines": []}
+    text = log_path.read_text(encoding="utf-8")
+    all_lines = text.splitlines()
+    return {"lines": all_lines[-lines:] if len(all_lines) > lines else all_lines}
+
+
+@app.post("/sandbox/{project_id}/stop")
+def sandbox_stop(project_id: str):
+    pid = _sandbox_current_pid(project_id)
+    if pid is None:
+        return {"ok": False, "error": "not_running"}
+    try:
+        os.kill(pid, signal.SIGTERM)
+        try:
+            _sandbox_pid_path(project_id).unlink()
+        except OSError:
+            pass
+        logger.info(
+            "supervisor: sandbox stopped pid=%d project_id=%s", pid, project_id
+        )
         return {"ok": True}
     except OSError as exc:
         return {"ok": False, "error": str(exc)}
