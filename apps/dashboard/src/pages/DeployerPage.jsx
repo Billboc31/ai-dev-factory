@@ -4,6 +4,87 @@ import ActionButton from '../components/ActionButton'
 import ErrorBanner from '../components/ErrorBanner'
 import usePolling from '../hooks/usePolling'
 
+const STEP_COLORS = {
+  skipped: 'text-gray-400',
+  success: 'text-green-600',
+  failed: 'text-red-600',
+}
+
+function SandboxStatusPanel({ status }) {
+  if (!status || status.state === 'idle') return null
+  const colorClass = STATE_COLORS[status.state] || STATE_COLORS.idle
+  return (
+    <div className="bg-white border border-gray-200 rounded p-4 mt-4 space-y-2">
+      <div className="flex items-center gap-3">
+        <span className="text-sm font-semibold text-gray-700">Sandbox</span>
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${colorClass}`}>
+          {status.state === 'running' && <span className="animate-spin inline-block">↻</span>}
+          {status.state}
+        </span>
+        {status.sandbox_id && (
+          <span className="text-xs text-gray-400 font-mono">{status.sandbox_id}</span>
+        )}
+      </div>
+      {status.error && (
+        <p className="text-xs text-red-600">Error: {status.error}</p>
+      )}
+      {status.steps && status.steps.length > 0 && (
+        <ul className="space-y-0.5 mt-1">
+          {status.steps.map(step => (
+            <li key={step.name} className="flex items-center gap-2 text-xs font-mono">
+              <span className={STEP_COLORS[step.status] || 'text-gray-600'}>
+                {step.status === 'success' ? '✓' : step.status === 'failed' ? '✗' : '—'}
+              </span>
+              <span className="text-gray-700">{step.name}</span>
+              {step.exit_code != null && step.exit_code !== 0 && (
+                <span className="text-red-500">(exit {step.exit_code})</span>
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+function SandboxLogsPanel({ projectId, isRunning }) {
+  const [logs, setLogs] = useState([])
+  const [open, setOpen] = useState(false)
+
+  const fetchLogs = useCallback(() => {
+    deployerApi.getSandboxLogs(projectId, 100)
+      .then(res => setLogs(res.data.lines))
+      .catch(() => {})
+  }, [projectId])
+
+  useEffect(() => {
+    if (open) fetchLogs()
+  }, [open]) // eslint-disable-line
+
+  usePolling(fetchLogs, (open && isRunning) ? 5000 : null, projectId)
+
+  return (
+    <div className="mt-2 border border-gray-200 rounded">
+      <button
+        className="w-full flex items-center justify-between px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        onClick={() => setOpen(o => !o)}
+      >
+        <span>Sandbox Logs</span>
+        <span className="text-gray-400">{open ? '▲' : '▼'}</span>
+      </button>
+      {open && (
+        <div className="p-4 bg-gray-900 rounded-b max-h-80 overflow-y-auto">
+          {logs.length === 0 ? (
+            <p className="text-gray-400 text-xs">No logs yet.</p>
+          ) : (
+            <pre className="text-xs text-green-300 whitespace-pre-wrap">{logs.join('\n')}</pre>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 const STATE_COLORS = {
   idle: 'bg-gray-100 text-gray-700',
   running: 'bg-yellow-100 text-yellow-700',
@@ -261,6 +342,7 @@ export default function DeployerPage({ projectId }) {
   const [status, setStatus] = useState(null)
   const [analysisStatus, setAnalysisStatus] = useState(null)
   const [scriptsStatus, setScriptsStatus] = useState(null)
+  const [sandboxStatus, setSandboxStatus] = useState(null)
   const [scanResult, setScanResult] = useState(null)
   const [scanning, setScanning] = useState(false)
   const [error, setError] = useState(null)
@@ -268,9 +350,11 @@ export default function DeployerPage({ projectId }) {
   const isRunning = status?.state === 'running'
   const isAnalysing = analysisStatus?.state === 'running'
   const isGeneratingScripts = scriptsStatus?.state === 'running'
+  const isSandboxRunning = sandboxStatus?.state === 'running' || sandboxStatus?.state === 'pending'
   const pollingDelay = !status || status.state === 'idle' || isRunning ? 5000 : null
   const analysisPollingDelay = isAnalysing ? 5000 : null
   const scriptsPollingDelay = isGeneratingScripts ? 5000 : null
+  const sandboxPollingDelay = isSandboxRunning ? 5000 : null
 
   const refreshStatus = useCallback(() => {
     deployerApi.getDeployerStatus(projectId)
@@ -290,13 +374,21 @@ export default function DeployerPage({ projectId }) {
       .catch(() => {})
   }, [projectId])
 
+  const refreshSandboxStatus = useCallback(() => {
+    deployerApi.getSandboxStatus(projectId)
+      .then(res => setSandboxStatus(res.data))
+      .catch(() => {})
+  }, [projectId])
+
   usePolling(refreshStatus, pollingDelay, projectId)
   usePolling(refreshAnalysisStatus, analysisPollingDelay, projectId)
   usePolling(refreshScriptsStatus, scriptsPollingDelay, projectId)
+  usePolling(refreshSandboxStatus, sandboxPollingDelay, projectId)
 
   useEffect(() => {
     refreshAnalysisStatus()
     refreshScriptsStatus()
+    refreshSandboxStatus()
   }, [projectId]) // eslint-disable-line
 
   const handleScan = async () => {
@@ -365,6 +457,11 @@ export default function DeployerPage({ projectId }) {
           action={handleGenerateScripts}
           disabled={isGeneratingScripts}
         />
+        <ActionButton
+          label="Deploy &amp; Test in Sandbox"
+          action={() => deployerApi.startSandboxValidation(projectId).then(refreshSandboxStatus)}
+          disabled={isSandboxRunning}
+        />
       </div>
       <LogsPanel projectId={projectId} isRunning={isRunning} />
       <AnalysisStatusPanel status={analysisStatus} />
@@ -372,6 +469,8 @@ export default function DeployerPage({ projectId }) {
       <ScriptsStatusPanel status={scriptsStatus} />
       <ScriptsLogsPanel projectId={projectId} isRunning={isGeneratingScripts} />
       <ScanResultPanel result={scanResult} />
+      <SandboxStatusPanel status={sandboxStatus} />
+      <SandboxLogsPanel projectId={projectId} isRunning={isSandboxRunning} />
     </div>
   )
 }

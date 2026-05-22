@@ -260,6 +260,51 @@ class DeployLogsResponse(BaseModel):
     lines: list[str]
 
 
+# T134 — Schemas for the per-project deploy-validation pipeline.
+#
+# These models are intentionally namespaced with the ``SandboxValidation``
+# prefix to keep them clearly distinct from the worker-isolation
+# ``SandboxState`` / ``SandboxStatus`` enum & model defined in
+# ``services.control_api.models.sandbox`` (T133/T136).
+#
+# Conceptually:
+#   * ``SandboxState``       (models/sandbox.py)  → AI worker isolation
+#   * ``SandboxValidation*`` (this module)         → deploy validation
+
+
+class SandboxValidationStep(BaseModel):
+    name: str
+    status: Literal["skipped", "success", "failed"]
+    exit_code: int | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+
+
+class SandboxValidationState(BaseModel):
+    state: Literal["idle", "pending", "running", "success", "failed"] = "idle"
+    sandbox_id: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    error: str | None = None
+    last_step: str | None = None
+    steps: list[SandboxValidationStep] = []
+
+
+class SandboxValidationStatus(BaseModel):
+    state: Literal["idle", "pending", "running", "success", "failed"]
+    project_id: str
+    sandbox_id: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    error: str | None = None
+    last_step: str | None = None
+    steps: list[SandboxValidationStep] = []
+
+
+class SandboxValidationLogsResponse(BaseModel):
+    lines: list[str]
+
+
 class AnalysisStatus(BaseModel):
     state: Literal["idle", "running", "success", "failed"] = "idle"
     started_at: str | None = None
