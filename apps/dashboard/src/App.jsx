@@ -10,6 +10,7 @@ import DeployerPage from './pages/DeployerPage'
 import SandboxPanel from './components/SandboxPanel'
 import AutoFixPanel from './components/AutoFixPanel'
 import ProjectSidebar from './components/ProjectSidebar'
+import RuntimeDashboardPage from './pages/RuntimeDashboardPage'
 import useProjects from './hooks/useProjects'
 
 export const ActiveProjectContext = createContext(null)
@@ -29,6 +30,7 @@ function Nav({ activeProject }) {
       <NavLink to="/deployer" className={linkClass}>Deployer</NavLink>
       <NavLink to="/sandboxes" className={linkClass}>Sandboxes</NavLink>
       <NavLink to="/auto-fix" className={linkClass}>Auto-Fix</NavLink>
+      <NavLink to="/runtime-dashboard" className={linkClass}>Runtime</NavLink>
     </nav>
   )
 }
@@ -65,6 +67,7 @@ export default function App() {
                 <Route path="/deployer" element={<DeployerPage projectId={activeProject} />} />
                 <Route path="/sandboxes" element={<SandboxPanel />} />
                 <Route path="/auto-fix" element={<AutoFixPanel projectId={activeProject} />} />
+                <Route path="/runtime-dashboard" element={<RuntimeDashboardPage />} />
               </Routes>
             </ActiveProjectContext.Provider>
           </main>
