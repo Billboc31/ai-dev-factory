@@ -21,6 +21,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -326,6 +327,8 @@ def get_sandbox_run_logs(
 
 @runs_router.delete("/{sandbox_id}", status_code=204)
 def cleanup_sandbox_run(sandbox_id: str) -> Response:
+    if not re.fullmatch(r"[a-zA-Z0-9_\-]+", sandbox_id):
+        raise HTTPException(status_code=400, detail="invalid sandbox_id")
     sandboxes_root = _sandboxes_root()
     if not sandboxes_root:
         raise HTTPException(status_code=404, detail=f"sandbox not found: {sandbox_id}")

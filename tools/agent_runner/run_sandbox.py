@@ -513,6 +513,7 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
         "ports": ports,
         "worktree_path": str(worktree_path),
         "compose_project": compose_project,
+        "project_root": str(project_root),
     }
     _write_state(state_path, latest_state_path, state_base)
     _append_log(log_path, f"=== sandbox {sandbox_id} started {started_at} ===\n")
