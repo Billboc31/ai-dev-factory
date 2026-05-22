@@ -17,7 +17,7 @@ components:
     command: bash deploy/start_supervisor.sh
   - name: daemon
     type: host
-    command: python tools/agent_runner/run_daemon.py --exec-cmd "claude --dangerously-skip-permissions" --poll-issues --auto-commit --auto-push --interval 30
+    command: python tools/agent_runner/run_daemon.py --exec-cmd "claude --dangerously-skip-permissions" --poll-issues --issue-repo Billboc31/ai-dev-factory --auto-commit --auto-push --auto-include-code --interval 30
 healthcheck:
   command: curl -sf http://localhost:8080/health
   timeout: 30
