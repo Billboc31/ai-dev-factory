@@ -1079,7 +1079,7 @@ def _auto_fix_runtime_root() -> Path:
 
 class AutoFixProposeRequest(BaseModel):
     project_root: str
-    exec_cmd: str = "claude --dangerously-skip-permissions"
+    exec_cmd: str
     sandbox_id: str
     failing_step: str | None = None
 
@@ -1185,3 +1185,114 @@ def auto_fix_list_proposals(project_id: str):
     runtime_root = _auto_fix_runtime_root()
     proposals = _list_proposals_disk(project_id, runtime_root)
     return {"proposals": proposals}
+
+
+# ── auto-fix loop endpoints ───────────────────────────────────────────────────
+#
+# The loop applies patches and reruns validation in-place, iterating up to
+# max_retries. Each session persists iteration history to disk.
+
+try:
+    from auto_fix_loop import (  # noqa: E402
+        make_session as _make_session,
+        persist_session as _persist_session,
+        load_session as _load_session,
+        list_sessions as _list_sessions_disk,
+        run_auto_fix_loop as _run_auto_fix_loop,
+    )
+    _auto_fix_loop_available = True
+except ImportError:
+    _auto_fix_loop_available = False
+
+
+class AutoFixLoopStartRequest(BaseModel):
+    project_root: str
+    exec_cmd: str
+    sandbox_id: str | None = None
+    max_retries: int = 3
+    failing_step: str | None = None
+
+
+def _run_loop_bg(
+    session: dict,
+    project_root: Path,
+    exec_cmd: str,
+    runtime_root: Path,
+) -> None:
+    """Background thread: run the full auto-fix loop."""
+    try:
+        _run_auto_fix_loop(session, project_root, exec_cmd, runtime_root)
+    except Exception as exc:
+        session["status"] = "error"
+        session["error"] = str(exc)
+        session["finished_at"] = datetime.datetime.now(
+            datetime.timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            _persist_session(session["project_id"], session, runtime_root)
+        except Exception as persist_exc:
+            logger.error(
+                "supervisor: failed to persist loop session %s: %s",
+                session.get("session_id"), persist_exc,
+            )
+        logger.error("supervisor: auto-fix loop crashed session=%s: %s", session.get("session_id"), exc)
+
+
+@app.post("/auto-fix/{project_id}/loop/start")
+def auto_fix_loop_start(project_id: str, body: AutoFixLoopStartRequest):
+    from fastapi.responses import JSONResponse
+
+    if not _auto_fix_loop_available:
+        return JSONResponse(
+            status_code=503,
+            content={"ok": False, "error": "auto_fix_loop not available"},
+        )
+
+    mapped_root = mapper.map(body.project_root)
+    runtime_root = _auto_fix_runtime_root()
+
+    session = _make_session(
+        project_id=project_id,
+        sandbox_id=body.sandbox_id,
+        max_retries=body.max_retries,
+        failing_step=body.failing_step,
+    )
+    _persist_session(project_id, session, runtime_root)
+
+    threading.Thread(
+        target=_run_loop_bg,
+        args=(session, Path(mapped_root), body.exec_cmd, runtime_root),
+        daemon=True,
+    ).start()
+
+    logger.info(
+        "supervisor: auto-fix loop %s started project_id=%s max_retries=%d",
+        session["session_id"], project_id, body.max_retries,
+    )
+    return {"ok": True, "session_id": session["session_id"]}
+
+
+@app.get("/auto-fix/{project_id}/loop/{session_id}")
+def auto_fix_loop_get(project_id: str, session_id: str):
+    from fastapi.responses import JSONResponse
+
+    if not _auto_fix_loop_available:
+        return JSONResponse(status_code=503, content={"error": "auto_fix_loop not available"})
+
+    runtime_root = _auto_fix_runtime_root()
+    session = _load_session(project_id, session_id, runtime_root)
+    if session is None:
+        return JSONResponse(status_code=404, content={"error": f"session not found: {session_id}"})
+    return session
+
+
+@app.get("/auto-fix/{project_id}/loops")
+def auto_fix_loop_list(project_id: str):
+    from fastapi.responses import JSONResponse
+
+    if not _auto_fix_loop_available:
+        return JSONResponse(status_code=503, content={"error": "auto_fix_loop not available"})
+
+    runtime_root = _auto_fix_runtime_root()
+    sessions = _list_sessions_disk(project_id, runtime_root)
+    return {"sessions": sessions}

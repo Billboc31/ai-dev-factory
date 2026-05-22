@@ -173,7 +173,7 @@ def _is_allowed_path(relative_path: str) -> bool:
     if ".." in relative_path:
         return False
     normalized = relative_path.lstrip("/").replace("\\", "/")
-    return normalized.startswith(_ALLOWED_PREFIX + "/") or normalized == _ALLOWED_PREFIX
+    return normalized.startswith(_ALLOWED_PREFIX + "/")
 
 
 def validate_patches(patches: list[dict], project_root: Path) -> list[dict]:  # noqa: ARG001

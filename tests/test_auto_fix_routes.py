@@ -44,7 +44,7 @@ def test_propose_returns_proposal_id(tmp_path, monkeypatch):
     proj_id = Path(tmp_path / "myproject").name
     r = client.post(
         f"/projects/{proj_id}/auto-fix/propose",
-        json={"sandbox_id": "sb1", "failing_step": "build.sh"},
+        json={"exec_cmd": "echo", "sandbox_id": "sb1", "failing_step": "build.sh"},
     )
     assert r.status_code == 200
     data = r.json()

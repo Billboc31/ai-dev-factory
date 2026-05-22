@@ -95,3 +95,76 @@ def list_proposals(
     except Exception as exc:  # noqa: BLE001
         logger.warning("auto_fix: failed to list proposals for %s: %s", project_id, exc)
         return []
+
+
+# ── Loop session runner ───────────────────────────────────────────────────────
+
+def start_auto_fix_loop(
+    project_id: str,
+    project_root: str,
+    exec_cmd: str,
+    sandbox_id: str | None = None,
+    max_retries: int = 3,
+    failing_step: str | None = None,
+    supervisor_url: str | None = None,
+) -> dict:
+    """Ask the supervisor to start an auto-fix loop session."""
+    url = _resolve_supervisor_url(supervisor_url)
+    if not url:
+        return {"ok": False, "error": "no_supervisor_url"}
+    try:
+        resp = httpx.post(
+            f"{url}/auto-fix/{project_id}/loop/start",
+            json={
+                "project_root": project_root,
+                "exec_cmd": exec_cmd,
+                "sandbox_id": sandbox_id,
+                "max_retries": max_retries,
+                "failing_step": failing_step,
+            },
+            timeout=10.0,
+        )
+        return resp.json()
+    except httpx.ConnectError:
+        return {"ok": False, "error": "supervisor_unreachable"}
+
+
+def get_auto_fix_session(
+    project_id: str,
+    session_id: str,
+    supervisor_url: str | None = None,
+) -> dict | None:
+    """Fetch a loop session by ID. Returns None if not found or unreachable."""
+    url = _resolve_supervisor_url(supervisor_url)
+    if not url:
+        return None
+    try:
+        resp = httpx.get(
+            f"{url}/auto-fix/{project_id}/loop/{session_id}",
+            timeout=5.0,
+        )
+        if resp.status_code == 404:
+            return None
+        return resp.json()
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("auto_fix: failed to fetch session %s: %s", session_id, exc)
+        return None
+
+
+def list_auto_fix_sessions(
+    project_id: str,
+    supervisor_url: str | None = None,
+) -> list[dict]:
+    """List all loop sessions for a project. Returns empty list on error."""
+    url = _resolve_supervisor_url(supervisor_url)
+    if not url:
+        return []
+    try:
+        resp = httpx.get(
+            f"{url}/auto-fix/{project_id}/loops",
+            timeout=5.0,
+        )
+        return resp.json().get("sessions", [])
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("auto_fix: failed to list sessions for %s: %s", project_id, exc)
+        return []
