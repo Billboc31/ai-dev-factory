@@ -8,6 +8,7 @@ import ProjectMapPage from './pages/ProjectMapPage'
 import IssueMapperActivityPage from './pages/IssueMapperActivityPage'
 import DeployerPage from './pages/DeployerPage'
 import SandboxPanel from './components/SandboxPanel'
+import AutoFixPanel from './components/AutoFixPanel'
 import ProjectSidebar from './components/ProjectSidebar'
 import useProjects from './hooks/useProjects'
 
@@ -27,6 +28,7 @@ function Nav({ activeProject }) {
       <NavLink to="/mapper-activity" className={linkClass}>Mapper Activity</NavLink>
       <NavLink to="/deployer" className={linkClass}>Deployer</NavLink>
       <NavLink to="/sandboxes" className={linkClass}>Sandboxes</NavLink>
+      <NavLink to="/auto-fix" className={linkClass}>Auto-Fix</NavLink>
     </nav>
   )
 }
@@ -62,6 +64,7 @@ export default function App() {
                 <Route path="/mapper-activity" element={<IssueMapperActivityPage projectId={activeProject} />} />
                 <Route path="/deployer" element={<DeployerPage projectId={activeProject} />} />
                 <Route path="/sandboxes" element={<SandboxPanel />} />
+                <Route path="/auto-fix" element={<AutoFixPanel projectId={activeProject} />} />
               </Routes>
             </ActiveProjectContext.Provider>
           </main>
