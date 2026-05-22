@@ -12,6 +12,11 @@ export const getDeployLogs = (projectId, lines = 100) => client.get(`${_pfx(proj
 export const analyzeProject = (projectId) => client.post(`${_pfx(projectId)}/deployer/analyze`)
 export const getAnalysisStatus = (projectId) => client.get(`${_pfx(projectId)}/deployer/analysis/status`)
 export const getAnalysisLogs = (projectId, lines = 100) => client.get(`${_pfx(projectId)}/deployer/analysis/logs`, { params: { lines } })
+// T132 — AI-generated operational scripts (`deployer/scripts/*`).
 export const generateScripts = (projectId) => client.post(`${_pfx(projectId)}/deployer/generate-scripts`)
 export const getScriptsStatus = (projectId) => client.get(`${_pfx(projectId)}/deployer/scripts/status`)
 export const getScriptsLogs = (projectId, lines = 100) => client.get(`${_pfx(projectId)}/deployer/scripts/logs`, { params: { lines } })
+// T134 — per-project deploy-validation pipeline (`sandbox/*`).
+export const startSandboxValidation = (projectId) => client.post(`${_pfx(projectId)}/sandbox/start`)
+export const getSandboxStatus = (projectId) => client.get(`${_pfx(projectId)}/sandbox/status`)
+export const getSandboxLogs = (projectId, lines = 100) => client.get(`${_pfx(projectId)}/sandbox/logs`, { params: { lines } })

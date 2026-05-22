@@ -1,14 +1,42 @@
+"""Routes for the two sandbox subsystems.
+
+This module exposes two FastAPI routers that share the word "sandbox"
+but address different operational concerns:
+
+* ``router`` (mounted at ``/sandboxes``) — from T133/T136. Manages
+  long-lived sandboxes used to isolate AI ticket workers. Backed by
+  :class:`services.control_api.services.sandbox_manager.SandboxManager`.
+
+* ``project_router`` (mounted at ``/projects/{project_id}/sandbox``) —
+  from T134. One-shot deploy-validation pipeline that runs the
+  generated operational scripts (``bootstrap → build → start →
+  healthcheck``) in an isolated worktree and reports per-step status.
+  Backed by :mod:`services.control_api.services.sandbox_runner`.
+
+Class and function names are intentionally distinct between the two so
+that imports and call sites never silently shadow each other.
+"""
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 
+from ..dependencies import resolve_project
 from ..models.sandbox import SandboxState
+from ..models.schemas import (
+    ActionResult,
+    SandboxValidationLogsResponse,
+    SandboxValidationStatus,
+)
+from ..services import sandbox_runner
 from ..services.sandbox_manager import SandboxManager, SandboxNotFoundError
 
 logger = logging.getLogger("control-api")
+
+# ── T133/T136: SandboxManager router ──────────────────────────────────────────
 
 router = APIRouter(prefix="/sandboxes", tags=["sandbox"])
 
@@ -24,7 +52,12 @@ class CreateSandboxRequest(BaseModel):
     project_root: str
 
 
-class SandboxLogsResponse(BaseModel):
+class SandboxManagerLogsResponse(BaseModel):
+    """Response shape for the SandboxManager logs endpoint.
+
+    Distinct from :class:`SandboxValidationLogsResponse` (T134), which
+    returns a list of log lines for the deploy-validation pipeline.
+    """
     logs: str
 
 
@@ -89,14 +122,69 @@ def destroy_sandbox(sandbox_id: str, request: Request) -> None:
         raise HTTPException(status_code=404, detail=f"sandbox not found: {sandbox_id}")
 
 
-@router.get("/{sandbox_id}/logs", response_model=SandboxLogsResponse)
+@router.get("/{sandbox_id}/logs", response_model=SandboxManagerLogsResponse)
 def get_sandbox_logs(
     sandbox_id: str,
     request: Request,
     component: str | None = Query(default=None),
-) -> SandboxLogsResponse:
+) -> SandboxManagerLogsResponse:
     try:
         logs = _get_manager(request).logs(sandbox_id, component)
-        return SandboxLogsResponse(logs=logs)
+        return SandboxManagerLogsResponse(logs=logs)
     except SandboxNotFoundError:
         raise HTTPException(status_code=404, detail=f"sandbox not found: {sandbox_id}")
+
+
+# ── T134: per-project deploy-validation router ────────────────────────────────
+
+project_router = APIRouter(prefix="/projects", tags=["sandbox"])
+
+
+@project_router.get(
+    "/{project_id}/sandbox/status",
+    response_model=SandboxValidationStatus,
+)
+def get_project_sandbox_status(
+    project_id: str,
+    project_root: Path = Depends(resolve_project),
+) -> SandboxValidationStatus:
+    state = sandbox_runner.get_sandbox_state(project_root)
+    return SandboxValidationStatus(
+        state=state.state,
+        project_id=project_id,
+        sandbox_id=state.sandbox_id,
+        started_at=state.started_at,
+        finished_at=state.finished_at,
+        error=state.error,
+        last_step=state.last_step,
+        steps=state.steps,
+    )
+
+
+@project_router.post(
+    "/{project_id}/sandbox/start",
+    response_model=ActionResult,
+    status_code=202,
+)
+def start_project_sandbox(
+    project_id: str,
+    project_root: Path = Depends(resolve_project),
+) -> ActionResult:
+    logger.info("api: POST /projects/%s/sandbox/start", project_id)
+    result = sandbox_runner.start_sandbox_validation(project_id, project_root)
+    if result.error == "locked":
+        raise HTTPException(status_code=409, detail="sandbox already running")
+    return result
+
+
+@project_router.get(
+    "/{project_id}/sandbox/logs",
+    response_model=SandboxValidationLogsResponse,
+)
+def get_project_sandbox_logs(
+    project_id: str,
+    project_root: Path = Depends(resolve_project),
+    lines: int = Query(default=100, ge=1, le=10000),
+) -> SandboxValidationLogsResponse:
+    log_lines = sandbox_runner.get_sandbox_logs(project_root, lines)
+    return SandboxValidationLogsResponse(lines=log_lines)

@@ -40,3 +40,9 @@
 - prev: PLAN_REVIEW_NEEDED
 - step: approve-plan
 - next: PLAN_APPROVED
+
+## 2026-05-22T12:40:40Z
+
+- prev: PLAN_APPROVED
+- step: coder
+- next: IMPLEMENTATION_REVIEW_NEEDED

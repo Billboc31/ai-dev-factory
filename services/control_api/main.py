@@ -112,7 +112,10 @@ def create_app(
     app.include_router(project_map.router)
     app.include_router(project_map.project_router)
     app.include_router(deployer.project_router)
+    # T133/T136: /sandboxes — SandboxManager (ticket-worker isolation).
     app.include_router(sandbox.router)
+    # T134: /projects/{id}/sandbox/* — one-shot deploy-validation pipeline.
+    app.include_router(sandbox.project_router)
 
     return app
 
