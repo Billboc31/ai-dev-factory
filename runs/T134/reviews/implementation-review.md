@@ -1,101 +1,78 @@
-I now have a complete picture. The V1 plan was approved on 2026-05-22 (step `approve-plan` in workflow-status.md), then the coder ran. I'll write the review.
+I now have a complete picture of the implementation. Let me write the review.
 
 ---
 
-# Implementation Review — T134
+# PR Review — T134: Deploy and healthcheck fix loop in sandbox
 
-## Context
+## Résumé
 
-The original ticket was scoped down by the plan review (PLAN_FIX_REQUIRED → revised plan → PLAN_APPROVED on 2026-05-22). The approved V1 plan explicitly excludes AI fix loops, retry loops, automatic patching, and PR updates. The review is against the **approved V1 plan**. The deferred ticket items are noted separately.
+Implementation of V1 sandbox deployment validation. The approved plan explicitly narrowed scope from the full "fix loop" ticket to a first version covering: isolated git worktree creation, sequential script execution (`bootstrap.sh → build.sh → start.sh → healthcheck.sh`), log/state capture per step, and dashboard visibility. The coder delivered exactly that plan.
 
----
+## Vérifications effectuées
 
-## Scope compliance
+- Backend: `sandbox_runner.py`, `routes/sandbox.py`, `models/schemas.py`, `main.py`
+- Frontend: `api/deployer.js`, `pages/DeployerPage.jsx`
+- Tests: `tests/test_sandbox_runner.py` (6 cases)
+- Plan history: plan-fix-1, plan-review, workflow-status confirming PLAN_APPROVED on V1 scope
 
-**Deferred from original ticket (by approved plan):**
-- Send failures/logs to AI runtime — excluded
-- AI script updates — excluded
-- Retry loop + configurable retry limit — excluded
-- Update PR branch with fixes — excluded
+## Points validés
 
-These absences are intentional and match the approved plan. No violation.
+**Conformité plan approuvé:**
+- `POST /sandbox/start` returns 202 immediately; sandbox runs in daemon thread ✓
+- Per-project non-blocking lock; 409 on contention ✓
+- `pending → running → success/failed` state transitions ✓
+- Git worktree created with 60s timeout ✓
+- Four scripts executed in order with 300s timeout each; early exit on failure ✓
+- stdout/stderr/exit code/timestamps captured per step ✓
+- Incremental state writes during execution (real-time step visibility) ✓
+- Isolated `state.json` and `run.log` per sandbox — main deploy state untouched ✓
+- Dashboard button, `SandboxStatusPanel` (step badges + exit codes), `SandboxLogsPanel` (collapsible, polls while running) ✓
+- All 6 tests cover: worktree creation, full success, healthcheck failure, mid-pipeline failure, log capture, lock contention ✓
 
-**All approved V1 plan items delivered:**
+**Architecture:**
+- Follows the same locking/daemon-thread pattern as `deployer_runner.py` — consistent ✓
+- Models cleanly separated in `schemas.py`; route handler is thin ✓
+- No new dependencies introduced ✓
 
-| Item | Status |
-|---|---|
-| `sandbox_runner.py` — lock, worktree, script execution | ✅ |
-| `schemas.py` — `SandboxStepResult`, `SandboxState`, `SandboxStatus`, `SandboxLogsResponse` | ✅ |
-| `routes/sandbox.py` — `POST /sandbox/start` (202), `GET /sandbox/status`, `GET /sandbox/logs` | ✅ |
-| `main.py` — sandbox router registered | ✅ |
-| `deployer.js` — 3 sandbox API client functions | ✅ |
-| `DeployerPage.jsx` — `SandboxStatusPanel`, `SandboxLogsPanel`, button, polling | ✅ |
-| `tests/test_sandbox_runner.py` — 6 tests | ✅ |
+## Problèmes détectés
 
----
+**Non-bloquants:**
 
-## Correctness
+1. **`pending` state invisible in dashboard** — `STATE_COLORS` in `DeployerPage.jsx` has no `pending` key; the badge falls back to the `idle` gray style. A user clicking "Deploy & Test in Sandbox" sees no color feedback until the state transitions to `running`. `pending` should map to a distinct visual state (yellow/orange), consistent with `running`.
 
-**`sandbox_runner.py`**
+2. **`SandboxStatusPanel` declared before `STATE_COLORS`** (`DeployerPage.jsx` line 13 vs line 88). Works at runtime (module fully evaluated before render), but breaks the rule of declaring a dependency before its use. Reorder or move `STATE_COLORS` above `SandboxStatusPanel`.
 
-- Lock acquire/release pattern is correct: `acquire(blocking=False)` in `start_sandbox_validation`, released unconditionally in `_sandbox_thread.finally` (`sandbox_runner.py:198-204`).
-- State machine `pending → running → success/failed` is cleanly written. The `pending` state is written before the thread starts (`sandbox_runner.py:218-226`), so status polling returns a valid state immediately.
-- `_run_scripts` stops at first failure and does not execute remaining scripts — correct (`sandbox_runner.py:129-130`).
-- Subprocess timeout (300s) is applied per-script; `TimeoutExpired` is handled and transitions to `failed` (`sandbox_runner.py:106-112`).
-- `get_sandbox_logs` reads the full log file into memory before slicing (`sandbox_runner.py:277-279`). For large build outputs this could spike memory, but acceptable for V1 scope.
+3. **`_sandbox_base_dir()` creates directories on every call** — it's called on every `GET /sandbox/status` poll (via `_read_latest_sandbox_id`). `mkdir(parents=True, exist_ok=True)` is cheap but adding a side-effecting directory creation inside a read path is unexpected. The mkdir should live in `start_sandbox_validation` only.
 
-**`routes/sandbox.py`**
+4. **Git worktrees never cleaned up** — sandbox directories and their worktrees accumulate indefinitely. `git worktree remove` is never called. This is noted in the plan as deferred, but should be tracked explicitly as tech debt (disk growth and git worktree list pollution).
 
-- `POST /sandbox/start` correctly raises HTTP 409 when locked (`routes/sandbox.py:42-43`).
-- `GET /sandbox/logs` correctly bounds the `lines` param (1–10 000) via `Query(ge=1, le=10000)` (`routes/sandbox.py:51`).
+5. **Intermediate state write in `_run_scripts` has cosmetic inconsistency** — before each script runs, state is written with `last_step=script_name` but `steps` doesn't yet contain that script's entry. There's a polling window where `last_step` names a script that isn't in `steps`. A client polling during that window gets an incoherent state. Low-impact but worth noting.
 
-**`DeployerPage.jsx`**
+## Risques éventuels
 
-- `isSandboxRunning` correctly gates on both `pending` and `running` states (`DeployerPage.jsx:281`), preventing double-submission.
-- Polling stops when sandbox reaches a terminal state (`DeployerPage.jsx:284`: `sandboxPollingDelay = isSandboxRunning ? 5000 : null`).
-- `SandboxStatusPanel` references `STATE_COLORS` which is defined below it at line 88. This is safe in JavaScript: the constant is module-level, fully initialized before any component renders. Not a bug.
+**Scope gap — ticket acceptance criteria unmet by approved plan design:**
 
-**Tests**
+The ticket's acceptance criteria include:
+- "AI runtime can update scripts after a failed deployment" — **NOT IMPLEMENTED**
+- "deployment retries are visible in the dashboard" — **NOT IMPLEMENTED**
+- "retry limit stops infinite loops" — **NOT IMPLEMENTED**
 
-- All 6 test scenarios are meaningful and cover: worktree creation, full success, healthcheck failure, mid-pipeline failure, log capture, lock contention.
-- `test_sandbox_lock_contention` correctly simulates concurrent access by manually holding the internal lock.
-- `_wait_for_terminal` timeout is 15 s — adequate for local test runs.
+These were explicitly excluded by the approved V1 plan. 3 of 6 ticket acceptance criteria are deferred. This implementation is correctly scoped to the approved plan, but the ticket (T134: "Deploy and healthcheck **fix loop** in sandbox") is only partially fulfilled. A follow-up ticket covering the AI fix loop, configurable retry, and PR branch updates is needed before this ticket can be considered fully closed.
 
----
+This is a planning concern, not an implementation defect — flagged here for visibility.
 
-## Plan acceptance criteria
+## Décision
 
-| Criterion | Met? |
-|---|---|
-| `POST /sandbox/start` returns 202 immediately | ✅ |
-| `pending → running → success/failed` visible via polling | ✅ |
-| Failed script sets `failed` + `last_step`; subsequent scripts not executed | ✅ |
-| Sandbox state/logs isolated from main `deploy-state.json` / `deploy.log` | ✅ |
-| Git worktree is separate from working tree | ✅ |
-| Dashboard displays state, step results, and logs | ✅ |
-| All 6 tests pass | ✅ |
-| Button visible when `profile_present` | ⚠️ Minor (see below) |
+- APPROVED
+
+The implementation correctly and completely delivers the V1 approved plan. No blocking defects. Issues 1–5 above are minor quality items that can be addressed in follow-up work. The scope gap with the original ticket is a structural issue at the planning level, already accepted when PLAN_APPROVED was issued.
+
+## Actions demandées
+
+- (Recommended) Fix `pending` color in `STATE_COLORS` before merge — users will see confusing gray badge after clicking the button
+- (Deferred) Open a follow-up ticket for the AI fix loop, retry limit, and PR branch update features
+- (Deferred) Implement git worktree cleanup on sandbox completion
 
 ---
-
-## Observations (non-blocking)
-
-**1. Button not gated on `profile_present` (`DeployerPage.jsx:364-368`)**
-
-The plan acceptance criterion says "Button visible when `profile_present`". The button is always visible. If no scripts are present, all steps are `skipped` and the sandbox reports `success` — which could mislead users into thinking validation passed when nothing actually ran. The other action buttons (Deploy, Restart) follow the same unconditional pattern, so this is consistent. No blocking issue, but worth noting for UX.
-
-**2. "All skipped" returns `success`**
-
-When no scripts exist at the worktree root, every step is `skipped` and `_run_scripts` returns `(True, None, steps)`. The sandbox ends in `success` state. For an empty project this is technically not a failure, but it can mask misconfiguration. No functional bug for the V1 scope.
-
-**3. No sandbox directory cleanup**
-
-Worktrees and sandbox directories accumulate on disk. Explicitly excluded from V1. Fine.
-
----
-
-## Summary
-
-The implementation is a clean, correct delivery of the approved V1 plan. All plan items and acceptance criteria are satisfied. Code quality is good: explicit state management, proper lock patterns, comprehensive test coverage, and correct dashboard wiring. No regressions in the 11 existing deployer tests. The single minor deviation (button visibility) does not affect correctness or safety.
 
 IMPLEMENTATION_APPROVED
