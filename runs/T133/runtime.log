@@ -33,3 +33,11 @@
 [2026-05-22T06:07:28Z] compose: skill=ai/skills/debugging.md
 [2026-05-22T06:07:28Z] compose: task (canonical prompt)
 [2026-05-22T06:07:28Z] snapshot: runtime-prompt=runs/T133/prompts/tester-attempt-1.md
+[2026-05-22T06:09:49Z] auto-run: step=tester done rc=0
+[2026-05-22T06:09:49Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-22T06:09:49Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-22T06:09:49Z] commit-checkpoint: unstaged runtime garbage: ['runs/T133/runtime.log']
+[2026-05-22T06:09:49Z] commit-checkpoint: sha=26738d5d files=3 title='test(T133/workflow): tester — update 3 file(s)'
+[2026-05-22T06:09:49Z] auto-run: auto-push triggered
+[2026-05-22T06:09:49Z] push: tolerating runtime dirty files (not blocking): ['runs/T133/runtime.log']
+[2026-05-22T06:09:49Z] push: pushing branch=ticket/T133-t133-isolated-sandbox-deployment-runtime
