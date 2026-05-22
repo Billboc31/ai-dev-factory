@@ -8,6 +8,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import yaml
 
@@ -19,6 +20,9 @@ from ..models.schemas import (
     DeployProfile,
     DeployState,
 )
+
+if TYPE_CHECKING:
+    from ..models.sandbox import SandboxState
 
 logger = logging.getLogger("control-api")
 
@@ -149,7 +153,7 @@ def _build_deploy_cmd(component: DeployComponent) -> str | None:
 
 
 def _run_healthcheck(
-    hc: DeployHealthcheck, project_root: Path, log_path: Path
+    hc: DeployHealthcheck, cwd: Path, log_path: Path
 ) -> ActionResult:
     _append_log(log_path, f"\n--- healthcheck: {hc.command} ---\n")
     for attempt in range(1, hc.retries + 1):
@@ -161,7 +165,7 @@ def _run_healthcheck(
                 shell=True,
                 capture_output=True,
                 text=True,
-                cwd=str(project_root),
+                cwd=str(cwd),
                 timeout=hc.timeout,
             )
         except subprocess.TimeoutExpired:
@@ -179,13 +183,34 @@ def _run_healthcheck(
     return ActionResult(ok=False, message=msg, error=msg)
 
 
-def _do_deploy(project_id: str, project_root: Path) -> ActionResult:
-    profile = _load_deploy_profile(project_root)
+def _inject_compose_flags(cmd: str, compose_project: str, env_file: str) -> str:
+    """Prepend -p / --env-file isolation flags to a docker compose command."""
+    if not cmd.startswith("docker compose "):
+        return cmd
+    suffix = cmd[len("docker compose "):]
+    return f"docker compose -p {compose_project} --env-file {env_file} {suffix}"
+
+
+def _do_deploy(
+    project_id: str,
+    project_root: Path,
+    sandbox: SandboxState | None = None,
+) -> ActionResult:
+    if sandbox is not None:
+        sandbox_dir = Path(sandbox.env_file).parent
+        state_path = sandbox_dir / "state.json"
+        log_path = sandbox_dir / "logs" / "deploy.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        cwd = Path(sandbox.worktree_path) if sandbox.worktree_path else project_root
+    else:
+        state_path = _state_path(project_root)
+        log_path = _log_path(project_root)
+        cwd = project_root
+
+    profile = _load_deploy_profile(cwd)
     if profile is None:
         return ActionResult(ok=False, message="no deploy.yml found")
 
-    state_path = _state_path(project_root)
-    log_path = _log_path(project_root)
     pid = os.getpid()
     started_at = _now_iso()
 
@@ -216,8 +241,11 @@ def _do_deploy(project_id: str, project_root: Path) -> ActionResult:
             })
             return ActionResult(ok=False, message=msg, error=msg)
 
+        if sandbox is not None:
+            cmd = _inject_compose_flags(cmd, sandbox.compose_project, sandbox.env_file)
+
         result = subprocess.run(
-            cmd, shell=True, capture_output=True, text=True, cwd=str(project_root)
+            cmd, shell=True, capture_output=True, text=True, cwd=str(cwd)
         )
         if result.stdout:
             _append_log(log_path, result.stdout)
@@ -238,7 +266,7 @@ def _do_deploy(project_id: str, project_root: Path) -> ActionResult:
             )
 
     if profile.healthcheck:
-        hc_result = _run_healthcheck(profile.healthcheck, project_root, log_path)
+        hc_result = _run_healthcheck(profile.healthcheck, cwd, log_path)
         if not hc_result.ok:
             finished_at = _now_iso()
             _write_state(state_path, {
@@ -266,6 +294,40 @@ def run_deploy(project_id: str, project_root: Path) -> ActionResult:
         return _do_deploy(project_id, project_root)
     finally:
         lock.release()
+
+
+def run_deploy_sandboxed(
+    project_id: str,
+    project_root: Path,
+    sandbox_manager: object,
+    branch: str | None = None,
+    job_type: str = "deploy",
+) -> ActionResult:
+    lock = _get_lock(project_id)
+    if not lock.acquire(blocking=False):
+        return ActionResult(ok=False, message="deploy already in progress", error="locked")
+    sandbox = None
+    try:
+        try:
+            sandbox = sandbox_manager.create_with_worktree(
+                ticket_id=project_id,
+                project_root=str(project_root),
+                branch=branch,
+                job_type=job_type,
+            )
+        except Exception as exc:
+            return ActionResult(
+                ok=False, message=f"sandbox creation failed: {exc}", error=str(exc)
+            )
+        return _do_deploy(project_id, project_root, sandbox=sandbox)
+    finally:
+        lock.release()
+        if sandbox is not None:
+            try:
+                sandbox_manager.mark_completed(sandbox.id)
+                sandbox_manager.cleanup_completed()
+            except Exception as exc:
+                logger.warning("sandbox cleanup after deploy failed: %s", exc)
 
 
 def _do_restart(project_id: str, project_root: Path) -> ActionResult:

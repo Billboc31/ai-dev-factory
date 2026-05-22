@@ -163,6 +163,11 @@ def main() -> None:
     project_id = args.project_id
     exec_cmd = args.exec_cmd
 
+    # When the supervisor injected SANDBOX_WORKTREE, use that isolated directory
+    # for all file writes and git operations instead of the main project root.
+    sandbox_worktree = os.environ.get("SANDBOX_WORKTREE", "").strip()
+    effective_root = Path(sandbox_worktree).resolve() if sandbox_worktree else project_root
+
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     started_at = _now()
@@ -178,19 +183,19 @@ def main() -> None:
 
     try:
         logger.info("scanning project")
-        scan_result = _scan_project(project_root)
+        scan_result = _scan_project(effective_root)
 
         logger.info("loading deploy profile")
-        deploy_profile_yaml = _load_deploy_profile_yaml(project_root)
+        deploy_profile_yaml = _load_deploy_profile_yaml(effective_root)
 
         logger.info("building file tree")
-        file_tree = _build_file_tree(project_root)
+        file_tree = _build_file_tree(effective_root)
 
         logger.info("building scripts prompt")
-        prompt = build_scripts_prompt(str(project_root), scan_result, deploy_profile_yaml, file_tree)
+        prompt = build_scripts_prompt(str(effective_root), scan_result, deploy_profile_yaml, file_tree)
 
         logger.info("invoking LLM via exec_cmd=%r", exec_cmd.split()[0])
-        llm_output = _invoke_llm(exec_cmd, prompt, project_root)
+        llm_output = _invoke_llm(exec_cmd, prompt, effective_root)
 
         logger.info("parsing LLM output (%d chars)", len(llm_output))
         generated_files = _extract_files(llm_output)
@@ -200,10 +205,10 @@ def main() -> None:
                 raise RuntimeError(f"LLM output missing required block: {rel}")
 
         logger.info("writing %d generated file(s)", len(generated_files))
-        (project_root / ".ai-dev-factory" / "scripts").mkdir(parents=True, exist_ok=True)
+        (effective_root / ".ai-dev-factory" / "scripts").mkdir(parents=True, exist_ok=True)
         for rel_path, content in generated_files.items():
-            target = (project_root / rel_path).resolve()
-            if not str(target).startswith(str(project_root) + "/"):
+            target = (effective_root / rel_path).resolve()
+            if not str(target).startswith(str(effective_root) + "/"):
                 raise RuntimeError(
                     f"LLM returned path escaping project root: {rel_path}"
                 )
@@ -214,7 +219,7 @@ def main() -> None:
             logger.info("wrote %s", rel_path)
 
         logger.info("committing and pushing")
-        branch, pr_url = commit_and_push(project_root, project_id)
+        branch, pr_url = commit_and_push(effective_root, project_id)
 
         finished_at = _now()
         _write_state(project_id, {

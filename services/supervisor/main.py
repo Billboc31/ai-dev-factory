@@ -22,6 +22,19 @@ from pathlib import Path
 from fastapi import FastAPI, Query
 from pydantic import BaseModel
 
+# Optional sandbox support — gracefully disabled when the control_api package
+# is not importable (e.g. in isolated test environments).
+_project_root_dir = Path(__file__).resolve().parents[2]
+if str(_project_root_dir) not in sys.path:
+    sys.path.insert(0, str(_project_root_dir))
+
+try:
+    from services.control_api.services.sandbox_manager import SandboxManager as _SandboxManager
+    _sandbox_manager: _SandboxManager | None = _SandboxManager()
+except Exception:
+    _SandboxManager = None  # type: ignore[assignment,misc]
+    _sandbox_manager = None
+
 logger = logging.getLogger("supervisor")
 
 _SUPERVISOR_DIR = Path(__file__).resolve().parent
@@ -270,6 +283,23 @@ async def lifespan(app: FastAPI):
         await task
     except asyncio.CancelledError:
         pass
+
+
+# ── sandbox cleanup helper ────────────────────────────────────────────────────
+
+def _destroy_sandbox_after_proc(proc: subprocess.Popen, sandbox_id: str) -> None:
+    """Wait for *proc* to exit, then destroy its sandbox. Run in a daemon thread."""
+    try:
+        proc.wait()
+    except Exception:
+        pass
+    if _sandbox_manager is None:
+        return
+    try:
+        _sandbox_manager.destroy(sandbox_id)
+        logger.info("supervisor: sandbox destroyed after subprocess: %s", sandbox_id)
+    except Exception as exc:
+        logger.warning("supervisor: sandbox cleanup failed for %s: %s", sandbox_id, exc)
 
 
 # ── analysis per-project locking ──────────────────────────────────────────────
@@ -538,6 +568,30 @@ def analysis_start(body: AnalysisStartRequest):
             "--worktrees-dir", str(_worktrees_dir()),
         ]
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+
+        # Create an isolated worktree sandbox for this analysis job.
+        sandbox = None
+        if _sandbox_manager is not None:
+            try:
+                sandbox = _sandbox_manager.create_with_worktree(
+                    ticket_id=body.project_id,
+                    project_root=body.project_root,
+                    branch=None,
+                    job_type="analysis",
+                )
+                env["SANDBOX_ID"] = sandbox.id
+                env["SANDBOX_WORKTREE"] = sandbox.worktree_path or ""
+                logger.info(
+                    "supervisor: analysis sandbox created %s for project_id=%s",
+                    sandbox.id, body.project_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "supervisor: sandbox creation failed for analysis %s: %s — continuing without sandbox",
+                    body.project_id, exc,
+                )
+                sandbox = None
+
         try:
             with open(log, "a", encoding="utf-8") as log_fh:
                 log_fh.write(
@@ -560,8 +614,19 @@ def analysis_start(body: AnalysisStartRequest):
                 encoding="utf-8",
             )
             logger.info("supervisor: analysis started pid=%d project_id=%s", proc.pid, body.project_id)
+            if sandbox is not None:
+                threading.Thread(
+                    target=_destroy_sandbox_after_proc,
+                    args=(proc, sandbox.id),
+                    daemon=True,
+                ).start()
             return {"ok": True, "pid": proc.pid}
         except OSError as exc:
+            if sandbox is not None:
+                try:
+                    _sandbox_manager.destroy(sandbox.id)
+                except Exception:
+                    pass
             return {"ok": False, "error": str(exc)}
     finally:
         lock.release()
@@ -644,6 +709,30 @@ def scripts_start(body: ScriptsStartRequest):
             "--exec-cmd", body.exec_cmd,
         ]
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+
+        # Create an isolated worktree sandbox for this scripts generation job.
+        sandbox = None
+        if _sandbox_manager is not None:
+            try:
+                sandbox = _sandbox_manager.create_with_worktree(
+                    ticket_id=body.project_id,
+                    project_root=body.project_root,
+                    branch=None,
+                    job_type="scripts",
+                )
+                env["SANDBOX_ID"] = sandbox.id
+                env["SANDBOX_WORKTREE"] = sandbox.worktree_path or ""
+                logger.info(
+                    "supervisor: scripts sandbox created %s for project_id=%s",
+                    sandbox.id, body.project_id,
+                )
+            except Exception as exc:
+                logger.warning(
+                    "supervisor: sandbox creation failed for scripts %s: %s — continuing without sandbox",
+                    body.project_id, exc,
+                )
+                sandbox = None
+
         try:
             with open(log, "a", encoding="utf-8") as log_fh:
                 log_fh.write(
@@ -666,8 +755,19 @@ def scripts_start(body: ScriptsStartRequest):
                 encoding="utf-8",
             )
             logger.info("supervisor: scripts started pid=%d project_id=%s", proc.pid, body.project_id)
+            if sandbox is not None:
+                threading.Thread(
+                    target=_destroy_sandbox_after_proc,
+                    args=(proc, sandbox.id),
+                    daemon=True,
+                ).start()
             return {"ok": True, "pid": proc.pid}
         except OSError as exc:
+            if sandbox is not None:
+                try:
+                    _sandbox_manager.destroy(sandbox.id)
+                except Exception:
+                    pass
             return {"ok": False, "error": str(exc)}
     finally:
         lock.release()

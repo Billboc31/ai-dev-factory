@@ -1,7 +1,7 @@
 {
   "ticket_id": "T136",
-  "state": "PLAN_APPROVED",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T136-t136-deploy-sandbox-isolation-and-runtime-separati",
   "issue_number": 109,
-  "updated_at": "2026-05-22T07:18:14Z"
+  "updated_at": "2026-05-22T07:31:48Z"
 }
