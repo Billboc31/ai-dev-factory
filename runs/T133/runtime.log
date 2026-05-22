@@ -22,3 +22,14 @@
 [2026-05-21T22:47:48Z] push: pushing branch=ticket/T133-t133-isolated-sandbox-deployment-runtime
 [2026-05-21T22:47:50Z] push: done branch=ticket/T133-t133-isolated-sandbox-deployment-runtime
 [2026-05-21T22:52:17Z] human-approval: approve-plan — PLAN_REVIEW_NEEDED → PLAN_APPROVED
+[2026-05-22T06:07:28Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-22T06:07:28Z] auto-run: running step=tester
+[2026-05-22T06:07:28Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-22T06:07:28Z] prompt: generic fallback — injecting runs/T133/ticket.md
+[2026-05-22T06:07:28Z] compose: global-context=docs/ai/global-context.md
+[2026-05-22T06:07:28Z] compose: role=ai/roles/tester.md
+[2026-05-22T06:07:28Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-22T06:07:28Z] compose: skill=ai/skills/testing.md
+[2026-05-22T06:07:28Z] compose: skill=ai/skills/debugging.md
+[2026-05-22T06:07:28Z] compose: task (canonical prompt)
+[2026-05-22T06:07:28Z] snapshot: runtime-prompt=runs/T133/prompts/tester-attempt-1.md
