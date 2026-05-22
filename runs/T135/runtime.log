@@ -38,3 +38,14 @@
 [2026-05-22T06:38:00Z] compose: extra-context=runs/T135/fixes/context-20260522T063800Z.md
 [2026-05-22T06:38:00Z] snapshot: runtime-prompt=runs/T135/prompts/planner-attempt-2.md
 [2026-05-22T06:39:55Z] auto-run: step=planner done rc=0
+[2026-05-22T06:39:57Z] planner checkpoint: committed
+[2026-05-22T06:39:57Z] planner checkpoint: pushed
+[2026-05-22T06:39:57Z] planner validation success
+[2026-05-22T06:39:57Z] auto-run: transition PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED
+[2026-05-22T06:39:57Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-22T06:39:58Z] commit-checkpoint: unstaged runtime garbage: ['runs/T135/runtime.log']
+[2026-05-22T06:39:58Z] commit-checkpoint: sha=22b9e02a files=2 title='docs(T135/workflow): planner — update 2 file(s)'
+[2026-05-22T06:39:58Z] auto-run: auto-push triggered
+[2026-05-22T06:39:58Z] push: tolerating runtime dirty files (not blocking): ['runs/T135/runtime.log']
+[2026-05-22T06:39:58Z] push: pushing branch=ticket/T135-t135-isolated-analysis-and-deploy-worktrees
+[2026-05-22T06:40:00Z] push: done branch=ticket/T135-t135-isolated-analysis-and-deploy-worktrees
