@@ -21,3 +21,4 @@
 [2026-05-22T19:45:33Z] push: tolerating runtime dirty files (not blocking): ['runs/T139/runtime.log']
 [2026-05-22T19:45:33Z] push: pushing branch=ticket/T139-t139-runtime-dashboard-for-sandboxes-and-proposals
 [2026-05-22T19:45:35Z] push: done branch=ticket/T139-t139-runtime-dashboard-for-sandboxes-and-proposals
+[2026-05-22T19:51:36Z] human-approval: request-plan-fix — PLAN_REVIEW_NEEDED → PLAN_FIX_REQUIRED
