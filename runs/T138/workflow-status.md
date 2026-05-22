@@ -34,3 +34,9 @@
 - prev: PLAN_FIX_REQUIRED
 - step: planner
 - next: PLAN_REVIEW_NEEDED
+
+## 2026-05-22T15:32:41Z
+
+- prev: PLAN_REVIEW_NEEDED
+- step: request-plan-fix
+- next: PLAN_FIX_REQUIRED
