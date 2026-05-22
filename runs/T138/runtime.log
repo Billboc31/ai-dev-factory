@@ -78,3 +78,21 @@
 [2026-05-22T15:35:28Z] push: pushing branch=ticket/T138-t138-generic-ai-sandbox-auto-fix-loop
 [2026-05-22T15:35:30Z] push: done branch=ticket/T138-t138-generic-ai-sandbox-auto-fix-loop
 [2026-05-22T15:37:45Z] human-approval: approve-plan — PLAN_REVIEW_NEEDED → PLAN_APPROVED
+[2026-05-22T16:06:55Z] auto-run start: state=IMPLEMENTATION_FIX_REQUIRED
+[2026-05-22T16:06:55Z] auto-run: running step=coder
+[2026-05-22T16:06:55Z] auto-run: fix context: previous_output=runs/T138/implementation-output.md
+[2026-05-22T16:06:55Z] auto-run: fix context: review=runs/T138/reviews/implementation-review.md
+[2026-05-22T16:06:55Z] auto-run: fix context: fix_instructions=runs/T138/fixes/implementation-fix-2.md
+[2026-05-22T16:06:55Z] auto-run: fix context: context_file=runs/T138/fixes/context-20260522T160655Z.md
+[2026-05-22T16:06:55Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-22T16:06:55Z] prompt: generic fallback — injecting runs/T138/ticket.md
+[2026-05-22T16:06:55Z] compose: global-context=docs/ai/global-context.md
+[2026-05-22T16:06:55Z] compose: role=ai/roles/coder.md
+[2026-05-22T16:06:55Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-22T16:06:55Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-22T16:06:55Z] compose: skill=ai/skills/code-quality.md
+[2026-05-22T16:06:55Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-22T16:06:55Z] compose: skill=ai/skills/security.md
+[2026-05-22T16:06:55Z] compose: task (canonical prompt)
+[2026-05-22T16:06:55Z] compose: extra-context=runs/T138/fixes/context-20260522T160655Z.md
+[2026-05-22T16:06:55Z] snapshot: runtime-prompt=runs/T138/prompts/coder-attempt-3.md

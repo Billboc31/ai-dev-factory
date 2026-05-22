@@ -21,7 +21,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from fastapi import FastAPI, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 # Optional sandbox support — gracefully disabled when the control_api package
 # is not importable (e.g. in isolated test environments).
@@ -1100,8 +1100,14 @@ def _run_proposal_bg(
         raw_patches = call_ai_runtime(context, exec_cmd, project_root, failing_step)
         validated = validate_patches(raw_patches, project_root)
 
+        any_valid = any(p["valid"] for p in validated)
         any_invalid = any(not p["valid"] for p in validated)
-        proposal["status"] = "rejected" if any_invalid else "ready"
+        if any_valid and any_invalid:
+            proposal["status"] = "ready_with_warnings"
+        elif any_valid:
+            proposal["status"] = "ready"
+        else:
+            proposal["status"] = "rejected"
         proposal["patches"] = validated
         proposal["context_snapshot"] = {
             "deploy_profile_present": bool(context.get("deploy_profile")),
@@ -1209,7 +1215,7 @@ class AutoFixLoopStartRequest(BaseModel):
     project_root: str
     exec_cmd: str
     sandbox_id: str | None = None
-    max_retries: int = 3
+    max_retries: int = Field(default=3, ge=1, le=50)
     failing_step: str | None = None
 
 

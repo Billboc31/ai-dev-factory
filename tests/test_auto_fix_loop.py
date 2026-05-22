@@ -28,10 +28,13 @@ import auto_fix_loop as afl  # noqa: E402
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
+_GENERIC_SCRIPTS = ["bootstrap.sh", "build.sh", "start.sh", "healthcheck.sh"]
+
+
 def _make_scripts(project_root: Path, exit_code: int = 0) -> None:
     scripts_dir = project_root / ".ai-dev-factory" / "scripts"
     scripts_dir.mkdir(parents=True, exist_ok=True)
-    for name in afl._REQUIRED_SCRIPTS:
+    for name in _GENERIC_SCRIPTS:
         script = scripts_dir / name
         script.write_text(f"#!/bin/sh\nexit {exit_code}\n")
         script.chmod(0o755)
@@ -70,7 +73,7 @@ def test_run_scripts_validation_success(tmp_path):
 
     assert success is True
     assert error is None
-    assert len(steps) == len(afl._REQUIRED_SCRIPTS)
+    assert len(steps) == len(_GENERIC_SCRIPTS)
     assert all(s["status"] == "success" for s in steps)
 
 
@@ -92,10 +95,9 @@ def test_run_scripts_validation_fails_on_nonzero(tmp_path):
     assert steps[0]["status"] == "failed"
 
 
-# ── 4. run_scripts_validation fails on missing script ────────────────────────
+# ── 4. run_scripts_validation — empty scripts dir is success ─────────────────
 
-def test_run_scripts_validation_fails_on_missing_script(tmp_path):
-    # Only create some scripts, not all
+def test_run_scripts_validation_empty_scripts_dir_is_success(tmp_path):
     scripts_dir = tmp_path / ".ai-dev-factory" / "scripts"
     scripts_dir.mkdir(parents=True)
     iter_dir = tmp_path / "iter-1"
@@ -103,9 +105,20 @@ def test_run_scripts_validation_fails_on_missing_script(tmp_path):
 
     success, error, steps = afl.run_scripts_validation(tmp_path, iter_dir)
 
-    assert success is False
-    assert "missing" in error
-    assert steps[0]["status"] == "failed"
+    assert success is True
+    assert error is None
+    assert steps == []
+
+
+def test_run_scripts_validation_missing_scripts_dir_is_success(tmp_path):
+    iter_dir = tmp_path / "iter-1"
+    iter_dir.mkdir()
+
+    success, error, steps = afl.run_scripts_validation(tmp_path, iter_dir)
+
+    assert success is True
+    assert error is None
+    assert steps == []
 
 
 # ── 5. run_auto_fix_loop — convergence after one fix ─────────────────────────
@@ -119,8 +132,8 @@ def test_loop_converges_after_one_fix(tmp_path):
     # Deploy context
     scripts_dir = project_root / ".ai-dev-factory" / "scripts"
     scripts_dir.mkdir(parents=True)
-    for name in afl._REQUIRED_SCRIPTS:
-        (scripts_dir / name).write_text(f"#!/bin/sh\nexit 0\n")
+    for name in _GENERIC_SCRIPTS:
+        (scripts_dir / name).write_text("#!/bin/sh\nexit 0\n")
 
     call_count = {"n": 0}
 

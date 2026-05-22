@@ -33,7 +33,6 @@ from auto_fix_proposer import (
 
 logger = logging.getLogger("supervisor")
 
-_REQUIRED_SCRIPTS = ["bootstrap.sh", "build.sh", "start.sh", "healthcheck.sh"]
 _SCRIPTS_DIR = ".ai-dev-factory/scripts"
 _DEFAULT_MAX_RETRIES = 3
 _SCRIPT_TIMEOUT = int(os.environ.get("AI_DEV_FACTORY_SANDBOX_SCRIPT_TIMEOUT", "120"))
@@ -131,24 +130,19 @@ def run_scripts_validation(
     iteration_dir: Path,
     script_timeout: int = _SCRIPT_TIMEOUT,
 ) -> tuple[bool, str | None, list[dict]]:
-    """Run required scripts in-place from project_root.
+    """Run all *.sh scripts found in the scripts directory (sorted).
 
     Returns (success, error_message, steps).
     """
     log_path = iteration_dir / "run.log"
     steps: list[dict] = []
 
-    for script_name in _REQUIRED_SCRIPTS:
-        script_path = project_root / _SCRIPTS_DIR / script_name
-        if not script_path.exists():
-            error = f"required script missing: {_SCRIPTS_DIR}/{script_name}"
-            _append_iter_log(log_path, f"{error}\n")
-            steps.append({
-                "name": script_name, "status": "failed", "exit_code": None,
-                "started_at": _now_utc(), "finished_at": _now_utc(),
-            })
-            return False, error, steps
+    scripts_dir = project_root / _SCRIPTS_DIR
+    if not scripts_dir.exists():
+        return True, None, steps
 
+    for script_path in sorted(scripts_dir.glob("*.sh")):
+        script_name = script_path.name
         step: dict = {
             "name": script_name, "status": "running",
             "started_at": _now_utc(), "exit_code": None,
