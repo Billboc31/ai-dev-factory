@@ -107,3 +107,11 @@
 [2026-05-22T18:36:25Z] compose: skill=ai/skills/debugging.md
 [2026-05-22T18:36:25Z] compose: task (canonical prompt)
 [2026-05-22T18:36:25Z] snapshot: runtime-prompt=runs/T138/prompts/tester-attempt-1.md
+[2026-05-22T18:40:47Z] auto-run: step=tester done rc=0
+[2026-05-22T18:40:47Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-22T18:40:47Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-22T18:40:47Z] commit-checkpoint: unstaged runtime garbage: ['runs/T138/runtime.log']
+[2026-05-22T18:40:47Z] commit-checkpoint: sha=9a107741 files=3 title='test(T138/workflow): tester — update 3 file(s)'
+[2026-05-22T18:40:47Z] auto-run: auto-push triggered
+[2026-05-22T18:40:47Z] push: tolerating runtime dirty files (not blocking): ['runs/T138/runtime.log']
+[2026-05-22T18:40:47Z] push: pushing branch=ticket/T138-t138-generic-ai-sandbox-auto-fix-loop
