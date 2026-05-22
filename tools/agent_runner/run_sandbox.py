@@ -3,9 +3,17 @@
 
 Runs the per-project deploy-validation pipeline on the **host** filesystem:
 
-    bootstrap.sh → build.sh → start.sh → healthcheck.sh
+    .ai-dev-factory/scripts/bootstrap.sh
+      → .ai-dev-factory/scripts/build.sh
+        → .ai-dev-factory/scripts/start.sh
+          → .ai-dev-factory/scripts/healthcheck.sh
 
-…inside an isolated ``git worktree`` of the project. The pipeline used to
+…inside an isolated ``git worktree`` of the project. Each script is
+**required** — if any of them is missing the run fails immediately
+with a clear "required script missing: …" error. Silently skipping
+missing scripts (the previous behaviour) used to report "sandbox:
+success" with zero steps actually executed, masking real generation
+failures upstream. The pipeline used to
 live inside the API Docker container, which broke as soon as the
 project_root pointed at a host-only path (``/Users/…``) that the container
 cannot see. This script is invoked by the supervisor (``services/supervisor``),
@@ -59,10 +67,23 @@ from pathlib import Path
 
 logger = logging.getLogger("run_sandbox")
 
-# Scripts run inside the worktree, in this order. A missing script is
-# treated as "skipped" — that's how the pipeline supports projects that
-# don't have every artefact yet.
-_SCRIPTS = ["bootstrap.sh", "build.sh", "start.sh", "healthcheck.sh"]
+# Scripts are produced by the scripts-generation pipeline (`run_scripts.py`)
+# and committed under `.ai-dev-factory/scripts/` at the project root, so
+# they're naturally present in any git worktree carved from HEAD. We
+# execute them with `cwd=<worktree>` so the scripts themselves can rely on
+# the project root being the current directory (e.g. `npm install`,
+# `docker compose up`).
+#
+# Every script here is **required**. Missing scripts fail the validation
+# — silently skipping them used to surface as "sandbox: success" with no
+# steps actually executed, which masked real generation failures.
+_SCRIPTS_DIR = ".ai-dev-factory/scripts"
+_REQUIRED_SCRIPTS = [
+    "bootstrap.sh",
+    "build.sh",
+    "start.sh",
+    "healthcheck.sh",
+]
 
 _WORKTREE_TIMEOUT_SECONDS = int(
     os.environ.get("AI_DEV_FACTORY_SANDBOX_WORKTREE_TIMEOUT", "60")
@@ -294,30 +315,48 @@ def _run_scripts(
     state_base: dict,
 ) -> tuple[bool, str | None, list[dict]]:
     steps: list[dict] = []
+    scripts_dir_abs = worktree_path / _SCRIPTS_DIR
 
-    for script_name in _SCRIPTS:
-        script_path = worktree_path / script_name
+    _append_log(
+        log_path,
+        f"\n--- resolving operational scripts ---\n"
+        f"scripts dir (relative): {_SCRIPTS_DIR}\n"
+        f"scripts dir (absolute): {scripts_dir_abs}\n",
+    )
+
+    for script_name in _REQUIRED_SCRIPTS:
+        script_rel = f"{_SCRIPTS_DIR}/{script_name}"
+        script_path = worktree_path / script_rel
+        _append_log(log_path, f"resolved script path: {script_path}\n")
 
         if not script_path.exists():
-            _append_log(log_path, f"\n--- {script_name}: not found, skipping ---\n")
-            steps.append({
-                "name": script_name, "status": "skipped",
-                "exit_code": None, "started_at": None, "finished_at": None,
-            })
+            error = f"required script missing: {script_rel}"
+            _append_log(log_path, f"{error}\n")
+            step = {
+                "name": script_name, "status": "failed",
+                "exit_code": None,
+                "started_at": _now_iso(), "finished_at": _now_iso(),
+            }
+            steps.append(step)
             _write_state(state_path, latest_state_path, {
                 **state_base, "last_step": script_name, "steps": steps,
             })
-            continue
+            return False, error, steps
 
         step_started = _now_iso()
-        _append_log(log_path, f"\n--- {script_name} ---\n")
+        _append_log(
+            log_path,
+            f"\n--- {script_name} ({script_rel}) ---\n",
+        )
         _write_state(state_path, latest_state_path, {
             **state_base, "last_step": script_name, "steps": steps,
         })
 
+        # Run from the worktree root so scripts can use project-relative
+        # paths (e.g. `npm install`, `docker compose up`).
         try:
             result = subprocess.run(
-                ["bash", script_name],
+                ["bash", script_rel],
                 capture_output=True,
                 text=True,
                 cwd=str(worktree_path),
