@@ -267,6 +267,7 @@ class AnalysisStatus(BaseModel):
     error: str | None = None
     branch: str | None = None
     pr_url: str | None = None
+    worktree_path: str | None = None
 
 
 class ScriptsStatus(BaseModel):
