@@ -35,3 +35,10 @@ def test_unrelated_path_not_mutated(monkeypatch):
     monkeypatch.setenv("HOST_RUNTIME_ROOT", "/host/runtime")
     mapper = ContainerToHostMapper()
     assert mapper.map("/other/path/file.txt") == "/other/path/file.txt"
+
+
+def test_ambiguous_prefix_not_mapped(monkeypatch):
+    monkeypatch.setenv("CONTAINER_RUNTIME_ROOT", "/app")
+    monkeypatch.setenv("HOST_RUNTIME_ROOT", "/host/runtime")
+    mapper = ContainerToHostMapper()
+    assert mapper.map("/applications/foo") == "/applications/foo"

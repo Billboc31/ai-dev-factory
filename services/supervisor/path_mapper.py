@@ -15,7 +15,7 @@ class ContainerToHostMapper:
     def map(self, path: str) -> str:
         if not self.container_root or not self.host_root:
             return path
-        if path.startswith(self.container_root):
+        if path == self.container_root or path.startswith(self.container_root + "/"):
             mapped = self.host_root + path[len(self.container_root):]
             logger.info("path_mapper: %r -> %r", path, mapped)
             return mapped
