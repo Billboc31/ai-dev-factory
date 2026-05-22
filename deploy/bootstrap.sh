@@ -12,6 +12,7 @@ mkdir -p \
   "${RUNTIME_ROOT}/logs" \
   "${RUNTIME_ROOT}/state" \
   "${RUNTIME_ROOT}/registry" \
+  "${RUNTIME_ROOT}/sandboxes" \
   "${RUNTIME_ROOT}/.runtime"
 
 # Best-effort migration: copy artifacts from old locations to canonical ones.

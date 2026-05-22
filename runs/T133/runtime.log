@@ -1,0 +1,43 @@
+[2026-05-21T22:45:23Z] auto-run start: state=INIT
+[2026-05-21T22:45:23Z] auto-run: running step=planner
+[2026-05-21T22:45:23Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-05-21T22:45:23Z] prompt: generic fallback — injecting runs/T133/ticket.md
+[2026-05-21T22:45:23Z] compose: global-context=docs/ai/global-context.md
+[2026-05-21T22:45:23Z] compose: role=ai/roles/planner.md
+[2026-05-21T22:45:23Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-21T22:45:23Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-21T22:45:23Z] compose: skill=ai/skills/documentation.md
+[2026-05-21T22:45:23Z] compose: task (canonical prompt)
+[2026-05-21T22:45:23Z] snapshot: runtime-prompt=runs/T133/prompts/planner-attempt-1.md
+[2026-05-21T22:47:46Z] auto-run: step=planner done rc=0
+[2026-05-21T22:47:48Z] planner checkpoint: committed
+[2026-05-21T22:47:48Z] planner checkpoint: pushed
+[2026-05-21T22:47:48Z] planner validation success
+[2026-05-21T22:47:48Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-21T22:47:48Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-21T22:47:48Z] commit-checkpoint: unstaged runtime garbage: ['runs/T133/runtime.log']
+[2026-05-21T22:47:48Z] commit-checkpoint: sha=80bef886 files=2 title='docs(T133/workflow): planner — update 2 file(s)'
+[2026-05-21T22:47:48Z] auto-run: auto-push triggered
+[2026-05-21T22:47:48Z] push: tolerating runtime dirty files (not blocking): ['runs/T133/runtime.log']
+[2026-05-21T22:47:48Z] push: pushing branch=ticket/T133-t133-isolated-sandbox-deployment-runtime
+[2026-05-21T22:47:50Z] push: done branch=ticket/T133-t133-isolated-sandbox-deployment-runtime
+[2026-05-21T22:52:17Z] human-approval: approve-plan — PLAN_REVIEW_NEEDED → PLAN_APPROVED
+[2026-05-22T06:07:28Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-22T06:07:28Z] auto-run: running step=tester
+[2026-05-22T06:07:28Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-22T06:07:28Z] prompt: generic fallback — injecting runs/T133/ticket.md
+[2026-05-22T06:07:28Z] compose: global-context=docs/ai/global-context.md
+[2026-05-22T06:07:28Z] compose: role=ai/roles/tester.md
+[2026-05-22T06:07:28Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-22T06:07:28Z] compose: skill=ai/skills/testing.md
+[2026-05-22T06:07:28Z] compose: skill=ai/skills/debugging.md
+[2026-05-22T06:07:28Z] compose: task (canonical prompt)
+[2026-05-22T06:07:28Z] snapshot: runtime-prompt=runs/T133/prompts/tester-attempt-1.md
+[2026-05-22T06:09:49Z] auto-run: step=tester done rc=0
+[2026-05-22T06:09:49Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-22T06:09:49Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-22T06:09:49Z] commit-checkpoint: unstaged runtime garbage: ['runs/T133/runtime.log']
+[2026-05-22T06:09:49Z] commit-checkpoint: sha=26738d5d files=3 title='test(T133/workflow): tester — update 3 file(s)'
+[2026-05-22T06:09:49Z] auto-run: auto-push triggered
+[2026-05-22T06:09:49Z] push: tolerating runtime dirty files (not blocking): ['runs/T133/runtime.log']
+[2026-05-22T06:09:49Z] push: pushing branch=ticket/T133-t133-isolated-sandbox-deployment-runtime
