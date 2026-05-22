@@ -47,9 +47,15 @@ def _make_git_project(tmp_path: Path) -> Path:
     return proj
 
 
+_SCRIPTS_REL = ".ai-dev-factory/scripts"
+
+
 def _add_scripts(proj: Path, scripts: dict[str, str]) -> None:
+    """Mirror the generator layout: ``.ai-dev-factory/scripts/<name>``."""
+    scripts_dir = proj / _SCRIPTS_REL
+    scripts_dir.mkdir(parents=True, exist_ok=True)
     for name, content in scripts.items():
-        script = proj / name
+        script = scripts_dir / name
         script.write_text(f"#!/bin/bash\n{content}\n")
         script.chmod(0o755)
     _subprocess.run(["git", "-C", str(proj), "add", "."], check=True, capture_output=True)
@@ -57,6 +63,10 @@ def _add_scripts(proj: Path, scripts: dict[str, str]) -> None:
         ["git", "-C", str(proj), "commit", "-m", "add scripts"],
         check=True, capture_output=True,
     )
+
+
+def _required_scripts_all_ok() -> dict[str, str]:
+    return {name: "exit 0" for name in run_sandbox._REQUIRED_SCRIPTS}
 
 
 @pytest.fixture(autouse=True)
@@ -92,32 +102,32 @@ def test_worker_creates_worktree(tmp_path):
     proj = _make_git_project(tmp_path)
     run_sandbox._do_sandbox("myproject", proj, "myproject-T1")
 
+    # Project has no scripts → must fail (no more silent success).
     state = _read_latest_state(tmp_path)
-    assert state["state"] in ("success", "failed")  # depends on scripts presence
+    assert state["state"] == "failed"
     wt = tmp_path / "runtime" / "sandboxes" / "myproject-T1" / "worktree"
-    assert wt.exists(), "worktree directory must be created"
+    assert wt.exists(), "worktree directory must be created before failing"
 
 
 def test_worker_full_success(tmp_path):
     proj = _make_git_project(tmp_path)
-    _add_scripts(proj, {
-        "bootstrap.sh": "exit 0",
-        "build.sh": "exit 0",
-        "start.sh": "exit 0",
-        "healthcheck.sh": "exit 0",
-    })
+    _add_scripts(proj, _required_scripts_all_ok())
     run_sandbox._do_sandbox("myproject", proj, "myproject-OK")
 
     state = _read_latest_state(tmp_path)
     assert state["state"] == "success"
     success_steps = [s for s in state["steps"] if s["status"] == "success"]
     assert len(success_steps) == 4
+    # All four required scripts must appear in order.
+    assert [s["name"] for s in state["steps"]] == run_sandbox._REQUIRED_SCRIPTS
 
 
 def test_worker_healthcheck_failure(tmp_path):
     proj = _make_git_project(tmp_path)
     _add_scripts(proj, {
         "bootstrap.sh": "exit 0",
+        "build.sh": "exit 0",
+        "start.sh": "exit 0",
         "healthcheck.sh": "exit 1",
     })
     run_sandbox._do_sandbox("myproject", proj, "myproject-HC")
@@ -151,12 +161,15 @@ def test_worker_mid_pipeline_failure_skips_later_scripts(tmp_path):
 
 def test_worker_writes_step_output_to_log(tmp_path):
     proj = _make_git_project(tmp_path)
-    _add_scripts(proj, {"bootstrap.sh": "echo hello_from_bootstrap"})
+    scripts = _required_scripts_all_ok()
+    scripts["bootstrap.sh"] = "echo hello_from_bootstrap"
+    _add_scripts(proj, scripts)
     run_sandbox._do_sandbox("myproject", proj, "myproject-LOG")
 
     log = _read_latest_log(tmp_path)
     assert "hello_from_bootstrap" in log
-    assert "--- bootstrap.sh ---" in log
+    # Log must mention both the script name AND the resolved relative path.
+    assert "--- bootstrap.sh (.ai-dev-factory/scripts/bootstrap.sh) ---" in log
 
 
 def test_worker_latest_state_mirrors_per_run_state(tmp_path):
@@ -164,6 +177,7 @@ def test_worker_latest_state_mirrors_per_run_state(tmp_path):
     per-run history lives under ``sandboxes/{id}/state.json``. Both must
     carry the same content after the worker finishes."""
     proj = _make_git_project(tmp_path)
+    _add_scripts(proj, _required_scripts_all_ok())
     run_sandbox._do_sandbox("myproject", proj, "myproject-MIRROR")
 
     latest = json.loads(
@@ -173,6 +187,115 @@ def test_worker_latest_state_mirrors_per_run_state(tmp_path):
         (tmp_path / "runtime" / "sandboxes" / "myproject-MIRROR" / "state.json").read_text()
     )
     assert latest == per_run
+
+
+# ── Script lookup + missing-script policy ─────────────────────────────────────
+
+
+def test_scripts_resolved_under_ai_dev_factory_dir(tmp_path):
+    """Scripts at the worktree root are NOT picked up — the canonical
+    location is `.ai-dev-factory/scripts/`. This guards against a
+    silent regression where the runner falls back to the root.
+    """
+    proj = _make_git_project(tmp_path)
+    # Plant a happy-path bootstrap.sh at the WRONG location (root).
+    decoy = proj / "bootstrap.sh"
+    decoy.write_text("#!/bin/bash\nexit 0\n")
+    decoy.chmod(0o755)
+    _subprocess.run(["git", "-C", str(proj), "add", "."], check=True, capture_output=True)
+    _subprocess.run(
+        ["git", "-C", str(proj), "commit", "-m", "decoy"],
+        check=True, capture_output=True,
+    )
+
+    run_sandbox._do_sandbox("myproject", proj, "myproject-DECOY")
+    state = _read_latest_state(tmp_path)
+
+    assert state["state"] == "failed"
+    assert ".ai-dev-factory/scripts/bootstrap.sh" in state["error"]
+
+
+def test_missing_required_script_fails_validation(tmp_path):
+    """Empty `.ai-dev-factory/scripts/` ⇒ validation MUST fail. This is
+    the regression the user observed (sandbox reporting "success" with
+    every step skipped)."""
+    proj = _make_git_project(tmp_path)
+
+    run_sandbox._do_sandbox("myproject", proj, "myproject-EMPTY")
+    state = _read_latest_state(tmp_path)
+
+    assert state["state"] == "failed", (
+        "missing scripts must fail validation, not silently succeed"
+    )
+    assert state["error"], "error must explain what is missing"
+    assert "required script missing" in state["error"]
+    assert ".ai-dev-factory/scripts/bootstrap.sh" in state["error"]
+
+
+def test_partial_scripts_set_fails_at_first_missing(tmp_path):
+    """If `bootstrap.sh` runs but `build.sh` is missing, the run must
+    fail at build.sh and report it — not skip and call it a day."""
+    proj = _make_git_project(tmp_path)
+    _add_scripts(proj, {"bootstrap.sh": "exit 0"})
+
+    run_sandbox._do_sandbox("myproject", proj, "myproject-PARTIAL")
+    state = _read_latest_state(tmp_path)
+
+    assert state["state"] == "failed"
+    assert ".ai-dev-factory/scripts/build.sh" in state["error"]
+    by_name = {s["name"]: s for s in state["steps"]}
+    assert by_name["bootstrap.sh"]["status"] == "success"
+    assert by_name["build.sh"]["status"] == "failed"
+
+
+def test_log_records_resolved_script_paths(tmp_path):
+    proj = _make_git_project(tmp_path)
+    _add_scripts(proj, _required_scripts_all_ok())
+    run_sandbox._do_sandbox("myproject", proj, "myproject-LOGS")
+
+    log = _read_latest_log(tmp_path)
+    # Scripts dir + each fully-resolved path must appear at least once.
+    assert "scripts dir (relative): .ai-dev-factory/scripts" in log
+    assert "scripts dir (absolute): " in log
+    for name in run_sandbox._REQUIRED_SCRIPTS:
+        assert f".ai-dev-factory/scripts/{name}" in log
+
+
+def test_log_explains_missing_script_clearly(tmp_path):
+    proj = _make_git_project(tmp_path)
+    run_sandbox._do_sandbox("myproject", proj, "myproject-MISSING-LOG")
+
+    log = _read_latest_log(tmp_path)
+    assert "required script missing: .ai-dev-factory/scripts/bootstrap.sh" in log
+
+
+def test_scripts_executed_with_worktree_as_cwd(tmp_path):
+    """Generated scripts assume they run from the project root, so that
+    relative paths (`npm install`, `docker compose up`) work. The worker
+    must use ``cwd=<worktree>``, not ``cwd=<scripts_dir>``."""
+    proj = _make_git_project(tmp_path)
+    # bootstrap echoes its own pwd; if cwd is the scripts dir the test
+    # fails immediately.
+    scripts = _required_scripts_all_ok()
+    scripts["bootstrap.sh"] = (
+        "pwd > pwd_check.txt\n"
+        "test -f README.md\n"
+        "exit 0\n"
+    )
+    _add_scripts(proj, scripts)
+
+    run_sandbox._do_sandbox("myproject", proj, "myproject-CWD")
+    state = _read_latest_state(tmp_path)
+    assert state["state"] == "success"
+
+    pwd_check = (
+        tmp_path / "runtime" / "sandboxes" / "myproject-CWD" / "worktree" / "pwd_check.txt"
+    )
+    assert pwd_check.exists(), "bootstrap must have run with worktree as cwd"
+    recorded_pwd = pwd_check.read_text().strip()
+    assert recorded_pwd.endswith("/worktree"), (
+        f"expected cwd=<worktree>, got {recorded_pwd!r}"
+    )
 
 
 # ── Worktree robustness (preserved from PR #120) ──────────────────────────────
