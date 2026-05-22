@@ -3,5 +3,7 @@
   "state": "TEST_COMPLETE",
   "branch": "ticket/T136-t136-deploy-sandbox-isolation-and-runtime-separati",
   "issue_number": 109,
-  "updated_at": "2026-05-22T07:44:31Z"
+  "updated_at": "2026-05-22T07:53:26Z",
+  "pr_number": 111,
+  "pr_synced": true
 }
