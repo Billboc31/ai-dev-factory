@@ -3,8 +3,11 @@ from __future__ import annotations
 import json
 import logging
 import os
+import shutil
+import signal
 import subprocess
 import threading
+import traceback
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -16,6 +19,17 @@ _locks: dict[str, threading.Lock] = {}
 _locks_mutex = threading.Lock()
 
 _SCRIPTS = ["bootstrap.sh", "build.sh", "start.sh", "healthcheck.sh"]
+
+# Hard upper bounds. ``git worktree add`` should usually return in <2s on a
+# warm repo; 60s is a generous safety net. The validator caller can override
+# the worktree timeout via ``AI_DEV_FACTORY_SANDBOX_WORKTREE_TIMEOUT`` if a
+# project genuinely needs more.
+_WORKTREE_TIMEOUT_SECONDS = int(
+    os.environ.get("AI_DEV_FACTORY_SANDBOX_WORKTREE_TIMEOUT", "60")
+)
+_GIT_LIST_TIMEOUT_SECONDS = 15
+_GIT_PRUNE_TIMEOUT_SECONDS = 30
+_GIT_REMOVE_TIMEOUT_SECONDS = 30
 
 
 def _get_lock(project_id: str) -> threading.Lock:
@@ -132,6 +146,198 @@ def _run_scripts(
     return True, None, steps
 
 
+# ── Worktree lifecycle helpers ────────────────────────────────────────────────
+
+
+def _run_git(
+    args: list[str],
+    cwd: Path,
+    log_path: Path,
+    timeout: int,
+) -> tuple[int, str, str]:
+    """Run ``git <args>`` with full safety:
+
+    * ``stdin=DEVNULL``        — never blocks on an interactive credential prompt.
+    * ``start_new_session=True`` — gives every git child its own process group so we
+      can ``killpg`` the whole tree if it exceeds the timeout.
+    * ``Popen.communicate(timeout=...)`` — kills the process group on timeout
+      (`subprocess.run` alone may hang in cleanup when grandchildren keep
+      pipes open).
+    * Full stderr/stdout captured AND tee'd to the run log so the dashboard
+      shows what actually happened even if the call hangs/explodes.
+
+    Returns ``(returncode, stdout, stderr)``. Raises ``subprocess.TimeoutExpired``
+    only after the process group has been killed.
+    """
+    cmd = ["git", *args]
+    _append_log(log_path, f"+ {' '.join(cmd)}  (cwd={cwd}, timeout={timeout}s)\n")
+    proc = subprocess.Popen(
+        cmd,
+        cwd=str(cwd),
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = proc.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        # Kill the whole process group so grandchildren (hooks, signing
+        # helpers, …) don't keep the pipes open and re-hang communicate().
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+        try:
+            stdout, stderr = proc.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            stdout, stderr = "", ""
+        _append_log(
+            log_path,
+            f"git command timed out after {timeout}s; process group killed\n",
+        )
+        if stdout:
+            _append_log(log_path, stdout)
+        if stderr:
+            _append_log(log_path, stderr)
+        raise
+
+    if stdout:
+        _append_log(log_path, stdout)
+    if stderr:
+        _append_log(log_path, stderr)
+    _append_log(log_path, f"exit={proc.returncode}\n")
+    return proc.returncode, stdout, stderr
+
+
+def _preflight_worktree(
+    project_root: Path, worktree_path: Path, log_path: Path
+) -> str | None:
+    """Bail out fast with a clear message before launching ``git worktree add``.
+
+    Returns ``None`` if all checks pass, otherwise an operator-readable
+    error string. We intentionally check (and try to repair) the cases
+    that previously caused the runner to hang forever: missing ``git``
+    binary, non-git project_root, stale registration, leftover index
+    lock, and a worktree directory left behind by a previous failure.
+    """
+    if shutil.which("git") is None:
+        return "git binary not found in PATH"
+
+    if not project_root.exists():
+        return f"project_root does not exist: {project_root}"
+
+    git_dir = project_root / ".git"
+    if not git_dir.exists():
+        return f"project_root is not a git repository (no .git): {project_root}"
+
+    # `.git` can be a file (worktree) or a dir (regular repo); the lock
+    # location lives inside the resolved gitdir.
+    lock_candidates = [
+        git_dir / "index.lock" if git_dir.is_dir() else None,
+        project_root / ".git/index.lock",
+    ]
+    for lock in (c for c in lock_candidates if c is not None):
+        if lock.exists():
+            try:
+                lock.unlink()
+                _append_log(log_path, f"removed stale lock: {lock}\n")
+            except OSError as e:
+                return f"could not remove stale index lock {lock}: {e}"
+
+    if worktree_path.exists():
+        # Try to deregister + remove. If that fails we give up rather
+        # than overwriting unknown state.
+        _append_log(
+            log_path,
+            f"worktree path already exists: {worktree_path} — attempting cleanup\n",
+        )
+        try:
+            rc, _out, err = _run_git(
+                ["worktree", "remove", "--force", str(worktree_path)],
+                cwd=project_root,
+                log_path=log_path,
+                timeout=_GIT_REMOVE_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired:
+            return "git worktree remove timed out cleaning up previous run"
+        if rc != 0:
+            # The directory may be untracked by git (stale leftover);
+            # delete it directly so `worktree add` has a clean slot.
+            try:
+                shutil.rmtree(worktree_path)
+                _append_log(log_path, f"removed stale dir: {worktree_path}\n")
+            except OSError as e:
+                return (
+                    f"worktree path {worktree_path} could not be cleaned: "
+                    f"git remove rc={rc} stderr={err.strip()[:200]} "
+                    f"rmtree={e}"
+                )
+
+    # Prune stale registrations regardless. This is cheap and stops the
+    # next `worktree add` from refusing because of a dangling pointer.
+    try:
+        _run_git(
+            ["worktree", "prune"],
+            cwd=project_root,
+            log_path=log_path,
+            timeout=_GIT_PRUNE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        # Non-fatal: log and continue. The subsequent `worktree add` is
+        # what we ultimately care about.
+        _append_log(log_path, "git worktree prune timed out (continuing)\n")
+
+    return None
+
+
+def _create_worktree(
+    project_root: Path,
+    worktree_path: Path,
+    log_path: Path,
+) -> tuple[bool, str | None]:
+    """Run preflight + ``git worktree add``. Returns ``(ok, error_message)``.
+
+    All exit paths leave a useful trace in ``log_path``. Never raises.
+    """
+    _append_log(log_path, "\n--- creating git worktree ---\n")
+    _append_log(log_path, f"worktree path: {worktree_path}\n")
+    _append_log(log_path, f"timeout: {_WORKTREE_TIMEOUT_SECONDS}s\n")
+
+    preflight_error = _preflight_worktree(project_root, worktree_path, log_path)
+    if preflight_error is not None:
+        _append_log(log_path, f"preflight failed: {preflight_error}\n")
+        return False, preflight_error
+
+    try:
+        rc, _stdout, stderr = _run_git(
+            ["worktree", "add", str(worktree_path), "HEAD"],
+            cwd=project_root,
+            log_path=log_path,
+            timeout=_WORKTREE_TIMEOUT_SECONDS,
+        )
+    except subprocess.TimeoutExpired:
+        return False, (
+            f"git worktree add timed out after {_WORKTREE_TIMEOUT_SECONDS}s"
+        )
+    except OSError as e:
+        # E.g. git binary disappeared between preflight and exec, or PATH
+        # changed. We still want a deterministic failure, not a hang.
+        return False, f"git worktree add could not run: {e}"
+
+    if rc != 0:
+        return False, (
+            f"git worktree add exited {rc}: {stderr.strip()[:500] or '<no stderr>'}"
+        )
+
+    _append_log(log_path, "worktree created\n")
+    return True, None
+
+
+# ── Main pipeline ─────────────────────────────────────────────────────────────
+
+
 def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> None:
     base_dir = _sandbox_base_dir(project_root)
     sandbox_dir = base_dir / sandbox_id
@@ -151,55 +357,78 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> None:
     }
     _write_state(state_path, state_base)
     _append_log(log_path, f"=== sandbox {sandbox_id} started {started_at} ===\n")
+    _append_log(log_path, f"project_root: {project_root}\n")
 
-    _append_log(log_path, "\n--- creating git worktree ---\n")
+    # The outer try/except guarantees the state file is finalised with
+    # ``state=failed`` even if something explodes outside the per-step
+    # handlers (e.g. disk full, permission error, KeyboardInterrupt
+    # propagation, …). The dashboard must never observe an indefinite
+    # ``state=running`` because the runner thread died silently.
     try:
-        wt_result = subprocess.run(
-            ["git", "worktree", "add", str(worktree_path), "HEAD"],
-            capture_output=True,
-            text=True,
-            cwd=str(project_root),
-            timeout=60,
+        ok, error = _create_worktree(project_root, worktree_path, log_path)
+        if not ok:
+            _append_log(log_path, f"worktree creation failed: {error}\n")
+            _write_state(
+                state_path,
+                {
+                    **state_base,
+                    "state": "failed",
+                    "finished_at": _now_iso(),
+                    "error": error,
+                },
+            )
+            return
+
+        success, error, steps = _run_scripts(
+            worktree_path, state_path, log_path, state_base
         )
-    except subprocess.TimeoutExpired:
-        msg = "git worktree creation timed out"
-        _append_log(log_path, f"{msg}\n")
-        _write_state(state_path, {**state_base, "state": "failed", "finished_at": _now_iso(), "error": msg})
-        return
 
-    if wt_result.stdout:
-        _append_log(log_path, wt_result.stdout)
-    if wt_result.stderr:
-        _append_log(log_path, wt_result.stderr)
+        finished_at = _now_iso()
+        _write_state(state_path, {
+            **state_base,
+            "state": "success" if success else "failed",
+            "finished_at": finished_at,
+            "error": error,
+            "last_step": steps[-1]["name"] if steps else state_base["last_step"],
+            "steps": steps,
+        })
+        outcome = "completed" if success else "failed"
+        _append_log(
+            log_path, f"\n=== sandbox {sandbox_id} {outcome} {finished_at} ===\n"
+        )
+    except Exception as e:  # noqa: BLE001 — catch-all is intentional
+        tb = traceback.format_exc()
+        logger.exception(
+            "sandbox: unhandled error during _do_sandbox project=%s sandbox=%s",
+            project_id,
+            sandbox_id,
+        )
+        _append_log(log_path, f"\nunhandled exception: {e}\n{tb}\n")
+        _write_state(
+            state_path,
+            {
+                **state_base,
+                "state": "failed",
+                "finished_at": _now_iso(),
+                "error": f"unhandled exception in sandbox runner: {e}",
+            },
+        )
 
-    if wt_result.returncode != 0:
-        msg = f"git worktree failed (exit {wt_result.returncode}): {wt_result.stderr.strip()[:200]}"
-        _append_log(log_path, f"{msg}\n")
-        _write_state(state_path, {**state_base, "state": "failed", "finished_at": _now_iso(), "error": msg})
-        return
 
-    _append_log(log_path, "worktree created\n")
-
-    success, error, steps = _run_scripts(worktree_path, state_path, log_path, state_base)
-
-    finished_at = _now_iso()
-    _write_state(state_path, {
-        **state_base,
-        "state": "success" if success else "failed",
-        "finished_at": finished_at,
-        "error": error,
-        "last_step": steps[-1]["name"] if steps else None,
-        "steps": steps,
-    })
-    outcome = "completed" if success else "failed"
-    _append_log(log_path, f"\n=== sandbox {sandbox_id} {outcome} {finished_at} ===\n")
-
-
-def _sandbox_thread(project_id: str, project_root: Path, sandbox_id: str, lock: threading.Lock) -> None:
+def _sandbox_thread(
+    project_id: str, project_root: Path, sandbox_id: str, lock: threading.Lock
+) -> None:
+    # The thread wrapper is now a thin shell. ``_do_sandbox`` is responsible
+    # for finalising state on any error path; we just guarantee the lock
+    # is released so the next start_sandbox_validation() can run.
     try:
         _do_sandbox(project_id, project_root, sandbox_id)
-    except Exception as e:
-        logger.exception("sandbox: unhandled error for %s: %s", project_id, e)
+    except Exception:
+        # _do_sandbox catches its own; this guard is belt-and-suspenders
+        # in case a future refactor moves work outside its try-block.
+        logger.exception(
+            "sandbox: top-level error project=%s sandbox=%s", project_id, sandbox_id
+        )
     finally:
         lock.release()
 
