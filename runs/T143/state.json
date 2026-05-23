@@ -1,7 +1,7 @@
 {
   "ticket_id": "T143",
-  "state": "PLAN_FIX_REQUIRED",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T143-t143-conflict-resolver-agent-for-pr-branch-rebases",
   "issue_number": 134,
-  "updated_at": "2026-05-23T15:38:27Z"
+  "updated_at": "2026-05-23T15:40:48Z"
 }
