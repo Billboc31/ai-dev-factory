@@ -2,6 +2,7 @@ import datetime
 import json
 import logging
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -179,8 +180,6 @@ def run_next(ticket_id: str, request: Request) -> ActionResult:
     root = _root(request)
     wt_dir = _worktrees_dir(request)
 
-    import threading
-
     def _bg() -> None:
         subprocess_runner.run_next(ticket_id, root, wt_dir)
 
@@ -262,6 +261,36 @@ def _mark_conflict_failed(project_root: Path, ticket_id: str, worktrees_dir: Pat
     return ActionResult(ok=True, message="transitioned to CONFLICT_RESOLUTION_FAILED")
 
 
+def _transition_to_resolving(project_root: Path, ticket_id: str, worktrees_dir: Path | None) -> ActionResult:
+    """Transition CONFLICT_RESOLUTION_NEEDED → CONFLICT_RESOLVING atomically."""
+    run_dir = resolve_ticket_run_dir(ticket_id, resolve_runs_dir(project_root), worktrees_dir)
+    state_file = run_dir / "state.json"
+    if not state_file.exists():
+        return ActionResult(ok=False, message=f"ticket {ticket_id} not found", returncode=404)
+    try:
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return ActionResult(ok=False, message=f"state.json unreadable: {exc}", returncode=-1)
+
+    if data.get("state") != "CONFLICT_RESOLUTION_NEEDED":
+        return ActionResult(
+            ok=False,
+            message=(
+                f"ticket {ticket_id} is not in CONFLICT_RESOLUTION_NEEDED "
+                f"(current: {data.get('state')!r})"
+            ),
+            returncode=409,
+            error="wrong_state",
+        )
+
+    data["state"] = "CONFLICT_RESOLVING"
+    data["updated_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    tmp = state_file.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    tmp.replace(state_file)
+    return ActionResult(ok=True, message="transitioned to CONFLICT_RESOLVING")
+
+
 @router.post("/{ticket_id}/mark-conflict-failed", response_model=ActionResult)
 def mark_conflict_failed(ticket_id: str, request: Request) -> ActionResult:
     logger.info("api: POST /tickets/%s/mark-conflict-failed", ticket_id)
@@ -270,6 +299,57 @@ def mark_conflict_failed(ticket_id: str, request: Request) -> ActionResult:
     if result.returncode == 409:
         raise HTTPException(status_code=409, detail=result.message)
     _log_action(request, ticket_id, "mark-conflict-failed", result)
+    return result
+
+
+@router.post("/{ticket_id}/resolve-conflicts", response_model=ActionResult, status_code=202)
+def resolve_conflicts(ticket_id: str, request: Request) -> ActionResult:
+    logger.info("api: POST /tickets/%s/resolve-conflicts", ticket_id)
+    _get_or_404(_root(request), ticket_id, _worktrees_dir(request))
+    root = _root(request)
+    wt_dir = _worktrees_dir(request)
+
+    transition = _transition_to_resolving(root, ticket_id, wt_dir)
+    if transition.returncode == 409:
+        raise HTTPException(status_code=409, detail=transition.message)
+    if not transition.ok:
+        raise HTTPException(status_code=500, detail=transition.message)
+
+    exec_cmd = getattr(request.app.state, "daemon_exec_cmd", "claude --dangerously-skip-permissions")
+
+    def _bg() -> None:
+        subprocess_runner.resolve_conflicts(ticket_id, root, wt_dir, exec_cmd)
+
+    t = threading.Thread(target=_bg, daemon=True)
+    t.start()
+    result = ActionResult(ok=True, message="resolve-conflicts dispatched in background")
+    _log_action(request, ticket_id, "resolve-conflicts", result)
+    return result
+
+
+@router.post("/{ticket_id}/approve-conflict-resolution", response_model=ActionResult)
+def approve_conflict_resolution(ticket_id: str, request: Request) -> ActionResult:
+    logger.info("api: POST /tickets/%s/approve-conflict-resolution", ticket_id)
+    _get_or_404(_root(request), ticket_id, _worktrees_dir(request))
+    result = subprocess_runner.approve_conflict_resolution(
+        ticket_id, _root(request), _worktrees_dir(request)
+    )
+    if result.returncode not in (None, 0) and result.returncode == 2:
+        raise HTTPException(status_code=409, detail=result.stderr or result.message)
+    _log_action(request, ticket_id, "approve-conflict-resolution", result)
+    return result
+
+
+@router.post("/{ticket_id}/reject-conflict-resolution", response_model=ActionResult)
+def reject_conflict_resolution(ticket_id: str, request: Request) -> ActionResult:
+    logger.info("api: POST /tickets/%s/reject-conflict-resolution", ticket_id)
+    _get_or_404(_root(request), ticket_id, _worktrees_dir(request))
+    result = subprocess_runner.reject_conflict_resolution(
+        ticket_id, _root(request), _worktrees_dir(request)
+    )
+    if result.returncode not in (None, 0) and result.returncode == 2:
+        raise HTTPException(status_code=409, detail=result.stderr or result.message)
+    _log_action(request, ticket_id, "reject-conflict-resolution", result)
     return result
 
 
@@ -419,8 +499,6 @@ def project_run_next(ticket_id: str, request: Request, project_root: Path = Depe
     wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
 
-    import threading
-
     def _bg() -> None:
         subprocess_runner.run_next(ticket_id, project_root, wt_dir)
 
@@ -475,6 +553,51 @@ def project_mark_conflict_failed(ticket_id: str, request: Request, project_root:
     if result.returncode == 409:
         raise HTTPException(status_code=409, detail=result.message)
     _log_action(request, ticket_id, "mark-conflict-failed", result)
+    return result
+
+
+@project_router.post("/{project_id}/tickets/{ticket_id}/resolve-conflicts", response_model=ActionResult, status_code=202)
+def project_resolve_conflicts(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
+    wt_dir = resolve_worktrees_dir(project_root)
+    _get_or_404(project_root, ticket_id, wt_dir)
+
+    transition = _transition_to_resolving(project_root, ticket_id, wt_dir)
+    if transition.returncode == 409:
+        raise HTTPException(status_code=409, detail=transition.message)
+    if not transition.ok:
+        raise HTTPException(status_code=500, detail=transition.message)
+
+    exec_cmd = getattr(request.app.state, "daemon_exec_cmd", "claude --dangerously-skip-permissions")
+
+    def _bg() -> None:
+        subprocess_runner.resolve_conflicts(ticket_id, project_root, wt_dir, exec_cmd)
+
+    t = threading.Thread(target=_bg, daemon=True)
+    t.start()
+    result = ActionResult(ok=True, message="resolve-conflicts dispatched in background")
+    _log_action(request, ticket_id, "resolve-conflicts", result)
+    return result
+
+
+@project_router.post("/{project_id}/tickets/{ticket_id}/approve-conflict-resolution", response_model=ActionResult)
+def project_approve_conflict_resolution(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
+    wt_dir = resolve_worktrees_dir(project_root)
+    _get_or_404(project_root, ticket_id, wt_dir)
+    result = subprocess_runner.approve_conflict_resolution(ticket_id, project_root, wt_dir)
+    if result.returncode not in (None, 0) and result.returncode == 2:
+        raise HTTPException(status_code=409, detail=result.stderr or result.message)
+    _log_action(request, ticket_id, "approve-conflict-resolution", result)
+    return result
+
+
+@project_router.post("/{project_id}/tickets/{ticket_id}/reject-conflict-resolution", response_model=ActionResult)
+def project_reject_conflict_resolution(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
+    wt_dir = resolve_worktrees_dir(project_root)
+    _get_or_404(project_root, ticket_id, wt_dir)
+    result = subprocess_runner.reject_conflict_resolution(ticket_id, project_root, wt_dir)
+    if result.returncode not in (None, 0) and result.returncode == 2:
+        raise HTTPException(status_code=409, detail=result.stderr or result.message)
+    _log_action(request, ticket_id, "reject-conflict-resolution", result)
     return result
 
 

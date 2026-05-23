@@ -20,6 +20,7 @@ TICKET_ID_RE = re.compile(r"^T\d{3,}$")
 _TOOLS_DIR = Path(__file__).resolve().parents[3] / "tools" / "agent_runner"
 _RUN_TICKET = _TOOLS_DIR / "run_ticket.py"
 _RUN_ISSUE_INTAKE = _TOOLS_DIR / "run_issue_intake.py"
+_RUN_CONFLICT_RESOLVER = _TOOLS_DIR / "run_conflict_resolver.py"
 
 
 def _validate_ticket_id(ticket_id: str) -> None:
@@ -194,6 +195,51 @@ def archive_ticket(ticket_id: str, project_root: Path, worktrees_dir: Path | Non
         return ActionResult(ok=False, message=error, returncode=-1)
     return _run(
         [sys.executable, str(_RUN_TICKET), ticket_id, "--archive-daemon"],
+        cwd=cwd,
+    )
+
+
+def resolve_conflicts(
+    ticket_id: str,
+    project_root: Path,
+    worktrees_dir: Path | None = None,
+    exec_cmd: str = "claude --dangerously-skip-permissions",
+) -> ActionResult:
+    _validate_ticket_id(ticket_id)
+    logger.info("api: resolve-conflicts for %s", ticket_id)
+    cwd, error = _resolve_action_cwd(ticket_id, project_root, worktrees_dir)
+    if error:
+        return ActionResult(ok=False, message=error, returncode=-1)
+    return _run(
+        [sys.executable, str(_RUN_CONFLICT_RESOLVER), ticket_id, "--exec-cmd", exec_cmd],
+        cwd=cwd,
+    )
+
+
+def approve_conflict_resolution(
+    ticket_id: str, project_root: Path, worktrees_dir: Path | None = None
+) -> ActionResult:
+    _validate_ticket_id(ticket_id)
+    logger.info("api: approve-conflict-resolution for %s", ticket_id)
+    cwd, error = _resolve_action_cwd(ticket_id, project_root, worktrees_dir)
+    if error:
+        return ActionResult(ok=False, message=error, returncode=-1)
+    return _run(
+        [sys.executable, str(_RUN_TICKET), ticket_id, "--approve-conflict-resolution"],
+        cwd=cwd,
+    )
+
+
+def reject_conflict_resolution(
+    ticket_id: str, project_root: Path, worktrees_dir: Path | None = None
+) -> ActionResult:
+    _validate_ticket_id(ticket_id)
+    logger.info("api: reject-conflict-resolution for %s", ticket_id)
+    cwd, error = _resolve_action_cwd(ticket_id, project_root, worktrees_dir)
+    if error:
+        return ActionResult(ok=False, message=error, returncode=-1)
+    return _run(
+        [sys.executable, str(_RUN_TICKET), ticket_id, "--reject-conflict-resolution"],
         cwd=cwd,
     )
 

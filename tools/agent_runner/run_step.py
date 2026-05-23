@@ -34,6 +34,8 @@ STEP_ALIASES = {
     "memory-updater": "memory-updater",
     "memory": "memory-updater",
     "memory-apply": "memory-apply",
+    "conflict-resolver": "conflict-resolver",
+    "conflict": "conflict-resolver",
 }
 
 DEFAULT_OUTPUTS = {
@@ -43,6 +45,7 @@ DEFAULT_OUTPUTS = {
     "tester": "tests/test-report.md",
     "memory-updater": "memory/memory-update.md",
     "memory-apply": "memory/memory-apply.md",
+    "conflict-resolver": "conflict/resolution.md",
 }
 
 WORKFLOW_SEQUENCE = [
@@ -58,6 +61,7 @@ STEP_ROLE_FILES: dict[str, str] = {
     "coder": "ai/roles/coder.md",
     "review": "ai/roles/reviewer.md",
     "tester": "ai/roles/tester.md",
+    "conflict-resolver": "ai/roles/conflict-resolver.md",
 }
 
 STEP_SKILL_FILES: dict[str, list[str]] = {
@@ -65,6 +69,7 @@ STEP_SKILL_FILES: dict[str, list[str]] = {
     "coder": ["workflow-discipline", "git-discipline", "code-quality", "refactor-safety", "security"],
     "review": ["workflow-discipline", "code-quality", "refactor-safety", "security"],
     "tester": ["workflow-discipline", "testing", "debugging"],
+    "conflict-resolver": ["workflow-discipline", "git-discipline", "code-quality", "refactor-safety"],
 }
 
 _FORBIDDEN_PHRASES = [

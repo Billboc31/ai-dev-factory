@@ -12,10 +12,17 @@ const STATE_COLORS = {
   RUNNING: 'bg-yellow-100 text-yellow-800',
   FAILED: 'bg-red-100 text-red-800',
   CONFLICT_RESOLUTION_NEEDED: 'bg-red-100 text-red-800',
+  CONFLICT_RESOLVING: 'bg-yellow-100 text-yellow-800',
+  CONFLICT_RESOLVED_REVIEW_NEEDED: 'bg-blue-100 text-blue-800',
   CONFLICT_RESOLUTION_FAILED: 'bg-red-200 text-red-900',
 }
 
-const CONFLICT_STATES = new Set(['CONFLICT_RESOLUTION_NEEDED', 'CONFLICT_RESOLUTION_FAILED'])
+const CONFLICT_STATES = new Set([
+  'CONFLICT_RESOLUTION_NEEDED',
+  'CONFLICT_RESOLVING',
+  'CONFLICT_RESOLVED_REVIEW_NEEDED',
+  'CONFLICT_RESOLUTION_FAILED',
+])
 
 function stateBadgeClass(state) {
   if (STATE_COLORS[state]) return STATE_COLORS[state]

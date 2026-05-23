@@ -1,0 +1,57 @@
+[2026-05-23T16:22:32Z] auto-run start: state=INIT
+[2026-05-23T16:22:32Z] auto-run: running step=planner
+[2026-05-23T16:22:32Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-05-23T16:22:32Z] prompt: generic fallback — injecting runs/T144/ticket.md
+[2026-05-23T16:22:32Z] compose: global-context=docs/ai/global-context.md
+[2026-05-23T16:22:32Z] compose: role=ai/roles/planner.md
+[2026-05-23T16:22:32Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-23T16:22:32Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-23T16:22:32Z] compose: skill=ai/skills/documentation.md
+[2026-05-23T16:22:32Z] compose: task (canonical prompt)
+[2026-05-23T16:22:32Z] snapshot: runtime-prompt=runs/T144/prompts/planner-attempt-1.md
+[2026-05-23T16:26:30Z] auto-run: step=planner done rc=0
+[2026-05-23T16:26:32Z] planner checkpoint: committed
+[2026-05-23T16:26:32Z] planner checkpoint: pushed
+[2026-05-23T16:26:32Z] planner validation success
+[2026-05-23T16:26:32Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-23T16:26:32Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-23T16:26:32Z] commit-checkpoint: unstaged runtime garbage: ['runs/T144/runtime.log']
+[2026-05-23T16:26:32Z] commit-checkpoint: sha=a14c8d1e files=2 title='docs(T144/workflow): planner — update 2 file(s)'
+[2026-05-23T16:26:32Z] auto-run: auto-push triggered
+[2026-05-23T16:26:32Z] push: tolerating runtime dirty files (not blocking): ['runs/T144/runtime.log']
+[2026-05-23T16:26:32Z] push: pushing branch=ticket/T144-t144-conflict-resolver-agent-and-review-ui
+[2026-05-23T16:26:34Z] push: done branch=ticket/T144-t144-conflict-resolver-agent-and-review-ui
+[2026-05-23T16:36:39Z] auto-run start: state=PLAN_APPROVED
+[2026-05-23T16:36:40Z] auto-run: running step=coder
+[2026-05-23T16:36:40Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-23T16:36:40Z] prompt: generic fallback — injecting runs/T144/ticket.md
+[2026-05-23T16:36:40Z] compose: global-context=docs/ai/global-context.md
+[2026-05-23T16:36:40Z] compose: role=ai/roles/coder.md
+[2026-05-23T16:36:40Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-23T16:36:40Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-23T16:36:40Z] compose: skill=ai/skills/code-quality.md
+[2026-05-23T16:36:40Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-23T16:36:40Z] compose: skill=ai/skills/security.md
+[2026-05-23T16:36:40Z] compose: task (canonical prompt)
+[2026-05-23T16:36:40Z] snapshot: runtime-prompt=runs/T144/prompts/coder-attempt-1.md
+[2026-05-23T16:53:42Z] set-state: PLAN_APPROVED → IMPLEMENTATION_REVIEW_NEEDED (human)
+[2026-05-23T17:27:58Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-23T17:27:58Z] auto-run: running step=tester
+[2026-05-23T17:27:58Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-23T17:27:58Z] prompt: generic fallback — injecting runs/T144/ticket.md
+[2026-05-23T17:27:58Z] compose: global-context=docs/ai/global-context.md
+[2026-05-23T17:27:58Z] compose: role=ai/roles/tester.md
+[2026-05-23T17:27:58Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-23T17:27:58Z] compose: skill=ai/skills/testing.md
+[2026-05-23T17:27:58Z] compose: skill=ai/skills/debugging.md
+[2026-05-23T17:27:58Z] compose: task (canonical prompt)
+[2026-05-23T17:27:58Z] snapshot: runtime-prompt=runs/T144/prompts/tester-attempt-1.md
+[2026-05-23T17:34:07Z] auto-run: step=tester done rc=0
+[2026-05-23T17:34:07Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-23T17:34:07Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-23T17:34:07Z] commit-checkpoint: unstaged runtime garbage: ['runs/T144/runtime.log']
+[2026-05-23T17:34:07Z] commit-checkpoint: sha=6a220a32 files=4 title='test(T144/workflow): tester — update 4 file(s)'
+[2026-05-23T17:34:07Z] auto-run: auto-push triggered
+[2026-05-23T17:34:07Z] push: tolerating runtime dirty files (not blocking): ['runs/T144/runtime.log']
+[2026-05-23T17:34:07Z] push: pushing branch=ticket/T144-t144-conflict-resolver-agent-and-review-ui
+[2026-05-23T17:34:09Z] push: done branch=ticket/T144-t144-conflict-resolver-agent-and-review-ui

@@ -143,6 +143,7 @@ HUMAN_GATE_STATES = frozenset({
     "TEST_COMPLETE",
     "CONFLICT_RESOLUTION_NEEDED",
     "CONFLICT_RESOLUTION_FAILED",
+    "CONFLICT_RESOLVED_REVIEW_NEEDED",
 })
 
 # Retry/cooldown policies per failure class.

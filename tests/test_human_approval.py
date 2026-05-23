@@ -34,7 +34,7 @@ def _read_state(run_dir: Path) -> str:
 # ── HUMAN_APPROVAL_TRANSITIONS table ─────────────────────────────────────────
 
 def test_transitions_table_has_four_entries():
-    assert len(HUMAN_APPROVAL_TRANSITIONS) == 4
+    assert len(HUMAN_APPROVAL_TRANSITIONS) == 5
 
 
 def test_transitions_table_keys():
@@ -43,6 +43,7 @@ def test_transitions_table_keys():
         "request-plan-fix",
         "approve-implementation",
         "request-implementation-fix",
+        "reject-conflict-resolution",
     }
 
 

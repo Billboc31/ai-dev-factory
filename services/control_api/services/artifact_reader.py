@@ -61,15 +61,42 @@ def _read_last_error(run_dir: Path) -> str | None:
     return None
 
 
-def _conflict_fields(data: dict) -> dict:
+_CONFLICT_STATES = frozenset({
+    "CONFLICT_RESOLUTION_NEEDED",
+    "CONFLICT_RESOLVING",
+    "CONFLICT_RESOLVED_REVIEW_NEEDED",
+    "CONFLICT_RESOLUTION_FAILED",
+})
+
+
+def _conflict_fields(data: dict, run_dir: Path | None = None) -> dict:
     """Extract conflict metadata from a state.json dict. All fields nullable."""
     state = data.get("state", "")
-    conflict_status = state if state in ("CONFLICT_RESOLUTION_NEEDED", "CONFLICT_RESOLUTION_FAILED") else None
+    conflict_status = state if state in _CONFLICT_STATES else None
+
+    resolution_summary: str | None = None
+    conflict_test_result: str | None = None
+    if run_dir is not None:
+        res_path = run_dir / "conflict" / "resolution.md"
+        if res_path.exists():
+            try:
+                resolution_summary = res_path.read_text(encoding="utf-8")
+            except OSError:
+                pass
+        test_path = run_dir / "conflict" / "test-report.md"
+        if test_path.exists():
+            try:
+                conflict_test_result = test_path.read_text(encoding="utf-8")
+            except OSError:
+                pass
+
     return {
         "conflict_status": conflict_status,
         "conflicted_files": data.get("conflicted_files") or None,
         "conflict_detected_at": data.get("conflict_detected_at") or None,
         "pre_conflict_state": data.get("pre_conflict_state") or None,
+        "resolution_summary": resolution_summary,
+        "conflict_test_result": conflict_test_result,
     }
 
 
@@ -105,7 +132,7 @@ def list_tickets(project_root: Path, worktrees_dir: Path | None = None) -> list[
                     issue_number=data.get("issue_number"),
                     updated_at=data.get("updated_at"),
                     last_log=_last_log_line(run_dir / "runtime.log"),
-                    **_conflict_fields(data),
+                    **_conflict_fields(data, run_dir),
                 )
             except (json.JSONDecodeError, OSError):
                 continue
@@ -129,7 +156,7 @@ def list_tickets(project_root: Path, worktrees_dir: Path | None = None) -> list[
                     issue_number=data.get("issue_number"),
                     updated_at=data.get("updated_at"),
                     last_log=_last_log_line(entry / "runtime.log"),
-                    **_conflict_fields(data),
+                    **_conflict_fields(data, entry),
                 )
             except (json.JSONDecodeError, OSError):
                 continue
@@ -152,7 +179,7 @@ def get_ticket(project_root: Path, ticket_id: str, worktrees_dir: Path | None = 
             issue_number=data.get("issue_number"),
             updated_at=data.get("updated_at"),
             retry_info=_read_retry_state(run_dir),
-            **_conflict_fields(data),
+            **_conflict_fields(data, run_dir),
         )
     except (json.JSONDecodeError, OSError):
         return None
@@ -236,6 +263,10 @@ _STATUS_MAP: dict[str, tuple[list[str], bool]] = {
     "IMPLEMENTATION_APPROVED": (
         ["done", "done", "done", "done", "done", "skipped", "running"], False),
     "CONFLICT_RESOLUTION_NEEDED": (
+        ["done", "done", "done", "done", "done", "done", "waiting_human"], True),
+    "CONFLICT_RESOLVING": (
+        ["done", "done", "done", "done", "done", "done", "running"], False),
+    "CONFLICT_RESOLVED_REVIEW_NEEDED": (
         ["done", "done", "done", "done", "done", "done", "waiting_human"], True),
     "CONFLICT_RESOLUTION_FAILED": (
         ["done", "done", "done", "done", "done", "done", "failed"], True),

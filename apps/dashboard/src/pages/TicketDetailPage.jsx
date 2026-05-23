@@ -8,6 +8,13 @@ import ErrorBanner from '../components/ErrorBanner'
 import WorkflowTimeline from '../components/WorkflowTimeline'
 import usePolling from '../hooks/usePolling'
 
+const CONFLICT_PANEL_STATES = new Set([
+  'CONFLICT_RESOLUTION_NEEDED',
+  'CONFLICT_RESOLVING',
+  'CONFLICT_RESOLVED_REVIEW_NEEDED',
+  'CONFLICT_RESOLUTION_FAILED',
+])
+
 const TABS = ['timeline', 'overview', 'logs', 'plan', 'review', 'tests', 'artifacts', 'audit']
 
 const TAB_FETCHERS = {
@@ -24,6 +31,110 @@ function renderContent(content) {
   if (content === undefined || content === null) return ''
   if (typeof content === 'string') return content
   return JSON.stringify(content, null, 2)
+}
+
+function ConflictResolutionPanel({ ticket, projectId, onRefresh }) {
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState(null)
+  const state = ticket?.state
+
+  const act = (fn) => {
+    setBusy(true)
+    setErr(null)
+    fn()
+      .then(() => onRefresh())
+      .catch(e => setErr(e.response?.data?.detail || e.message))
+      .finally(() => setBusy(false))
+  }
+
+  if (!state || !CONFLICT_PANEL_STATES.has(state)) return null
+
+  return (
+    <div className="bg-white border border-orange-200 rounded p-4 space-y-3 mb-6">
+      <h2 className="text-sm font-semibold text-orange-800">Conflict Resolution</h2>
+
+      {err && <p className="text-red-600 text-xs">{err}</p>}
+
+      <div className="flex flex-wrap gap-3 text-xs text-gray-600">
+        {ticket.conflict_detected_at && (
+          <span>Detected: {new Date(ticket.conflict_detected_at).toLocaleString()}</span>
+        )}
+        {ticket.pre_conflict_state && (
+          <span>Was in: <span className="font-mono">{ticket.pre_conflict_state}</span></span>
+        )}
+      </div>
+
+      {ticket.conflicted_files && ticket.conflicted_files.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-gray-700 mb-1">Conflicted files:</p>
+          <ul className="list-disc list-inside space-y-0.5">
+            {ticket.conflicted_files.map(f => (
+              <li key={f} className="font-mono text-xs text-gray-600">{f}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {state === 'CONFLICT_RESOLUTION_NEEDED' && (
+        <button
+          onClick={() => act(() => api.resolveConflicts(ticket.ticket_id, projectId))}
+          disabled={busy}
+          className="px-3 py-1.5 text-xs bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-50"
+        >
+          {busy ? 'Starting…' : 'Resolve Conflicts'}
+        </button>
+      )}
+
+      {state === 'CONFLICT_RESOLVING' && (
+        <p className="text-xs text-yellow-700 font-medium animate-pulse">
+          Resolver running — polling for updates…
+        </p>
+      )}
+
+      {state === 'CONFLICT_RESOLVED_REVIEW_NEEDED' && (
+        <div className="space-y-3">
+          {ticket.resolution_summary && (
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-1">Resolution summary:</p>
+              <pre className="bg-gray-50 border border-gray-200 rounded p-2 text-xs overflow-auto whitespace-pre-wrap max-h-48">
+                {ticket.resolution_summary}
+              </pre>
+            </div>
+          )}
+          {ticket.conflict_test_result && (
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-1">Test results:</p>
+              <pre className="bg-gray-50 border border-gray-200 rounded p-2 text-xs overflow-auto whitespace-pre-wrap max-h-32">
+                {ticket.conflict_test_result}
+              </pre>
+            </div>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={() => act(() => api.approveConflictResolution(ticket.ticket_id, projectId))}
+              disabled={busy}
+              className="px-3 py-1.5 text-xs bg-green-600 text-white rounded hover:bg-green-700 disabled:opacity-50"
+            >
+              {busy ? 'Processing…' : 'Approve Resolution'}
+            </button>
+            <button
+              onClick={() => act(() => api.rejectConflictResolution(ticket.ticket_id, projectId))}
+              disabled={busy}
+              className="px-3 py-1.5 text-xs bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
+            >
+              {busy ? 'Processing…' : 'Reject Resolution'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {state === 'CONFLICT_RESOLUTION_FAILED' && (
+        <p className="text-xs text-red-700 font-medium">
+          Resolution failed. Check the logs tab for details. Manual intervention is required before this ticket can proceed.
+        </p>
+      )}
+    </div>
+  )
 }
 
 function OverviewTab({ timeline }) {
@@ -153,6 +264,14 @@ export default function TicketDetailPage() {
       </div>
 
       <ErrorBanner message={error} onClose={() => setError(null)} />
+
+      {ticket && CONFLICT_PANEL_STATES.has(ticket.state) && (
+        <ConflictResolutionPanel
+          ticket={ticket}
+          projectId={projectId}
+          onRefresh={refreshTicket}
+        />
+      )}
 
       <div className="flex border-b border-gray-200 mb-4">
         {TABS.map(t => (
