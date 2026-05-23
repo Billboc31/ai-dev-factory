@@ -1,14 +1,18 @@
-The revised plan is written to `runs/T141/plan.md`. Here's a summary of what changed from the rejected plan:
+The plan is written to `runs/T141/plan.md`. Here's what it covers:
 
-**Dropped entirely:**
-- Generic runtime topology model (`runtime_topology.py`, `ComponentType`, `ComponentHealth`)
-- `sandbox-profile.yml` format and profile loading
-- Component startup abstraction and health polling
-- `tests/test_runtime_topology.py`
+**Core problem identified:** `stop()` at line 176 only runs `docker compose down` — it never calls `_terminate_sandbox_supervisor()`, never calls `_release_slot()`, and never cleans pid/lock files.
 
-**Kept and grounded to actual code:**
-- The plan now targets the exact files that need to change: `sandbox_manager.py`, `routes/sandbox.py`, `routes/runtime_dashboard.py`
-- It reuses the existing `_terminate_sandbox_supervisor()` and `_release_slot()` already in `destroy()` — the real gap is that `stop()` doesn't call them
-- The missing endpoints (`/restart`, `/refresh`) are clearly identified as absent from the current router
-- `SandboxRunSummary` enrichment is scoped to just `runtime_root` and `uptime_seconds` (the two fields that serve lifecycle state visibility without topology abstractions)
-- A single new test file covers all lifecycle scenarios
+**Three changes to `sandbox_manager.py`:**
+1. Fix `stop()` — add supervisor termination, pid/lock cleanup, and port release
+2. Add `restart()` — stop + start
+3. Add `refresh()` — stateless re-read of state.json
+
+**Two new endpoints in `routes/sandbox.py`:**
+- `POST /sandboxes/{id}/restart`
+- `POST /sandboxes/{id}/refresh`
+
+**Dashboard enrichment in `routes/runtime_dashboard.py`:**
+- `SandboxRunSummary` gains `runtime_root` and `uptime_seconds`
+- Three new proxied lifecycle endpoints (stop/restart/refresh)
+
+**Tests** cover the supervisor SIGTERM mock, port release, pid/lock cleanup, restart transitions, refresh no-side-effects, and concurrent safety.
