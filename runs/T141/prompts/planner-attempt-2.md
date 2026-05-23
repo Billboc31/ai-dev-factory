@@ -1,0 +1,537 @@
+# GLOBAL CONTEXT
+
+# Global Context — ai-dev-factory
+
+## Vision
+
+ai-dev-factory est un framework générique d’orchestration de développement assisté par IA.
+
+Le système doit permettre :
+- création de tickets structurés
+- génération de prompts spécialisés
+- orchestration planner/coder/reviewer/tester
+- reviews IA intermédiaires
+- maintenance automatique de la mémoire projet
+- workflow GitHub-centric basé sur PR
+
+Détails lifecycle PR, branches et artefacts : [pr-lifecycle.md](./pr-lifecycle.md).
+
+## Principes
+
+- GitHub = source de vérité workflow
+- PR = protocole de communication agentique
+- mémoire versionnée dans le repository
+- architecture explicitement documentée
+- aucun merge sans validations IA requises
+
+## Reviews obligatoires
+
+Aucun merge sans :
+- PLAN_APPROVED
+- IMPLEMENTATION_APPROVED
+- MEMORY_APPROVED
+
+## Mémoire
+
+Le système mémoire est composé de :
+- global-context.md
+- project-life.md
+- decisions-log.md
+
+## Workflow cible
+
+1. Ticket
+2. Classification risque
+3. Planner
+4. Review plan
+5. Coder
+6. Reviewer
+7. Tester
+8. Review implémentation
+9. Memory updater
+10. Review mémoire
+11. Merge
+
+---
+
+# ROLE
+
+# Role — Planner
+
+## Mission
+
+Lire un ticket et produire un plan d’implémentation court, concret, borné et actionnable.
+
+## Tu dois
+
+- comprendre le ticket
+- proposer les étapes minimales
+- lister les fichiers à créer ou modifier
+- identifier les risques
+- expliciter le hors scope
+- produire un plan Markdown versionnable
+- signaler les hypothèses nécessaires
+
+## Tu ne dois pas
+
+- coder
+- réécrire le ticket
+- anticiper les tickets suivants
+- élargir le scope
+- masquer les incertitudes
+
+## Sortie attendue
+
+Un fichier de plan conforme à `ai/templates/plan-template.md`.
+
+## Règles
+
+- le plan doit rester court
+- le plan doit être exécutable par un Coder sans ambiguïté
+- toute hypothèse doit être explicite
+- toute dérive de scope doit être refusée
+
+## Structure obligatoire
+
+Tout plan doit contenir au minimum **les sections suivantes** (titres
+Markdown niveau 2 — `##`). Les variantes anglaises sont acceptées à l'identique :
+
+| Français (recommandé)         | English equivalent       |
+|-------------------------------|--------------------------|
+| `## Contexte`                 | `## Context`             |
+| `## Objectif`                 | `## Objective`           |
+| `## Inclus`                   | `## Included`            |
+| `## Hors scope`               | `## Excluded`            |
+| `## Critères d'acceptation`   | `## Acceptance criteria` |
+
+Choisis une langue par plan, ne mélange pas FR et EN dans un même plan.
+
+Ces titres sont obligatoires même si une section est courte : un ticket
+trivial peut produire un plan court, mais la structure doit rester stable.
+
+Ne jamais produire uniquement un résumé.
+Ne jamais produire un compte rendu d’implémentation.
+
+## Interdictions absolues
+
+Tu ne dois jamais écrire :
+- "implémentation terminée"
+- "syntaxe valide"
+- "changements appliqués"
+- "voici ce qui a été fait"
+
+Tu dois produire uniquement un plan futur, pas un compte rendu passé.
+
+---
+
+# SKILL: workflow-discipline
+
+# Skill — Workflow Discipline
+
+## Objectif
+
+Faire respecter le lifecycle officiel des tickets et PR IA.
+
+## Règles
+
+- respecter l’ordre des étapes du workflow
+- ne pas bypass les reviews obligatoires
+- maintenir les statuts cohérents
+- conserver les artefacts versionnés
+- séparer plan, implémentation et mémoire
+
+## Refuser si
+
+- une review obligatoire est sautée
+- la mémoire est mise à jour avant validation implémentation
+- le workflow officiel est contourné
+
+---
+
+# SKILL: architecture-discipline
+
+# Skill — Architecture Discipline
+
+## Objectif
+
+Préserver la cohérence architecture du projet dans le temps.
+
+## Règles
+
+- respecter les invariants documentés
+- éviter les couplages implicites
+- éviter les dépendances inutiles
+- éviter les refactors transversaux non demandés
+- documenter toute nouvelle règle structurante
+- privilégier les changements locaux et bornés
+
+## Refuser si
+
+- le scope dérive
+- plusieurs couches sont modifiées sans justification
+- des conventions existantes sont cassées
+- la mémoire projet devient incohérente
+
+---
+
+# SKILL: documentation
+
+# Skill — Documentation
+
+## Objectif
+
+Maintenir une documentation utile, concise et alignée avec le code réel.
+
+## Règles
+
+- documenter les décisions importantes
+- éviter les documentations vagues
+- garder la mémoire projet cohérente
+- expliciter les invariants architecture
+- préférer Markdown simple et versionnable
+
+## Refuser si
+
+- la documentation diverge du comportement réel
+- la mémoire contient des suppositions non validées
+- des décisions importantes ne sont pas tracées
+
+---
+
+# TASK
+
+The ticket follows.
+# Generic Planner Task Read the ticket below and produce a detailed implementation plan. 
+
+## Required output structure (strict) Your reply **MUST** be a Markdown document containing **exactly** these four level-2 headings, in this order, spelled exactly as shown:
+## Objective
+## Included
+## Excluded
+## Acceptance criteria
+These headings are mandatory even for trivial tickets. A short plan is acceptable — an unstructured plan is not. - ## Objective — one or two sentences describing what the change achieves. - ## Included — concrete changes (files, functions, logic, tests). - ## Excluded — what is explicitly out of scope for this ticket. - ## Acceptance criteria — verifiable conditions a reviewer can check. ## Invalid output Your reply is **invalid** if any of the four headings above is missing, renamed, mistyped, or replaced by a synonym (e.g. ## Goal, ## Scope, ## In scope, ## Out of scope, ## Plan, ## Tasks are **not** accepted). An invalid reply will be rejected by the automated validator and the ticket will be retried. You **MUST NOT** write: - "implementation done" - "changes applied" - "here is what was done" - any past-tense report of work already performed You produce a *future* plan, not a status report. ## Minimal valid example (for a trivial ticket)
+markdown
+## Objective
+Rename the helper `foo()` to `bar()` in `utils.py` to align with the new
+naming convention. Behaviour is preserved.
+
+## Included
+- `utils.py`: rename `foo` → `bar`, update the docstring.
+- `tests/test_utils.py`: update the single import and assertion.
+
+## Excluded
+- Renaming callers in other modules (tracked in a follow-up ticket).
+- Any logic change inside `foo` / `bar`.
+
+## Acceptance criteria
+- `utils.py` no longer defines `foo`.
+- `pytest tests/test_utils.py` passes.
+- No other file references the old name.
+
+The ticket follows.
+
+
+
+# T141 — T141 — Full sandbox environments and lifecycle management
+
+**Source**: GitHub Issue #131
+
+## Description
+
+Goal: make each sandbox a complete isolated runtime environment with full lifecycle management.
+
+Context:
+T140 introduces isolated runtime roots and isolated supervisors.
+
+The next step is making a sandbox behave like a full independent environment containing all required runtime components for a project.
+
+A sandbox should not only expose isolated API/web ports. It should represent a complete runnable project environment.
+
+Scope:
+- sandbox environments must support full runtime component topology
+- sandbox deploy profiles must declare runtime components generically
+- sandbox startup must start all declared components
+- support components such as:
+  - api
+  - web
+  - supervisor
+  - daemon
+  - workers
+  - databases
+  - redis
+  - custom services
+- sandbox dashboard must display runtime components and component states
+- add sandbox lifecycle actions:
+  - start
+  - stop
+  - restart
+  - cleanup/delete
+  - refresh state
+- stopping a sandbox must:
+  - stop compose services
+  - stop supervisor
+  - stop daemon/workers
+  - release ports
+  - clean locks and pid files safely
+- cleanup must preserve optional logs/state artifacts when configured
+- sandbox dashboard must display:
+  - sandbox URLs
+  - runtime root
+  - allocated ports
+  - component health
+  - running/stopped state
+  - uptime
+- support multiple concurrent sandbox environments safely
+- runtime topology must remain generic and not ai-dev-factory specific
+
+Out of scope:
+- distributed orchestration
+- Kubernetes support
+- cloud deployment
+- production deployment
+- automatic AI self-healing loops
+
+Acceptance:
+- a sandbox represents a full isolated runtime environment
+- sandbox lifecycle actions work safely
+- all runtime components stop correctly on sandbox shutdown
+- ports and locks are released correctly
+- dashboard displays sandbox runtime topology and state
+- multiple sandbox environments can coexist safely
+- the implementation remains generic and reusable across projects
+
+---
+
+## Contexte de retry injecté par run_ticket.py
+
+## Output précédent
+
+## Objective
+
+Extend the sandbox system so that each sandbox represents a complete, generically-declared runtime environment — with all required components started, health-tracked, and shut down safely — and expose the resulting state through enriched lifecycle endpoints and a richer dashboard.
+
+## Included
+
+### 1. Generic runtime topology model — new file
+`services/control_api/models/runtime_topology.py`
+- `ComponentType(Enum)`: `compose_service`, `supervisor`, `daemon`, `worker`, `database`, `redis`, `custom`
+- `ComponentHealth(Enum)`: `unknown`, `healthy`, `degraded`, `stopped`, `error`
+- `RuntimeComponent`, `RuntimeTopology` Pydantic models
+
+### 2. Sandbox profile format — new convention
+`ai/sandbox-profile.yml.example` — example with all component types.  
+Loaded from `{project_root}/ai/sandbox-profile.yml` at sandbox startup; falls back to a default profile (compose services + supervisor) if absent or unparseable.
+
+### 3. Enriched `SandboxState`
+- `services/control_api/models/sandbox.py`: add `topology`, `urls`, `uptime_seconds`
+- `services/control_api/models/schemas.py`: enrich `SandboxRunSummary` / `SandboxValidationStatus` with topology, urls, runtime_root, allocated_ports, uptime_seconds
+
+### 4. Profile loading and component startup — `run_sandbox.py`
+- `_load_sandbox_profile()` with safe fallback
+- `_start_components()` dispatching by type (compose → already done; daemon/worker → supervisor daemon API; database/redis → compose verify; custom → daemon)
+- `_check_component_health()` with HTTP probe + PID liveness check
+- `_poll_topology_health()` called after initial healthcheck and every 30 s; writes topology to state files
+
+### 5. Enhanced stop sequence — `run_sandbox.py`
+Ordered shutdown: compose down → daemon/worker PIDs (SIGTERM+SIGKILL) → supervisor SIGTERM → port release → lock/pid file cleanup under `{sandbox_runtime_root}/`
+
+### 6. Cleanup with artifact preservation — `sandbox_manager.py`
+- `destroy(sandbox_id, preserve_logs=False)` — copies `run.log` + `state.json` to `sandboxes/preserved/{id}/` before deletion when flag is set
+- `restart(sandbox_id)` — stop then start
+- `refresh_state(sandbox_id)` — reads state.json from disk without side effects
+
+### 7. New lifecycle endpoints — `routes/sandbox.py`
+- `POST /sandboxes/{id}/restart`
+- `POST /sandboxes/{id}/refresh`
+- `DELETE /sandboxes/{id}?preserve_logs=false`
+
+### 8. Dashboard enrichment — `routes/runtime_dashboard.py`
+Return topology, urls, runtime_root, allocated_ports, uptime_seconds in both list and detail endpoints.
+
+### 9. Tests
+- `tests/test_sandbox_lifecycle.py` (new): restart, refresh, destroy with preservation, stop sequence
+- `tests/test_runtime_topology.py` (new): profile loading (valid, missing, invalid, default fallback), component health check
+
+## Excluded
+
+- Distributed orchestration, Kubernetes, cloud/production deployment
+- AI auto-healing loops (T138)
+- Automatic component restart driven by health-check failures
+- Frontend/UI changes (dashboard consumes the enriched API)
+- Changes to the main (non-sandbox) supervisor
+- Component dependency DAG (components start sequentially in declaration order)
+- Modifications to `docker-compose.yml` itself
+
+## Acceptance criteria
+
+- `GET /runtime-dashboard/sandbox-runs` returns `topology`, `urls`, `allocated_ports`, `runtime_root`, `uptime_seconds` per sandbox
+- `POST /sandboxes/{id}/restart` produces running → stopped → running state transitions
+- `POST /sandboxes/{id}/refresh` returns current state without side effects
+- `DELETE /sandboxes/{id}?preserve_logs=true` leaves `run.log` + `state.json` under `sandboxes/preserved/{id}/`
+- A sandbox with a `sandbox-profile.yml` declaring a daemon shows that component in topology with correct health
+- A sandbox without a profile behaves identically to today
+- On stop: compose down, daemon PIDs terminated, port slot released, no stale locks/PIDs under `{sandbox_runtime_root}/`
+- Two sandboxes run concurrently without port conflict or registry corruption
+- `pytest tests/test_sandbox_lifecycle.py tests/test_runtime_topology.py` passes
+
+The plan has been saved to `runs/T141/plan.md`.
+
+---
+
+## Review
+
+# Plan review — T141
+
+Decision: PLAN_FIX_REQUIRED
+
+The current T141 plan is too ambitious for one implementation ticket.
+
+It combines:
+
+- generic runtime topology model
+- sandbox-profile.yml format
+- component startup abstraction
+- component health polling
+- daemon/worker/database/redis/custom component handling
+- lifecycle endpoints
+- restart/destroy/preserve logs
+- runtime dashboard enrichment
+- multiple new test suites
+
+These are valuable, but the immediate runtime need is simpler and more urgent: the user can start sandbox environments but cannot safely stop, restart, or clean them up from the UI.
+
+## Requested change
+
+Rewrite T141 as a focused V1:
+
+> Sandbox lifecycle controls: stop, restart, cleanup/delete, refresh.
+
+The ticket should focus on safe lifecycle operations for existing sandbox runs.
+
+Do not introduce the generic topology model or sandbox-profile.yml in this ticket.
+
+See `runs/T141/fixes/plan-fix-1.md` for the requested reduced scope.
+
+---
+
+## Instructions de fix
+
+# Plan fix — T141 V1
+
+## New objective
+
+Implement safe sandbox lifecycle management for existing sandbox environments.
+
+The primary user need is:
+
+- start sandbox
+- stop sandbox
+- restart sandbox
+- cleanup/delete sandbox
+- refresh sandbox state
+
+The implementation should focus on stable runtime lifecycle behavior before introducing generic topology abstractions.
+
+---
+
+# Included
+
+## Sandbox lifecycle operations
+
+Implement:
+
+- stop sandbox
+- restart sandbox
+- cleanup/delete sandbox
+- refresh sandbox state
+
+## Safe shutdown behavior
+
+Stopping a sandbox must:
+
+- stop docker compose services for the sandbox
+- stop sandbox supervisor if running
+- stop sandbox daemon/workers if running
+- release allocated ports
+- remove stale locks and pid files
+- preserve sandbox state consistency
+
+The main runtime must never be impacted.
+
+## Cleanup behavior
+
+Deleting a sandbox must:
+
+- stop the sandbox first if still running
+- remove sandbox runtime artifacts safely
+- remove sandbox worktree safely
+- remove compose resources associated with the sandbox
+
+Optional:
+
+- preserve logs/state artifacts before deletion
+
+## Lifecycle API endpoints
+
+Add minimal lifecycle endpoints:
+
+- POST /sandboxes/{id}/stop
+- POST /sandboxes/{id}/restart
+- POST /sandboxes/{id}/refresh
+- DELETE /sandboxes/{id}
+
+## Dashboard integration
+
+Expose:
+
+- running/stopped state
+- ports
+- runtime root
+- uptime if available
+
+Add lifecycle actions in the dashboard:
+
+- stop
+- restart
+- refresh
+- delete
+
+## Tests
+
+Add tests for:
+
+- stop lifecycle
+- restart lifecycle
+- cleanup/delete
+- port release
+- stale lock cleanup
+- concurrent sandbox safety
+
+---
+
+# Excluded
+
+Do NOT implement in this ticket:
+
+- generic runtime topology model
+- sandbox-profile.yml
+- component DAG/orchestration
+- component health polling
+- generic component abstractions
+- distributed orchestration
+- Kubernetes/cloud support
+- AI auto-healing loops
+
+These should be handled in later dedicated tickets.
+
+---
+
+# Acceptance criteria
+
+- sandbox can be stopped safely
+- sandbox can be restarted safely
+- sandbox can be deleted safely
+- ports are released correctly after stop/delete
+- stale locks and pid files are cleaned safely
+- dashboard lifecycle actions work
+- main runtime is never affected
+- concurrent sandboxes remain isolated
