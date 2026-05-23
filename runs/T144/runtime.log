@@ -10,3 +10,14 @@
 [2026-05-23T16:22:32Z] compose: task (canonical prompt)
 [2026-05-23T16:22:32Z] snapshot: runtime-prompt=runs/T144/prompts/planner-attempt-1.md
 [2026-05-23T16:26:30Z] auto-run: step=planner done rc=0
+[2026-05-23T16:26:32Z] planner checkpoint: committed
+[2026-05-23T16:26:32Z] planner checkpoint: pushed
+[2026-05-23T16:26:32Z] planner validation success
+[2026-05-23T16:26:32Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-23T16:26:32Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-23T16:26:32Z] commit-checkpoint: unstaged runtime garbage: ['runs/T144/runtime.log']
+[2026-05-23T16:26:32Z] commit-checkpoint: sha=a14c8d1e files=2 title='docs(T144/workflow): planner — update 2 file(s)'
+[2026-05-23T16:26:32Z] auto-run: auto-push triggered
+[2026-05-23T16:26:32Z] push: tolerating runtime dirty files (not blocking): ['runs/T144/runtime.log']
+[2026-05-23T16:26:32Z] push: pushing branch=ticket/T144-t144-conflict-resolver-agent-and-review-ui
+[2026-05-23T16:26:34Z] push: done branch=ticket/T144-t144-conflict-resolver-agent-and-review-ui
