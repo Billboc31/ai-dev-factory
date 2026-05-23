@@ -23,6 +23,8 @@ class SandboxState(BaseModel):
     status: SandboxStatus
     created_at: str
     slot: int
+    supervisor_port: int = 0
+    sandbox_runtime_root: str = ""
     worktree_path: str | None = None
     job_type: str | None = None
     completed_at: str | None = None

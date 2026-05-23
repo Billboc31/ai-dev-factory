@@ -4,6 +4,7 @@ import json
 import logging
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -129,10 +130,12 @@ class SandboxManager:
         compose_project = normalize_compose_project_name(f"sandbox-{sandbox_id}")
         web_port = _BASE_WEB_PORT + slot * _PORT_STEP
         api_port = _BASE_API_PORT + slot * _PORT_STEP
+        supervisor_port = 8090 + slot
         ports: dict[str, int] = {"web": web_port, "api": api_port}
 
         sandbox_dir = self._sandbox_dir(sandbox_id)
         sandbox_dir.mkdir(parents=True, exist_ok=True)
+        sandbox_runtime_root = str(sandbox_dir / "runtime")
 
         env_file = sandbox_dir / ".env"
         env_file.write_text(
@@ -152,6 +155,8 @@ class SandboxManager:
             status=SandboxStatus.stopped,
             created_at=_now_iso(),
             slot=slot,
+            supervisor_port=supervisor_port,
+            sandbox_runtime_root=sandbox_runtime_root,
         )
         self._write_state(state)
         logger.info("sandbox created: %s (slot=%d ports=%s)", sandbox_id, slot, ports)
@@ -233,9 +238,28 @@ class SandboxManager:
                 pass
         return destroyed
 
+    def _terminate_sandbox_supervisor(self, state: SandboxState) -> None:
+        """SIGTERM the sandbox supervisor process if its PID file exists."""
+        if not state.sandbox_runtime_root:
+            return
+        pid_path = Path(state.sandbox_runtime_root) / "supervisor.pid"
+        if not pid_path.exists():
+            return
+        try:
+            data = json.loads(pid_path.read_text(encoding="utf-8"))
+            pid = data.get("pid") if isinstance(data, dict) else int(data)
+            if isinstance(pid, int):
+                os.kill(pid, signal.SIGTERM)
+                logger.info(
+                    "sandbox supervisor SIGTERM: sandbox=%s pid=%d", state.id, pid
+                )
+        except (OSError, ValueError, json.JSONDecodeError):
+            pass
+
     def destroy(self, sandbox_id: str) -> None:
         try:
             state = self._read_state(sandbox_id)
+            self._terminate_sandbox_supervisor(state)
             if state.worktree_path:
                 subprocess.run(
                     ["git", "worktree", "remove", "--force", state.worktree_path],
