@@ -35,3 +35,23 @@
 [2026-05-23T16:36:40Z] compose: task (canonical prompt)
 [2026-05-23T16:36:40Z] snapshot: runtime-prompt=runs/T144/prompts/coder-attempt-1.md
 [2026-05-23T16:53:42Z] set-state: PLAN_APPROVED → IMPLEMENTATION_REVIEW_NEEDED (human)
+[2026-05-23T17:27:58Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-23T17:27:58Z] auto-run: running step=tester
+[2026-05-23T17:27:58Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-23T17:27:58Z] prompt: generic fallback — injecting runs/T144/ticket.md
+[2026-05-23T17:27:58Z] compose: global-context=docs/ai/global-context.md
+[2026-05-23T17:27:58Z] compose: role=ai/roles/tester.md
+[2026-05-23T17:27:58Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-23T17:27:58Z] compose: skill=ai/skills/testing.md
+[2026-05-23T17:27:58Z] compose: skill=ai/skills/debugging.md
+[2026-05-23T17:27:58Z] compose: task (canonical prompt)
+[2026-05-23T17:27:58Z] snapshot: runtime-prompt=runs/T144/prompts/tester-attempt-1.md
+[2026-05-23T17:34:07Z] auto-run: step=tester done rc=0
+[2026-05-23T17:34:07Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-23T17:34:07Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-23T17:34:07Z] commit-checkpoint: unstaged runtime garbage: ['runs/T144/runtime.log']
+[2026-05-23T17:34:07Z] commit-checkpoint: sha=6a220a32 files=4 title='test(T144/workflow): tester — update 4 file(s)'
+[2026-05-23T17:34:07Z] auto-run: auto-push triggered
+[2026-05-23T17:34:07Z] push: tolerating runtime dirty files (not blocking): ['runs/T144/runtime.log']
+[2026-05-23T17:34:07Z] push: pushing branch=ticket/T144-t144-conflict-resolver-agent-and-review-ui
+[2026-05-23T17:34:09Z] push: done branch=ticket/T144-t144-conflict-resolver-agent-and-review-ui
