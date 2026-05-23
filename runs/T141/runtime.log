@@ -98,3 +98,11 @@
 [2026-05-23T11:14:23Z] compose: skill=ai/skills/debugging.md
 [2026-05-23T11:14:23Z] compose: task (canonical prompt)
 [2026-05-23T11:14:23Z] snapshot: runtime-prompt=runs/T141/prompts/tester-attempt-1.md
+[2026-05-23T11:17:27Z] auto-run: step=tester done rc=0
+[2026-05-23T11:17:27Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-23T11:17:27Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-23T11:17:28Z] commit-checkpoint: unstaged runtime garbage: ['runs/T141/runtime.log']
+[2026-05-23T11:17:28Z] commit-checkpoint: sha=43c91f12 files=3 title='test(T141/workflow): tester — update 3 file(s)'
+[2026-05-23T11:17:28Z] auto-run: auto-push triggered
+[2026-05-23T11:17:28Z] push: tolerating runtime dirty files (not blocking): ['runs/T141/runtime.log']
+[2026-05-23T11:17:28Z] push: pushing branch=ticket/T141-t141-full-sandbox-environments-and-lifecycle-manag
