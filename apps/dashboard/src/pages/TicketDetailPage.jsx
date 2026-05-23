@@ -130,7 +130,7 @@ function ConflictResolutionPanel({ ticket, projectId, onRefresh }) {
 
       {state === 'CONFLICT_RESOLUTION_FAILED' && (
         <p className="text-xs text-red-700 font-medium">
-          Resolution failed. Check the logs tab for details. You may retry by clicking "Resolve Conflicts" after manually verifying the worktree state.
+          Resolution failed. Check the logs tab for details. Manual intervention is required before this ticket can proceed.
         </p>
       )}
     </div>

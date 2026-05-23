@@ -6,7 +6,7 @@ Writes runs/{ticket_id}/conflict/context.md with:
 - PR diff (via gh)
 - merge-base diff (git diff merge-base..HEAD)
 - latest main changes since conflict detected
-- full content of each conflicted file (with conflict markers)
+- full content of each conflicted file (captured before rebase, no conflict markers yet)
 """
 
 from __future__ import annotations

@@ -32,6 +32,14 @@ def test_conflict_resolution_failed_in_valid_states():
     assert "CONFLICT_RESOLUTION_FAILED" in VALID_STATES
 
 
+def test_conflict_resolving_in_valid_states():
+    assert "CONFLICT_RESOLVING" in VALID_STATES
+
+
+def test_conflict_resolved_review_needed_in_valid_states():
+    assert "CONFLICT_RESOLVED_REVIEW_NEEDED" in VALID_STATES
+
+
 # ── AUTO_RUNNABLE_STATES ──────────────────────────────────────────────────────
 
 def test_conflict_resolution_needed_not_auto_runnable():
@@ -42,6 +50,14 @@ def test_conflict_resolution_failed_not_auto_runnable():
     assert "CONFLICT_RESOLUTION_FAILED" not in AUTO_RUNNABLE_STATES
 
 
+def test_conflict_resolving_not_auto_runnable():
+    assert "CONFLICT_RESOLVING" not in AUTO_RUNNABLE_STATES
+
+
+def test_conflict_resolved_review_needed_not_auto_runnable():
+    assert "CONFLICT_RESOLVED_REVIEW_NEEDED" not in AUTO_RUNNABLE_STATES
+
+
 # ── HUMAN_GATE_STATES ─────────────────────────────────────────────────────────
 
 def test_conflict_resolution_needed_in_human_gate():
@@ -50,6 +66,10 @@ def test_conflict_resolution_needed_in_human_gate():
 
 def test_conflict_resolution_failed_in_human_gate():
     assert "CONFLICT_RESOLUTION_FAILED" in HUMAN_GATE_STATES
+
+
+def test_conflict_resolved_review_needed_in_human_gate():
+    assert "CONFLICT_RESOLVED_REVIEW_NEEDED" in HUMAN_GATE_STATES
 
 
 # ── TRANSITIONS ───────────────────────────────────────────────────────────────

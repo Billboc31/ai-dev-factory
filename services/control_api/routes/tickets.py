@@ -2,6 +2,7 @@ import datetime
 import json
 import logging
 import sys
+import threading
 from pathlib import Path
 from typing import Any
 
@@ -179,8 +180,6 @@ def run_next(ticket_id: str, request: Request) -> ActionResult:
     root = _root(request)
     wt_dir = _worktrees_dir(request)
 
-    import threading
-
     def _bg() -> None:
         subprocess_runner.run_next(ticket_id, root, wt_dir)
 
@@ -317,8 +316,6 @@ def resolve_conflicts(ticket_id: str, request: Request) -> ActionResult:
         raise HTTPException(status_code=500, detail=transition.message)
 
     exec_cmd = getattr(request.app.state, "daemon_exec_cmd", "claude --dangerously-skip-permissions")
-
-    import threading
 
     def _bg() -> None:
         subprocess_runner.resolve_conflicts(ticket_id, root, wt_dir, exec_cmd)
@@ -502,8 +499,6 @@ def project_run_next(ticket_id: str, request: Request, project_root: Path = Depe
     wt_dir = resolve_worktrees_dir(project_root)
     _get_or_404(project_root, ticket_id, wt_dir)
 
-    import threading
-
     def _bg() -> None:
         subprocess_runner.run_next(ticket_id, project_root, wt_dir)
 
@@ -573,8 +568,6 @@ def project_resolve_conflicts(ticket_id: str, request: Request, project_root: Pa
         raise HTTPException(status_code=500, detail=transition.message)
 
     exec_cmd = getattr(request.app.state, "daemon_exec_cmd", "claude --dangerously-skip-permissions")
-
-    import threading
 
     def _bg() -> None:
         subprocess_runner.resolve_conflicts(ticket_id, project_root, wt_dir, exec_cmd)
