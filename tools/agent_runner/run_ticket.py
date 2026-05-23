@@ -59,11 +59,14 @@ VALID_STATES = frozenset({
     "IMPLEMENTATION_APPROVED",
     "TEST_COMPLETE",
     "CONFLICT_RESOLUTION_NEEDED",
+    "CONFLICT_RESOLVING",
+    "CONFLICT_RESOLVED_REVIEW_NEEDED",
     "CONFLICT_RESOLUTION_FAILED",
 })
 
 # Maps state -> (step, is_deterministic, possible_next_states_in_order)
 # None marks a terminal state with no further transitions.
+# Conflict states are not auto-runnable; they are managed via API/CLI only.
 TRANSITIONS: dict[str, tuple[str, bool, list[str]] | None] = {
     "INIT":                         ("planner", True,  ["PLAN_REVIEW_NEEDED"]),
     "PLAN_REVIEW_NEEDED":           ("review",  False, ["PLAN_APPROVED", "PLAN_FIX_REQUIRED"]),
@@ -849,6 +852,7 @@ HUMAN_APPROVAL_TRANSITIONS: dict[str, tuple[str, str]] = {
     "request-plan-fix":           ("PLAN_REVIEW_NEEDED",           "PLAN_FIX_REQUIRED"),
     "approve-implementation":     ("IMPLEMENTATION_REVIEW_NEEDED", "IMPLEMENTATION_APPROVED"),
     "request-implementation-fix": ("IMPLEMENTATION_REVIEW_NEEDED", "IMPLEMENTATION_FIX_REQUIRED"),
+    "reject-conflict-resolution": ("CONFLICT_RESOLVED_REVIEW_NEEDED", "CONFLICT_RESOLUTION_NEEDED"),
 }
 
 
@@ -870,6 +874,48 @@ def apply_human_approval(ticket_id: str, command: str) -> int:
     save_state(ticket_id, {**state, "state": target_state})
     _append_workflow_journal(ticket_id, current_state, command, target_state)
     _log_runtime(ticket_id, f"human-approval: {command} — {current_state} → {target_state}")
+    print(f"approved: {current_state} → {target_state}")
+    return 0
+
+
+def apply_approve_conflict_resolution(ticket_id: str) -> int:
+    """Approve conflict resolution — restores pre_conflict_state from state.json."""
+    try:
+        state = load_state(ticket_id)
+    except TicketRunnerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    current_state = state["state"]
+    if current_state != "CONFLICT_RESOLVED_REVIEW_NEEDED":
+        print(
+            f"error: --approve-conflict-resolution requires state "
+            f"CONFLICT_RESOLVED_REVIEW_NEEDED, current state is {current_state!r}",
+            file=sys.stderr,
+        )
+        _log_runtime(
+            ticket_id,
+            f"human-approval: refused approve-conflict-resolution — "
+            f"expected CONFLICT_RESOLVED_REVIEW_NEEDED, got {current_state!r}",
+        )
+        return 2
+    target_state = state.get("pre_conflict_state")
+    if not target_state or target_state not in VALID_STATES:
+        print(
+            f"error: pre_conflict_state is missing or invalid in state.json: {target_state!r}",
+            file=sys.stderr,
+        )
+        _log_runtime(
+            ticket_id,
+            f"human-approval: refused approve-conflict-resolution — "
+            f"pre_conflict_state={target_state!r} invalid",
+        )
+        return 2
+    save_state(ticket_id, {**state, "state": target_state})
+    _append_workflow_journal(ticket_id, current_state, "approve-conflict-resolution", target_state)
+    _log_runtime(
+        ticket_id,
+        f"human-approval: approve-conflict-resolution — {current_state} → {target_state}",
+    )
     print(f"approved: {current_state} → {target_state}")
     return 0
 
@@ -1142,6 +1188,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--request-plan-fix", action="store_true", help="Request plan fix (PLAN_REVIEW_NEEDED → PLAN_FIX_REQUIRED)")
     parser.add_argument("--approve-implementation", action="store_true", help="Approve implementation (IMPLEMENTATION_REVIEW_NEEDED → IMPLEMENTATION_APPROVED)")
     parser.add_argument("--request-implementation-fix", action="store_true", help="Request implementation fix (IMPLEMENTATION_REVIEW_NEEDED → IMPLEMENTATION_FIX_REQUIRED)")
+    parser.add_argument("--approve-conflict-resolution", action="store_true", help="Approve conflict resolution (CONFLICT_RESOLVED_REVIEW_NEEDED → pre_conflict_state)")
+    parser.add_argument("--reject-conflict-resolution", action="store_true", help="Reject conflict resolution (CONFLICT_RESOLVED_REVIEW_NEEDED → CONFLICT_RESOLUTION_NEEDED)")
     return parser.parse_args(argv)
 
 
@@ -1159,9 +1207,13 @@ def main(argv: list[str]) -> int:
             ("request-plan-fix",           "request_plan_fix"),
             ("approve-implementation",     "approve_implementation"),
             ("request-implementation-fix", "request_implementation_fix"),
+            ("reject-conflict-resolution", "reject_conflict_resolution"),
         ):
             if getattr(args, attr):
                 return apply_human_approval(ticket_id, cmd)
+
+        if args.approve_conflict_resolution:
+            return apply_approve_conflict_resolution(ticket_id)
 
         if args.archive_daemon:
             return archive_daemon(ticket_id)

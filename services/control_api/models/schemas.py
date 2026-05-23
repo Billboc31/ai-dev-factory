@@ -65,6 +65,8 @@ class TicketSummary(BaseModel):
     conflicted_files: list[str] | None = None
     conflict_detected_at: str | None = None
     pre_conflict_state: str | None = None
+    resolution_summary: str | None = None
+    conflict_test_result: str | None = None
 
 
 class TicketDetail(TicketSummary):

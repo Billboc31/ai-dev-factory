@@ -25,3 +25,6 @@ export const createCheckpoint = (id, projectId) => client.post(`${_pfx(projectId
 export const archiveDaemon = (id, projectId) => client.post(`${_pfx(projectId)}/tickets/${id}/archive`)
 export const getAuditLog = (id, projectId) => client.get(`${_pfx(projectId)}/tickets/${id}/audit-log`)
 export const markConflictFailed = (id, projectId) => client.post(`${_pfx(projectId)}/tickets/${id}/mark-conflict-failed`)
+export const resolveConflicts = (id, projectId) => client.post(`${_pfx(projectId)}/tickets/${id}/resolve-conflicts`)
+export const approveConflictResolution = (id, projectId) => client.post(`${_pfx(projectId)}/tickets/${id}/approve-conflict-resolution`)
+export const rejectConflictResolution = (id, projectId) => client.post(`${_pfx(projectId)}/tickets/${id}/reject-conflict-resolution`)
