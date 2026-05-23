@@ -1,99 +1,96 @@
-Now I have everything needed to write the full review.
+I have a complete picture of the implementation. All issues from the previous review cycle have been addressed. Let me write the formal review.
 
 ---
 
-# Review — T144: Conflict Resolver Agent and Review UI
+# Review — T144: Conflict Resolver Agent and Review UI (Attempt 2)
+
+## Summary of Previous Blocking Issue
+
+The previous review (attempt 1) required fixing one blocking issue: a misleading retry message in `TicketDetailPage.jsx:131–135` that told users to "retry by clicking 'Resolve Conflicts'" from a terminal state where that button never appears.
+
+**Status: FIXED.** The message now reads:
+
+> "Resolution failed. Check the logs tab for details. Manual intervention is required before this ticket can proceed."
+
+Accurate, actionable, no fabricated affordance.
+
+---
 
 ## Ticket Compliance
 
 ### States
 
-All four required states are implemented: `CONFLICT_RESOLVING`, `CONFLICT_RESOLVED_REVIEW_NEEDED`, `CONFLICT_RESOLUTION_NEEDED`, `CONFLICT_RESOLUTION_FAILED`. State transitions are consistent across `run_ticket.py`, `run_daemon.py`, and `run_conflict_resolver.py`.
+All four required states are present in `VALID_STATES` (`run_ticket.py:61–64`):
+- `CONFLICT_RESOLUTION_NEEDED`
+- `CONFLICT_RESOLVING`
+- `CONFLICT_RESOLVED_REVIEW_NEEDED`
+- `CONFLICT_RESOLUTION_FAILED`
 
-### Resolver execution
+State machine transitions are consistent across `run_ticket.py`, `run_daemon.py`, `run_conflict_resolver.py`, and `tickets.py`.
+
+### Resolver Execution
 
 `run_conflict_resolver.py` correctly:
-- validates current branch is never `main` before any git operation
-- validates branch matches state.json
-- fetches origin, rebases onto `origin/main`
-- on conflict: invokes the AI agent with composed prompt
-- stages resolved files, continues rebase
-- runs tests after resolution
-- commits artifacts, pushes with `--force-with-lease`
-- transitions to `CONFLICT_RESOLVED_REVIEW_NEEDED` on success, `CONFLICT_RESOLUTION_FAILED` on any failure
+- Guards against running on `main` branch (hard fail at line 157)
+- Validates branch matches `state.json`
+- Fetches origin, rebases onto `origin/main`
+- On conflict: collects context, invokes AI agent with composed prompt, stages resolved files, continues rebase
+- Handles the "nothing to commit" edge case during `rebase --continue` (line 268–269)
+- Runs tests, writes all three artifacts, commits, pushes with `--force-with-lease`
+- Transitions to `CONFLICT_RESOLVED_REVIEW_NEEDED` on success, `CONFLICT_RESOLUTION_FAILED` on any of 10 failure points
 
-All 10 failure points are handled explicitly and log to `conflict/error.log`.
+### Context Collection
 
-### Context collection
+`conflict_context_collector.py` assembles: ticket.md, plan.md, reviews, fixes, PR diff, merge-base diff, latest main commits, and conflicted file contents — matching the ticket spec exactly.
 
-`conflict_context_collector.py` assembles ticket.md, plan.md, reviews, fixes, PR diff, merge-base diff, latest main commits, and conflicted file contents — matching the ticket spec exactly.
-
-Note on ordering: context.md is written **before** `git rebase` starts, so the "Conflicted Files" section in context.md shows pre-rebase content without conflict markers. The module docstring says "with conflict markers preserved" — this is inaccurate. In practice the AI agent reads the actual in-worktree files (which do have markers after the failed rebase), so the resolver works correctly, but the docstring is misleading.
+The previous docstring inaccuracy ("with conflict markers preserved") has been corrected to "captured before rebase, no conflict markers yet" (line 9). The comment at line 185 ("before rebase so we capture current conflicted files") is consistent.
 
 ### Artifacts
 
-`conflict/context.md`, `conflict/resolution.md`, and `conflict/test-report.md` are all written correctly.
+`conflict/context.md`, `conflict/resolution.md`, and `conflict/test-report.md` are all written at the correct execution points. The clean-rebase path also writes a `resolution.md` noting no conflicts were needed (line 282–287).
 
-### API endpoints
+### API Endpoints
 
-All required endpoints are present for both `/tickets/{id}/*` and `/projects/{pid}/tickets/{id}/*` routes:
-- `POST resolve-conflicts` (202, background thread)
-- `POST approve-conflict-resolution`
-- `POST reject-conflict-resolution`
-- `POST mark-conflict-failed`
+All required endpoints are present on both `/tickets/{id}/*` and `/projects/{pid}/tickets/{id}/*` routes:
+- `POST resolve-conflicts` → 202, atomic state transition then background thread
+- `POST approve-conflict-resolution` → delegates to `run_ticket.py --approve-conflict-resolution`
+- `POST reject-conflict-resolution` → delegates to `run_ticket.py --reject-conflict-resolution`
+- `POST mark-conflict-failed` → direct state write, 409 on wrong state
 
-The `_transition_to_resolving()` helper correctly prevents double-triggering by atomically moving state to `CONFLICT_RESOLVING` before spawning the background thread.
+The `_transition_to_resolving()` helper (line 264) atomically moves state to `CONFLICT_RESOLVING` using a tmp-file rename before spawning the background thread, correctly preventing double-triggering.
 
-### Approve / Reject gate
+### Human Approval Gate
 
-Approve restores `pre_conflict_state` (resuming the workflow). Reject returns to `CONFLICT_RESOLUTION_NEEDED` (allowing a retry). Human gate is enforced. Satisfies acceptance criteria.
+- **Approve**: Restores `pre_conflict_state` via `apply_approve_conflict_resolution()`, resuming the original workflow.
+- **Reject**: Returns to `CONFLICT_RESOLUTION_NEEDED`, allowing a retry.
+- Both gates require `CONFLICT_RESOLVED_REVIEW_NEEDED` and return 409 on wrong state.
 
 ### Dashboard UI
 
-`ConflictResolutionPanel` renders correctly for all four conflict states. Conflict metadata (detected at, pre-conflict state, conflicted files) is displayed. Approve/Reject buttons appear only in `CONFLICT_RESOLVED_REVIEW_NEEDED`. This matches the ticket spec.
+`ConflictResolutionPanel` renders correctly for all four conflict states:
+- `CONFLICT_RESOLUTION_NEEDED` → "Resolve Conflicts" button only
+- `CONFLICT_RESOLVING` → pulsing status message, no action buttons
+- `CONFLICT_RESOLVED_REVIEW_NEEDED` → resolution summary + test results + Approve/Reject buttons
+- `CONFLICT_RESOLUTION_FAILED` → accurate terminal message, no fabricated actions
+
+5-second polling in `usePolling` ensures users see live status changes.
 
 ---
 
-## Blocking Issues
+## All Minor Issues from Previous Review — Resolved
 
-### 1. Misleading retry message for `CONFLICT_RESOLUTION_FAILED`
-
-`TicketDetailPage.jsx:131–135`:
-
-```jsx
-{state === 'CONFLICT_RESOLUTION_FAILED' && (
-  <p className="text-xs text-red-700 font-medium">
-    Resolution failed. Check the logs tab for details. You may retry by clicking
-    "Resolve Conflicts" after manually verifying the worktree state.
-  </p>
-)}
-```
-
-**Problem:** `CONFLICT_RESOLUTION_FAILED` is a terminal state with no outgoing transitions (verified by `test_conflict_resolution_failed_has_no_outgoing_transitions`). The "Resolve Conflicts" button only appears in `CONFLICT_RESOLUTION_NEEDED` state — it is **never rendered** when the ticket is in `CONFLICT_RESOLUTION_FAILED`. The message actively misleads the user: they will look for a button that does not exist.
-
-**Required fix:** Either (a) remove the retry hint and replace it with an accurate message directing users to investigate logs, or (b) add an explicit escape-hatch transition from `CONFLICT_RESOLUTION_FAILED` → `CONFLICT_RESOLUTION_NEEDED` with a corresponding "Retry" button.
-
-Option (b) would require adding a `reset-conflict-failure` endpoint and an outgoing transition from `CONFLICT_RESOLUTION_FAILED`, which is a scope extension. Option (a) is minimal and correct.
+| Issue | Status |
+|---|---|
+| Misleading retry message on FAILED state | ✅ Fixed |
+| Test coverage: CONFLICT_RESOLVING + CONFLICT_RESOLVED_REVIEW_NEEDED missing | ✅ Fixed — tests added for both states in VALID_STATES and AUTO_RUNNABLE_STATES |
+| `import threading` inline in route handler | ✅ Fixed — now module-level at `tickets.py:5` |
+| Misleading module docstring in conflict_context_collector.py | ✅ Fixed — docstring corrected to reflect pre-rebase capture |
 
 ---
 
-## Minor Observations (non-blocking)
+## Remaining Non-Blocking Observation
 
-### 2. Test coverage gap for intermediate conflict states
-
-`tests/test_conflict_resolver.py` tests `CONFLICT_RESOLUTION_NEEDED` and `CONFLICT_RESOLUTION_FAILED` in `VALID_STATES`, `AUTO_RUNNABLE_STATES`, and `HUMAN_GATE_STATES`, but does not cover `CONFLICT_RESOLVING` or `CONFLICT_RESOLVED_REVIEW_NEEDED`. Both states are defined and used correctly in production code, but their state classification is untested. Adding four assertions would close the gap.
-
-### 3. `import threading` inside route handler
-
-`tickets.py:321` and `:578` both do `import threading` inline inside the route function body. Should be moved to module-level imports.
-
-### 4. Misleading module docstring in `conflict_context_collector.py`
-
-Line 9: `"full content of each conflicted file (with conflict markers preserved)"` — as noted above, context is captured before the rebase attempt, so no conflict markers are present at write time. The comment at line 186 (`"before rebase so we capture current conflicted files"`) is more accurate. The module docstring should be corrected to avoid confusion during maintenance.
-
-### 5. Resolver does not assert state is `CONFLICT_RESOLVING` before executing
-
-`run_conflict_resolver.py` reads `branch` from `state.json` but does not assert `state == "CONFLICT_RESOLVING"`. In API-triggered paths the API route pre-transitions the state, so this is fine in practice. As a direct CLI invocation guard, a check here would prevent accidental misuse. Low risk given current call paths.
+**Resolver does not assert `state == CONFLICT_RESOLVING` at entry.** `run_conflict_resolver.py` reads `branch` from `state.json` but does not verify the current state before executing. This was noted in the previous review as low-risk: in all triggered paths (API route pre-transitions state, then spawns background subprocess), the state is already `CONFLICT_RESOLVING`. Risk of accidental misuse via direct CLI invocation is real but manageable. An explicit guard would improve defensive depth; it is not blocking.
 
 ---
 
@@ -101,18 +98,33 @@ Line 9: `"full content of each conflicted file (with conflict markers preserved)
 
 | Rule | Status |
 |---|---|
-| Never resolve conflicts on main | ✅ hard check at line 157 |
-| Never reset the branch | ✅ no `git reset --hard` anywhere |
-| No blind ours/theirs | ✅ AI agent role explicitly forbids this |
-| No auto-merge to main | ✅ approval gate required |
-| Force-with-lease only | ✅ `--force-with-lease` used |
-| Human review required | ✅ CONFLICT_RESOLVED_REVIEW_NEEDED gate |
-| All changes inside ticket worktree | ✅ subprocess CWD is resolved to ticket worktree |
+| Never resolve conflicts on main | ✅ Hard check at line 157 — transitions to FAILED if violated |
+| Never git reset --hard | ✅ Absent from all conflict-related scripts |
+| No blind ours/theirs | ✅ Explicitly forbidden in both AI role and prompt template |
+| No auto-merge to main | ✅ Human approval gate required before any workflow resumes |
+| Force-with-lease only | ✅ `--force-with-lease` used exclusively |
+| Human review required | ✅ CONFLICT_RESOLVED_REVIEW_NEEDED gate enforced |
+| All changes inside ticket worktree | ✅ subprocess CWD resolved to ticket worktree via `resolve_ticket_cwd` |
 
 ---
 
-## Summary
+## Acceptance Criteria Checklist
 
-The implementation is architecturally correct and satisfies the ticket requirements. All safety rules are respected. The one blocking issue is a misleading UI message in the failed state that tells users to click a button that doesn't exist. This must be corrected before merge.
+| Criterion | Status |
+|---|---|
+| User can launch conflict resolution from dashboard | ✅ |
+| Resolver runs in the existing ticket worktree | ✅ |
+| Resolver receives full ticket and conflict context | ✅ |
+| Resolved branch pushed with force-with-lease | ✅ |
+| Resolver artifacts persisted (context.md, resolution.md, test-report.md) | ✅ |
+| Dashboard shows status, summary, changed files and tests | ✅ |
+| Human approve/reject gate required before workflow resumes | ✅ |
+| Failure ends in CONFLICT_RESOLUTION_FAILED with logs | ✅ |
 
-IMPLEMENTATION_FIX_REQUIRED
+---
+
+## Conclusion
+
+All blocking issues from the previous review cycle have been addressed. The implementation is architecturally sound, respects all safety rules, covers all acceptance criteria, and the dashboard UI accurately reflects every state in the conflict resolution flow. The one remaining minor observation (no state assertion at resolver entry) is non-blocking and was carried from the previous review.
+
+IMPLEMENTATION_APPROVED
