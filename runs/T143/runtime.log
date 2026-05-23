@@ -21,3 +21,20 @@
 [2026-05-23T15:02:33Z] push: tolerating runtime dirty files (not blocking): ['runs/T143/runtime.log']
 [2026-05-23T15:02:33Z] push: pushing branch=ticket/T143-t143-conflict-resolver-agent-for-pr-branch-rebases
 [2026-05-23T15:02:35Z] push: done branch=ticket/T143-t143-conflict-resolver-agent-for-pr-branch-rebases
+[2026-05-23T15:39:02Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-05-23T15:39:02Z] auto-run: running step=planner
+[2026-05-23T15:39:02Z] auto-run: fix context: previous_output=runs/T143/plan.md
+[2026-05-23T15:39:02Z] auto-run: fix context: review=runs/T143/reviews/plan-review.md
+[2026-05-23T15:39:02Z] auto-run: fix context: fix_instructions=runs/T143/fixes/plan-fix-v1.md
+[2026-05-23T15:39:02Z] auto-run: fix context: context_file=runs/T143/fixes/context-20260523T153902Z.md
+[2026-05-23T15:39:02Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-05-23T15:39:02Z] prompt: generic fallback — injecting runs/T143/ticket.md
+[2026-05-23T15:39:02Z] compose: global-context=docs/ai/global-context.md
+[2026-05-23T15:39:02Z] compose: role=ai/roles/planner.md
+[2026-05-23T15:39:02Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-23T15:39:02Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-23T15:39:02Z] compose: skill=ai/skills/documentation.md
+[2026-05-23T15:39:02Z] compose: task (canonical prompt)
+[2026-05-23T15:39:02Z] compose: extra-context=runs/T143/fixes/context-20260523T153902Z.md
+[2026-05-23T15:39:02Z] snapshot: runtime-prompt=runs/T143/prompts/planner-attempt-2.md
+[2026-05-23T15:40:46Z] auto-run: step=planner done rc=0
