@@ -208,12 +208,13 @@ def _write_sandbox_env(
     api_port: int,
     web_port: int,
     compose_project: str,
+    supervisor_port: int,
 ) -> None:
-    supervisor_port = os.environ.get("AI_DEV_FACTORY_SUPERVISOR_PORT", "8090")
     lines = [
         f"AI_DEV_FACTORY_RUNTIME_ROOT={runtime_root}",
         f"AI_DEV_FACTORY_PROJECT_ROOT={project_root}",
         f"AI_DEV_FACTORY_SUPERVISOR_PORT={supervisor_port}",
+        f"AI_DEV_FACTORY_SUPERVISOR_URL=http://host.docker.internal:{supervisor_port}",
         f"API_PORT={api_port}",
         f"WEB_PORT={web_port}",
         f"COMPOSE_PROJECT_NAME={compose_project}",
@@ -487,6 +488,85 @@ def _run_scripts(
 # ── Main pipeline ────────────────────────────────────────────────────────────
 
 
+def _start_sandbox_supervisor(
+    supervisor_port: int,
+    sandbox_runtime_root: Path,
+    log_path: Path,
+) -> subprocess.Popen | None:
+    """Spawn a per-sandbox supervisor bound to *supervisor_port* with its own runtime root.
+
+    Writes ``{sandbox_runtime_root}/supervisor.pid`` so SandboxManager.destroy()
+    can SIGTERM the process on cleanup. Returns the Popen handle, or None on error.
+    """
+    repo_root = Path(__file__).resolve().parents[2]
+    supervisor_env = {
+        **os.environ,
+        "AI_DEV_FACTORY_RUNTIME_ROOT": str(sandbox_runtime_root),
+        "PYTHONDONTWRITEBYTECODE": "1",
+    }
+    cmd = [
+        sys.executable, "-m", "uvicorn",
+        "services.supervisor.main:app",
+        "--host", "127.0.0.1",
+        "--port", str(supervisor_port),
+    ]
+    _append_log(
+        log_path,
+        f"\n--- starting sandbox supervisor on port {supervisor_port} ---\n"
+        f"runtime_root: {sandbox_runtime_root}\n"
+        f"command: {' '.join(cmd)}\n",
+    )
+    try:
+        sup_log = sandbox_runtime_root / "supervisor.log"
+        with sup_log.open("a", encoding="utf-8") as sup_fh:
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(repo_root),
+                env=supervisor_env,
+                stdin=subprocess.DEVNULL,
+                stdout=sup_fh,
+                stderr=sup_fh,
+                start_new_session=True,
+            )
+        pid_path = sandbox_runtime_root / "supervisor.pid"
+        pid_path.write_text(
+            json.dumps({"pid": proc.pid, "port": supervisor_port}),
+            encoding="utf-8",
+        )
+        _append_log(log_path, f"sandbox supervisor started pid={proc.pid}\n")
+        return proc
+    except OSError as exc:
+        _append_log(log_path, f"sandbox supervisor failed to start: {exc}\n")
+        return None
+
+
+def _stop_sandbox_supervisor(
+    proc: subprocess.Popen | None,
+    sandbox_runtime_root: Path,
+    log_path: Path,
+) -> None:
+    """Terminate the sandbox supervisor subprocess."""
+    if proc is None:
+        return
+    try:
+        proc.terminate()
+        proc.wait(timeout=5)
+    except subprocess.TimeoutExpired:
+        try:
+            proc.kill()
+            proc.wait(timeout=2)
+        except (subprocess.TimeoutExpired, OSError):
+            pass
+    except OSError:
+        pass
+    pid_path = sandbox_runtime_root / "supervisor.pid"
+    try:
+        pid_path.unlink()
+    except OSError:
+        pass
+    _append_log(log_path, "sandbox supervisor stopped\n")
+
+
 def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
     base_dir = _sandbox_base_dir()
     sandbox_dir = base_dir / sandbox_id
@@ -501,6 +581,8 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
     slot = _allocate_port_slot(sandbox_id)
     api_port = 8080 + slot * 100
     web_port = 3000 + slot * 100
+    supervisor_port = 8090 + slot
+
     # Sandbox IDs use a UTC timestamp like ``20260522T204456`` whose
     # uppercase ``T`` is rejected by Docker Compose. Normalise the
     # project name so it always matches ``^[a-z0-9][a-z0-9_-]*$`` while
@@ -508,9 +590,16 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
     compose_project = normalize_compose_project_name(f"sandbox-{sandbox_id}")
     ports = {"api_port": api_port, "web_port": web_port}
 
+    # Each sandbox gets its own isolated runtime root so its supervisor serves
+    # only that sandbox's state, not the main runtime state.
+    sandbox_runtime_root = _runtime_root() / "sandboxes" / sandbox_id / "runtime"
+    sandbox_runtime_root.mkdir(parents=True, exist_ok=True)
+    for subdir in ("state", "logs", "runs"):
+        (sandbox_runtime_root / subdir).mkdir(exist_ok=True)
+
     _write_sandbox_env(
-        sandbox_dir, sandbox_id, _runtime_root(), project_root,
-        api_port, web_port, compose_project,
+        sandbox_dir, sandbox_id, sandbox_runtime_root, project_root,
+        api_port, web_port, compose_project, supervisor_port,
     )
 
     started_at = _now_iso()
@@ -532,8 +621,13 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
     _append_log(log_path, f"=== sandbox {sandbox_id} started {started_at} ===\n")
     _append_log(log_path, f"project_root: {project_root}\n")
     _append_log(log_path, f"runtime_root: {_runtime_root()}\n")
+    _append_log(log_path, f"sandbox_runtime_root: {sandbox_runtime_root}\n")
     _append_log(log_path, f"sandbox_dir: {sandbox_dir}\n")
-    _append_log(log_path, f"port_slot: {slot}  api_port: {api_port}  web_port: {web_port}\n")
+    _append_log(
+        log_path,
+        f"port_slot: {slot}  api_port: {api_port}  web_port: {web_port}"
+        f"  supervisor_port: {supervisor_port}\n",
+    )
     raw_compose = f"sandbox-{sandbox_id}"
     if compose_project != raw_compose:
         _append_log(
@@ -548,7 +642,11 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
         "WEB_PORT": str(web_port),
         "COMPOSE_PROJECT_NAME": compose_project,
         "SANDBOX_ID": sandbox_id,
+        "AI_DEV_FACTORY_SUPERVISOR_PORT": str(supervisor_port),
+        "AI_DEV_FACTORY_SUPERVISOR_URL": f"http://host.docker.internal:{supervisor_port}",
     }
+
+    supervisor_proc = _start_sandbox_supervisor(supervisor_port, sandbox_runtime_root, log_path)
 
     try:
         ok, error = _create_worktree(project_root, worktree_path, log_path)
@@ -596,6 +694,7 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
         })
         return 1
     finally:
+        _stop_sandbox_supervisor(supervisor_proc, sandbox_runtime_root, log_path)
         _release_port_slot(sandbox_id)
 
 
