@@ -1,0 +1,289 @@
+"""Tests for T143 — conflict detection and CONFLICT_RESOLUTION_* states."""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).parent.parent / "tools" / "agent_runner"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from run_ticket import VALID_STATES, TRANSITIONS
+from run_daemon import (
+    AUTO_RUNNABLE_STATES,
+    HUMAN_GATE_STATES,
+    _load_state_json,
+    _save_state_json,
+    detect_pr_conflict,
+)
+
+
+# ── VALID_STATES ──────────────────────────────────────────────────────────────
+
+def test_conflict_resolution_needed_in_valid_states():
+    assert "CONFLICT_RESOLUTION_NEEDED" in VALID_STATES
+
+
+def test_conflict_resolution_failed_in_valid_states():
+    assert "CONFLICT_RESOLUTION_FAILED" in VALID_STATES
+
+
+# ── AUTO_RUNNABLE_STATES ──────────────────────────────────────────────────────
+
+def test_conflict_resolution_needed_not_auto_runnable():
+    assert "CONFLICT_RESOLUTION_NEEDED" not in AUTO_RUNNABLE_STATES
+
+
+def test_conflict_resolution_failed_not_auto_runnable():
+    assert "CONFLICT_RESOLUTION_FAILED" not in AUTO_RUNNABLE_STATES
+
+
+# ── HUMAN_GATE_STATES ─────────────────────────────────────────────────────────
+
+def test_conflict_resolution_needed_in_human_gate():
+    assert "CONFLICT_RESOLUTION_NEEDED" in HUMAN_GATE_STATES
+
+
+def test_conflict_resolution_failed_in_human_gate():
+    assert "CONFLICT_RESOLUTION_FAILED" in HUMAN_GATE_STATES
+
+
+# ── TRANSITIONS ───────────────────────────────────────────────────────────────
+
+def test_conflict_resolution_failed_is_terminal():
+    assert "CONFLICT_RESOLUTION_FAILED" not in TRANSITIONS
+
+
+def test_conflict_resolution_needed_is_not_in_transitions():
+    assert "CONFLICT_RESOLUTION_NEEDED" not in TRANSITIONS
+
+
+# ── detect_pr_conflict — gh returns CONFLICTING ───────────────────────────────
+
+def _make_run_dir(tmp_path: Path, ticket_id: str = "T001", **extra) -> Path:
+    run_dir = tmp_path / ticket_id
+    run_dir.mkdir(parents=True)
+    state = {"ticket_id": ticket_id, "state": "IMPLEMENTATION_REVIEW_NEEDED", "pr_number": 42, **extra}
+    (run_dir / "state.json").write_text(json.dumps(state, indent=2), encoding="utf-8")
+    return run_dir
+
+
+def _mock_gh_conflicting(files=None):
+    files = files or [{"path": "src/foo.py"}, {"path": "src/bar.py"}]
+    mergeable_response = MagicMock(returncode=0, stdout=json.dumps({"mergeable": "CONFLICTING"}))
+    files_response = MagicMock(returncode=0, stdout=json.dumps({"files": files}))
+    return [mergeable_response, files_response]
+
+
+def test_detect_pr_conflict_returns_true_on_conflicting(tmp_path):
+    run_dir = _make_run_dir(tmp_path)
+    with patch("run_daemon.subprocess.run", side_effect=_mock_gh_conflicting()):
+        result = detect_pr_conflict("T001", 42, run_dir, repo=None)
+    assert result is True
+
+
+def test_detect_pr_conflict_writes_metadata_to_state_json(tmp_path):
+    run_dir = _make_run_dir(tmp_path)
+    with patch("run_daemon.subprocess.run", side_effect=_mock_gh_conflicting()):
+        detect_pr_conflict("T001", 42, run_dir, repo=None)
+    data = _load_state_json(run_dir)
+    assert data["state"] == "CONFLICT_RESOLUTION_NEEDED"
+    assert data["pre_conflict_state"] == "IMPLEMENTATION_REVIEW_NEEDED"
+    assert data["conflict_pr_number"] == 42
+    assert "conflict_detected_at" in data
+    assert isinstance(data["conflicted_files"], list)
+
+
+def test_detect_pr_conflict_captures_file_list(tmp_path):
+    run_dir = _make_run_dir(tmp_path)
+    files = [{"path": "tools/foo.py"}, {"path": "services/bar.py"}]
+    with patch("run_daemon.subprocess.run", side_effect=_mock_gh_conflicting(files)):
+        detect_pr_conflict("T001", 42, run_dir)
+    data = _load_state_json(run_dir)
+    assert "tools/foo.py" in data["conflicted_files"]
+    assert "services/bar.py" in data["conflicted_files"]
+
+
+# ── detect_pr_conflict — gh returns non-conflicting ──────────────────────────
+
+def test_detect_pr_conflict_returns_false_when_mergeable(tmp_path):
+    run_dir = _make_run_dir(tmp_path)
+    mergeable_response = MagicMock(returncode=0, stdout=json.dumps({"mergeable": "MERGEABLE"}))
+    with patch("run_daemon.subprocess.run", return_value=mergeable_response):
+        result = detect_pr_conflict("T001", 42, run_dir)
+    assert result is False
+
+
+def test_detect_pr_conflict_does_not_modify_state_when_not_conflicting(tmp_path):
+    run_dir = _make_run_dir(tmp_path)
+    original = _load_state_json(run_dir)
+    mergeable_response = MagicMock(returncode=0, stdout=json.dumps({"mergeable": "MERGEABLE"}))
+    with patch("run_daemon.subprocess.run", return_value=mergeable_response):
+        detect_pr_conflict("T001", 42, run_dir)
+    data = _load_state_json(run_dir)
+    assert data["state"] == original["state"]
+
+
+# ── detect_pr_conflict — gh failure ──────────────────────────────────────────
+
+def test_detect_pr_conflict_returns_false_on_gh_error(tmp_path):
+    run_dir = _make_run_dir(tmp_path)
+    error_response = MagicMock(returncode=1, stdout="", stderr="Not found")
+    with patch("run_daemon.subprocess.run", return_value=error_response):
+        result = detect_pr_conflict("T001", 42, run_dir)
+    assert result is False
+
+
+def test_detect_pr_conflict_returns_false_when_gh_missing(tmp_path):
+    run_dir = _make_run_dir(tmp_path)
+    with patch("run_daemon.subprocess.run", side_effect=FileNotFoundError):
+        result = detect_pr_conflict("T001", 42, run_dir)
+    assert result is False
+
+
+def test_detect_pr_conflict_returns_false_on_invalid_json(tmp_path):
+    run_dir = _make_run_dir(tmp_path)
+    bad_response = MagicMock(returncode=0, stdout="not-json")
+    with patch("run_daemon.subprocess.run", return_value=bad_response):
+        result = detect_pr_conflict("T001", 42, run_dir)
+    assert result is False
+
+
+# ── TicketSummary — conflict fields serialised ────────────────────────────────
+
+def test_ticket_summary_serialises_conflict_fields():
+    from services.control_api.models.schemas import TicketSummary
+
+    ts = TicketSummary(
+        ticket_id="T001",
+        state="CONFLICT_RESOLUTION_NEEDED",
+        conflict_status="CONFLICT_RESOLUTION_NEEDED",
+        conflicted_files=["src/foo.py"],
+        conflict_detected_at="2026-05-23T12:00:00Z",
+        pre_conflict_state="PLAN_APPROVED",
+    )
+    d = ts.model_dump()
+    assert d["conflict_status"] == "CONFLICT_RESOLUTION_NEEDED"
+    assert d["conflicted_files"] == ["src/foo.py"]
+    assert d["conflict_detected_at"] == "2026-05-23T12:00:00Z"
+    assert d["pre_conflict_state"] == "PLAN_APPROVED"
+
+
+def test_ticket_summary_conflict_fields_default_to_none():
+    from services.control_api.models.schemas import TicketSummary
+
+    ts = TicketSummary(ticket_id="T001", state="PLAN_APPROVED")
+    assert ts.conflict_status is None
+    assert ts.conflicted_files is None
+    assert ts.conflict_detected_at is None
+    assert ts.pre_conflict_state is None
+
+
+# ── GET /tickets/{id} returns conflict fields ─────────────────────────────────
+
+def _make_app(tmp_path: Path):
+    from services.control_api.main import create_app
+    return create_app(project_root=tmp_path)
+
+
+def _make_ticket(tmp_path: Path, ticket_id: str, state: str, **extra) -> Path:
+    run_dir = tmp_path / "runs" / ticket_id
+    run_dir.mkdir(parents=True)
+    data = {"ticket_id": ticket_id, "state": state, **extra}
+    (run_dir / "state.json").write_text(json.dumps(data), encoding="utf-8")
+    return run_dir
+
+
+@pytest.fixture()
+def isolated_tmp(tmp_path, monkeypatch):
+    """tmp_path with AI_DEV_FACTORY_RUNTIME_ROOT cleared so resolve_runs_dir uses tmp_path."""
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    return tmp_path
+
+
+def test_get_ticket_exposes_conflict_fields(isolated_tmp):
+    from fastapi.testclient import TestClient
+
+    _make_ticket(
+        isolated_tmp, "T001", "CONFLICT_RESOLUTION_NEEDED",
+        pre_conflict_state="PLAN_APPROVED",
+        conflict_detected_at="2026-05-23T10:00:00Z",
+        conflict_pr_number=7,
+        conflicted_files=["a.py", "b.py"],
+    )
+    client = TestClient(_make_app(isolated_tmp))
+    r = client.get("/tickets/T001")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["conflict_status"] == "CONFLICT_RESOLUTION_NEEDED"
+    assert body["pre_conflict_state"] == "PLAN_APPROVED"
+    assert body["conflict_detected_at"] == "2026-05-23T10:00:00Z"
+    assert body["conflicted_files"] == ["a.py", "b.py"]
+
+
+def test_get_ticket_conflict_fields_null_when_no_conflict(isolated_tmp):
+    from fastapi.testclient import TestClient
+
+    _make_ticket(isolated_tmp, "T001", "PLAN_APPROVED")
+    client = TestClient(_make_app(isolated_tmp))
+    r = client.get("/tickets/T001")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["conflict_status"] is None
+    assert body["conflicted_files"] is None
+
+
+# ── POST /mark-conflict-failed ────────────────────────────────────────────────
+
+def test_mark_conflict_failed_transitions_state(isolated_tmp):
+    from fastapi.testclient import TestClient
+
+    _make_ticket(isolated_tmp, "T001", "CONFLICT_RESOLUTION_NEEDED",
+                 pre_conflict_state="PLAN_APPROVED",
+                 conflict_detected_at="2026-05-23T10:00:00Z",
+                 conflicted_files=[])
+    client = TestClient(_make_app(isolated_tmp))
+    r = client.post("/tickets/T001/mark-conflict-failed")
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+
+    state_file = isolated_tmp / "runs" / "T001" / "state.json"
+    data = json.loads(state_file.read_text())
+    assert data["state"] == "CONFLICT_RESOLUTION_FAILED"
+
+
+def test_mark_conflict_failed_returns_409_from_wrong_state(isolated_tmp):
+    from fastapi.testclient import TestClient
+
+    _make_ticket(isolated_tmp, "T001", "PLAN_APPROVED")
+    client = TestClient(_make_app(isolated_tmp))
+    r = client.post("/tickets/T001/mark-conflict-failed")
+    assert r.status_code == 409
+
+
+def test_mark_conflict_failed_returns_409_from_conflict_resolution_failed(isolated_tmp):
+    from fastapi.testclient import TestClient
+
+    _make_ticket(isolated_tmp, "T001", "CONFLICT_RESOLUTION_FAILED")
+    client = TestClient(_make_app(isolated_tmp))
+    r = client.post("/tickets/T001/mark-conflict-failed")
+    assert r.status_code == 409
+
+
+def test_mark_conflict_failed_returns_404_on_unknown_ticket(isolated_tmp):
+    from fastapi.testclient import TestClient
+
+    (isolated_tmp / "runs").mkdir(parents=True)
+    client = TestClient(_make_app(isolated_tmp))
+    r = client.post("/tickets/T999/mark-conflict-failed")
+    assert r.status_code == 404
+
+
+# ── CONFLICT_RESOLUTION_FAILED is terminal ────────────────────────────────────
+
+def test_conflict_resolution_failed_has_no_outgoing_transitions():
+    assert TRANSITIONS.get("CONFLICT_RESOLUTION_FAILED", "NOT_PRESENT") == "NOT_PRESENT"

@@ -1,3 +1,4 @@
+import datetime
 import json
 import logging
 import sys
@@ -10,7 +11,7 @@ from fastapi.responses import PlainTextResponse
 from ..dependencies import resolve_project
 from ..models.schemas import ActionResult, AuditEvent, TicketSummary, TimelineResponse
 from ..services import artifact_reader, subprocess_runner
-from ..services.runtime_resolver import resolve_worktrees_dir
+from ..services.runtime_resolver import resolve_ticket_run_dir, resolve_runs_dir, resolve_worktrees_dir
 
 _TOOLS_DIR = Path(__file__).resolve().parents[3] / "tools" / "agent_runner"
 if str(_TOOLS_DIR) not in sys.path:
@@ -228,6 +229,50 @@ def archive(ticket_id: str, request: Request) -> ActionResult:
     return result
 
 
+# ── conflict endpoints ────────────────────────────────────────────────────────
+
+def _mark_conflict_failed(project_root: Path, ticket_id: str, worktrees_dir: Path | None) -> ActionResult:
+    """Transition CONFLICT_RESOLUTION_NEEDED → CONFLICT_RESOLUTION_FAILED.
+
+    Returns an ActionResult with ok=False and a 409 error code stored in
+    `error` when the ticket is not in CONFLICT_RESOLUTION_NEEDED.
+    """
+    run_dir = resolve_ticket_run_dir(ticket_id, resolve_runs_dir(project_root), worktrees_dir)
+    state_file = run_dir / "state.json"
+    if not state_file.exists():
+        return ActionResult(ok=False, message=f"ticket {ticket_id} not found", returncode=404)
+    try:
+        data = json.loads(state_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return ActionResult(ok=False, message=f"state.json unreadable: {exc}", returncode=-1)
+
+    if data.get("state") != "CONFLICT_RESOLUTION_NEEDED":
+        return ActionResult(
+            ok=False,
+            message=f"ticket {ticket_id} is not in CONFLICT_RESOLUTION_NEEDED (current: {data.get('state')!r})",
+            returncode=409,
+            error="wrong_state",
+        )
+
+    data["state"] = "CONFLICT_RESOLUTION_FAILED"
+    data["updated_at"] = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    tmp = state_file.with_suffix(".tmp")
+    tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    tmp.replace(state_file)
+    return ActionResult(ok=True, message="transitioned to CONFLICT_RESOLUTION_FAILED")
+
+
+@router.post("/{ticket_id}/mark-conflict-failed", response_model=ActionResult)
+def mark_conflict_failed(ticket_id: str, request: Request) -> ActionResult:
+    logger.info("api: POST /tickets/%s/mark-conflict-failed", ticket_id)
+    _get_or_404(_root(request), ticket_id, _worktrees_dir(request))
+    result = _mark_conflict_failed(_root(request), ticket_id, _worktrees_dir(request))
+    if result.returncode == 409:
+        raise HTTPException(status_code=409, detail=result.message)
+    _log_action(request, ticket_id, "mark-conflict-failed", result)
+    return result
+
+
 # ── audit log endpoint ────────────────────────────────────────────────────────
 
 @router.get("/{ticket_id}/audit-log", response_model=list[AuditEvent])
@@ -419,6 +464,17 @@ def project_archive(ticket_id: str, request: Request, project_root: Path = Depen
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.archive_ticket(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "archive", result)
+    return result
+
+
+@project_router.post("/{project_id}/tickets/{ticket_id}/mark-conflict-failed", response_model=ActionResult)
+def project_mark_conflict_failed(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
+    wt_dir = resolve_worktrees_dir(project_root)
+    _get_or_404(project_root, ticket_id, wt_dir)
+    result = _mark_conflict_failed(project_root, ticket_id, wt_dir)
+    if result.returncode == 409:
+        raise HTTPException(status_code=409, detail=result.message)
+    _log_action(request, ticket_id, "mark-conflict-failed", result)
     return result
 
 

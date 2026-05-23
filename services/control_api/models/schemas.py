@@ -61,6 +61,10 @@ class TicketSummary(BaseModel):
     updated_at: str | None = None
     last_log: str | None = None
     retry_info: RetryInfo | None = None
+    conflict_status: str | None = None
+    conflicted_files: list[str] | None = None
+    conflict_detected_at: str | None = None
+    pre_conflict_state: str | None = None
 
 
 class TicketDetail(TicketSummary):

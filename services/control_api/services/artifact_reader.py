@@ -61,6 +61,18 @@ def _read_last_error(run_dir: Path) -> str | None:
     return None
 
 
+def _conflict_fields(data: dict) -> dict:
+    """Extract conflict metadata from a state.json dict. All fields nullable."""
+    state = data.get("state", "")
+    conflict_status = state if state in ("CONFLICT_RESOLUTION_NEEDED", "CONFLICT_RESOLUTION_FAILED") else None
+    return {
+        "conflict_status": conflict_status,
+        "conflicted_files": data.get("conflicted_files") or None,
+        "conflict_detected_at": data.get("conflict_detected_at") or None,
+        "pre_conflict_state": data.get("pre_conflict_state") or None,
+    }
+
+
 def validate_ticket_id(ticket_id: str) -> None:
     if not TICKET_ID_RE.fullmatch(ticket_id):
         raise ValueError(f"invalid ticket_id: {ticket_id!r}")
@@ -93,6 +105,7 @@ def list_tickets(project_root: Path, worktrees_dir: Path | None = None) -> list[
                     issue_number=data.get("issue_number"),
                     updated_at=data.get("updated_at"),
                     last_log=_last_log_line(run_dir / "runtime.log"),
+                    **_conflict_fields(data),
                 )
             except (json.JSONDecodeError, OSError):
                 continue
@@ -116,6 +129,7 @@ def list_tickets(project_root: Path, worktrees_dir: Path | None = None) -> list[
                     issue_number=data.get("issue_number"),
                     updated_at=data.get("updated_at"),
                     last_log=_last_log_line(entry / "runtime.log"),
+                    **_conflict_fields(data),
                 )
             except (json.JSONDecodeError, OSError):
                 continue
@@ -138,6 +152,7 @@ def get_ticket(project_root: Path, ticket_id: str, worktrees_dir: Path | None = 
             issue_number=data.get("issue_number"),
             updated_at=data.get("updated_at"),
             retry_info=_read_retry_state(run_dir),
+            **_conflict_fields(data),
         )
     except (json.JSONDecodeError, OSError):
         return None
@@ -220,6 +235,10 @@ _STATUS_MAP: dict[str, tuple[list[str], bool]] = {
         ["done", "done", "done", "done", "done", "running", "pending"], False),
     "IMPLEMENTATION_APPROVED": (
         ["done", "done", "done", "done", "done", "skipped", "running"], False),
+    "CONFLICT_RESOLUTION_NEEDED": (
+        ["done", "done", "done", "done", "done", "done", "waiting_human"], True),
+    "CONFLICT_RESOLUTION_FAILED": (
+        ["done", "done", "done", "done", "done", "done", "failed"], True),
 }
 
 
