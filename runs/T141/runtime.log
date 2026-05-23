@@ -72,3 +72,7 @@
 [2026-05-23T07:59:02Z] compose: extra-context=runs/T141/fixes/context-20260523T075902Z.md
 [2026-05-23T07:59:02Z] snapshot: runtime-prompt=runs/T141/prompts/planner-attempt-5.md
 [2026-05-23T07:59:40Z] auto-run: step=planner done rc=0
+[2026-05-23T07:59:42Z] planner checkpoint: committed
+[2026-05-23T07:59:42Z] planner checkpoint: pushed
+[2026-05-23T07:59:42Z] planner validation failed: plan sans section reconnue (Objective/Included/Excluded/Acceptance criteria — ou équivalents FR)
+[2026-05-23T08:02:05Z] auto-run: step=planner done rc=0
