@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from ..models.sandbox import SandboxState, SandboxStatus
+from .runtime_resolver import get_project_sandbox_dir
 
 # Single source of truth for compose project-name normalisation, shared
 # with the host-side worker (tools/agent_runner/run_sandbox.py). The
@@ -46,11 +47,7 @@ class SandboxNotFoundError(Exception):
 class SandboxManager:
     def __init__(self, sandboxes_dir: Path | None = None) -> None:
         if sandboxes_dir is None:
-            runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
-            if runtime_root:
-                sandboxes_dir = Path(runtime_root) / "sandboxes"
-            else:
-                sandboxes_dir = Path.cwd() / "sandboxes"
+            sandboxes_dir = get_project_sandbox_dir()
         self.sandboxes_dir = sandboxes_dir
         self.sandboxes_dir.mkdir(parents=True, exist_ok=True)
         self._registry_path = self.sandboxes_dir / "port-registry.json"

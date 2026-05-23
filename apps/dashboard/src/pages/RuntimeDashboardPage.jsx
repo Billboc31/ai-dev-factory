@@ -23,10 +23,55 @@ function Section({ title, children }) {
   )
 }
 
+function SandboxTopologyPanel({ overview }) {
+  if (!overview) {
+    return <p className="text-sm text-gray-400">Loading topology…</p>
+  }
+  const statusCounts = overview.sandboxes.reduce((acc, s) => {
+    acc[s.status] = (acc[s.status] || 0) + 1
+    return acc
+  }, {})
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-3 gap-3">
+        <div className="bg-gray-50 border border-gray-200 rounded p-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Sandbox Root</p>
+          <p className="text-xs font-mono text-gray-700 break-all">{overview.sandbox_root}</p>
+        </div>
+        <div className="bg-gray-50 border border-gray-200 rounded p-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Project</p>
+          <p className="text-sm font-medium text-gray-800">{overview.project_name}</p>
+        </div>
+        <div className="bg-gray-50 border border-gray-200 rounded p-3">
+          <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Total Sandboxes</p>
+          <p className="text-2xl font-bold text-gray-800">{overview.sandboxes.length}</p>
+        </div>
+      </div>
+      <div className="bg-gray-50 border border-gray-200 rounded p-3">
+        <p className="text-xs font-semibold text-gray-500 uppercase mb-1">Project Sandbox Dir</p>
+        <p className="text-xs font-mono text-gray-700 break-all">{overview.project_sandbox_dir}</p>
+      </div>
+      {Object.keys(statusCounts).length > 0 && (
+        <div className="flex gap-2 flex-wrap">
+          {Object.entries(statusCounts).map(([status, count]) => (
+            <span
+              key={status}
+              className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700"
+            >
+              {status} <span className="font-bold">{count}</span>
+            </span>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function RuntimeDashboardPage() {
   const [sandboxRuns, setSandboxRuns] = useState([])
   const [proposalRuns, setProposalRuns] = useState([])
   const [health, setHealth] = useState(null)
+  const [overview, setOverview] = useState(null)
   const [error, setError] = useState(null)
   const [logSandboxId, setLogSandboxId] = useState(null)
 
@@ -58,9 +103,19 @@ export default function RuntimeDashboardPage() {
     }
   }, [])
 
+  const fetchOverview = useCallback(async () => {
+    try {
+      const res = await api.getRuntimeOverview()
+      setOverview(res.data)
+    } catch {
+      // non-critical — overview endpoint may be temporarily unavailable
+    }
+  }, [])
+
   usePolling(fetchSandboxRuns, 5000)
   usePolling(fetchProposalRuns, 5000)
   usePolling(fetchHealth, 5000)
+  usePolling(fetchOverview, 5000)
 
   const handleOpenLogs = (sandboxId) => {
     setLogSandboxId(sandboxId)
@@ -75,6 +130,10 @@ export default function RuntimeDashboardPage() {
       <h1 className="text-2xl font-bold text-gray-900">Runtime Dashboard</h1>
 
       <ErrorBanner message={error} onClose={() => setError(null)} />
+
+      <Section title="Sandbox Topology">
+        <SandboxTopologyPanel overview={overview} />
+      </Section>
 
       <Section title="Sandbox Runs">
         <SandboxRunsTable

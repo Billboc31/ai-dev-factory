@@ -37,6 +37,7 @@ from ..models.schemas import (
     SandboxValidationStatus,
 )
 from ..services import sandbox_runner
+from ..services.runtime_resolver import get_project_sandbox_dir
 from ..services.sandbox_manager import SandboxManager, SandboxNotFoundError
 
 
@@ -251,10 +252,7 @@ runs_router = APIRouter(prefix="/sandbox-runs", tags=["sandbox"])
 
 
 def _sandboxes_root() -> Path | None:
-    rr = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
-    if rr:
-        return Path(rr).expanduser().resolve() / "sandboxes"
-    return None
+    return get_project_sandbox_dir()
 
 
 def _port_registry_path() -> Path | None:

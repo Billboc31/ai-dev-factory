@@ -67,8 +67,9 @@ class ContainerToHostMapper:
         else:
             logger.warning(
                 "path_mapper: no mapping rules configured "
-                "(set CONTAINER_PROJECT_ROOT/HOST_PROJECT_ROOT and/or "
-                "CONTAINER_RUNTIME_ROOT/HOST_RUNTIME_ROOT in deploy/.env). "
+                "(set CONTAINER_PROJECT_ROOT/HOST_PROJECT_ROOT, "
+                "CONTAINER_RUNTIME_ROOT/HOST_RUNTIME_ROOT, and/or "
+                "CONTAINER_SANDBOX_ROOT/HOST_SANDBOX_ROOT in deploy/.env). "
                 "All paths will be returned unchanged."
             )
 
@@ -78,6 +79,7 @@ class ContainerToHostMapper:
         pairs = (
             ("project-root", "CONTAINER_PROJECT_ROOT", "HOST_PROJECT_ROOT"),
             ("runtime-root", "CONTAINER_RUNTIME_ROOT", "HOST_RUNTIME_ROOT"),
+            ("sandbox-root", "CONTAINER_SANDBOX_ROOT", "HOST_SANDBOX_ROOT"),
         )
         for name, container_env, host_env in pairs:
             container = (os.environ.get(container_env) or "").strip()

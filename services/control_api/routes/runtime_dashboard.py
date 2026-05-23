@@ -23,6 +23,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
+from ..services.runtime_resolver import get_project_name, get_project_sandbox_dir, get_sandbox_root
 from ..services.sandbox_manager import SandboxManager, SandboxNotFoundError
 
 router = APIRouter(prefix="/runtime-dashboard", tags=["runtime-dashboard"])
@@ -35,10 +36,6 @@ _ACTIVE_STATUSES = {"running", "creating", "active"}
 
 def _project_root(request: Request) -> Path:
     return request.app.state.project_root
-
-
-def _sandboxes_root(project_root: Path) -> Path:
-    return project_root / "sandboxes"
 
 
 def _proposal_dir(project_root: Path) -> Path:
@@ -79,6 +76,16 @@ def _check_supervisor_status() -> str:
         return "down"
 
 
+def _get_sandbox_manager(request: Request) -> SandboxManager:
+    if not hasattr(request.app.state, "_sandbox_manager"):
+        request.app.state._sandbox_manager = SandboxManager()
+    return request.app.state._sandbox_manager
+
+
+def _get_sandboxes_dir(request: Request) -> Path:
+    return _get_sandbox_manager(request).sandboxes_dir
+
+
 # ── models ────────────────────────────────────────────────────────────────────
 
 class SandboxRunSummary(BaseModel):
@@ -113,6 +120,13 @@ class RuntimeHealth(BaseModel):
     active_jobs: int
     stale_pid_files: list[str]
     stale_locks: list[str]
+
+
+class OverviewResponse(BaseModel):
+    sandbox_root: str
+    project_name: str
+    project_sandbox_dir: str
+    sandboxes: list[SandboxRunSummary]
 
 
 # ── sandbox run parsing ───────────────────────────────────────────────────────
@@ -152,9 +166,26 @@ def _parse_sandbox_state(state_path: Path) -> SandboxRunSummary | None:
 
 # ── sandbox runs ──────────────────────────────────────────────────────────────
 
+@router.get("/overview", response_model=OverviewResponse)
+def get_overview(request: Request) -> OverviewResponse:
+    sandboxes_dir = _get_sandboxes_dir(request)
+    sandboxes = []
+    if sandboxes_dir.exists():
+        for state_file in sorted(sandboxes_dir.glob("*/state.json")):
+            item = _parse_sandbox_state(state_file)
+            if item is not None:
+                sandboxes.append(item)
+    return OverviewResponse(
+        sandbox_root=str(get_sandbox_root()),
+        project_name=get_project_name(),
+        project_sandbox_dir=str(get_project_sandbox_dir()),
+        sandboxes=sandboxes,
+    )
+
+
 @router.get("/sandbox-runs", response_model=list[SandboxRunSummary])
 def list_sandbox_runs(request: Request) -> list[SandboxRunSummary]:
-    root = _sandboxes_root(_project_root(request))
+    root = _get_sandboxes_dir(request)
     if not root.exists():
         return []
     results = []
@@ -173,7 +204,7 @@ def get_sandbox_run_logs(
 ) -> LogResponse:
     if not re.fullmatch(r"[a-zA-Z0-9_\-]+", sandbox_id):
         raise HTTPException(status_code=400, detail="invalid sandbox_id")
-    root = _sandboxes_root(_project_root(request))
+    root = _get_sandboxes_dir(request)
     sandbox_dir = root / sandbox_id
     if not sandbox_dir.exists():
         raise HTTPException(status_code=404, detail=f"sandbox not found: {sandbox_id}")
@@ -192,7 +223,7 @@ def get_sandbox_run_logs(
 def delete_sandbox_run(sandbox_id: str, request: Request) -> Response:
     if not re.fullmatch(r"[a-zA-Z0-9_\-]+", sandbox_id):
         raise HTTPException(status_code=400, detail="invalid sandbox_id")
-    root = _sandboxes_root(_project_root(request))
+    root = _get_sandboxes_dir(request)
     sandbox_dir = root / sandbox_id
     if not sandbox_dir.exists():
         raise HTTPException(status_code=404, detail=f"sandbox not found: {sandbox_id}")
@@ -222,12 +253,6 @@ def delete_sandbox_run(sandbox_id: str, request: Request) -> Response:
     shutil.rmtree(sandbox_dir, ignore_errors=True)
     logger.info("runtime-dashboard: deleted sandbox run %s", sandbox_id)
     return Response(status_code=204)
-
-
-def _get_sandbox_manager(request: Request) -> SandboxManager:
-    if not hasattr(request.app.state, "_sandbox_manager"):
-        request.app.state._sandbox_manager = SandboxManager()
-    return request.app.state._sandbox_manager
 
 
 @router.post("/sandbox-runs/{sandbox_id}/stop", response_model=SandboxRunSummary)

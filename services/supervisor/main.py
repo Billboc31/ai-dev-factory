@@ -937,7 +937,18 @@ def sandbox_start(body: SandboxStartRequest):
         # The mapper is the SAME instance used by /analysis/start so the
         # mapping rules are consistent across all supervisor-managed jobs.
         mapped_root = mapper.map(body.project_root)
-        sandbox_root = str(_runtime_root() / "sandboxes")
+        _sandbox_root_env = os.environ.get("SANDBOX_ROOT", "").strip()
+        _sandbox_root_path = (
+            Path(_sandbox_root_env).expanduser().resolve()
+            if _sandbox_root_env
+            else Path.home() / "sandboxes"
+        )
+        _proj_name = (
+            os.environ.get("PROJECT_NAME", "").strip()
+            or Path(os.environ.get("AI_DEV_FACTORY_PROJECT_ROOT", "")).name
+            or "default"
+        )
+        sandbox_root = str(_sandbox_root_path / _proj_name)
         logger.info(
             "supervisor spawning sandbox validation project_id=%s",
             body.project_id,

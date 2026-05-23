@@ -122,8 +122,27 @@ def _runtime_root() -> Path:
     return Path.cwd() / ".ai-dev-factory"
 
 
+def _sandbox_root() -> Path:
+    """Resolve the top-level sandbox root from SANDBOX_ROOT, expanding ~."""
+    raw = os.environ.get("SANDBOX_ROOT", "")
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return Path.home() / "sandboxes"
+
+
+def _project_name() -> str:
+    """Return the project name from PROJECT_NAME or basename of AI_DEV_FACTORY_PROJECT_ROOT."""
+    name = os.environ.get("PROJECT_NAME", "").strip()
+    if name:
+        return name
+    project_root = os.environ.get("AI_DEV_FACTORY_PROJECT_ROOT", "").strip()
+    if project_root:
+        return Path(project_root).name
+    return "default"
+
+
 def _sandbox_base_dir() -> Path:
-    p = _runtime_root() / "sandboxes"
+    p = _sandbox_root() / _project_name()
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -154,8 +173,7 @@ def _make_sandbox_id(project_id: str) -> str:
 # web_port = 3000 + slot*100.
 
 def _port_registry_paths() -> tuple[Path, Path]:
-    base = _runtime_root() / "sandboxes"
-    base.mkdir(parents=True, exist_ok=True)
+    base = _sandbox_base_dir()
     return base / "port-registry.json", base / ".port-registry.lock"
 
 
@@ -219,6 +237,8 @@ def _write_sandbox_env(
         f"WEB_PORT={web_port}",
         f"COMPOSE_PROJECT_NAME={compose_project}",
         f"SANDBOX_ID={sandbox_id}",
+        f"SANDBOX_ROOT={_sandbox_root()}",
+        f"PROJECT_NAME={_project_name()}",
     ]
     (sandbox_dir / "deploy.env").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
@@ -592,7 +612,7 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
 
     # Each sandbox gets its own isolated runtime root so its supervisor serves
     # only that sandbox's state, not the main runtime state.
-    sandbox_runtime_root = _runtime_root() / "sandboxes" / sandbox_id / "runtime"
+    sandbox_runtime_root = sandbox_dir / "runtime"
     sandbox_runtime_root.mkdir(parents=True, exist_ok=True)
     for subdir in ("state", "logs", "runs"):
         (sandbox_runtime_root / subdir).mkdir(exist_ok=True)
@@ -644,6 +664,8 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
         "SANDBOX_ID": sandbox_id,
         "AI_DEV_FACTORY_SUPERVISOR_PORT": str(supervisor_port),
         "AI_DEV_FACTORY_SUPERVISOR_URL": f"http://host.docker.internal:{supervisor_port}",
+        "SANDBOX_ROOT": str(_sandbox_root()),
+        "PROJECT_NAME": _project_name(),
     }
 
     supervisor_proc = _start_sandbox_supervisor(supervisor_port, sandbox_runtime_root, log_path)
