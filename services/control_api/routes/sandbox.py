@@ -122,6 +122,24 @@ def stop_sandbox(sandbox_id: str, request: Request) -> SandboxState:
         raise HTTPException(status_code=404, detail=f"sandbox not found: {sandbox_id}")
 
 
+@router.post("/{sandbox_id}/restart", response_model=SandboxState)
+def restart_sandbox(sandbox_id: str, request: Request) -> SandboxState:
+    logger.info("api: POST /sandboxes/%s/restart", sandbox_id)
+    try:
+        return _get_manager(request).restart(sandbox_id)
+    except SandboxNotFoundError:
+        raise HTTPException(status_code=404, detail=f"sandbox not found: {sandbox_id}")
+
+
+@router.post("/{sandbox_id}/refresh", response_model=SandboxState)
+def refresh_sandbox(sandbox_id: str, request: Request) -> SandboxState:
+    logger.info("api: POST /sandboxes/%s/refresh", sandbox_id)
+    try:
+        return _get_manager(request).refresh(sandbox_id)
+    except SandboxNotFoundError:
+        raise HTTPException(status_code=404, detail=f"sandbox not found: {sandbox_id}")
+
+
 @router.delete("/{sandbox_id}", status_code=204)
 def destroy_sandbox(sandbox_id: str, request: Request) -> None:
     logger.info("api: DELETE /sandboxes/%s", sandbox_id)

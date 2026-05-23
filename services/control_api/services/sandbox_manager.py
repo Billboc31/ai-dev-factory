@@ -175,12 +175,28 @@ class SandboxManager:
 
     def stop(self, sandbox_id: str) -> SandboxState:
         state = self._read_state(sandbox_id)
+        self._terminate_sandbox_supervisor(state)
         rc, _out, err = self._run_compose(state, "down")
         if rc != 0:
             logger.warning("sandbox stop warning: %s — %s", sandbox_id, err.strip())
+        if state.sandbox_runtime_root:
+            runtime_root = Path(state.sandbox_runtime_root)
+            for pattern in ("*.pid", "*.lock"):
+                for stale in runtime_root.glob(pattern):
+                    try:
+                        stale.unlink()
+                    except OSError:
+                        pass
         state = state.model_copy(update={"status": SandboxStatus.stopped})
         self._write_state(state)
         return state
+
+    def restart(self, sandbox_id: str) -> SandboxState:
+        self.stop(sandbox_id)
+        return self.start(sandbox_id)
+
+    def refresh(self, sandbox_id: str) -> SandboxState:
+        return self._read_state(sandbox_id)
 
     def create_with_worktree(
         self,

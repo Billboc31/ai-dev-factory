@@ -17,10 +17,13 @@ import re
 import shutil
 import urllib.error  # noqa: F401 (kept for clarity)
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel
+
+from ..services.sandbox_manager import SandboxManager, SandboxNotFoundError
 
 router = APIRouter(prefix="/runtime-dashboard", tags=["runtime-dashboard"])
 logger = logging.getLogger("control-api")
@@ -87,6 +90,8 @@ class SandboxRunSummary(BaseModel):
     ports: dict[str, int] = {}
     worktree_path: str | None = None
     compose_project: str | None = None
+    runtime_root: str | None = None
+    uptime_seconds: float | None = None
 
 
 class ProposalRunSummary(BaseModel):
@@ -122,6 +127,15 @@ def _parse_sandbox_state(state_path: Path) -> SandboxRunSummary | None:
     status = raw.get("state") or raw.get("status") or "unknown"
     started_at = raw.get("started_at") or raw.get("created_at")
     finished_at = raw.get("finished_at") or raw.get("completed_at")
+    uptime_seconds: float | None = None
+    if status == "running" and started_at:
+        try:
+            t = datetime.fromisoformat(started_at)
+            if t.tzinfo is None:
+                t = t.replace(tzinfo=timezone.utc)
+            uptime_seconds = (datetime.now(timezone.utc) - t).total_seconds()
+        except (ValueError, TypeError):
+            pass
     return SandboxRunSummary(
         id=sandbox_id,
         project_id=str(project_id),
@@ -131,6 +145,8 @@ def _parse_sandbox_state(state_path: Path) -> SandboxRunSummary | None:
         ports=raw.get("ports") or {},
         worktree_path=raw.get("worktree_path"),
         compose_project=raw.get("compose_project"),
+        runtime_root=raw.get("sandbox_runtime_root") or None,
+        uptime_seconds=uptime_seconds,
     )
 
 
@@ -206,6 +222,46 @@ def delete_sandbox_run(sandbox_id: str, request: Request) -> Response:
     shutil.rmtree(sandbox_dir, ignore_errors=True)
     logger.info("runtime-dashboard: deleted sandbox run %s", sandbox_id)
     return Response(status_code=204)
+
+
+def _get_sandbox_manager(request: Request) -> SandboxManager:
+    if not hasattr(request.app.state, "_sandbox_manager"):
+        request.app.state._sandbox_manager = SandboxManager()
+    return request.app.state._sandbox_manager
+
+
+@router.post("/sandbox-runs/{sandbox_id}/stop", response_model=SandboxRunSummary)
+def stop_sandbox_run(sandbox_id: str, request: Request) -> SandboxRunSummary:
+    if not re.fullmatch(r"[a-zA-Z0-9_\-]+", sandbox_id):
+        raise HTTPException(status_code=400, detail="invalid sandbox_id")
+    mgr = _get_sandbox_manager(request)
+    try:
+        mgr.stop(sandbox_id)
+    except SandboxNotFoundError:
+        raise HTTPException(status_code=404, detail=f"sandbox not found: {sandbox_id}")
+    state_file = mgr.sandboxes_dir / sandbox_id / "state.json"
+    item = _parse_sandbox_state(state_file)
+    if item is None:
+        raise HTTPException(status_code=500, detail="failed to read sandbox state after stop")
+    logger.info("runtime-dashboard: stopped sandbox %s", sandbox_id)
+    return item
+
+
+@router.post("/sandbox-runs/{sandbox_id}/restart", response_model=SandboxRunSummary)
+def restart_sandbox_run(sandbox_id: str, request: Request) -> SandboxRunSummary:
+    if not re.fullmatch(r"[a-zA-Z0-9_\-]+", sandbox_id):
+        raise HTTPException(status_code=400, detail="invalid sandbox_id")
+    mgr = _get_sandbox_manager(request)
+    try:
+        mgr.restart(sandbox_id)
+    except SandboxNotFoundError:
+        raise HTTPException(status_code=404, detail=f"sandbox not found: {sandbox_id}")
+    state_file = mgr.sandboxes_dir / sandbox_id / "state.json"
+    item = _parse_sandbox_state(state_file)
+    if item is None:
+        raise HTTPException(status_code=500, detail="failed to read sandbox state after restart")
+    logger.info("runtime-dashboard: restarted sandbox %s", sandbox_id)
+    return item
 
 
 # ── proposal run parsing ──────────────────────────────────────────────────────

@@ -163,3 +163,64 @@ def test_logs_calls_docker_compose(mgr):
     cmd = mock_run.call_args[0][0]
     assert "logs" in cmd
     assert s.compose_project in cmd
+
+
+def test_stop_calls_terminate_supervisor(mgr):
+    s = mgr.create("T001", "/project")
+    runtime_root = Path(s.sandbox_runtime_root)
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    pid_path = runtime_root / "supervisor.pid"
+    import os
+    pid_path.write_text(f'{{"pid": {os.getpid()}}}', encoding="utf-8")
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        with patch("services.control_api.services.sandbox_manager.os.kill") as mock_kill:
+            mgr.stop(s.id)
+    mock_kill.assert_called_once()
+    args = mock_kill.call_args[0]
+    assert args[0] == os.getpid()
+
+
+def test_stop_cleans_pid_and_lock_files(mgr):
+    s = mgr.create("T001", "/project")
+    runtime_root = Path(s.sandbox_runtime_root)
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    pid_file = runtime_root / "worker.pid"
+    lock_file = runtime_root / "run.lock"
+    pid_file.write_text('{"pid": 99999}', encoding="utf-8")
+    lock_file.write_text('{"pid": 99999}', encoding="utf-8")
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        mgr.stop(s.id)
+
+    assert not pid_file.exists()
+    assert not lock_file.exists()
+
+
+def test_stop_retains_port_slot(mgr):
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        s = mgr.create("T001", "/project")
+        slot_before = s.slot
+        mgr.start(s.id)
+        mgr.stop(s.id)
+        registry = mgr._read_registry()
+        assert s.id in registry
+        assert registry[s.id] == slot_before
+
+
+def test_restart_transitions_running(mgr):
+    s = mgr.create("T001", "/project")
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        s = mgr.start(s.id)
+        assert s.status == SandboxStatus.running
+        s = mgr.restart(s.id)
+        assert s.status == SandboxStatus.running
+
+
+def test_refresh_returns_state_no_subprocess(mgr):
+    s = mgr.create("T001", "/project")
+    with patch("services.control_api.services.sandbox_manager.subprocess.run") as mock_run:
+        result = mgr.refresh(s.id)
+    mock_run.assert_not_called()
+    assert result.id == s.id
+    assert result.status == SandboxStatus.stopped
