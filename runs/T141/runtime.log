@@ -76,3 +76,14 @@
 [2026-05-23T07:59:42Z] planner checkpoint: pushed
 [2026-05-23T07:59:42Z] planner validation failed: plan sans section reconnue (Objective/Included/Excluded/Acceptance criteria — ou équivalents FR)
 [2026-05-23T08:02:05Z] auto-run: step=planner done rc=0
+[2026-05-23T08:02:07Z] planner checkpoint: committed
+[2026-05-23T08:02:07Z] planner checkpoint: pushed
+[2026-05-23T08:02:07Z] planner validation success
+[2026-05-23T08:02:07Z] auto-run: transition PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED
+[2026-05-23T08:02:07Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-23T08:02:07Z] commit-checkpoint: unstaged runtime garbage: ['runs/T141/runtime.log']
+[2026-05-23T08:02:07Z] commit-checkpoint: sha=af8a5187 files=2 title='docs(T141/workflow): planner — update 2 file(s)'
+[2026-05-23T08:02:07Z] auto-run: auto-push triggered
+[2026-05-23T08:02:07Z] push: tolerating runtime dirty files (not blocking): ['runs/T141/runtime.log']
+[2026-05-23T08:02:07Z] push: pushing branch=ticket/T141-t141-full-sandbox-environments-and-lifecycle-manag
+[2026-05-23T08:02:09Z] push: done branch=ticket/T141-t141-full-sandbox-environments-and-lifecycle-manag
