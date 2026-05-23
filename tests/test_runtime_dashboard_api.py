@@ -9,6 +9,15 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+_TEST_PROJECT_NAME = "testproject"
+
+
+@pytest.fixture(autouse=True)
+def _pin_sandbox_env(tmp_path, monkeypatch):
+    """Pin SANDBOX_ROOT and PROJECT_NAME so sandbox paths are hermetic."""
+    monkeypatch.setenv("SANDBOX_ROOT", str(tmp_path / "sandboxes"))
+    monkeypatch.setenv("PROJECT_NAME", _TEST_PROJECT_NAME)
+
 
 def _make_app(tmp_path: Path):
     import sys
@@ -17,13 +26,17 @@ def _make_app(tmp_path: Path):
     return create_app(project_root=tmp_path)
 
 
+def _sandbox_dir(tmp_path: Path, sandbox_id: str) -> Path:
+    return tmp_path / "sandboxes" / _TEST_PROJECT_NAME / sandbox_id
+
+
 def _make_sandbox(
     tmp_path: Path,
     sandbox_id: str,
     state: str,
     pid: int | None = None,
 ) -> Path:
-    sandbox_dir = tmp_path / "sandboxes" / sandbox_id
+    sandbox_dir = _sandbox_dir(tmp_path, sandbox_id)
     sandbox_dir.mkdir(parents=True)
     (sandbox_dir / "state.json").write_text(
         json.dumps({
@@ -130,7 +143,7 @@ def test_get_sandbox_logs_respects_offset(tmp_path):
 # ── DELETE /runtime-dashboard/sandbox-runs/{id} ──────────────────────────────
 
 def test_delete_sandbox_run_not_found(tmp_path):
-    (tmp_path / "sandboxes").mkdir()
+    (tmp_path / "sandboxes" / _TEST_PROJECT_NAME).mkdir(parents=True)
     client = TestClient(_make_app(tmp_path))
     r = client.delete("/runtime-dashboard/sandbox-runs/nonexistent")
     assert r.status_code == 404
@@ -141,7 +154,7 @@ def test_delete_sandbox_run_completed_returns_204(tmp_path):
     client = TestClient(_make_app(tmp_path))
     r = client.delete("/runtime-dashboard/sandbox-runs/sb-001")
     assert r.status_code == 204
-    assert not (tmp_path / "sandboxes" / "sb-001").exists()
+    assert not _sandbox_dir(tmp_path, "sb-001").exists()
 
 
 def test_delete_sandbox_run_running_returns_409(tmp_path):

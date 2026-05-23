@@ -69,11 +69,20 @@ def _required_scripts_all_ok() -> dict[str, str]:
     return {name: "exit 0" for name in run_sandbox._REQUIRED_SCRIPTS}
 
 
+_TEST_PROJECT_NAME = "testproject"
+
+
 @pytest.fixture(autouse=True)
 def _runtime_root(tmp_path, monkeypatch):
-    """Pin the host runtime root to a tmp dir so tests are hermetic."""
+    """Pin the host runtime root and sandbox root to tmp dirs so tests are hermetic."""
     monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path / "runtime"))
+    monkeypatch.setenv("SANDBOX_ROOT", str(tmp_path / "sandboxes"))
+    monkeypatch.setenv("PROJECT_NAME", _TEST_PROJECT_NAME)
     return tmp_path / "runtime"
+
+
+def _sandbox_dir(tmp_path: Path, sandbox_id: str) -> Path:
+    return tmp_path / "sandboxes" / _TEST_PROJECT_NAME / sandbox_id
 
 
 def _read_latest_state(tmp_path: Path, project_id: str = "myproject") -> dict:
@@ -82,8 +91,7 @@ def _read_latest_state(tmp_path: Path, project_id: str = "myproject") -> dict:
 
 
 def _read_latest_log(tmp_path: Path, project_id: str = "myproject") -> str:
-    # Per-run log: find the single sandbox directory under runtime/sandboxes/
-    base = tmp_path / "runtime" / "sandboxes"
+    base = tmp_path / "sandboxes" / _TEST_PROJECT_NAME
     dirs = [d for d in base.iterdir() if d.is_dir() and d.name.startswith(project_id)]
     assert dirs, f"no sandbox directory found under {base}"
     return (dirs[0] / "run.log").read_text()
@@ -105,7 +113,7 @@ def test_worker_creates_worktree(tmp_path):
     # Project has no scripts → must fail (no more silent success).
     state = _read_latest_state(tmp_path)
     assert state["state"] == "failed"
-    wt = tmp_path / "runtime" / "sandboxes" / "myproject-T1" / "worktree"
+    wt = _sandbox_dir(tmp_path, "myproject-T1") / "worktree"
     assert wt.exists(), "worktree directory must be created before failing"
 
 
@@ -184,7 +192,7 @@ def test_worker_latest_state_mirrors_per_run_state(tmp_path):
         (tmp_path / "runtime" / "state" / "sandbox-myproject.json").read_text()
     )
     per_run = json.loads(
-        (tmp_path / "runtime" / "sandboxes" / "myproject-MIRROR" / "state.json").read_text()
+        (_sandbox_dir(tmp_path, "myproject-MIRROR") / "state.json").read_text()
     )
     assert latest == per_run
 
@@ -193,7 +201,7 @@ def test_worker_latest_state_mirrors_per_run_state(tmp_path):
 
 
 def _read_deploy_env(tmp_path: Path, sandbox_id: str) -> dict[str, str]:
-    env_path = tmp_path / "runtime" / "sandboxes" / sandbox_id / "deploy.env"
+    env_path = _sandbox_dir(tmp_path, sandbox_id) / "deploy.env"
     out: dict[str, str] = {}
     for line in env_path.read_text().splitlines():
         if "=" in line and line.strip():
@@ -365,9 +373,7 @@ def test_scripts_executed_with_worktree_as_cwd(tmp_path):
     state = _read_latest_state(tmp_path)
     assert state["state"] == "success"
 
-    pwd_check = (
-        tmp_path / "runtime" / "sandboxes" / "myproject-CWD" / "worktree" / "pwd_check.txt"
-    )
+    pwd_check = _sandbox_dir(tmp_path, "myproject-CWD") / "worktree" / "pwd_check.txt"
     assert pwd_check.exists(), "bootstrap must have run with worktree as cwd"
     recorded_pwd = pwd_check.read_text().strip()
     assert recorded_pwd.endswith("/worktree"), (
