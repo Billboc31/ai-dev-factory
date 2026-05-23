@@ -1,7 +1,7 @@
 {
   "ticket_id": "T145",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T145-t145-harden-conflict-resolver-workflow",
   "issue_number": 140,
-  "updated_at": "2026-05-23T18:22:29Z"
+  "updated_at": "2026-05-23T18:24:44Z"
 }
