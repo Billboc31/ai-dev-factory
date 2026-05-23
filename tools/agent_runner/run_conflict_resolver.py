@@ -4,11 +4,12 @@
 Runs inside the ticket worktree:
 1. Fetches origin and rebases onto origin/main.
 2. On rebase conflict: collects context, invokes AI agent to edit files.
-3. Stages resolved files, continues rebase.
-4. Runs tests.
-5. Commits artifacts with message conflict(T{id}): resolve conflicts against main.
-6. Pushes with --force-with-lease.
-7. Transitions state to CONFLICT_RESOLVED_REVIEW_NEEDED (success)
+3. Loops until all conflicts cleared or MAX_RESOLVER_PASSES reached.
+4. Stages only conflicted files per pass.
+5. Runs tests.
+6. Commits artifacts with message conflict(T{id}): resolve conflicts against main.
+7. Pushes with --force-with-lease.
+8. Transitions state to CONFLICT_RESOLVED_REVIEW_NEEDED (success)
    or CONFLICT_RESOLUTION_FAILED (any failure).
 """
 
@@ -26,6 +27,8 @@ from pathlib import Path
 
 os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
 sys.dont_write_bytecode = True
+
+MAX_RESOLVER_PASSES = int(os.environ.get("CONFLICT_RESOLVER_MAX_PASSES", "3"))
 
 ROOT = Path(__file__).resolve().parent
 _RUN_STEP_PATH = ROOT / "run_step.py"
@@ -102,6 +105,18 @@ def _list_conflicted_files() -> list[str]:
     if result.returncode != 0:
         return []
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def _has_conflict_markers(path: str) -> bool:
+    try:
+        return "<<<<<<< " in Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+
+
+def _abort_rebase(ticket_id: str) -> None:
+    _log(ticket_id, "aborting rebase")
+    _run_git(["rebase", "--abort"])
 
 
 def _run_tests(ticket_id: str, run_dir: Path) -> str:
@@ -182,101 +197,154 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
         _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
         return 2
 
-    # 2. collect context (before rebase so we capture current conflicted files)
-    _log(ticket_id, "collecting conflict context")
-    try:
-        context_path = collect_context(ticket_id)
-        _log(ticket_id, f"context written: {context_path}")
-    except Exception as exc:
-        _log(ticket_id, f"context collection failed: {exc}")
-        _write_error_log(run_dir, f"context collection failed: {exc}")
-        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
-        return 2
-
-    # 3. git rebase origin/main
+    # 2. git rebase origin/main
     _log(ticket_id, "git rebase origin/main")
     rebase = _run_git(["rebase", "origin/main"])
     _log(ticket_id, f"rebase exit={rebase.returncode}")
 
     if rebase.returncode != 0:
-        # Rebase has conflicts — invoke AI resolver
-        conflicted = _list_conflicted_files()
-        _log(ticket_id, f"conflicts in: {conflicted}")
+        # Confirm actual conflict markers exist before invoking AI
+        conflicted_files = _list_conflicted_files()
+        if not conflicted_files:
+            msg = f"rebase failed with no conflict markers: {rebase.stderr.strip()}"
+            _log(ticket_id, msg)
+            _write_error_log(run_dir, msg, rebase.stderr)
+            _abort_rebase(ticket_id)
+            _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+            return 2
 
-        context_content = context_path.read_text(encoding="utf-8")
+        _log(ticket_id, f"conflicts detected: {conflicted_files}")
 
         prompt_path = Path("prompts") / "generic" / "conflict-resolver.md"
         if not prompt_path.exists():
-            _log(ticket_id, "prompt file not found")
-            _write_error_log(run_dir, f"prompt not found: {prompt_path}")
-            _run_git(["rebase", "--abort"])
-            _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
-            return 2
-
-        task_content = prompt_path.read_text(encoding="utf-8") + "\n\n" + context_content
-        runtime_prompt = compose_runtime_prompt(ticket_id, "conflict-resolver", task_content)
-
-        # Snapshot the prompt
-        prompts_dir = run_dir / "prompts"
-        prompts_dir.mkdir(parents=True, exist_ok=True)
-        existing = list(prompts_dir.glob("conflict-resolver-attempt-*.md"))
-        attempt = len(existing) + 1
-        snapshot = prompts_dir / f"conflict-resolver-attempt-{attempt}.md"
-        snapshot.write_text(runtime_prompt, encoding="utf-8")
-        _log(ticket_id, f"prompt snapshot: {snapshot}")
-
-        _log(ticket_id, f"invoking AI resolver (attempt {attempt})")
-        stdout, stderr, rc = execute_external_command(exec_cmd, runtime_prompt)
-
-        if rc != 0:
-            msg = f"AI resolver failed (rc={rc})"
+            msg = f"prompt not found: {prompt_path}"
             _log(ticket_id, msg)
-            _write_error_log(run_dir, msg, stderr)
-            (conflict_dir / "resolution.md").write_text(stdout or "", encoding="utf-8")
-            _run_git(["rebase", "--abort"])
+            _write_error_log(run_dir, msg)
+            _abort_rebase(ticket_id)
             _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
             return 2
 
-        # Write resolution.md
-        (conflict_dir / "resolution.md").write_text(stdout or "", encoding="utf-8")
-        _log(ticket_id, "resolution.md written")
+        pass_count = 0
+        while conflicted_files and pass_count < MAX_RESOLVER_PASSES:
+            pass_count += 1
+            pass_conflicted = list(conflicted_files)
+            _log(ticket_id, f"[pass {pass_count}/{MAX_RESOLVER_PASSES}] start conflicted={pass_conflicted}")
 
-        # Stage resolved files and continue rebase
-        _log(ticket_id, "git add -A")
-        add = _run_git(["add", "-A"])
-        if add.returncode != 0:
-            msg = f"git add failed: {add.stderr.strip()}"
-            _log(ticket_id, msg)
-            _write_error_log(run_dir, msg, add.stderr)
-            _run_git(["rebase", "--abort"])
-            _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
-            return 2
-
-        _log(ticket_id, "git rebase --continue")
-        env = dict(os.environ)
-        env["GIT_EDITOR"] = "true"
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
-        continue_result = subprocess.run(
-            ["git", "rebase", "--continue"],
-            text=True, capture_output=True, check=False, env=env,
-        )
-        _log(ticket_id, f"rebase --continue exit={continue_result.returncode}")
-
-        if continue_result.returncode != 0:
-            # Check if it's "nothing to commit" which means rebase is done
-            out_lower = (continue_result.stdout + continue_result.stderr).lower()
-            if "nothing to commit" in out_lower or "no changes" in out_lower:
-                _run_git(["rebase", "--skip"])
-                _log(ticket_id, "rebase skip (nothing to commit)")
-            else:
-                msg = f"rebase --continue failed: {continue_result.stderr.strip()}"
-                _log(ticket_id, msg)
-                _write_error_log(run_dir, msg, continue_result.stderr)
-                _run_git(["rebase", "--abort"])
+            # Collect context after conflict markers exist on disk
+            try:
+                context_path = collect_context(ticket_id, conflicted_files=pass_conflicted)
+                _log(ticket_id, f"context written: {context_path}")
+            except Exception as exc:
+                _log(ticket_id, f"context collection failed pass {pass_count}: {exc}")
+                _write_error_log(run_dir, f"context collection failed: {exc}")
+                _abort_rebase(ticket_id)
                 _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
                 return 2
+
+            context_content = context_path.read_text(encoding="utf-8")
+            task_content = prompt_path.read_text(encoding="utf-8") + "\n\n" + context_content
+            runtime_prompt = compose_runtime_prompt(ticket_id, "conflict-resolver", task_content)
+
+            # Snapshot the prompt
+            prompts_dir = run_dir / "prompts"
+            prompts_dir.mkdir(parents=True, exist_ok=True)
+            existing = list(prompts_dir.glob("conflict-resolver-attempt-*.md"))
+            attempt_num = len(existing) + 1
+            snapshot = prompts_dir / f"conflict-resolver-attempt-{attempt_num}.md"
+            snapshot.write_text(runtime_prompt, encoding="utf-8")
+            _log(ticket_id, f"prompt snapshot: {snapshot}")
+
+            _log(ticket_id, f"invoking AI resolver pass {pass_count}")
+            stdout, stderr_ai, rc = execute_external_command(exec_cmd, runtime_prompt)
+
+            if rc != 0:
+                msg = f"AI resolver failed (rc={rc}) pass {pass_count}"
+                _log(ticket_id, msg)
+                _write_error_log(run_dir, msg, stderr_ai)
+                (conflict_dir / "resolution.md").write_text(stdout or "", encoding="utf-8")
+                _abort_rebase(ticket_id)
+                _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+                return 2
+
+            (conflict_dir / "resolution.md").write_text(stdout or "", encoding="utf-8")
+
+            # Check which files still have markers after AI edit (before staging)
+            still_unresolved_markers = [f for f in pass_conflicted if _has_conflict_markers(f)]
+
+            # Stage only the conflicted files (not git add -A)
+            staged = list(pass_conflicted)
+            add = _run_git(["add", "--"] + staged)
+            if add.returncode != 0:
+                msg = f"git add failed: {add.stderr.strip()}"
+                _log(ticket_id, msg)
+                _write_error_log(run_dir, msg, add.stderr)
+                _abort_rebase(ticket_id)
+                _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+                return 2
+
+            # git rebase --continue
+            env = dict(os.environ)
+            env["GIT_EDITOR"] = "true"
+            env["PYTHONDONTWRITEBYTECODE"] = "1"
+            continue_result = subprocess.run(
+                ["git", "rebase", "--continue"],
+                text=True, capture_output=True, check=False, env=env,
+            )
+            continue_rc = continue_result.returncode
+
+            if continue_rc != 0:
+                out_lower = (continue_result.stdout + continue_result.stderr).lower()
+                if "nothing to commit" in out_lower or "no changes" in out_lower:
+                    _run_git(["rebase", "--skip"])
+                    _log(ticket_id, "rebase --skip (nothing to commit)")
+                    conflicted_files = _list_conflicted_files()
+                else:
+                    # Check if new conflicts appeared from the next commit in the rebase stack
+                    new_conflicted = _list_conflicted_files()
+                    if new_conflicted:
+                        _log(ticket_id, (
+                            f"[pass {pass_count}/{MAX_RESOLVER_PASSES}]"
+                            f" conflicted={pass_conflicted}"
+                            f" | staged={staged}"
+                            f" | unresolved={still_unresolved_markers}"
+                            f" | continue_rc={continue_rc}"
+                        ))
+                        conflicted_files = new_conflicted
+                        continue
+                    else:
+                        msg = f"rebase --continue failed (pass {pass_count}): {continue_result.stderr.strip()}"
+                        _log(ticket_id, msg)
+                        _write_error_log(run_dir, msg, continue_result.stderr)
+                        _abort_rebase(ticket_id)
+                        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+                        return 2
+            else:
+                # Successful continue — check for conflicts from the next commit
+                conflicted_files = _list_conflicted_files()
+
+            _log(ticket_id, (
+                f"[pass {pass_count}/{MAX_RESOLVER_PASSES}]"
+                f" conflicted={pass_conflicted}"
+                f" | staged={staged}"
+                f" | unresolved={still_unresolved_markers}"
+                f" | continue_rc={continue_rc}"
+            ))
+
+        if conflicted_files:
+            msg = (
+                f"conflicts remain after {pass_count}/{MAX_RESOLVER_PASSES} passes:"
+                f" {conflicted_files}"
+            )
+            _log(ticket_id, msg)
+            _write_error_log(run_dir, msg)
+            _abort_rebase(ticket_id)
+            _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+            return 2
+
+        _log(ticket_id, f"all conflicts resolved after {pass_count} pass(es)")
+
     else:
-        # Clean rebase — still write a resolution.md noting no conflicts needed
+        # Clean rebase — write resolution.md noting no conflicts needed
         res_path = conflict_dir / "resolution.md"
         if not res_path.exists():
             res_path.write_text(
@@ -287,14 +355,21 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
             )
         _log(ticket_id, "rebase clean — no conflicts")
 
-    # 4. run tests
+    # 3. run tests
     _log(ticket_id, "running tests")
     test_report = _run_tests(ticket_id, run_dir)
     test_report_path = conflict_dir / "test-report.md"
     test_report_path.write_text(test_report, encoding="utf-8")
     _log(ticket_id, f"test-report written: {test_report_path}")
 
-    # 5. commit all artifacts
+    if "Exit code: 0" not in test_report and "skipped" not in test_report.lower():
+        msg = "tests failed after conflict resolution"
+        _log(ticket_id, msg)
+        _write_error_log(run_dir, msg)
+        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+        return 2
+
+    # 4. commit all artifacts
     _log(ticket_id, "staging and committing resolution artifacts")
     add_all = _run_git(["add", "-A"])
     if add_all.returncode != 0:
@@ -317,7 +392,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
         sha = sha_result.stdout.strip() if sha_result.returncode == 0 else "unknown"
         _log(ticket_id, f"commit: sha={sha}")
 
-    # 6. push with --force-with-lease
+    # 5. push with --force-with-lease
     push_target = branch or current_branch
     _log(ticket_id, f"git push --force-with-lease origin {push_target}")
     push = _run_git(["push", "--force-with-lease", "origin", push_target])
@@ -330,7 +405,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
 
     _log(ticket_id, "push succeeded")
 
-    # 7. transition to CONFLICT_RESOLVED_REVIEW_NEEDED
+    # 6. transition only after clean rebase + passing tests
     _transition_state(ticket_id, run_dir, "CONFLICT_RESOLVED_REVIEW_NEEDED")
     _log(ticket_id, "done → CONFLICT_RESOLVED_REVIEW_NEEDED")
     return 0

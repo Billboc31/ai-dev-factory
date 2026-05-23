@@ -30,13 +30,19 @@ def _run(args: list[str], cwd: str | None = None) -> tuple[str, int]:
     return result.stdout, result.returncode
 
 
-def collect_context(ticket_id: str) -> Path:
+def collect_context(
+    ticket_id: str,
+    conflicted_files: list[str] | None = None,
+) -> Path:
     run_dir = Path("runs") / ticket_id
     state_file = run_dir / "state.json"
 
     data = json.loads(state_file.read_text(encoding="utf-8"))
     conflict_pr_number = data.get("conflict_pr_number")
-    conflicted_files: list[str] = data.get("conflicted_files") or []
+    # Use caller-supplied list when available (post-rebase real conflicts);
+    # fall back to the pre-rebase list stored by the daemon.
+    if conflicted_files is None:
+        conflicted_files = data.get("conflicted_files") or []
     pre_conflict_state = data.get("pre_conflict_state", "unknown")
     conflict_detected_at = data.get("conflict_detected_at", "unknown")
 
