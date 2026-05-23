@@ -76,6 +76,45 @@ def _make_proposal(tmp_path: Path, proposal_id: str, status: str) -> Path:
     return proposal_dir
 
 
+# ── GET /runtime-dashboard/overview ─────────────────────────────────────────
+
+def test_overview_returns_topology_fields(tmp_path):
+    """T142: /overview must expose sandbox_root, project_name, project_sandbox_dir."""
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/runtime-dashboard/overview")
+    assert r.status_code == 200
+    data = r.json()
+    assert "sandbox_root" in data
+    assert "project_name" in data
+    assert "project_sandbox_dir" in data
+    assert "sandboxes" in data
+    assert isinstance(data["sandboxes"], list)
+
+
+def test_overview_reflects_pinned_sandbox_root(tmp_path):
+    """T142: overview must show the pinned SANDBOX_ROOT, not ~/sandboxes."""
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/runtime-dashboard/overview")
+    assert r.status_code == 200
+    data = r.json()
+    assert str(tmp_path / "sandboxes") in data["sandbox_root"]
+    assert data["project_name"] == _TEST_PROJECT_NAME
+    assert data["project_sandbox_dir"].endswith(_TEST_PROJECT_NAME)
+
+
+def test_overview_lists_existing_sandboxes(tmp_path):
+    """T142: topology panel must enumerate active sandbox entries."""
+    _make_sandbox(tmp_path, "sb-002", "running")
+    _make_sandbox(tmp_path, "sb-003", "completed")
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/runtime-dashboard/overview")
+    assert r.status_code == 200
+    data = r.json()
+    ids = [s["id"] for s in data["sandboxes"]]
+    assert "sb-002" in ids
+    assert "sb-003" in ids
+
+
 # ── GET /runtime-dashboard/sandbox-runs ──────────────────────────────────────
 
 def test_list_sandbox_runs_empty(tmp_path):
