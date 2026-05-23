@@ -12,3 +12,5 @@ export const getProposalSummary = (id) => client.get(`/runtime-dashboard/proposa
 export const deleteProposalRun = (id) => client.delete(`/runtime-dashboard/proposal-runs/${id}`)
 
 export const getRuntimeHealth = () => client.get('/runtime-dashboard/health')
+
+export const getRuntimeOverview = () => client.get('/runtime-dashboard/overview')

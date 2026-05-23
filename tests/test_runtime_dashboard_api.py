@@ -9,6 +9,15 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+_TEST_PROJECT_NAME = "testproject"
+
+
+@pytest.fixture(autouse=True)
+def _pin_sandbox_env(tmp_path, monkeypatch):
+    """Pin SANDBOX_ROOT and PROJECT_NAME so sandbox paths are hermetic."""
+    monkeypatch.setenv("SANDBOX_ROOT", str(tmp_path / "sandboxes"))
+    monkeypatch.setenv("PROJECT_NAME", _TEST_PROJECT_NAME)
+
 
 def _make_app(tmp_path: Path):
     import sys
@@ -17,13 +26,17 @@ def _make_app(tmp_path: Path):
     return create_app(project_root=tmp_path)
 
 
+def _sandbox_dir(tmp_path: Path, sandbox_id: str) -> Path:
+    return tmp_path / "sandboxes" / _TEST_PROJECT_NAME / sandbox_id
+
+
 def _make_sandbox(
     tmp_path: Path,
     sandbox_id: str,
     state: str,
     pid: int | None = None,
 ) -> Path:
-    sandbox_dir = tmp_path / "sandboxes" / sandbox_id
+    sandbox_dir = _sandbox_dir(tmp_path, sandbox_id)
     sandbox_dir.mkdir(parents=True)
     (sandbox_dir / "state.json").write_text(
         json.dumps({
@@ -61,6 +74,45 @@ def _make_proposal(tmp_path: Path, proposal_id: str, status: str) -> Path:
         encoding="utf-8",
     )
     return proposal_dir
+
+
+# ── GET /runtime-dashboard/overview ─────────────────────────────────────────
+
+def test_overview_returns_topology_fields(tmp_path):
+    """T142: /overview must expose sandbox_root, project_name, project_sandbox_dir."""
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/runtime-dashboard/overview")
+    assert r.status_code == 200
+    data = r.json()
+    assert "sandbox_root" in data
+    assert "project_name" in data
+    assert "project_sandbox_dir" in data
+    assert "sandboxes" in data
+    assert isinstance(data["sandboxes"], list)
+
+
+def test_overview_reflects_pinned_sandbox_root(tmp_path):
+    """T142: overview must show the pinned SANDBOX_ROOT, not ~/sandboxes."""
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/runtime-dashboard/overview")
+    assert r.status_code == 200
+    data = r.json()
+    assert str(tmp_path / "sandboxes") in data["sandbox_root"]
+    assert data["project_name"] == _TEST_PROJECT_NAME
+    assert data["project_sandbox_dir"].endswith(_TEST_PROJECT_NAME)
+
+
+def test_overview_lists_existing_sandboxes(tmp_path):
+    """T142: topology panel must enumerate active sandbox entries."""
+    _make_sandbox(tmp_path, "sb-002", "running")
+    _make_sandbox(tmp_path, "sb-003", "completed")
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/runtime-dashboard/overview")
+    assert r.status_code == 200
+    data = r.json()
+    ids = [s["id"] for s in data["sandboxes"]]
+    assert "sb-002" in ids
+    assert "sb-003" in ids
 
 
 # ── GET /runtime-dashboard/sandbox-runs ──────────────────────────────────────
@@ -130,7 +182,7 @@ def test_get_sandbox_logs_respects_offset(tmp_path):
 # ── DELETE /runtime-dashboard/sandbox-runs/{id} ──────────────────────────────
 
 def test_delete_sandbox_run_not_found(tmp_path):
-    (tmp_path / "sandboxes").mkdir()
+    (tmp_path / "sandboxes" / _TEST_PROJECT_NAME).mkdir(parents=True)
     client = TestClient(_make_app(tmp_path))
     r = client.delete("/runtime-dashboard/sandbox-runs/nonexistent")
     assert r.status_code == 404
@@ -141,7 +193,7 @@ def test_delete_sandbox_run_completed_returns_204(tmp_path):
     client = TestClient(_make_app(tmp_path))
     r = client.delete("/runtime-dashboard/sandbox-runs/sb-001")
     assert r.status_code == 204
-    assert not (tmp_path / "sandboxes" / "sb-001").exists()
+    assert not _sandbox_dir(tmp_path, "sb-001").exists()
 
 
 def test_delete_sandbox_run_running_returns_409(tmp_path):

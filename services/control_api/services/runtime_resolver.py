@@ -41,6 +41,30 @@ def resolve_logs_dir(project_root: Path) -> Path:
     return project_root / "logs"
 
 
+def get_sandbox_root() -> Path:
+    """Return the top-level sandbox root from SANDBOX_ROOT, expanding ~. Falls back to ~/sandboxes."""
+    raw = os.environ.get("SANDBOX_ROOT", "")
+    if raw:
+        return Path(raw).expanduser().resolve()
+    return Path.home() / "sandboxes"
+
+
+def get_project_name() -> str:
+    """Return the project name from PROJECT_NAME, falling back to basename of AI_DEV_FACTORY_PROJECT_ROOT."""
+    name = os.environ.get("PROJECT_NAME", "").strip()
+    if name:
+        return name
+    project_root = os.environ.get("AI_DEV_FACTORY_PROJECT_ROOT", "").strip()
+    if project_root:
+        return Path(project_root).name
+    return "default"
+
+
+def get_project_sandbox_dir() -> Path:
+    """Return {get_sandbox_root()}/{get_project_name()} — the per-project sandbox directory."""
+    return get_sandbox_root() / get_project_name()
+
+
 def _load_workers(runs_dir: Path) -> dict:
     path = runs_dir / _WORKERS_JSON
     try:
