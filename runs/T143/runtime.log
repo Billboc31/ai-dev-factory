@@ -38,3 +38,14 @@
 [2026-05-23T15:39:02Z] compose: extra-context=runs/T143/fixes/context-20260523T153902Z.md
 [2026-05-23T15:39:02Z] snapshot: runtime-prompt=runs/T143/prompts/planner-attempt-2.md
 [2026-05-23T15:40:46Z] auto-run: step=planner done rc=0
+[2026-05-23T15:40:48Z] planner checkpoint: committed
+[2026-05-23T15:40:48Z] planner checkpoint: pushed
+[2026-05-23T15:40:48Z] planner validation success
+[2026-05-23T15:40:48Z] auto-run: transition PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED
+[2026-05-23T15:40:48Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-23T15:40:48Z] commit-checkpoint: unstaged runtime garbage: ['runs/T143/runtime.log']
+[2026-05-23T15:40:49Z] commit-checkpoint: sha=b1913364 files=2 title='docs(T143/workflow): planner — update 2 file(s)'
+[2026-05-23T15:40:49Z] auto-run: auto-push triggered
+[2026-05-23T15:40:49Z] push: tolerating runtime dirty files (not blocking): ['runs/T143/runtime.log']
+[2026-05-23T15:40:49Z] push: pushing branch=ticket/T143-t143-conflict-resolver-agent-for-pr-branch-rebases
+[2026-05-23T15:40:51Z] push: done branch=ticket/T143-t143-conflict-resolver-agent-for-pr-branch-rebases
