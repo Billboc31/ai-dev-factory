@@ -1,7 +1,7 @@
 {
   "ticket_id": "T141",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_FIX_REQUIRED",
   "branch": "ticket/T141-t141-full-sandbox-environments-and-lifecycle-manag",
   "issue_number": 131,
-  "updated_at": "2026-05-23T07:44:52Z"
+  "updated_at": "2026-05-23T07:47:50Z"
 }
