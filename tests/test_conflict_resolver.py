@@ -307,3 +307,145 @@ def test_mark_conflict_failed_returns_404_on_unknown_ticket(isolated_tmp):
 
 def test_conflict_resolution_failed_has_no_outgoing_transitions():
     assert TRANSITIONS.get("CONFLICT_RESOLUTION_FAILED", "NOT_PRESENT") == "NOT_PRESENT"
+
+
+# ── resolve_conflicts — multi-pass and max-pass tests ─────────────────────────
+
+import run_conflict_resolver as _rcr  # noqa: E402  (after sys.path setup above)
+
+
+def _make_resolver_fixture(tmp_path: Path, ticket_id: str = "T001") -> tuple[Path, Path]:
+    """Return (run_dir, context_path) after creating the minimum fixture."""
+    branch = "ticket/test-branch"
+    run_dir = tmp_path / "runs" / ticket_id
+    run_dir.mkdir(parents=True)
+    state = {"ticket_id": ticket_id, "state": "CONFLICT_RESOLVING", "branch": branch}
+    (run_dir / "state.json").write_text(json.dumps(state, indent=2))
+
+    conflict_dir = run_dir / "conflict"
+    conflict_dir.mkdir()
+    context_path = conflict_dir / "context.md"
+    context_path.write_text("# context\n")
+
+    prompt_dir = tmp_path / "prompts" / "generic"
+    prompt_dir.mkdir(parents=True)
+    (prompt_dir / "conflict-resolver.md").write_text("# Resolve\n")
+
+    return run_dir, context_path
+
+
+def _git_ok(stdout: str = "") -> MagicMock:
+    return MagicMock(returncode=0, stdout=stdout, stderr="")
+
+
+def _git_fail(stderr: str = "error", stdout: str = "") -> MagicMock:
+    return MagicMock(returncode=1, stdout=stdout, stderr=stderr)
+
+
+def test_resolve_conflicts_multi_pass_success(tmp_path, monkeypatch):
+    """Two-pass scenario: pass 1 leaves one file conflicted, pass 2 clears all.
+
+    Expected: state → CONFLICT_RESOLVED_REVIEW_NEEDED, return 0.
+    """
+    ticket_id = "T001"
+    run_dir, context_path = _make_resolver_fixture(tmp_path, ticket_id)
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(_rcr, "collect_context", MagicMock(return_value=context_path))
+    monkeypatch.setattr(_rcr, "execute_external_command", MagicMock(return_value=("ok", "", 0)))
+    monkeypatch.setattr(_rcr, "compose_runtime_prompt", MagicMock(return_value="prompt"))
+    monkeypatch.setattr(_rcr, "_run_tests", MagicMock(return_value="Exit code: 0\n"))
+
+    subprocess_calls = [
+        # _get_current_branch
+        _git_ok("ticket/test-branch\n"),
+        # git fetch origin
+        _git_ok(),
+        # git rebase origin/main → conflict
+        _git_fail("CONFLICT"),
+        # _list_conflicted_files (initial)
+        _git_ok("file_a.py\nfile_b.py\n"),
+        # Pass 1: git add -- file_a.py file_b.py
+        _git_ok(),
+        # Pass 1: git rebase --continue → more conflicts from next commit
+        _git_fail("CONFLICT (next commit)"),
+        # Pass 1: _list_conflicted_files after failed continue
+        _git_ok("file_b.py\n"),
+        # Pass 2: git add -- file_b.py
+        _git_ok(),
+        # Pass 2: git rebase --continue → success
+        _git_ok(),
+        # Pass 2: _list_conflicted_files after successful continue
+        _git_ok(""),
+        # git add -A (artifacts)
+        _git_ok(),
+        # git commit
+        _git_ok("[branch abc1234]"),
+        # git rev-parse --short HEAD
+        _git_ok("abc1234"),
+        # git push --force-with-lease
+        _git_ok(),
+    ]
+
+    with patch("run_conflict_resolver.subprocess.run", side_effect=subprocess_calls):
+        rc = _rcr.resolve_conflicts(ticket_id, exec_cmd="dummy")
+
+    assert rc == 0
+    state = json.loads((run_dir / "state.json").read_text())
+    assert state["state"] == "CONFLICT_RESOLVED_REVIEW_NEEDED"
+
+
+def test_resolve_conflicts_max_pass_failure(tmp_path, monkeypatch):
+    """All passes leave conflicts unresolved.
+
+    Expected: git rebase --abort called, state → CONFLICT_RESOLUTION_FAILED, return 2.
+    """
+    ticket_id = "T001"
+    run_dir, context_path = _make_resolver_fixture(tmp_path, ticket_id)
+    monkeypatch.chdir(tmp_path)
+
+    monkeypatch.setattr(_rcr, "collect_context", MagicMock(return_value=context_path))
+    monkeypatch.setattr(_rcr, "execute_external_command", MagicMock(return_value=("ok", "", 0)))
+    monkeypatch.setattr(_rcr, "compose_runtime_prompt", MagicMock(return_value="prompt"))
+
+    max_passes = _rcr.MAX_RESOLVER_PASSES
+
+    subprocess_calls = [
+        # _get_current_branch
+        _git_ok("ticket/test-branch\n"),
+        # git fetch origin
+        _git_ok(),
+        # git rebase origin/main → conflict
+        _git_fail("CONFLICT"),
+        # _list_conflicted_files (initial)
+        _git_ok("file_a.py\n"),
+    ]
+    for _ in range(max_passes):
+        subprocess_calls += [
+            # git add -- file_a.py
+            _git_ok(),
+            # git rebase --continue → conflict persists
+            _git_fail("CONFLICT"),
+            # _list_conflicted_files → still conflicted
+            _git_ok("file_a.py\n"),
+        ]
+    # git rebase --abort
+    subprocess_calls.append(_git_ok())
+
+    abort_calls: list[list[str]] = []
+
+    original_run = _rcr._run_git
+
+    def _tracking_run_git(args: list[str]) -> MagicMock:
+        if args == ["rebase", "--abort"]:
+            abort_calls.append(args)
+        return original_run(args)
+
+    with patch("run_conflict_resolver.subprocess.run", side_effect=subprocess_calls):
+        monkeypatch.setattr(_rcr, "_run_git", _tracking_run_git)
+        rc = _rcr.resolve_conflicts(ticket_id, exec_cmd="dummy")
+
+    assert rc == 2
+    state = json.loads((run_dir / "state.json").read_text())
+    assert state["state"] == "CONFLICT_RESOLUTION_FAILED"
+    assert len(abort_calls) >= 1, "git rebase --abort must be called on max-pass failure"
