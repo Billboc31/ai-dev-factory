@@ -176,3 +176,53 @@ def test_cleanup_endpoint(tmp_path, monkeypatch):
     r = client.post("/sandboxes/cleanup", params={"max_age_days": 0})
     assert r.status_code == 200
     assert "destroyed" in r.json()
+
+
+def test_restart_endpoint_200(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+    created = client.post("/sandboxes", json={"ticket_id": "T001", "project_root": "/project"}).json()
+    sandbox_id = created["id"]
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        r = client.post(f"/sandboxes/{sandbox_id}/restart")
+    assert r.status_code == 200
+    assert r.json()["status"] == "running"
+
+
+def test_restart_endpoint_404(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        r = client.post("/sandboxes/doesnotexist/restart")
+    assert r.status_code == 404
+
+
+def test_refresh_endpoint_200(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+    created = client.post("/sandboxes", json={"ticket_id": "T001", "project_root": "/project"}).json()
+    sandbox_id = created["id"]
+
+    r = client.post(f"/sandboxes/{sandbox_id}/refresh")
+    assert r.status_code == 200
+    assert r.json()["id"] == sandbox_id
+
+
+def test_refresh_endpoint_404(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+    r = client.post("/sandboxes/doesnotexist/refresh")
+    assert r.status_code == 404
