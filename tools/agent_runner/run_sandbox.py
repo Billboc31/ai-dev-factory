@@ -66,6 +66,15 @@ import sys
 import traceback
 from pathlib import Path
 
+# Make sibling modules importable when this script is launched as
+# ``python tools/agent_runner/run_sandbox.py …`` (the supervisor's
+# canonical invocation form).
+_THIS_DIR = Path(__file__).resolve().parent
+if str(_THIS_DIR) not in sys.path:
+    sys.path.insert(0, str(_THIS_DIR))
+
+from compose_utils import normalize_compose_project_name  # noqa: E402
+
 logger = logging.getLogger("run_sandbox")
 
 # Scripts are produced by the scripts-generation pipeline (`run_scripts.py`)
@@ -492,7 +501,11 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
     slot = _allocate_port_slot(sandbox_id)
     api_port = 8080 + slot * 100
     web_port = 3000 + slot * 100
-    compose_project = f"sandbox-{sandbox_id}"
+    # Sandbox IDs use a UTC timestamp like ``20260522T204456`` whose
+    # uppercase ``T`` is rejected by Docker Compose. Normalise the
+    # project name so it always matches ``^[a-z0-9][a-z0-9_-]*$`` while
+    # remaining unique per sandbox run.
+    compose_project = normalize_compose_project_name(f"sandbox-{sandbox_id}")
     ports = {"api_port": api_port, "web_port": web_port}
 
     _write_sandbox_env(
@@ -521,7 +534,14 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
     _append_log(log_path, f"runtime_root: {_runtime_root()}\n")
     _append_log(log_path, f"sandbox_dir: {sandbox_dir}\n")
     _append_log(log_path, f"port_slot: {slot}  api_port: {api_port}  web_port: {web_port}\n")
-    _append_log(log_path, f"compose_project: {compose_project}\n")
+    raw_compose = f"sandbox-{sandbox_id}"
+    if compose_project != raw_compose:
+        _append_log(
+            log_path,
+            f"compose_project: {compose_project}  (normalised from {raw_compose!r})\n",
+        )
+    else:
+        _append_log(log_path, f"compose_project: {compose_project}\n")
 
     extra_env = {
         "API_PORT": str(api_port),

@@ -69,6 +69,17 @@ def test_state_written_on_create(mgr):
     assert loaded.ticket_id == "T001"
 
 
+def test_compose_project_name_is_compose_valid(mgr):
+    """Even though SandboxManager mints uuid-hex IDs that are already
+    Compose-valid, run the produced name through Compose's regex so a
+    future change to the ID format doesn't silently regress this."""
+    import re
+    s = mgr.create("T001", "/project")
+    assert re.match(r"^[a-z0-9][a-z0-9_-]*$", s.compose_project), (
+        f"compose_project {s.compose_project!r} is not Compose-valid"
+    )
+
+
 def test_env_file_written_on_create(mgr):
     s = mgr.create("T001", "/project")
     env_file = Path(s.env_file)

@@ -5,12 +5,24 @@ import logging
 import os
 import shutil
 import subprocess
+import sys
 import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from ..models.sandbox import SandboxState, SandboxStatus
+
+# Single source of truth for compose project-name normalisation, shared
+# with the host-side worker (tools/agent_runner/run_sandbox.py). The
+# uuid-hex IDs minted here are already lowercase alphanumeric, so the
+# call is a no-op in practice — but applying it here too keeps this
+# module robust against future ID schemes.
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from tools.agent_runner.compose_utils import normalize_compose_project_name  # noqa: E402
 
 logger = logging.getLogger("control-api")
 
@@ -114,7 +126,7 @@ class SandboxManager:
         sandbox_id = uuid.uuid4().hex[:12]
         slot = self._allocate_slot(sandbox_id)
 
-        compose_project = f"sandbox-{sandbox_id}"
+        compose_project = normalize_compose_project_name(f"sandbox-{sandbox_id}")
         web_port = _BASE_WEB_PORT + slot * _PORT_STEP
         api_port = _BASE_API_PORT + slot * _PORT_STEP
         ports: dict[str, int] = {"web": web_port, "api": api_port}
