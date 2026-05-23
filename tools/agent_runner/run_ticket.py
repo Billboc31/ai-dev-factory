@@ -58,6 +58,8 @@ VALID_STATES = frozenset({
     "IMPLEMENTATION_FIX_REQUIRED",
     "IMPLEMENTATION_APPROVED",
     "TEST_COMPLETE",
+    "CONFLICT_RESOLUTION_NEEDED",
+    "CONFLICT_RESOLUTION_FAILED",
 })
 
 # Maps state -> (step, is_deterministic, possible_next_states_in_order)

@@ -141,6 +141,8 @@ AUTO_RUNNABLE_STATES = frozenset({
 HUMAN_GATE_STATES = frozenset({
     "PLAN_REVIEW_NEEDED",
     "TEST_COMPLETE",
+    "CONFLICT_RESOLUTION_NEEDED",
+    "CONFLICT_RESOLUTION_FAILED",
 })
 
 # Retry/cooldown policies per failure class.
@@ -824,6 +826,69 @@ def handle_test_complete(
     create_or_update_pr(ticket_id, run_dir, repo)
     auto_merge_pr(ticket_id, run_dir, repo)
     check_and_close_issue(ticket_id, run_dir, repo)
+
+
+_CONFLICT_SKIP_STATES = frozenset({
+    "CONFLICT_RESOLUTION_NEEDED",
+    "CONFLICT_RESOLUTION_FAILED",
+    "TEST_COMPLETE",
+})
+
+
+def detect_pr_conflict(
+    ticket_id: str,
+    pr_number: int,
+    run_dir: Path,
+    repo: str | None = None,
+) -> bool:
+    """Return True and write conflict metadata to state.json if the PR is CONFLICTING.
+
+    Returns False on any error or when the PR is not conflicting (fail-safe).
+    Does not perform any git operation.
+    """
+    check_cmd = ["gh", "pr", "view", str(pr_number), "--json", "mergeable"]
+    if repo:
+        check_cmd += ["--repo", repo]
+    try:
+        result = subprocess.run(check_cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        _log(f"{ticket_id}: conflict detection: gh not found")
+        return False
+    if result.returncode != 0:
+        _log(f"{ticket_id}: conflict detection: gh pr view failed (rc={result.returncode}): {result.stderr.strip()}")
+        return False
+    try:
+        pr_data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        _log(f"{ticket_id}: conflict detection: invalid JSON from gh pr view")
+        return False
+
+    if pr_data.get("mergeable") != "CONFLICTING":
+        return False
+
+    # Fetch PR files to surface as potential conflict candidates
+    files_cmd = ["gh", "pr", "view", str(pr_number), "--json", "files"]
+    if repo:
+        files_cmd += ["--repo", repo]
+    conflicted_files: list[str] = []
+    try:
+        files_result = subprocess.run(files_cmd, capture_output=True, text=True, check=False)
+        if files_result.returncode == 0:
+            files_data = json.loads(files_result.stdout)
+            conflicted_files = [f["path"] for f in files_data.get("files", []) if isinstance(f, dict) and "path" in f]
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+
+    state = _load_state_json(run_dir)
+    pre_conflict_state = state.get("state", "")
+    state["pre_conflict_state"] = pre_conflict_state
+    state["conflict_detected_at"] = _now_iso()
+    state["conflict_pr_number"] = pr_number
+    state["conflicted_files"] = conflicted_files
+    state["state"] = "CONFLICT_RESOLUTION_NEEDED"
+    _save_state_json(run_dir, state)
+    _log(f"{ticket_id}: PR #{pr_number} is CONFLICTING — transitioned to CONFLICT_RESOLUTION_NEEDED (was {pre_conflict_state!r}, {len(conflicted_files)} files)")
+    return True
 
 
 def scan_tickets(runs_dir: Path, worktrees_dir: Path | None = None) -> list[tuple[str, str]]:
@@ -1558,6 +1623,16 @@ def run_once(
                 )
             except Exception as exc:
                 _log(f"SQLite ticket sync failed for {ticket_id}: {exc}")
+
+        # Conflict detection: check any ticket that has a PR and is not already
+        # in a conflict or terminal state.
+        if state not in _CONFLICT_SKIP_STATES:
+            ticket_data_for_conflict = _load_state_json(run_dir)
+            pr_number_for_conflict = ticket_data_for_conflict.get("pr_number")
+            if pr_number_for_conflict and not dry_run:
+                if detect_pr_conflict(ticket_id, pr_number_for_conflict, run_dir, repo):
+                    # State was updated to CONFLICT_RESOLUTION_NEEDED — skip further processing
+                    continue
 
         if state in AUTO_RUNNABLE_STATES:
             _log(f"detected {ticket_id} state={state}")

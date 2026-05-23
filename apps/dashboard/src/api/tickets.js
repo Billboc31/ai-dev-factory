@@ -24,3 +24,4 @@ export const pushChanges = (id, projectId) => client.post(`${_pfx(projectId)}/ti
 export const createCheckpoint = (id, projectId) => client.post(`${_pfx(projectId)}/tickets/${id}/checkpoint`)
 export const archiveDaemon = (id, projectId) => client.post(`${_pfx(projectId)}/tickets/${id}/archive`)
 export const getAuditLog = (id, projectId) => client.get(`${_pfx(projectId)}/tickets/${id}/audit-log`)
+export const markConflictFailed = (id, projectId) => client.post(`${_pfx(projectId)}/tickets/${id}/mark-conflict-failed`)
