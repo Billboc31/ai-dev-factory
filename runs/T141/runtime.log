@@ -55,3 +55,20 @@
 [2026-05-23T07:53:59Z] compose: extra-context=runs/T141/fixes/context-20260523T075358Z.md
 [2026-05-23T07:53:59Z] snapshot: runtime-prompt=runs/T141/prompts/planner-attempt-3.md
 [2026-05-23T07:55:40Z] auto-run: step=planner done rc=0
+[2026-05-23T07:59:02Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-05-23T07:59:02Z] auto-run: running step=planner
+[2026-05-23T07:59:02Z] auto-run: fix context: previous_output=runs/T141/plan.md
+[2026-05-23T07:59:02Z] auto-run: fix context: review=runs/T141/reviews/plan-review.md
+[2026-05-23T07:59:02Z] auto-run: fix context: fix_instructions=runs/T141/fixes/plan-fix-1.md
+[2026-05-23T07:59:02Z] auto-run: fix context: context_file=runs/T141/fixes/context-20260523T075902Z.md
+[2026-05-23T07:59:02Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-05-23T07:59:02Z] prompt: generic fallback — injecting runs/T141/ticket.md
+[2026-05-23T07:59:02Z] compose: global-context=docs/ai/global-context.md
+[2026-05-23T07:59:02Z] compose: role=ai/roles/planner.md
+[2026-05-23T07:59:02Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-23T07:59:02Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-23T07:59:02Z] compose: skill=ai/skills/documentation.md
+[2026-05-23T07:59:02Z] compose: task (canonical prompt)
+[2026-05-23T07:59:02Z] compose: extra-context=runs/T141/fixes/context-20260523T075902Z.md
+[2026-05-23T07:59:02Z] snapshot: runtime-prompt=runs/T141/prompts/planner-attempt-5.md
+[2026-05-23T07:59:40Z] auto-run: step=planner done rc=0
