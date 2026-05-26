@@ -1,6 +1,22 @@
 services:
+  # Global reverse proxy. Gated behind the ``infra`` profile so a plain
+  # ``docker compose up -d`` (used by sandbox compose runs inside their
+  # isolated worktrees) never tries to spawn a per-sandbox Traefik —
+  # which previously failed with "Bind for 0.0.0.0:80 failed: port is
+  # already allocated" once a single global Traefik was running.
+  #
+  # Start exactly once per host with::
+  #
+  #     docker compose --profile infra up -d traefik
+  #
+  # Sandboxes only register/unregister route files under
+  # ``${HOST_RUNTIME_ROOT}/proxy/routes`` (see
+  # services/control_api/services/proxy_manager.py); they never own
+  # port 80 and never run their own proxy.
   traefik:
     image: traefik:v3.0
+    profiles:
+      - infra
     command:
       - "--configFile=/etc/traefik/traefik.yml"
     ports:

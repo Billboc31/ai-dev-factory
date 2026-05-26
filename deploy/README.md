@@ -26,11 +26,48 @@ The script sources `deploy/.env` so the supervisor sees all the
 `AI_DEV_FACTORY_SUPERVISOR_PORT` (default `8090`). It prints the resolved
 configuration at startup so you can verify the mapping.
 
-## 3. Start the Docker stack
+## 3. Start the global Traefik reverse proxy (once per host)
+
+```bash
+docker compose --profile infra up -d traefik
+```
+
+Traefik is **shared infrastructure**, not a per-sandbox service. It
+binds port `80` and watches `${HOST_RUNTIME_ROOT}/proxy/routes` for the
+dynamic route files written by `proxy_manager.py`. Sandboxes only
+register/unregister route files there.
+
+Traefik is gated behind the `infra` Docker Compose profile so that a
+plain `docker compose up -d` (used by sandbox compose runs inside an
+isolated worktree) never tries to spawn a per-sandbox Traefik. Without
+the gate, every sandbox after the first one would fail with:
+
+```text
+Bind for 0.0.0.0:80 failed: port is already allocated
+```
+
+To verify the profile gating is in place:
+
+```bash
+docker compose config --services                # api, web (no traefik)
+docker compose --profile infra config --services  # api, traefik, web
+```
+
+To stop the global Traefik:
+
+```bash
+docker compose --profile infra down
+```
+
+## 4. Start the application Docker stack
 
 ```bash
 docker compose --env-file deploy/.env up -d
 ```
+
+This starts only `api` and `web` — Traefik is excluded by the profile
+gate, so sandbox compose runs (`docker compose -p sandbox-… up -d`)
+will behave identically: no extra Traefik, no port-80 collision.
 
 The `--env-file deploy/.env` flag is what makes the variables available
 for `${HOST_RUNTIME_ROOT}` interpolation in `docker-compose.yml`. Without
