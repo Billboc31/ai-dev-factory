@@ -94,3 +94,18 @@
 [2026-05-26T11:20:04Z] compose: skill=ai/skills/debugging.md
 [2026-05-26T11:20:04Z] compose: task (canonical prompt)
 [2026-05-26T11:20:04Z] snapshot: runtime-prompt=runs/T151/prompts/tester-attempt-1.md
+[2026-05-26T11:21:35Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-26T11:21:35Z] auto-run: running step=tester
+[2026-05-26T11:21:35Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-26T11:21:35Z] prompt: generic fallback — injecting runs/T151/ticket.md
+[2026-05-26T11:21:35Z] compose: global-context=docs/ai/global-context.md
+[2026-05-26T11:21:35Z] compose: role=ai/roles/tester.md
+[2026-05-26T11:21:35Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-26T11:21:35Z] compose: skill=ai/skills/testing.md
+[2026-05-26T11:21:35Z] compose: skill=ai/skills/debugging.md
+[2026-05-26T11:21:35Z] compose: task (canonical prompt)
+[2026-05-26T11:21:35Z] snapshot: runtime-prompt=runs/T151/prompts/tester-attempt-2.md
+[2026-05-26T11:21:35Z] auto-run: runtime failure: empty_output (rc=1)
+[2026-05-26T11:21:35Z] auto-run: step=tester done rc=1
+[2026-05-26T11:21:35Z] auto-run: runtime failure: empty_output (rc=1)
+[2026-05-26T11:21:35Z] auto-run: step=tester failed rc=1, state unchanged=IMPLEMENTATION_APPROVED
