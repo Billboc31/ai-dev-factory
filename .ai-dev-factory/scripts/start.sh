@@ -31,6 +31,7 @@ __SB_SUPERVISOR_URL="${AI_DEV_FACTORY_SUPERVISOR_URL:-}"
 __SB_SUPERVISOR_HEALTH_URL="${AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL:-}"
 __SB_API_URL="${SANDBOX_API_URL:-}"
 __SB_WEB_URL="${SANDBOX_WEB_URL:-}"
+__SB_SUPERVISOR_ALREADY_STARTED="${AI_DEV_FACTORY_SUPERVISOR_ALREADY_STARTED:-}"
 
 # shellcheck source=/dev/null
 [ -f deploy/.env ] && source deploy/.env || true
@@ -48,14 +49,16 @@ AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL="${__SB_SUPERVISOR_HEALTH_URL:-${AI_DEV_FAC
 # falls back to direct host:port for both display and probes.
 SANDBOX_API_URL="${__SB_API_URL:-${SANDBOX_API_URL:-}}"
 SANDBOX_WEB_URL="${__SB_WEB_URL:-${SANDBOX_WEB_URL:-}}"
+AI_DEV_FACTORY_SUPERVISOR_ALREADY_STARTED="${__SB_SUPERVISOR_ALREADY_STARTED:-${AI_DEV_FACTORY_SUPERVISOR_ALREADY_STARTED:-0}}"
 export API_PORT WEB_PORT
 export AI_DEV_FACTORY_SUPERVISOR_PORT AI_DEV_FACTORY_SUPERVISOR_URL
 export AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL
 export SANDBOX_API_URL SANDBOX_WEB_URL
+export AI_DEV_FACTORY_SUPERVISOR_ALREADY_STARTED
 
 unset __SB_API_PORT __SB_WEB_PORT
 unset __SB_SUPERVISOR_PORT __SB_SUPERVISOR_URL __SB_SUPERVISOR_HEALTH_URL
-unset __SB_API_URL __SB_WEB_URL
+unset __SB_API_URL __SB_WEB_URL __SB_SUPERVISOR_ALREADY_STARTED
 
 RUN_DIR="$PROJECT_ROOT/.ai-dev-factory/run"
 mkdir -p "$RUN_DIR"
@@ -63,8 +66,14 @@ mkdir -p "$RUN_DIR"
 SUPERVISOR_PID_FILE="$RUN_DIR/supervisor.pid"
 
 # ── Supervisor ───────────────────────────────────────────────────────────────
+#
+# Sandbox validation starts the supervisor in run_sandbox.py before
+# invoking this script. Starting again here would bind the same port
+# twice ([Errno 48] address already in use).
 
-if [ -f "$SUPERVISOR_PID_FILE" ] && kill -0 "$(cat "$SUPERVISOR_PID_FILE")" 2>/dev/null; then
+if [ "${AI_DEV_FACTORY_SUPERVISOR_ALREADY_STARTED:-0}" = "1" ]; then
+  echo "start: supervisor already managed by sandbox worker, skipping startup"
+elif [ -f "$SUPERVISOR_PID_FILE" ] && kill -0 "$(cat "$SUPERVISOR_PID_FILE")" 2>/dev/null; then
   echo "start: supervisor already running (PID $(cat "$SUPERVISOR_PID_FILE"))"
 else
   if [ ! -f "$PROJECT_ROOT/.venv/bin/activate" ]; then

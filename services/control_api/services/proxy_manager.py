@@ -9,18 +9,16 @@ Route files live under ``${HOST_RUNTIME_ROOT}/proxy/routes/<id>.yml``.
 Traefik's file provider watches that directory (see
 ``deploy/infra/docker-compose.traefik.yml``).
 
-The companion :mod:`traefik_manager` ensures the global Traefik
-service is up *before* a route file is written — operators never
-need to remember a manual ``bash deploy/infra/start_traefik.sh``.
+Required host-global infra (reverse proxy) is ensured via
+:mod:`infra_service_manager` before route files are written.
 """
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Iterable
 from pathlib import Path
 
-from .traefik_manager import TraefikManager
+from .infra_service_manager import ensure_required_infra, resolve_proxy_routes_dir
 
 logger = logging.getLogger("control-api")
 
@@ -68,47 +66,31 @@ class ProxyManager:
         self,
         routes_dir: Path | None = None,
         *,
-        traefik_manager: TraefikManager | None = None,
-        auto_start_traefik: bool = True,
+        auto_ensure_infra: bool = True,
+        # Back-compat alias used by existing tests/callers.
+        auto_start_traefik: bool | None = None,
     ) -> None:
         if routes_dir is None:
-            runtime_root = Path(
-                os.environ.get(
-                    "AI_DEV_FACTORY_RUNTIME_ROOT", "~/runtime/ai-dev-factory"
-                )
-            ).expanduser()
-            routes_dir = runtime_root / "proxy" / "routes"
+            routes_dir = resolve_proxy_routes_dir()
         self.routes_dir = routes_dir
         self.routes_dir.mkdir(parents=True, exist_ok=True)
         dashboard_file = self.routes_dir / "_dashboard.yml"
         if not dashboard_file.exists():
             dashboard_file.write_text(_DASHBOARD_ROUTE, encoding="utf-8")
-        # ``auto_start_traefik=False`` is used by tests that want to
-        # assert ``register`` writes the file without actually talking
-        # to docker. Production code path keeps the default ``True``.
-        self._auto_start = auto_start_traefik
-        self._traefik = traefik_manager
-
-    @property
-    def traefik(self) -> TraefikManager:
-        """Lazy-instantiate so importing this module doesn't try to
-        locate the repo root unless the caller actually registers a
-        route."""
-        if self._traefik is None:
-            self._traefik = TraefikManager()
-        return self._traefik
+        # ``auto_ensure_infra=False`` keeps register() hermetic in tests.
+        if auto_start_traefik is not None:
+            auto_ensure_infra = auto_start_traefik
+        self._auto_ensure_infra = auto_ensure_infra
 
     def register(self, sandbox_id: str, ports: dict[str, int]) -> dict[str, str]:
-        if self._auto_start:
-            # Best effort — log a warning if Traefik can't be brought up,
-            # but still write the route file so it picks up the routes
-            # once the operator fixes the underlying docker issue.
-            ok = self.traefik.ensure_running()
-            if not ok:
+        if self._auto_ensure_infra:
+            results = ensure_required_infra(kinds=["reverse_proxy"])
+            if not results.get("reverse_proxy", False):
                 logger.warning(
-                    "proxy: traefik auto-start failed; route file will "
-                    "be written but pretty URLs won't resolve until "
-                    "traefik is up (run: bash deploy/infra/start_traefik.sh up)"
+                    "proxy: reverse_proxy unavailable; route file will "
+                    "be written to %s but pretty URLs may fail until infra "
+                    "is up (run: bash deploy/infra/start_traefik.sh up)",
+                    self.routes_dir,
                 )
 
         web_host = _web_hostname(sandbox_id)
@@ -146,7 +128,12 @@ class ProxyManager:
         tmp_file.rename(route_file)
 
         urls = build_sandbox_urls(sandbox_id)
-        logger.info("proxy route registered: sandbox=%s urls=%s", sandbox_id, urls)
+        logger.info(
+            "proxy: route registered sandbox=%s dir=%s urls=%s",
+            sandbox_id,
+            self.routes_dir,
+            urls,
+        )
         return urls
 
     def unregister(self, sandbox_id: str) -> None:

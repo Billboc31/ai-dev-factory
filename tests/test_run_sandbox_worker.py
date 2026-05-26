@@ -434,42 +434,84 @@ def test_sandbox_runner_injects_pretty_urls_and_supervisor_split(tmp_path, monke
     assert Path(rt_root) == expected_runtime
 
 
-def test_sandbox_runner_does_not_double_invoke_traefik_ensure_running(
-    tmp_path, monkeypatch
-):
-    """The worker calls ``TraefikManager.ensure_running`` exactly ONCE
-    per run — explicitly, before scripts execute. The follow-up
-    ``ProxyManager.register`` call must NOT trigger a second
-    auto-start, otherwise every sandbox run would issue a redundant
-    ``docker compose ps`` + TCP probe pair just to learn what it
-    already knew."""
+def test_sandbox_runner_ensures_infra_once_before_register(tmp_path, monkeypatch):
+    """Worker ensures required infra exactly once; register must not
+    re-run ensure (auto_ensure_infra=False on ProxyManager)."""
     proj = _make_git_project(tmp_path)
     _add_scripts(proj, _required_scripts_all_ok())
 
     call_log: list[str] = []
 
-    class _CountingTraefik:
-        def __init__(self, *a, **kw):
-            pass
-        def ensure_running(self, timeout: float = 15.0) -> bool:
-            call_log.append("ensure_running")
-            return False  # docker-less host: best-effort path
+    def counting_ensure(*, log=None, kinds=None):
+        call_log.append("ensure_required_infra")
+        if log:
+            log("infra: ensuring reverse_proxy (provider=traefik)")
+            log("infra: reverse_proxy ready")
+        return {"reverse_proxy": True}
 
-    # Patch the import sites — both the worker's direct call and the
-    # one the proxy's auto-start would resort to if not disabled.
-    monkeypatch.setattr(run_sandbox, "TraefikManager", _CountingTraefik)
-    import services.control_api.services.proxy_manager as pm
-    monkeypatch.setattr(pm, "TraefikManager", _CountingTraefik)
+    monkeypatch.setattr(run_sandbox, "ensure_required_infra", counting_ensure)
+    import services.control_api.services.proxy_manager as pm_mod
+
+    def boom(**kw):
+        call_log.append("proxy_ensure")
+        return {}
+
+    monkeypatch.setattr(pm_mod, "ensure_required_infra", boom)
 
     run_sandbox._do_sandbox("myproject", proj, "myproject-ONCE")
     state = _read_latest_state(tmp_path)
     assert state["state"] == "validated"
-    assert call_log == ["ensure_running"], (
-        f"expected exactly one ensure_running call, got {call_log}. "
-        f"The worker calls it explicitly; the proxy's auto-start path "
-        f"is disabled (auto_start_traefik=False) to avoid the double "
-        f"call."
+    assert call_log == ["ensure_required_infra"], (
+        f"expected single infra ensure, got {call_log}"
     )
+
+
+def test_sandbox_runner_injects_supervisor_already_started_flag(tmp_path, monkeypatch):
+    """When the worker starts the supervisor, start.sh must skip."""
+    dump_dir = tmp_path / "env_dump"
+    dump_dir.mkdir()
+    proj = _make_git_project(tmp_path)
+    scripts = {
+        name: (
+            f'printenv AI_DEV_FACTORY_SUPERVISOR_ALREADY_STARTED > "{dump_dir}/{name}"\n'
+            "exit 0\n"
+        )
+        for name in run_sandbox._REQUIRED_SCRIPTS
+    }
+    _add_scripts(proj, scripts)
+    monkeypatch.setattr(
+        run_sandbox, "ensure_required_infra", lambda **kw: {"reverse_proxy": True}
+    )
+    run_sandbox._do_sandbox("myproject", proj, "myproject-SUP-FLAG")
+    val = (dump_dir / "start.sh").read_text().strip()
+    assert val == "1", f"expected ALREADY_STARTED=1, got {val!r}"
+
+
+def test_sandbox_runner_registers_routes_under_host_runtime(
+    tmp_path, monkeypatch
+):
+    """Route files must land in HOST_RUNTIME_ROOT/proxy/routes."""
+    host = tmp_path / "host-runtime"
+    host.mkdir()
+    monkeypatch.setenv("HOST_RUNTIME_ROOT", str(host))
+    sandbox_rt = tmp_path / "runtime" / "sandboxes" / "x" / "runtime"
+    sandbox_rt.mkdir(parents=True)
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(sandbox_rt))
+
+    proj = _make_git_project(tmp_path)
+    _add_scripts(proj, _required_scripts_all_ok())
+    monkeypatch.setattr(
+        run_sandbox, "ensure_required_infra", lambda **kw: {"reverse_proxy": True}
+    )
+    monkeypatch.setattr(run_sandbox, "_unregister_proxy_route", lambda *a, **k: None)
+
+    sb_id = "myproject-ROUTES"
+    run_sandbox._do_sandbox("myproject", proj, sb_id)
+    route_file = host / "proxy" / "routes" / f"{sb_id}.yml"
+    assert route_file.exists(), (
+        f"route must be under host runtime {host}, not sandbox tree"
+    )
+    assert not (sandbox_rt / "proxy").exists()
 
 
 def test_sandbox_runner_unregisters_proxy_route_on_teardown(tmp_path, monkeypatch):

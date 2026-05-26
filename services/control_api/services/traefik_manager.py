@@ -7,9 +7,9 @@ their own Traefik (that would conflict on port 80).
 
 Operational flow this module supports::
 
-    1. SandboxManager.start() / ProxyManager.register() — both
-       implicitly call ``ensure_running()`` so the user never has to
-       remember to start Traefik manually.
+    1. :mod:`infra_service_manager` (reverse_proxy kind) calls
+       ``ensure_running()`` so deploy flows never require a manual
+       ``bash deploy/infra/start_traefik.sh``.
 
     2. ``ensure_running()`` is idempotent: returns True quickly when
        Traefik is already listening on port 80.

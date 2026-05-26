@@ -142,6 +142,24 @@ def test_healthcheck_prefers_sandbox_urls_over_direct_ports():
     assert "http://localhost:${WEB_PORT}" in text
 
 
+def test_start_sh_skips_supervisor_when_already_started_flag_set():
+    text = _START_SH.read_text(encoding="utf-8")
+    assert "AI_DEV_FACTORY_SUPERVISOR_ALREADY_STARTED" in text
+    assert re.search(
+        r'if\s*\[\s*"\$\{AI_DEV_FACTORY_SUPERVISOR_ALREADY_STARTED:-0\}"\s*=\s*"1"\s*\]',
+        text,
+    ), "start.sh must skip supervisor startup when worker already started it"
+    assert "supervisor already managed by sandbox worker" in text
+
+
+def test_start_sh_still_starts_supervisor_without_flag():
+    """Main runtime path: no flag → existing supervisor startup block."""
+    text = _START_SH.read_text(encoding="utf-8")
+    assert "deploy/start_supervisor.sh" in text
+    # The elif branch for pid file must still exist for main runtime.
+    assert "supervisor already running" in text
+
+
 def test_start_sh_announces_sandbox_urls_when_set():
     text = _START_SH.read_text(encoding="utf-8")
     assert "SANDBOX_API_URL" in text

@@ -22,7 +22,7 @@ def mgr(tmp_path):
     # docker auto-start path. The auto-start interaction is covered
     # by ``test_register_calls_ensure_running_on_real_default`` below
     # and by the dedicated ``test_traefik_manager.py`` suite.
-    return ProxyManager(routes_dir=tmp_path / "routes", auto_start_traefik=False)
+    return ProxyManager(routes_dir=tmp_path / "routes", auto_ensure_infra=False)
 
 
 def test_register_creates_route_file(mgr):
@@ -101,7 +101,7 @@ def test_init_does_not_overwrite_existing_dashboard(mgr):
     dashboard_file = mgr.routes_dir / "_dashboard.yml"
     original = dashboard_file.read_text()
     dashboard_file.write_text("custom content", encoding="utf-8")
-    ProxyManager(routes_dir=mgr.routes_dir, auto_start_traefik=False)
+    ProxyManager(routes_dir=mgr.routes_dir, auto_ensure_infra=False)
     assert dashboard_file.read_text() == "custom content"
     _ = original
 
@@ -123,62 +123,64 @@ def test_register_urls_match_build_helper(mgr):
     assert mgr.register("abc123", {"web": 1, "api": 2}) == build_sandbox_urls("abc123")
 
 
-# ── Traefik auto-start integration ───────────────────────────────────────────
-#
-# Production callers want `register` to make sure Traefik is up before
-# writing the route file, so the URL the dashboard surfaces is usable
-# immediately. These tests exercise the wiring with a stub
-# TraefikManager so the test stays hermetic (no real docker).
+# ── Infra auto-ensure integration ────────────────────────────────────────────
 
 
-class _StubTraefik:
-    def __init__(self, ok: bool = True):
-        self.calls: list[str] = []
-        self.ok = ok
+def test_register_calls_ensure_infra_when_auto_enabled(tmp_path, monkeypatch):
+    calls: list[dict] = []
 
-    def ensure_running(self, timeout: float = 15.0) -> bool:
-        self.calls.append("ensure_running")
-        return self.ok
+    def fake_ensure(**kwargs):
+        calls.append(kwargs)
+        return {"reverse_proxy": True}
 
+    import services.control_api.services.proxy_manager as pm_mod
 
-def test_register_calls_ensure_running_when_auto_start_enabled(tmp_path):
-    stub = _StubTraefik()
-    pm = ProxyManager(
-        routes_dir=tmp_path / "routes",
-        traefik_manager=stub,
-        auto_start_traefik=True,
-    )
+    monkeypatch.setattr(pm_mod, "ensure_required_infra", fake_ensure)
+    pm = ProxyManager(routes_dir=tmp_path / "routes", auto_ensure_infra=True)
     pm.register("abc123", {"web": 3100, "api": 8180})
-    assert stub.calls == ["ensure_running"], (
-        "auto_start=True must trigger ensure_running before route write"
-    )
+    assert len(calls) == 1
+    assert list(calls[0].get("kinds", [])) == ["reverse_proxy"]
 
 
-def test_register_still_writes_route_when_traefik_unavailable(tmp_path):
-    """Best-effort semantics: a failed auto-start logs a warning but
-    still writes the route file so it picks up once the operator
-    brings Traefik up manually."""
-    stub = _StubTraefik(ok=False)
-    pm = ProxyManager(
-        routes_dir=tmp_path / "routes",
-        traefik_manager=stub,
-        auto_start_traefik=True,
+def test_register_still_writes_route_when_infra_unavailable(tmp_path, monkeypatch):
+    import services.control_api.services.proxy_manager as pm_mod
+
+    monkeypatch.setattr(
+        pm_mod, "ensure_required_infra", lambda **kw: {"reverse_proxy": False}
     )
+    pm = ProxyManager(routes_dir=tmp_path / "routes", auto_ensure_infra=True)
     pm.register("abc123", {"web": 3100, "api": 8180})
     assert (pm.routes_dir / "abc123.yml").exists()
 
 
-def test_register_skips_ensure_running_when_disabled(tmp_path):
-    """``auto_start_traefik=False`` is the test/CI escape hatch — it
-    must not touch the (probably non-existent) docker daemon."""
-    stub = _StubTraefik()
-    pm = ProxyManager(
-        routes_dir=tmp_path / "routes",
-        traefik_manager=stub,
-        auto_start_traefik=False,
-    )
+def test_register_skips_ensure_infra_when_disabled(tmp_path, monkeypatch):
+    calls: list[str] = []
+
+    def boom(**kw):
+        calls.append("boom")
+        return {}
+
+    import services.control_api.services.proxy_manager as pm_mod
+
+    monkeypatch.setattr(pm_mod, "ensure_required_infra", boom)
+    pm = ProxyManager(routes_dir=tmp_path / "routes", auto_ensure_infra=False)
     pm.register("abc123", {"web": 3100, "api": 8180})
-    assert stub.calls == []
+    assert calls == []
+
+
+def test_proxy_routes_dir_uses_host_runtime_not_sandbox(monkeypatch, tmp_path):
+    """Regression: routes must land where Traefik watches them."""
+    host = tmp_path / "host-runtime"
+    host.mkdir()
+    sandbox = tmp_path / "sandboxes" / "x" / "runtime"
+    sandbox.mkdir(parents=True)
+    monkeypatch.setenv("HOST_RUNTIME_ROOT", str(host))
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(sandbox))
+    from services.control_api.services.infra_service_manager import (
+        resolve_proxy_routes_dir,
+    )
+
+    assert resolve_proxy_routes_dir() == host / "proxy" / "routes"
 
 
 # ── Stale route cleanup ──────────────────────────────────────────────────────
