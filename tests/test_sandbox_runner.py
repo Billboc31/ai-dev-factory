@@ -99,7 +99,7 @@ def test_start_picks_up_env_supervisor_url(monkeypatch, fake_httpx):
     url, body, _ = fake_httpx.posts[0]
     # trailing slash must be stripped before joining the path
     assert url == "http://supervisor:9000/sandbox/start"
-    assert body == {"project_root": "/host/p1", "project_id": "p1"}
+    assert body == {"project_root": "/host/p1", "project_id": "p1", "mode": "validation"}
 
 
 def test_start_propagates_409_as_locked(fake_httpx):
