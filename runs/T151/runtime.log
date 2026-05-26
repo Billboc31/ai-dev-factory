@@ -83,3 +83,14 @@
 [2026-05-26T10:32:45Z] push: tolerating runtime dirty files (not blocking): ['runs/T151/runtime.log']
 [2026-05-26T10:32:45Z] push: pushing branch=ticket/T151-t151-deployment-environments-dashboard
 [2026-05-26T10:32:48Z] push: done branch=ticket/T151-t151-deployment-environments-dashboard
+[2026-05-26T11:20:04Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-26T11:20:04Z] auto-run: running step=tester
+[2026-05-26T11:20:04Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-26T11:20:04Z] prompt: generic fallback — injecting runs/T151/ticket.md
+[2026-05-26T11:20:04Z] compose: global-context=docs/ai/global-context.md
+[2026-05-26T11:20:04Z] compose: role=ai/roles/tester.md
+[2026-05-26T11:20:04Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-26T11:20:04Z] compose: skill=ai/skills/testing.md
+[2026-05-26T11:20:04Z] compose: skill=ai/skills/debugging.md
+[2026-05-26T11:20:04Z] compose: task (canonical prompt)
+[2026-05-26T11:20:04Z] snapshot: runtime-prompt=runs/T151/prompts/tester-attempt-1.md
