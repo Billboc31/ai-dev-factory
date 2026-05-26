@@ -1,7 +1,7 @@
 {
   "ticket_id": "T151",
-  "state": "PLAN_APPROVED",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T151-t151-deployment-environments-dashboard",
   "issue_number": 149,
-  "updated_at": "2026-05-26T11:06:41Z"
+  "updated_at": "2026-05-26T11:12:00Z"
 }
