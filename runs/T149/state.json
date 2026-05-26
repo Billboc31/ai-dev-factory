@@ -1,7 +1,7 @@
 {
   "ticket_id": "T149",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_APPROVED",
   "branch": "ticket/T149-t149-sandbox-lifecycle-modes-and-stale-running-cle",
   "issue_number": 146,
-  "updated_at": "2026-05-26T08:43:38Z"
+  "updated_at": "2026-05-26T08:47:54Z"
 }
