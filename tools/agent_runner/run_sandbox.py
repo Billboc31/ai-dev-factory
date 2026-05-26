@@ -710,6 +710,17 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
     else:
         _append_log(log_path, f"compose_project: {compose_project}\n")
 
+    # Every key here is exported into the subprocess env of every
+    # operational script (bootstrap/build/start/healthcheck/...). The
+    # scripts read API_PORT / WEB_PORT / AI_DEV_FACTORY_SUPERVISOR_*
+    # to expose the isolated sandbox endpoints instead of the main
+    # runtime's hardcoded 8080/3000/8090 — otherwise healthchecks would
+    # silently probe the main runtime and report green even when the
+    # sandbox itself never came up.
+    #
+    # AI_DEV_FACTORY_RUNTIME_ROOT is included so scripts that resolve
+    # state/logs paths land inside the per-sandbox runtime tree rather
+    # than the shared host runtime root.
     extra_env = {
         "API_PORT": str(api_port),
         "WEB_PORT": str(web_port),
@@ -717,6 +728,7 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
         "SANDBOX_ID": sandbox_id,
         "AI_DEV_FACTORY_SUPERVISOR_PORT": str(supervisor_port),
         "AI_DEV_FACTORY_SUPERVISOR_URL": f"http://host.docker.internal:{supervisor_port}",
+        "AI_DEV_FACTORY_RUNTIME_ROOT": str(sandbox_runtime_root),
         "SANDBOX_ROOT": str(_sandbox_root()),
         "PROJECT_NAME": _project_name(),
     }

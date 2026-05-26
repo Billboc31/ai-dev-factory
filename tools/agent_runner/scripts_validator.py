@@ -155,6 +155,82 @@ _DOCKER_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
 )
 
 
+# ── Sandbox-aware port resolution (safety rule C1/C2) ────────────────────────
+#
+# `start.sh` and `healthcheck.sh` MUST derive their URLs from runtime
+# env vars (`API_PORT`, `WEB_PORT`, `AI_DEV_FACTORY_SUPERVISOR_*`). If
+# they hardcode the documented main-runtime defaults instead, sandbox
+# runs silently validate the MAIN runtime on 8080/3000 and report a
+# false-positive green light — exactly the failure mode that motivated
+# this validator rule.
+#
+# We only enforce this on the two scripts that actually emit URLs;
+# unrelated scripts (bootstrap, build, …) may mention literal numbers
+# in other contexts.
+
+_PORT_AWARE_SCRIPTS = frozenset({
+    ".ai-dev-factory/scripts/start.sh",
+    ".ai-dev-factory/scripts/healthcheck.sh",
+})
+
+# Match common hardcoded URL shapes: `http://localhost:8080`,
+# `http://127.0.0.1:3000/`, `localhost:8090/health`, etc. Anchored on a
+# host token + a port literal so we don't false-positive on the var
+# expansion form `${API_PORT}`.
+_HARDCODED_HOST_PORT_RE = re.compile(
+    r"\b(?:localhost|127\.0\.0\.1|0\.0\.0\.0|host\.docker\.internal)"
+    r":(8080|3000|8090)\b"
+)
+
+# Parameter expansion with default value: ``${VAR:-default}``. The
+# default is the documented fallback for the variable and is allowed
+# to mention the main-runtime port — that's how main-mode resolves
+# when no sandbox is active. We strip these expansions before running
+# the hardcoded-URL scan so they don't false-positive.
+_PARAM_DEFAULT_RE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*:-[^}]*\}")
+
+
+def _check_port_env_usage(path: str, content: str) -> list[str]:
+    """Reject hardcoded main-runtime ports in `start.sh`/`healthcheck.sh`.
+
+    Catches the production regression where the AI generator emitted
+    scripts that probed ``http://localhost:8080/health`` even inside
+    sandbox runs that had isolated ports allocated via env vars.
+    """
+    if path not in _PORT_AWARE_SCRIPTS:
+        return []
+    scan = _strip_comments(content)
+    # Drop parameter-expansion default values from the scan so
+    # ``${API_PORT:-8080}`` stays legal — the default ONLY takes effect
+    # when the env var is unset (i.e. not a sandbox run).
+    scan_no_defaults = _PARAM_DEFAULT_RE.sub("", scan)
+    errors: list[str] = []
+
+    hits = sorted(set(_HARDCODED_HOST_PORT_RE.findall(scan_no_defaults)))
+    if hits:
+        errors.append(
+            f"{path}: hardcoded URL with port {hits!r} — use the env "
+            f"expansions `${{API_PORT}}` / `${{WEB_PORT}}` / "
+            f"`${{AI_DEV_FACTORY_SUPERVISOR_URL}}` so sandbox runs use "
+            f"isolated ports instead of the main runtime defaults. "
+            f"See safety rule C1."
+        )
+
+    # Each script must reference the env-driven expansion explicitly
+    # for at least the two service ports it deals with — otherwise a
+    # future refactor could remove the resolution block without the
+    # validator noticing.
+    for var in ("API_PORT", "WEB_PORT", "AI_DEV_FACTORY_SUPERVISOR"):
+        if f"${{{var}" not in scan and f"${var}" not in scan:
+            errors.append(
+                f"{path}: must reference `${{{var}…}}` so the URL it "
+                f"emits/probes follows sandbox env injection. See "
+                f"safety rule C1."
+            )
+
+    return errors
+
+
 def _check_rm_rf_variables(content: str) -> list[str]:
     """Flag ``rm -rf "$VAR"`` unless the expansion uses ``${VAR:?…}``.
 
@@ -242,6 +318,7 @@ def _check_dangerous_patterns(path: str, content: str) -> list[str]:
 
     errors.extend(f"{path}: {e}" for e in _check_rm_rf_variables(scan))
     errors.extend(f"{path}: {e}" for e in _check_docker_compose_destructive(scan))
+    errors.extend(_check_port_env_usage(path, content))
 
     return errors
 
