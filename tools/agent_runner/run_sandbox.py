@@ -505,6 +505,58 @@ def _run_scripts(
     return True, None, steps
 
 
+# ── Stop script ─────────────────────────────────────────────────────────────
+
+
+def _run_stop_script(
+    worktree_path: Path,
+    log_path: Path,
+    extra_env: dict | None = None,
+) -> None:
+    """Execute stop.sh from the worktree as a cleanup step.
+
+    Non-blocking to cleanup: a non-zero exit or missing script is logged
+    but does not prevent the rest of the teardown from proceeding.
+    """
+    stop_rel = f"{_SCRIPTS_DIR}/stop.sh"
+    stop_path = worktree_path / stop_rel
+    if not stop_path.exists():
+        _append_log(log_path, f"stop.sh not found at {stop_path}, skipping\n")
+        return
+
+    _append_log(log_path, f"\n--- stop.sh ({stop_rel}) ---\n")
+    script_env = {**os.environ, **(extra_env or {})}
+    try:
+        result = subprocess.run(
+            ["bash", stop_rel],
+            capture_output=True,
+            text=True,
+            cwd=str(worktree_path),
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            timeout=_SCRIPT_TIMEOUT_SECONDS,
+            env=script_env,
+        )
+        if result.stdout:
+            _append_log(log_path, result.stdout)
+        if result.stderr:
+            _append_log(log_path, result.stderr)
+        if result.returncode != 0:
+            _append_log(
+                log_path,
+                f"stop.sh exited {result.returncode} (continuing cleanup)\n",
+            )
+        else:
+            _append_log(log_path, "stop.sh completed\n")
+    except subprocess.TimeoutExpired:
+        _append_log(
+            log_path,
+            f"stop.sh timed out after {_SCRIPT_TIMEOUT_SECONDS}s (continuing cleanup)\n",
+        )
+    except OSError as exc:
+        _append_log(log_path, f"stop.sh failed to run: {exc} (continuing cleanup)\n")
+
+
 # ── Main pipeline ────────────────────────────────────────────────────────────
 
 
@@ -716,6 +768,8 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
         })
         return 1
     finally:
+        if worktree_path.exists():
+            _run_stop_script(worktree_path, log_path, extra_env)
         _stop_sandbox_supervisor(supervisor_proc, sandbox_runtime_root, log_path)
         _release_port_slot(sandbox_id)
 
