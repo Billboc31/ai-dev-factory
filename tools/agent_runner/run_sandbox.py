@@ -639,7 +639,7 @@ def _stop_sandbox_supervisor(
     _append_log(log_path, "sandbox supervisor stopped\n")
 
 
-def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
+def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str = "validation") -> int:
     base_dir = _sandbox_base_dir()
     sandbox_dir = base_dir / sandbox_id
     sandbox_dir.mkdir(parents=True, exist_ok=True)
@@ -676,7 +676,8 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
 
     started_at = _now_iso()
     state_base = {
-        "state": "running",
+        "state": "validating",
+        "mode": mode,
         "sandbox_id": sandbox_id,
         "project_id": project_id,
         "started_at": started_at,
@@ -722,6 +723,9 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
 
     supervisor_proc = _start_sandbox_supervisor(supervisor_port, sandbox_runtime_root, log_path)
 
+    # Set to True in environment mode on success to skip teardown in finally.
+    keep_environment = False
+
     try:
         ok, error = _create_worktree(project_root, worktree_path, log_path)
         if not ok:
@@ -740,19 +744,37 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
         )
 
         finished_at = _now_iso()
-        _write_state(state_path, latest_state_path, {
-            **state_base,
-            "state": "success" if success else "failed",
-            "finished_at": finished_at,
-            "error": error,
-            "last_step": steps[-1]["name"] if steps else state_base["last_step"],
-            "steps": steps,
-        })
-        outcome = "completed" if success else "failed"
-        _append_log(
-            log_path, f"\n=== sandbox {sandbox_id} {outcome} {finished_at} ===\n"
-        )
-        return 0 if success else 1
+        if success and mode == "environment":
+            # Leave compose services and supervisor running; worker exits cleanly.
+            keep_environment = True
+            _write_state(state_path, latest_state_path, {
+                **state_base,
+                "state": "environment",
+                "finished_at": finished_at,
+                "error": None,
+                "last_step": steps[-1]["name"] if steps else state_base["last_step"],
+                "steps": steps,
+            })
+            _append_log(
+                log_path,
+                f"\n=== sandbox {sandbox_id} environment ready {finished_at} ===\n",
+            )
+            return 0
+        else:
+            final_state = "validated" if success else "failed"
+            _write_state(state_path, latest_state_path, {
+                **state_base,
+                "state": final_state,
+                "finished_at": finished_at,
+                "error": error,
+                "last_step": steps[-1]["name"] if steps else state_base["last_step"],
+                "steps": steps,
+            })
+            outcome = "validated" if success else "failed"
+            _append_log(
+                log_path, f"\n=== sandbox {sandbox_id} {outcome} {finished_at} ===\n"
+            )
+            return 0 if success else 1
 
     except Exception as e:  # noqa: BLE001
         tb = traceback.format_exc()
@@ -768,10 +790,11 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str) -> int:
         })
         return 1
     finally:
-        if worktree_path.exists():
-            _run_stop_script(worktree_path, log_path, extra_env)
-        _stop_sandbox_supervisor(supervisor_proc, sandbox_runtime_root, log_path)
-        _release_port_slot(sandbox_id)
+        if not keep_environment:
+            if worktree_path.exists():
+                _run_stop_script(worktree_path, log_path, extra_env)
+            _stop_sandbox_supervisor(supervisor_proc, sandbox_runtime_root, log_path)
+            _release_port_slot(sandbox_id)
 
 
 def main() -> None:
@@ -782,6 +805,12 @@ def main() -> None:
                         help="Host filesystem path to the project (already mapped)")
     parser.add_argument("--project-id", required=True,
                         help="Project identifier used to locate state/log files")
+    parser.add_argument(
+        "--mode",
+        choices=["validation", "environment"],
+        default="validation",
+        help="validation: deploy+test then teardown; environment: deploy and stay running",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -794,11 +823,11 @@ def main() -> None:
     sandbox_id = _make_sandbox_id(project_id)
 
     logger.info(
-        "sandbox worker start project_id=%s project_root=%s sandbox_id=%s runtime_root=%s",
-        project_id, project_root, sandbox_id, _runtime_root(),
+        "sandbox worker start project_id=%s project_root=%s sandbox_id=%s mode=%s runtime_root=%s",
+        project_id, project_root, sandbox_id, args.mode, _runtime_root(),
     )
 
-    rc = _do_sandbox(project_id, project_root, sandbox_id)
+    rc = _do_sandbox(project_id, project_root, sandbox_id, mode=args.mode)
     sys.exit(rc)
 
 

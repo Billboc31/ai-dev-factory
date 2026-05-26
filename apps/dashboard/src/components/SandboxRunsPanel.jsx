@@ -5,8 +5,13 @@ const STATE_COLORS = {
   idle: 'bg-gray-100 text-gray-700',
   pending: 'bg-yellow-100 text-yellow-700',
   running: 'bg-yellow-100 text-yellow-700',
+  validating: 'bg-yellow-100 text-yellow-700',
+  validated: 'bg-green-100 text-green-700',
+  environment: 'bg-blue-100 text-blue-700',
   success: 'bg-green-100 text-green-700',
   failed: 'bg-red-100 text-red-700',
+  stopped: 'bg-gray-100 text-gray-700',
+  cleaned: 'bg-gray-100 text-gray-400',
 }
 
 function LogsModal({ sandboxId, onClose }) {
@@ -42,7 +47,7 @@ function LogsModal({ sandboxId, onClose }) {
 export default function SandboxRunsPanel({ maxRows }) {
   const [runs, setRuns] = useState([])
   const [logsFor, setLogsFor] = useState(null)
-  const [cleaning, setCleaning] = useState(null)
+  const [acting, setActing] = useState(null)
 
   const fetchRuns = useCallback(() => {
     deployerApi.listSandboxRuns()
@@ -60,14 +65,38 @@ export default function SandboxRunsPanel({ maxRows }) {
   }, [fetchRuns])
 
   const handleCleanup = async (sandboxId) => {
-    setCleaning(sandboxId)
+    setActing(sandboxId)
     try {
       await deployerApi.cleanupSandboxRun(sandboxId)
       await fetchRuns()
     } catch {
       // ignore
     } finally {
-      setCleaning(null)
+      setActing(null)
+    }
+  }
+
+  const handleStop = async (run) => {
+    setActing(run.sandbox_id)
+    try {
+      await deployerApi.stopSandboxEnvironment(run.project_id)
+      await fetchRuns()
+    } catch {
+      // ignore
+    } finally {
+      setActing(null)
+    }
+  }
+
+  const handleDelete = async (run) => {
+    setActing(run.sandbox_id)
+    try {
+      await deployerApi.deleteSandboxEnvironment(run.project_id)
+      await fetchRuns()
+    } catch {
+      // ignore
+    } finally {
+      setActing(null)
     }
   }
 
@@ -86,29 +115,33 @@ export default function SandboxRunsPanel({ maxRows }) {
               <tr className="text-left text-gray-500 border-b">
                 <th className="pb-1 pr-3 font-medium">ID</th>
                 <th className="pb-1 pr-3 font-medium">Project</th>
+                <th className="pb-1 pr-3 font-medium">Mode</th>
                 <th className="pb-1 pr-3 font-medium">State</th>
                 <th className="pb-1 pr-3 font-medium">Started</th>
                 <th className="pb-1 pr-3 font-medium">Finished</th>
                 <th className="pb-1 pr-3 font-medium">Last step</th>
                 <th className="pb-1 pr-3 font-medium">Ports</th>
-                <th className="pb-1 pr-3 font-medium">Worktree</th>
                 <th className="pb-1 font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
               {runs.map(run => {
-                const isRunning = run.state === 'running' || run.state === 'pending'
+                const isActive = ['running', 'pending', 'validating'].includes(run.state)
+                const isEnv = run.state === 'environment'
+                const isStopped = run.state === 'stopped'
                 const colorClass = STATE_COLORS[run.state] || STATE_COLORS.idle
                 const portEntries = run.ports ? Object.entries(run.ports) : []
+                const busy = acting === run.sandbox_id
                 return (
                   <tr key={run.sandbox_id} className="border-b last:border-0 align-top">
                     <td className="py-1.5 pr-3 font-mono text-gray-600 max-w-[140px] truncate" title={run.sandbox_id}>
                       {run.sandbox_id}
                     </td>
                     <td className="py-1.5 pr-3 font-mono text-gray-600">{run.project_id}</td>
+                    <td className="py-1.5 pr-3 text-gray-500">{run.mode || 'validation'}</td>
                     <td className="py-1.5 pr-3">
                       <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${colorClass}`}>
-                        {isRunning && <span className="animate-spin inline-block">↻</span>}
+                        {isActive && <span className="animate-spin inline-block">↻</span>}
                         {run.state}
                       </span>
                     </td>
@@ -130,24 +163,41 @@ export default function SandboxRunsPanel({ maxRows }) {
                         </div>
                       ) : '—'}
                     </td>
-                    <td className="py-1.5 pr-3 font-mono text-gray-400 max-w-[160px] truncate" title={run.worktree_path}>
-                      {run.worktree_path || '—'}
-                    </td>
                     <td className="py-1.5">
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 flex-wrap">
                         <button
                           className="text-blue-600 hover:underline"
                           onClick={() => setLogsFor(run.sandbox_id)}
                         >
                           Logs
                         </button>
-                        <button
-                          className="text-red-500 hover:underline disabled:opacity-40"
-                          disabled={isRunning || cleaning === run.sandbox_id}
-                          onClick={() => handleCleanup(run.sandbox_id)}
-                        >
-                          {cleaning === run.sandbox_id ? '…' : 'Cleanup'}
-                        </button>
+                        {isEnv && (
+                          <button
+                            className="text-orange-500 hover:underline disabled:opacity-40"
+                            disabled={busy}
+                            onClick={() => handleStop(run)}
+                          >
+                            {busy ? '…' : 'Stop'}
+                          </button>
+                        )}
+                        {(isEnv || isStopped) && (
+                          <button
+                            className="text-red-500 hover:underline disabled:opacity-40"
+                            disabled={busy}
+                            onClick={() => handleDelete(run)}
+                          >
+                            {busy ? '…' : 'Delete'}
+                          </button>
+                        )}
+                        {!isActive && !isEnv && !isStopped && (
+                          <button
+                            className="text-red-500 hover:underline disabled:opacity-40"
+                            disabled={busy}
+                            onClick={() => handleCleanup(run.sandbox_id)}
+                          >
+                            {busy ? '…' : 'Cleanup'}
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

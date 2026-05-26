@@ -182,6 +182,7 @@ def get_project_sandbox_status(
     state = sandbox_runner.get_sandbox_state(project_id, _supervisor_url())
     return SandboxValidationStatus(
         state=state.state,
+        mode=state.mode,
         project_id=project_id,
         sandbox_id=state.sandbox_id,
         started_at=state.started_at,
@@ -202,18 +203,16 @@ def get_project_sandbox_status(
 )
 def start_project_sandbox(
     project_id: str,
+    mode: str = Query(default="validation", pattern="^(validation|environment)$"),
     project_root: Path = Depends(resolve_project),
 ) -> ActionResult:
     supervisor_url = _supervisor_url()
     logger.info(
-        "api: POST /projects/%s/sandbox/start (supervisor=%s)",
-        project_id, supervisor_url or "<not configured>",
+        "api: POST /projects/%s/sandbox/start mode=%s (supervisor=%s)",
+        project_id, mode, supervisor_url or "<not configured>",
     )
-    # Pass the project_root the dashboard sees (which is the API's view —
-    # potentially a container path like /app). The supervisor will map it
-    # to the corresponding host path before spawning the worker.
     result = sandbox_runner.start_sandbox_validation(
-        project_id, str(project_root), supervisor_url
+        project_id, str(project_root), supervisor_url, mode=mode
     )
     if result.error == "locked":
         raise HTTPException(status_code=409, detail="sandbox already running")
@@ -230,6 +229,38 @@ def start_project_sandbox(
             status_code=503,
             detail="supervisor unreachable — is the host supervisor running?",
         )
+    return result
+
+
+@project_router.post(
+    "/{project_id}/sandbox/stop",
+    response_model=ActionResult,
+)
+def stop_project_sandbox(
+    project_id: str,
+    project_root: Path = Depends(resolve_project),
+) -> ActionResult:
+    supervisor_url = _supervisor_url()
+    logger.info("api: POST /projects/%s/sandbox/stop", project_id)
+    result = sandbox_runner.stop_sandbox_environment(project_id, supervisor_url)
+    if result.error in ("no_supervisor_url", "supervisor_unreachable"):
+        raise HTTPException(status_code=503, detail=result.message)
+    return result
+
+
+@project_router.delete(
+    "/{project_id}/sandbox",
+    response_model=ActionResult,
+)
+def delete_project_sandbox(
+    project_id: str,
+    project_root: Path = Depends(resolve_project),
+) -> ActionResult:
+    supervisor_url = _supervisor_url()
+    logger.info("api: DELETE /projects/%s/sandbox", project_id)
+    result = sandbox_runner.delete_sandbox_environment(project_id, supervisor_url)
+    if result.error in ("no_supervisor_url", "supervisor_unreachable"):
+        raise HTTPException(status_code=503, detail=result.message)
     return result
 
 
@@ -297,6 +328,7 @@ def _raw_to_status(raw: dict) -> SandboxValidationStatus:
     ]
     return SandboxValidationStatus(
         state=raw.get("state", "idle"),
+        mode=raw.get("mode", "validation"),
         project_id=raw.get("project_id", ""),
         sandbox_id=raw.get("sandbox_id"),
         started_at=raw.get("started_at"),

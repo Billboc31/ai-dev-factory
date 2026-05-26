@@ -21,3 +21,16 @@
 [2026-05-26T08:43:38Z] push: tolerating runtime dirty files (not blocking): ['runs/T149/runtime.log']
 [2026-05-26T08:43:38Z] push: pushing branch=ticket/T149-t149-sandbox-lifecycle-modes-and-stale-running-cle
 [2026-05-26T08:43:40Z] push: done branch=ticket/T149-t149-sandbox-lifecycle-modes-and-stale-running-cle
+[2026-05-26T08:48:09Z] auto-run start: state=PLAN_APPROVED
+[2026-05-26T08:48:09Z] auto-run: running step=coder
+[2026-05-26T08:48:09Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-26T08:48:09Z] prompt: generic fallback — injecting runs/T149/ticket.md
+[2026-05-26T08:48:09Z] compose: global-context=docs/ai/global-context.md
+[2026-05-26T08:48:09Z] compose: role=ai/roles/coder.md
+[2026-05-26T08:48:09Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-26T08:48:09Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-26T08:48:09Z] compose: skill=ai/skills/code-quality.md
+[2026-05-26T08:48:09Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-26T08:48:09Z] compose: skill=ai/skills/security.md
+[2026-05-26T08:48:09Z] compose: task (canonical prompt)
+[2026-05-26T08:48:09Z] snapshot: runtime-prompt=runs/T149/prompts/coder-attempt-1.md

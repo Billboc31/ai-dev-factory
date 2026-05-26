@@ -289,7 +289,11 @@ class SandboxValidationStep(BaseModel):
 
 
 class SandboxValidationState(BaseModel):
-    state: Literal["idle", "pending", "running", "success", "failed"] = "idle"
+    state: Literal[
+        "idle", "pending", "running", "success",
+        "validating", "validated", "environment", "failed", "stopped", "cleaned",
+    ] = "idle"
+    mode: Literal["validation", "environment"] = "validation"
     sandbox_id: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
@@ -302,7 +306,11 @@ class SandboxValidationState(BaseModel):
 
 
 class SandboxValidationStatus(BaseModel):
-    state: Literal["idle", "pending", "running", "success", "failed"]
+    state: Literal[
+        "idle", "pending", "running", "success",
+        "validating", "validated", "environment", "failed", "stopped", "cleaned",
+    ]
+    mode: Literal["validation", "environment"] = "validation"
     project_id: str
     sandbox_id: str | None = None
     started_at: str | None = None
