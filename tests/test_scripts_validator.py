@@ -36,6 +36,22 @@ docker compose up -d
 echo "started"
 """
 
+# Body for the two port-aware scripts (``start.sh`` / ``healthcheck.sh``).
+# Must reference ``${API_PORT}``, ``${WEB_PORT}`` and ``${AI_DEV_FACTORY_SUPERVISOR…}``
+# so the rule-C1 safety check passes; otherwise the validator (rightly)
+# flags them for hardcoding main-runtime ports.
+_PORT_AWARE_BODY = """\
+#!/usr/bin/env bash
+set -euo pipefail
+API_PORT="${API_PORT:-8080}"
+WEB_PORT="${WEB_PORT:-3000}"
+AI_DEV_FACTORY_SUPERVISOR_PORT="${AI_DEV_FACTORY_SUPERVISOR_PORT:-8090}"
+AI_DEV_FACTORY_SUPERVISOR_URL="${AI_DEV_FACTORY_SUPERVISOR_URL:-http://127.0.0.1:${AI_DEV_FACTORY_SUPERVISOR_PORT}}"
+echo "api http://localhost:${API_PORT}"
+echo "web http://localhost:${WEB_PORT}"
+echo "supervisor ${AI_DEV_FACTORY_SUPERVISOR_URL}"
+"""
+
 _GOOD_DEPLOYMENT_MD = """\
 # Deployment Guide
 
@@ -59,9 +75,18 @@ threshold (~300 bytes, two headings) makes a one-liner summary fail.
 """
 
 
+_PORT_AWARE_PATHS = frozenset({
+    ".ai-dev-factory/scripts/start.sh",
+    ".ai-dev-factory/scripts/healthcheck.sh",
+})
+
+
 def _make_valid_set() -> dict[str, str]:
     """Build a complete, passing set of generated files."""
-    files = {p: _GOOD_BODY for p in REQUIRED_FILES if p.endswith(".sh")}
+    files = {
+        p: (_PORT_AWARE_BODY if p in _PORT_AWARE_PATHS else _GOOD_BODY)
+        for p in REQUIRED_FILES if p.endswith(".sh")
+    }
     files[".ai-dev-factory/deployment.md"] = _GOOD_DEPLOYMENT_MD
     return files
 
@@ -97,7 +122,12 @@ def test_single_backticks_in_command_substitution_are_allowed():
     files = _make_valid_set()
     files[".ai-dev-factory/scripts/healthcheck.sh"] = (
         "#!/usr/bin/env bash\nset -euo pipefail\n"
-        'curl -sf http://localhost:8080/health && echo "ok"\n'
+        'API_PORT="${API_PORT:-8080}"\n'
+        'WEB_PORT="${WEB_PORT:-3000}"\n'
+        'AI_DEV_FACTORY_SUPERVISOR_URL="${AI_DEV_FACTORY_SUPERVISOR_URL:-http://127.0.0.1:8090}"\n'
+        'curl -sf "http://localhost:${API_PORT}/health" && echo "ok"\n'
+        'curl -sf "http://localhost:${WEB_PORT}" || true\n'
+        'curl -sf "${AI_DEV_FACTORY_SUPERVISOR_URL}/health" || true\n'
         "REV=$(git rev-parse HEAD)\n"
         'echo "deployed: $REV"\n'
     )
@@ -117,7 +147,7 @@ def test_missing_shebang_is_rejected():
 
 def test_blank_lines_before_shebang_are_tolerated():
     files = _make_valid_set()
-    files[".ai-dev-factory/scripts/start.sh"] = "\n\n" + _GOOD_BODY
+    files[".ai-dev-factory/scripts/start.sh"] = "\n\n" + _PORT_AWARE_BODY
     assert validate_generated_files(files) == []
 
 
@@ -405,6 +435,107 @@ def test_parameter_expansion_hash_is_not_treated_as_comment():
     assert not any(s in "\n".join(errors) for s in (
         "pkill", "killall", "rm -rf", "does not look",
     )), errors
+
+
+# ── 12bis. Sandbox-aware port resolution (rule C1) ───────────────────────────
+#
+# Pins the regression where the AI generator produced start.sh /
+# healthcheck.sh that hardcoded the main-runtime ports (8080/3000/8090).
+# In sandbox runs, those URLs silently validated the MAIN runtime and
+# masked real deploy failures. The validator MUST flag every hardcoded
+# variant so the run aborts before writing such scripts to disk.
+
+
+def test_hardcoded_localhost_8080_in_start_sh_is_rejected():
+    files = _make_valid_set()
+    files[".ai-dev-factory/scripts/start.sh"] = (
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'echo "API http://localhost:8080"\n'
+        'echo "web http://localhost:3000"\n'
+        'echo "supervisor http://127.0.0.1:8090"\n'
+    )
+    errors = validate_generated_files(files)
+    assert any(
+        "start.sh" in e and "hardcoded URL" in e for e in errors
+    ), f"expected hardcoded-port rejection, got: {errors}"
+
+
+def test_hardcoded_ports_in_healthcheck_are_rejected():
+    files = _make_valid_set()
+    files[".ai-dev-factory/scripts/healthcheck.sh"] = (
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'curl -sf http://localhost:8080/health || exit 1\n'
+        'curl -sf http://localhost:3000 || exit 1\n'
+    )
+    errors = validate_generated_files(files)
+    assert any("healthcheck.sh" in e and "hardcoded URL" in e for e in errors)
+
+
+@pytest.mark.parametrize("hostport", [
+    "127.0.0.1:8080", "0.0.0.0:8080", "host.docker.internal:3000",
+    "localhost:8090",
+])
+def test_hardcoded_variants_are_all_rejected(hostport):
+    files = _make_valid_set()
+    files[".ai-dev-factory/scripts/start.sh"] = (
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        f'echo "service http://{hostport}/health"\n'
+        'API_PORT="${API_PORT:-8080}"\n'
+        'WEB_PORT="${WEB_PORT:-3000}"\n'
+        'AI_DEV_FACTORY_SUPERVISOR_URL="${AI_DEV_FACTORY_SUPERVISOR_URL:-x}"\n'
+    )
+    errors = validate_generated_files(files)
+    assert any("hardcoded URL" in e for e in errors), errors
+
+
+def test_missing_env_reference_in_start_sh_is_rejected():
+    """A script that emits NO hardcoded port but also never references
+    the env vars would not honour sandbox injection either."""
+    files = _make_valid_set()
+    files[".ai-dev-factory/scripts/start.sh"] = (
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'cd "$AI_DEV_FACTORY_PROJECT_ROOT"\n'
+        'docker compose up -d\n'
+        'echo "started"\n'
+    )
+    errors = validate_generated_files(files)
+    msg = "\n".join(errors)
+    assert "API_PORT" in msg, msg
+    assert "WEB_PORT" in msg, msg
+    assert "AI_DEV_FACTORY_SUPERVISOR" in msg, msg
+
+
+def test_env_driven_start_sh_passes_rule_c1():
+    files = _make_valid_set()
+    files[".ai-dev-factory/scripts/start.sh"] = (
+        "#!/usr/bin/env bash\n"
+        "set -euo pipefail\n"
+        'API_PORT="${API_PORT:-8080}"\n'
+        'WEB_PORT="${WEB_PORT:-3000}"\n'
+        'AI_DEV_FACTORY_SUPERVISOR_PORT="${AI_DEV_FACTORY_SUPERVISOR_PORT:-8090}"\n'
+        'AI_DEV_FACTORY_SUPERVISOR_URL="${AI_DEV_FACTORY_SUPERVISOR_URL:-http://127.0.0.1:${AI_DEV_FACTORY_SUPERVISOR_PORT}}"\n'
+        'docker compose up -d\n'
+        'echo "API http://localhost:${API_PORT}"\n'
+        'echo "web http://localhost:${WEB_PORT}"\n'
+        'echo "supervisor ${AI_DEV_FACTORY_SUPERVISOR_URL}"\n'
+    )
+    errors = validate_generated_files(files)
+    relevant = [e for e in errors if "C1" in e or "API_PORT" in e or "WEB_PORT" in e]
+    assert not relevant, f"env-driven start.sh should pass rule C1: {relevant}"
+
+
+def test_rule_c1_does_not_apply_to_other_scripts():
+    """Bootstrap/build/stop/restart may legitimately mention 8080 in
+    comments or test fixtures — rule C1 is scoped to the two scripts
+    that actually emit URLs at runtime."""
+    files = _make_valid_set()
+    files[".ai-dev-factory/scripts/bootstrap.sh"] = (
+        "#!/usr/bin/env bash\nset -euo pipefail\n"
+        'echo "verifying port 8080 reachable for local dev"\n'
+        'curl -sf http://localhost:8080/_check || true\n'
+    )
+    errors = validate_generated_files(files)
+    assert not any("hardcoded URL" in e for e in errors), errors
 
 
 # ── 13. The full PR #114 stop.sh fails every relevant rule ────────────────────

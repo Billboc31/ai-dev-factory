@@ -110,6 +110,51 @@ B7. Scripts MUST be idempotent (safe to run twice) and dry-run friendly
 B8. Use the deploy/.env file as the single source of truth for paths,
     ports and supervisor URL. Source it explicitly:
     `[ -f deploy/.env ] && source deploy/.env || true`
+
+## C. Sandbox-aware port resolution
+
+The same scripts run unchanged in TWO modes:
+
+  * **Main runtime** — ports come from `deploy/.env` or fall back to
+    the documented defaults (`8080` / `3000` / `8090`).
+  * **Sandbox runs** — `tools/agent_runner/run_sandbox.py` allocates
+    isolated ports per sandbox and injects them into the script
+    process via env vars (`API_PORT`, `WEB_PORT`,
+    `AI_DEV_FACTORY_SUPERVISOR_PORT`, `AI_DEV_FACTORY_SUPERVISOR_URL`,
+    `AI_DEV_FACTORY_RUNTIME_ROOT`, `SANDBOX_ID`, …).
+
+C1. `start.sh`, `healthcheck.sh` and any service-printing script MUST
+    derive their URLs from these env vars, never from hardcoded
+    `8080`/`3000`/`8090` or `localhost:8080`-style literals:
+
+    ```
+    API_PORT="${API_PORT:-8080}"
+    WEB_PORT="${WEB_PORT:-3000}"
+    AI_DEV_FACTORY_SUPERVISOR_PORT="${AI_DEV_FACTORY_SUPERVISOR_PORT:-8090}"
+    AI_DEV_FACTORY_SUPERVISOR_URL="${AI_DEV_FACTORY_SUPERVISOR_URL:-http://127.0.0.1:${AI_DEV_FACTORY_SUPERVISOR_PORT}}"
+    ```
+
+    `healthcheck.sh` probes MUST use these expansions, e.g.
+    `curl … "http://localhost:${API_PORT}/health"`. Hardcoded URLs
+    like `http://localhost:8080/health` cause sandbox healthchecks
+    to silently validate the MAIN runtime — a false positive that
+    hides real sandbox-deploy failures.
+
+C2. **Precedence**: sandbox-injected env vars MUST WIN over anything
+    that `deploy/.env` would set. The idiomatic pattern is to snapshot
+    inbound env, source `deploy/.env`, then restore the snapshot:
+
+    ```
+    __SB_API_PORT="${API_PORT:-}"
+    [ -f deploy/.env ] && source deploy/.env || true
+    API_PORT="${__SB_API_PORT:-${API_PORT:-8080}}"
+    unset __SB_API_PORT
+    ```
+
+C3. Detect sandbox mode with `[ -n "${SANDBOX_ID:-}" ]` when you need
+    to log the active sandbox, but the resolution code above MUST be
+    the SAME in both modes — never branch the script on sandbox
+    presence.
 """
 
 _INSTRUCTIONS_TEMPLATE = (

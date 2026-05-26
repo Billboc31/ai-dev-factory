@@ -116,13 +116,27 @@ cd "$SCRIPT_DIR/../.."
 echo "running"
 """
 
+# Body for the two scripts subject to rule C1: must reference the
+# sandbox-injection env vars so a sandbox run's allocated ports
+# survive across deploy/.env sourcing.
+_SH_PORT_AWARE_BODY = """\
+#!/usr/bin/env bash
+set -euo pipefail
+API_PORT="${API_PORT:-8080}"
+WEB_PORT="${WEB_PORT:-3000}"
+AI_DEV_FACTORY_SUPERVISOR_PORT="${AI_DEV_FACTORY_SUPERVISOR_PORT:-8090}"
+AI_DEV_FACTORY_SUPERVISOR_URL="${AI_DEV_FACTORY_SUPERVISOR_URL:-http://127.0.0.1:${AI_DEV_FACTORY_SUPERVISOR_PORT}}"
+echo "api http://localhost:${API_PORT}"
+echo "web http://localhost:${WEB_PORT}"
+"""
+
 _VALID_SCRIPTS_OUTPUT = (
     f"--- BEGIN FILE: .ai-dev-factory/scripts/bootstrap.sh ---\n{_SH_BODY}--- END FILE ---\n"
     f"--- BEGIN FILE: .ai-dev-factory/scripts/build.sh ---\n{_SH_BODY}--- END FILE ---\n"
-    f"--- BEGIN FILE: .ai-dev-factory/scripts/start.sh ---\n{_SH_BODY}--- END FILE ---\n"
+    f"--- BEGIN FILE: .ai-dev-factory/scripts/start.sh ---\n{_SH_PORT_AWARE_BODY}--- END FILE ---\n"
     f"--- BEGIN FILE: .ai-dev-factory/scripts/stop.sh ---\n{_SH_BODY}--- END FILE ---\n"
     f"--- BEGIN FILE: .ai-dev-factory/scripts/restart.sh ---\n{_SH_BODY}--- END FILE ---\n"
-    f"--- BEGIN FILE: .ai-dev-factory/scripts/healthcheck.sh ---\n{_SH_BODY}--- END FILE ---\n"
+    f"--- BEGIN FILE: .ai-dev-factory/scripts/healthcheck.sh ---\n{_SH_PORT_AWARE_BODY}--- END FILE ---\n"
     "--- BEGIN FILE: .ai-dev-factory/deployment.md ---\n"
     "# Deployment Guide\n\n"
     "## Overview\n"
@@ -237,7 +251,7 @@ def _bad_output_with_markdown_fences() -> str:
 def _bad_output_with_prose_script() -> str:
     """Reproduces PR #114's start.sh bug."""
     return _VALID_SCRIPTS_OUTPUT.replace(
-        f"--- BEGIN FILE: .ai-dev-factory/scripts/start.sh ---\n{_SH_BODY}--- END FILE ---",
+        f"--- BEGIN FILE: .ai-dev-factory/scripts/start.sh ---\n{_SH_PORT_AWARE_BODY}--- END FILE ---",
         "--- BEGIN FILE: .ai-dev-factory/scripts/start.sh ---\n"
         "Starts supervisor then Docker stack then daemon.\n"
         "--- END FILE ---",
