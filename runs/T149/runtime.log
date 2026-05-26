@@ -10,3 +10,14 @@
 [2026-05-26T08:40:44Z] compose: task (canonical prompt)
 [2026-05-26T08:40:44Z] snapshot: runtime-prompt=runs/T149/prompts/planner-attempt-1.md
 [2026-05-26T08:43:36Z] auto-run: step=planner done rc=0
+[2026-05-26T08:43:38Z] planner checkpoint: committed
+[2026-05-26T08:43:38Z] planner checkpoint: pushed
+[2026-05-26T08:43:38Z] planner validation success
+[2026-05-26T08:43:38Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-26T08:43:38Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-26T08:43:38Z] commit-checkpoint: unstaged runtime garbage: ['runs/T149/runtime.log']
+[2026-05-26T08:43:38Z] commit-checkpoint: sha=f2224b5d files=2 title='docs(T149/workflow): planner — update 2 file(s)'
+[2026-05-26T08:43:38Z] auto-run: auto-push triggered
+[2026-05-26T08:43:38Z] push: tolerating runtime dirty files (not blocking): ['runs/T149/runtime.log']
+[2026-05-26T08:43:38Z] push: pushing branch=ticket/T149-t149-sandbox-lifecycle-modes-and-stale-running-cle
+[2026-05-26T08:43:40Z] push: done branch=ticket/T149-t149-sandbox-lifecycle-modes-and-stale-running-cle
