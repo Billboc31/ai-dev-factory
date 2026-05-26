@@ -21,3 +21,14 @@
 [2026-05-26T07:08:50Z] push: tolerating runtime dirty files (not blocking): ['runs/T147/runtime.log']
 [2026-05-26T07:08:50Z] push: pushing branch=ticket/T147-t147-sandbox-daemon-isolation
 [2026-05-26T07:08:52Z] push: done branch=ticket/T147-t147-sandbox-daemon-isolation
+[2026-05-26T07:27:15Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-26T07:27:15Z] auto-run: running step=tester
+[2026-05-26T07:27:15Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-26T07:27:15Z] prompt: generic fallback — injecting runs/T147/ticket.md
+[2026-05-26T07:27:15Z] compose: global-context=docs/ai/global-context.md
+[2026-05-26T07:27:15Z] compose: role=ai/roles/tester.md
+[2026-05-26T07:27:15Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-26T07:27:15Z] compose: skill=ai/skills/testing.md
+[2026-05-26T07:27:15Z] compose: skill=ai/skills/debugging.md
+[2026-05-26T07:27:15Z] compose: task (canonical prompt)
+[2026-05-26T07:27:15Z] snapshot: runtime-prompt=runs/T147/prompts/tester-attempt-1.md
