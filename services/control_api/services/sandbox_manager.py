@@ -14,6 +14,7 @@ from pathlib import Path
 
 from ..models.sandbox import SandboxState, SandboxStatus
 from .deployer_runner import _load_deploy_profile
+from .proxy_manager import ProxyManager
 from .runtime_resolver import get_project_sandbox_dir
 from .undeploy_runner import run_cleanup, run_undeploy
 
@@ -61,6 +62,7 @@ class SandboxManager:
         self.sandboxes_dir = sandboxes_dir
         self.sandboxes_dir.mkdir(parents=True, exist_ok=True)
         self._registry_path = self.sandboxes_dir / "port-registry.json"
+        self._proxy = ProxyManager()
 
     # --- port registry ---
 
@@ -179,7 +181,8 @@ class SandboxManager:
             logger.warning("sandbox start failed: %s — %s", sandbox_id, err.strip())
             state = state.model_copy(update={"status": SandboxStatus.error, "supervisor_pid": supervisor_pid})
         else:
-            state = state.model_copy(update={"status": SandboxStatus.running, "supervisor_pid": supervisor_pid})
+            urls = self._proxy.register(sandbox_id, state.ports)
+            state = state.model_copy(update={"status": SandboxStatus.running, "supervisor_pid": supervisor_pid, "urls": urls})
         self._write_state(state)
         return state
 
@@ -343,6 +346,7 @@ class SandboxManager:
 
         # 1. Terminate supervisor before undeploy to avoid interference.
         self._terminate_sandbox_supervisor(state)
+        self._proxy.unregister(sandbox_id)
 
         # 2. Resolve project root for deploy profile lookup.
         worktree = Path(state.worktree_path) if state.worktree_path else None

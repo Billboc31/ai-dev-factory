@@ -1,4 +1,17 @@
 services:
+  traefik:
+    image: traefik:v3.0
+    command:
+      - "--configFile=/etc/traefik/traefik.yml"
+    ports:
+      - "80:80"
+    volumes:
+      - ./deploy/traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ${HOST_RUNTIME_ROOT:-~/runtime/ai-dev-factory}/proxy/routes:/routes
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
   api:
     build:
       context: .

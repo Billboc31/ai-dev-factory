@@ -1,0 +1,64 @@
+[2026-05-26T09:21:28Z] auto-run start: state=INIT
+[2026-05-26T09:21:28Z] auto-run: running step=planner
+[2026-05-26T09:21:28Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-05-26T09:21:28Z] prompt: generic fallback — injecting runs/T150/ticket.md
+[2026-05-26T09:21:28Z] compose: global-context=docs/ai/global-context.md
+[2026-05-26T09:21:28Z] compose: role=ai/roles/planner.md
+[2026-05-26T09:21:28Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-26T09:21:28Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-26T09:21:28Z] compose: skill=ai/skills/documentation.md
+[2026-05-26T09:21:28Z] compose: task (canonical prompt)
+[2026-05-26T09:21:28Z] snapshot: runtime-prompt=runs/T150/prompts/planner-attempt-1.md
+[2026-05-26T09:21:40Z] auto-run start: state=INIT
+[2026-05-26T09:21:40Z] auto-run: running step=planner
+[2026-05-26T09:21:40Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-05-26T09:21:40Z] prompt: generic fallback — injecting runs/T150/ticket.md
+[2026-05-26T09:21:40Z] compose: global-context=docs/ai/global-context.md
+[2026-05-26T09:21:40Z] compose: role=ai/roles/planner.md
+[2026-05-26T09:21:40Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-26T09:21:40Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-26T09:21:40Z] compose: skill=ai/skills/documentation.md
+[2026-05-26T09:21:40Z] compose: task (canonical prompt)
+[2026-05-26T09:21:40Z] snapshot: runtime-prompt=runs/T150/prompts/planner-attempt-2.md
+[2026-05-26T09:24:23Z] auto-run: step=planner done rc=0
+[2026-05-26T09:24:26Z] planner checkpoint: committed
+[2026-05-26T09:24:26Z] planner checkpoint: pushed
+[2026-05-26T09:24:26Z] planner validation success
+[2026-05-26T09:24:26Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-26T09:24:26Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-26T09:24:26Z] commit-checkpoint: unstaged runtime garbage: ['runs/T150/runtime.log']
+[2026-05-26T09:24:26Z] commit-checkpoint: sha=0a5265ac files=2 title='docs(T150/workflow): planner — update 2 file(s)'
+[2026-05-26T09:24:26Z] auto-run: auto-push triggered
+[2026-05-26T09:24:26Z] push: tolerating runtime dirty files (not blocking): ['runs/T150/runtime.log']
+[2026-05-26T09:24:26Z] push: pushing branch=ticket/T150-t150-local-dns-and-reverse-proxy-for-sandbox-envir
+[2026-05-26T09:25:24Z] auto-run: step=planner done rc=0
+[2026-05-26T09:25:27Z] planner checkpoint: committed
+[2026-05-26T09:25:27Z] planner checkpoint: pushed
+[2026-05-26T09:25:27Z] planner validation success
+[2026-05-26T09:25:27Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-26T09:25:27Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-26T09:25:27Z] commit-checkpoint: unstaged runtime garbage: ['runs/T150/runtime.log']
+[2026-05-26T09:25:27Z] commit-checkpoint: sha=bf1e650b files=2 title='docs(T150/workflow): planner — update 2 file(s)'
+[2026-05-26T09:25:27Z] auto-run: auto-push triggered
+[2026-05-26T09:25:27Z] push: tolerating runtime dirty files (not blocking): ['runs/T150/runtime.log']
+[2026-05-26T09:25:27Z] push: pushing branch=ticket/T150-t150-local-dns-and-reverse-proxy-for-sandbox-envir
+[2026-05-26T09:25:29Z] push: done branch=ticket/T150-t150-local-dns-and-reverse-proxy-for-sandbox-envir
+[2026-05-26T09:41:10Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-26T09:41:10Z] auto-run: running step=tester
+[2026-05-26T09:41:10Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-26T09:41:10Z] prompt: generic fallback — injecting runs/T150/ticket.md
+[2026-05-26T09:41:10Z] compose: global-context=docs/ai/global-context.md
+[2026-05-26T09:41:10Z] compose: role=ai/roles/tester.md
+[2026-05-26T09:41:10Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-26T09:41:10Z] compose: skill=ai/skills/testing.md
+[2026-05-26T09:41:10Z] compose: skill=ai/skills/debugging.md
+[2026-05-26T09:41:10Z] compose: task (canonical prompt)
+[2026-05-26T09:41:10Z] snapshot: runtime-prompt=runs/T150/prompts/tester-attempt-1.md
+[2026-05-26T09:47:09Z] auto-run: step=tester done rc=0
+[2026-05-26T09:47:09Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-26T09:47:09Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-26T09:47:10Z] commit-checkpoint: unstaged runtime garbage: ['runs/T150/runtime.log']
+[2026-05-26T09:47:10Z] commit-checkpoint: sha=3d18cf4e files=5 title='test(T150/dashboard,workflow): tester — update 5 file(s)'
+[2026-05-26T09:47:10Z] auto-run: auto-push triggered
+[2026-05-26T09:47:10Z] push: tolerating runtime dirty files (not blocking): ['runs/T150/runtime.log']
+[2026-05-26T09:47:10Z] push: pushing branch=ticket/T150-t150-local-dns-and-reverse-proxy-for-sandbox-envir
