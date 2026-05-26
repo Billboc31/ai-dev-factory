@@ -1,7 +1,7 @@
 {
   "ticket_id": "T148",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T148-t148-generic-sandbox-undeploy-lifecycle",
   "issue_number": 143,
-  "updated_at": "2026-05-26T07:38:25Z"
+  "updated_at": "2026-05-26T07:41:01Z"
 }
