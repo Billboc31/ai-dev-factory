@@ -21,3 +21,20 @@
 [2026-05-26T09:52:04Z] push: tolerating runtime dirty files (not blocking): ['runs/T151/runtime.log']
 [2026-05-26T09:52:04Z] push: pushing branch=ticket/T151-t151-deployment-environments-dashboard
 [2026-05-26T09:52:06Z] push: done branch=ticket/T151-t151-deployment-environments-dashboard
+[2026-05-26T10:18:14Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-05-26T10:18:14Z] auto-run: running step=planner
+[2026-05-26T10:18:14Z] auto-run: fix context: previous_output=runs/T151/plan.md
+[2026-05-26T10:18:14Z] auto-run: fix context: review=runs/T151/reviews/plan-review.md
+[2026-05-26T10:18:14Z] auto-run: fix context: fix_instructions=runs/T151/fixes/plan-fix-1.md
+[2026-05-26T10:18:14Z] auto-run: fix context: context_file=runs/T151/fixes/context-20260526T101814Z.md
+[2026-05-26T10:18:14Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-05-26T10:18:14Z] prompt: generic fallback — injecting runs/T151/ticket.md
+[2026-05-26T10:18:14Z] compose: global-context=docs/ai/global-context.md
+[2026-05-26T10:18:14Z] compose: role=ai/roles/planner.md
+[2026-05-26T10:18:14Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-26T10:18:14Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-05-26T10:18:14Z] compose: skill=ai/skills/documentation.md
+[2026-05-26T10:18:14Z] compose: task (canonical prompt)
+[2026-05-26T10:18:14Z] compose: extra-context=runs/T151/fixes/context-20260526T101814Z.md
+[2026-05-26T10:18:14Z] snapshot: runtime-prompt=runs/T151/prompts/planner-attempt-2.md
+[2026-05-26T10:21:20Z] auto-run: step=planner done rc=0
