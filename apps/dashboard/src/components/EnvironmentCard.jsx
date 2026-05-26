@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import * as api from '../api/environments'
 
 const STATUS_COLORS = {
@@ -50,12 +50,12 @@ function LogsModal({ envId, onClose }) {
   const [logs, setLogs] = useState('')
   const [loading, setLoading] = useState(true)
 
-  useState(() => {
+  useEffect(() => {
     api.getEnvironmentLogs(envId)
       .then(r => setLogs(r.data.logs || '(no logs)'))
       .catch(() => setLogs('(failed to fetch logs)'))
       .finally(() => setLoading(false))
-  })
+  }, [envId])
 
   return (
     <div className="fixed inset-0 flex justify-end z-50">
