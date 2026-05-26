@@ -12,7 +12,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from ..models.sandbox import EnvironmentMode, EnvironmentType, RefType, SandboxState, SandboxStatus
+from ..models.sandbox import SandboxState, SandboxStatus
 from .deployer_runner import _load_deploy_profile
 from .proxy_manager import ProxyManager
 from .runtime_resolver import get_project_sandbox_dir
@@ -132,17 +132,7 @@ class SandboxManager:
 
     # --- public API ---
 
-    def create(
-        self,
-        ticket_id: str,
-        project_root: str,
-        *,
-        env_name: str | None = None,
-        env_type: EnvironmentType | None = None,
-        ref: str | None = None,
-        ref_type: RefType | None = None,
-        deployment_mode: EnvironmentMode | None = None,
-    ) -> SandboxState:
+    def create(self, ticket_id: str, project_root: str) -> SandboxState:
         sandbox_id = uuid.uuid4().hex[:12]
         slot = self._allocate_slot(sandbox_id)
 
@@ -178,11 +168,6 @@ class SandboxManager:
             slot=slot,
             supervisor_port=supervisor_port,
             sandbox_runtime_root=sandbox_runtime_root,
-            env_name=env_name,
-            env_type=env_type,
-            ref=ref,
-            ref_type=ref_type,
-            deployment_mode=deployment_mode,
         )
         self._write_state(state)
         logger.info("sandbox created: %s (slot=%d ports=%s)", sandbox_id, slot, ports)
@@ -197,12 +182,7 @@ class SandboxManager:
             state = state.model_copy(update={"status": SandboxStatus.error, "supervisor_pid": supervisor_pid})
         else:
             urls = self._proxy.register(sandbox_id, state.ports)
-            state = state.model_copy(update={
-                "status": SandboxStatus.running,
-                "supervisor_pid": supervisor_pid,
-                "urls": urls,
-                "deployed_at": _now_iso(),
-            })
+            state = state.model_copy(update={"status": SandboxStatus.running, "supervisor_pid": supervisor_pid, "urls": urls})
         self._write_state(state)
         return state
 
@@ -220,7 +200,7 @@ class SandboxManager:
                         stale.unlink()
                     except OSError:
                         pass
-        state = state.model_copy(update={"status": SandboxStatus.stopped, "supervisor_pid": None, "stopped_at": _now_iso()})
+        state = state.model_copy(update={"status": SandboxStatus.stopped, "supervisor_pid": None})
         self._write_state(state)
         return state
 
