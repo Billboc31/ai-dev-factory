@@ -72,3 +72,14 @@
 [2026-05-26T10:28:47Z] compose: extra-context=runs/T151/fixes/context-20260526T102847Z.md
 [2026-05-26T10:28:47Z] snapshot: runtime-prompt=runs/T151/prompts/planner-attempt-4.md
 [2026-05-26T10:32:43Z] auto-run: step=planner done rc=0
+[2026-05-26T10:32:45Z] planner checkpoint: committed
+[2026-05-26T10:32:45Z] planner checkpoint: pushed
+[2026-05-26T10:32:45Z] planner validation success
+[2026-05-26T10:32:45Z] auto-run: transition PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED
+[2026-05-26T10:32:45Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-26T10:32:45Z] commit-checkpoint: unstaged runtime garbage: ['runs/T151/runtime.log']
+[2026-05-26T10:32:45Z] commit-checkpoint: sha=f9bed792 files=2 title='docs(T151/workflow): planner — update 2 file(s)'
+[2026-05-26T10:32:45Z] auto-run: auto-push triggered
+[2026-05-26T10:32:45Z] push: tolerating runtime dirty files (not blocking): ['runs/T151/runtime.log']
+[2026-05-26T10:32:45Z] push: pushing branch=ticket/T151-t151-deployment-environments-dashboard
+[2026-05-26T10:32:48Z] push: done branch=ticket/T151-t151-deployment-environments-dashboard
