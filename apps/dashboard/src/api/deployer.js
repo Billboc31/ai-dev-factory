@@ -17,9 +17,12 @@ export const generateScripts = (projectId) => client.post(`${_pfx(projectId)}/de
 export const getScriptsStatus = (projectId) => client.get(`${_pfx(projectId)}/deployer/scripts/status`)
 export const getScriptsLogs = (projectId, lines = 100) => client.get(`${_pfx(projectId)}/deployer/scripts/logs`, { params: { lines } })
 // T134 — per-project deploy-validation pipeline (`sandbox/*`).
-export const startSandboxValidation = (projectId) => client.post(`${_pfx(projectId)}/sandbox/start`)
+export const startSandboxValidation = (projectId) => client.post(`${_pfx(projectId)}/sandbox/start`, null, { params: { mode: 'validation' } })
+export const startSandboxEnvironment = (projectId) => client.post(`${_pfx(projectId)}/sandbox/start`, null, { params: { mode: 'environment' } })
 export const getSandboxStatus = (projectId) => client.get(`${_pfx(projectId)}/sandbox/status`)
 export const getSandboxLogs = (projectId, lines = 100) => client.get(`${_pfx(projectId)}/sandbox/logs`, { params: { lines } })
+export const stopSandboxEnvironment = (projectId) => client.post(`${_pfx(projectId)}/sandbox/stop`)
+export const deleteSandboxEnvironment = (projectId) => client.delete(`${_pfx(projectId)}/sandbox`)
 // T137 — historical sandbox-runs listing and cleanup (`/sandbox-runs`).
 export const listSandboxRuns = () => client.get('/sandbox-runs')
 export const getSandboxRunLogs = (sandboxId, lines = 500) => client.get(`/sandbox-runs/${sandboxId}/logs`, { params: { lines } })

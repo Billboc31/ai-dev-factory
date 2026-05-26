@@ -116,14 +116,20 @@ def test_sandbox_start_writes_supervisor_log_header(supervisor_app, monkeypatch)
 
 def test_sandbox_start_writes_pid_file(supervisor_app, monkeypatch):
     sup_main, runtime = supervisor_app
+    import threading as _threading
 
     class _Stub:
         pid = 33333
+        _ev = _threading.Event()
 
         def wait(self):
+            # Block until the test is done so the watcher thread doesn't
+            # remove the PID file before the assertion runs.
+            self._ev.wait(timeout=5)
             return 0
 
-    monkeypatch.setattr(sup_main.subprocess, "Popen", lambda *a, **kw: _Stub())
+    stub = _Stub()
+    monkeypatch.setattr(sup_main.subprocess, "Popen", lambda *a, **kw: stub)
 
     client = TestClient(sup_main.app)
     client.post(
@@ -138,11 +144,15 @@ def test_sandbox_start_writes_pid_file(supervisor_app, monkeypatch):
 
 def test_concurrent_start_returns_409(supervisor_app, monkeypatch):
     sup_main, runtime = supervisor_app
+    import threading as _threading
 
     class _LiveStub:
         pid = 44444
+        _ev = _threading.Event()
 
         def wait(self):
+            # Block so the watcher thread doesn't remove the PID file between r1 and r2.
+            self._ev.wait(timeout=5)
             return 0
 
     monkeypatch.setattr(sup_main.subprocess, "Popen", lambda *a, **kw: _LiveStub())
@@ -253,18 +263,94 @@ def test_stop_kills_worker_pid(supervisor_app, monkeypatch):
     monkeypatch.setattr(sup_main, "_is_alive", lambda pid: True)
     killed = []
     monkeypatch.setattr(sup_main.os, "kill", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(sup_main, "_run_stop_sh_supervisor", lambda *a, **kw: None)
 
     client = TestClient(sup_main.app)
     r = client.post("/sandbox/stoppable/stop")
-    assert r.json() == {"ok": True}
-    assert killed == [(7777, sup_main.signal.SIGTERM)]
+    assert r.json()["ok"] is True
+    assert (7777, sup_main.signal.SIGTERM) in killed
     assert not pid_path.exists()
 
 
-def test_stop_when_no_worker(supervisor_app):
+def test_stop_when_no_worker_is_idempotent(supervisor_app, monkeypatch):
+    """Stopping with nothing running is a graceful no-op (idempotent)."""
     sup_main, _ = supervisor_app
+    monkeypatch.setattr(sup_main, "_run_stop_sh_supervisor", lambda *a, **kw: None)
     client = TestClient(sup_main.app)
     r = client.post("/sandbox/nothing/stop")
+    assert r.json()["ok"] is True
+
+
+def test_stop_is_idempotent_when_already_stopped(supervisor_app):
+    """Calling stop on an already-stopped sandbox returns ok without error."""
+    sup_main, runtime = supervisor_app
+    state_path = runtime / "state" / "sandbox-done.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps({"state": "stopped", "sandbox_id": "done-1"}))
+
+    client = TestClient(sup_main.app)
+    r = client.post("/sandbox/done/stop")
     body = r.json()
-    assert body["ok"] is False
-    assert body["error"] == "not_running"
+    assert body["ok"] is True
+    assert body.get("already") == "stopped"
+
+
+# ── Stale PID recovery ────────────────────────────────────────────────────────
+
+
+def test_stale_pid_cleared_before_new_start(supervisor_app, monkeypatch):
+    """If the previous worker is dead its PID file must be cleared so a new
+    start is accepted without returning 409."""
+    sup_main, runtime = supervisor_app
+
+    # Write a PID file for a dead process.
+    pid_path = runtime / "runs" / "sandbox-stale.pid"
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text(json.dumps({"pid": 99999}))
+
+    class _Stub:
+        pid = 55555
+
+        def wait(self):
+            return 0
+
+    monkeypatch.setattr(sup_main.subprocess, "Popen", lambda *a, **kw: _Stub())
+    # PID 99999 is dead, new PID 55555 is alive.
+    monkeypatch.setattr(sup_main, "_is_alive", lambda pid: pid == 55555)
+
+    client = TestClient(sup_main.app)
+    r = client.post("/sandbox/start", json={"project_root": "/app", "project_id": "stale"})
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+
+
+# ── Delete ────────────────────────────────────────────────────────────────────
+
+
+def test_delete_transitions_state_to_cleaned(supervisor_app, monkeypatch, tmp_path):
+    """DELETE /sandbox/{project_id} must set state=cleaned."""
+    sup_main, runtime = supervisor_app
+
+    worktree = tmp_path / "worktree"
+    worktree.mkdir()
+    sandbox_dir = tmp_path
+
+    state_path = runtime / "state" / "sandbox-env1.json"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(json.dumps({
+        "state": "environment",
+        "sandbox_id": "env1-20260526T120000",
+        "worktree_path": str(worktree),
+        "project_root": str(tmp_path),
+    }))
+
+    monkeypatch.setattr(sup_main, "_is_alive", lambda pid: False)
+    monkeypatch.setattr(sup_main, "_run_stop_sh_supervisor", lambda *a, **kw: None)
+    monkeypatch.setattr(sup_main, "_release_port_slot_supervisor", lambda *a, **kw: None)
+
+    client = TestClient(sup_main.app)
+    r = client.delete("/sandbox/env1")
+    assert r.json()["ok"] is True
+
+    updated = json.loads(state_path.read_text())
+    assert updated["state"] == "cleaned"

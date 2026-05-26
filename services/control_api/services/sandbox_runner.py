@@ -63,6 +63,7 @@ def _state_from_payload(raw: dict) -> SandboxValidationState:
     ]
     return SandboxValidationState(
         state=raw.get("state", "idle"),
+        mode=raw.get("mode", "validation"),
         sandbox_id=raw.get("sandbox_id"),
         started_at=raw.get("started_at"),
         finished_at=raw.get("finished_at"),
@@ -79,6 +80,7 @@ def start_sandbox_validation(
     project_id: str,
     project_root: str,
     supervisor_url: str | None = None,
+    mode: str = "validation",
 ) -> ActionResult:
     """Ask the supervisor to spawn a host-side sandbox-validation worker.
 
@@ -96,7 +98,7 @@ def start_sandbox_validation(
     try:
         resp = httpx.post(
             f"{url}/sandbox/start",
-            json={"project_root": project_root, "project_id": project_id},
+            json={"project_root": project_root, "project_id": project_id, "mode": mode},
             timeout=10.0,
         )
         if resp.status_code == 409:
@@ -105,7 +107,7 @@ def start_sandbox_validation(
             )
         data = resp.json()
         if data.get("ok"):
-            return ActionResult(ok=True, message="sandbox validation started")
+            return ActionResult(ok=True, message="sandbox started")
         err = data.get("error") or "unknown error"
         return ActionResult(ok=False, message=err, error=err)
     except httpx.ConnectError:
@@ -136,6 +138,42 @@ def get_sandbox_state(
     except Exception as exc:  # noqa: BLE001 — failure must not propagate to the API
         logger.warning("sandbox: failed to fetch status: %s", exc)
         return SandboxValidationState(state="idle")
+
+
+def stop_sandbox_environment(
+    project_id: str,
+    supervisor_url: str | None = None,
+) -> ActionResult:
+    url = _resolve_supervisor_url(supervisor_url)
+    if not url:
+        return ActionResult(ok=False, message="supervisor not configured", error="no_supervisor_url")
+    try:
+        resp = httpx.post(f"{url}/sandbox/{project_id}/stop", timeout=30.0)
+        data = resp.json()
+        if data.get("ok"):
+            return ActionResult(ok=True, message="sandbox stopped")
+        err = data.get("error") or "unknown error"
+        return ActionResult(ok=False, message=err, error=err)
+    except httpx.ConnectError:
+        return ActionResult(ok=False, message="supervisor unreachable", error="supervisor_unreachable")
+
+
+def delete_sandbox_environment(
+    project_id: str,
+    supervisor_url: str | None = None,
+) -> ActionResult:
+    url = _resolve_supervisor_url(supervisor_url)
+    if not url:
+        return ActionResult(ok=False, message="supervisor not configured", error="no_supervisor_url")
+    try:
+        resp = httpx.delete(f"{url}/sandbox/{project_id}", timeout=60.0)
+        data = resp.json()
+        if data.get("ok"):
+            return ActionResult(ok=True, message="sandbox deleted")
+        err = data.get("error") or "unknown error"
+        return ActionResult(ok=False, message=err, error=err)
+    except httpx.ConnectError:
+        return ActionResult(ok=False, message="supervisor unreachable", error="supervisor_unreachable")
 
 
 def get_sandbox_logs(

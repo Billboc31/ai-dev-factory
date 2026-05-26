@@ -919,11 +919,28 @@ def scripts_stop(project_id: str):
 class SandboxStartRequest(BaseModel):
     project_root: str
     project_id: str
+    mode: str = "validation"
+
+
+def _sandbox_release_stale_lock(project_id: str) -> None:
+    """Remove a stale PID file and reset the per-project lock if the worker is dead.
+
+    Called before lock.acquire() so a dead worker never permanently blocks new starts.
+    """
+    pid_path = _sandbox_pid_path(project_id)
+    if not pid_path.exists():
+        return
+    existing_pid = _sandbox_current_pid(project_id)  # removes stale PID file
+    if existing_pid is None:
+        with _sandbox_locks_mutex:
+            _sandbox_locks.pop(project_id, None)
 
 
 @app.post("/sandbox/start")
 def sandbox_start(body: SandboxStartRequest):
     from fastapi.responses import JSONResponse
+
+    _sandbox_release_stale_lock(body.project_id)
 
     lock = _get_sandbox_lock(body.project_id)
     if not lock.acquire(blocking=False):
@@ -963,11 +980,13 @@ def sandbox_start(body: SandboxStartRequest):
             "%Y-%m-%dT%H:%M:%SZ"
         )
         log = _sandbox_log_path(body.project_id)
+        mode = body.mode if body.mode in ("validation", "environment") else "validation"
         cmd = [
             sys.executable,
             str(_run_sandbox_path()),
             "--project-root", mapped_root,
             "--project-id", body.project_id,
+            "--mode", mode,
         ]
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
 
@@ -978,6 +997,7 @@ def sandbox_start(body: SandboxStartRequest):
                     f"  project_root(container)={body.project_root}\n"
                     f"  project_root(host)={mapped_root}\n"
                     f"  sandbox_root(host)={sandbox_root}\n"
+                    f"  mode={mode}\n"
                     f"  command={' '.join(cmd)}\n"
                 )
                 log_fh.flush()
@@ -996,9 +1016,21 @@ def sandbox_start(body: SandboxStartRequest):
                 encoding="utf-8",
             )
             logger.info(
-                "supervisor: sandbox started pid=%d project_id=%s",
-                proc.pid, body.project_id,
+                "supervisor: sandbox started pid=%d project_id=%s mode=%s",
+                proc.pid, body.project_id, mode,
             )
+
+            def _watch_worker(p: subprocess.Popen, pp: Path) -> None:
+                p.wait()
+                try:
+                    pp.unlink()
+                except OSError:
+                    pass
+
+            threading.Thread(
+                target=_watch_worker, args=(proc, pid_path), daemon=True
+            ).start()
+
             return {"ok": True, "pid": proc.pid}
         except OSError as exc:
             return {"ok": False, "error": str(exc)}
@@ -1009,10 +1041,11 @@ def sandbox_start(body: SandboxStartRequest):
 @app.get("/sandbox/{project_id}/status")
 def sandbox_status_endpoint(project_id: str):
     state = _read_sandbox_state(project_id)
-    if state.get("state") == "running":
+    # Phantom-process recovery: if the worker died without writing a terminal
+    # state, promote to failed.  "environment" is intentionally worker-exited,
+    # so we never mark it as failed here.
+    if state.get("state") in ("running", "validating"):
         if _sandbox_current_pid(project_id) is None:
-            # Worker process disappeared without finalising state. Don't
-            # let the dashboard poll a phantom "running" forever.
             state["state"] = "failed"
             state["error"] = "sandbox process disappeared"
             state["finished_at"] = datetime.datetime.now(
@@ -1038,23 +1071,172 @@ def sandbox_logs(project_id: str, lines: int = Query(default=100, ge=1, le=10000
     return {"lines": all_lines[-lines:] if len(all_lines) > lines else all_lines}
 
 
-@app.post("/sandbox/{project_id}/stop")
-def sandbox_stop(project_id: str):
-    pid = _sandbox_current_pid(project_id)
-    if pid is None:
-        return {"ok": False, "error": "not_running"}
+def _sandbox_root_dir() -> Path:
+    env = os.environ.get("SANDBOX_ROOT", "").strip()
+    base = Path(env).expanduser().resolve() if env else Path.home() / "sandboxes"
+    proj = (
+        os.environ.get("PROJECT_NAME", "").strip()
+        or Path(os.environ.get("AI_DEV_FACTORY_PROJECT_ROOT", "")).name
+        or "default"
+    )
+    return base / proj
+
+
+def _release_port_slot_supervisor(sandbox_id: str) -> None:
+    registry = _sandbox_root_dir() / "port-registry.json"
+    lock_file = _sandbox_root_dir() / ".port-registry.lock"
+    if not registry.exists():
+        return
+    import fcntl
     try:
-        os.kill(pid, signal.SIGTERM)
+        lock_file.touch(exist_ok=True)
+        with lock_file.open("r+") as lf:
+            fcntl.flock(lf, fcntl.LOCK_EX)
+            try:
+                data = json.loads(registry.read_text())
+                data.pop(sandbox_id, None)
+                registry.write_text(json.dumps(data, indent=2))
+            finally:
+                fcntl.flock(lf, fcntl.LOCK_UN)
+    except (OSError, json.JSONDecodeError):
+        pass
+
+
+def _run_stop_sh_supervisor(worktree_path: Path, sandbox_dir: Path) -> None:
+    scripts_dir = ".ai-dev-factory/scripts"
+    stop_script = worktree_path / scripts_dir / "stop.sh"
+    if not stop_script.exists():
+        return
+    env = {**os.environ}
+    deploy_env = sandbox_dir / "deploy.env"
+    if deploy_env.exists():
+        for line in deploy_env.read_text(encoding="utf-8").splitlines():
+            if "=" in line and not line.startswith("#"):
+                k, _, v = line.partition("=")
+                env[k.strip()] = v.strip()
+    try:
+        subprocess.run(
+            ["bash", f"{scripts_dir}/stop.sh"],
+            cwd=str(worktree_path),
+            env=env,
+            stdin=subprocess.DEVNULL,
+            capture_output=True,
+            timeout=120,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+
+
+def _do_sandbox_stop(project_id: str) -> dict:
+    """Shared stop logic used by /stop and /delete endpoints."""
+    state = _read_sandbox_state(project_id)
+    current_state = state.get("state", "idle")
+
+    if current_state in ("stopped", "cleaned"):
+        return {"ok": True, "already": current_state}
+
+    # Kill worker process if still alive (e.g. mid-validation).
+    pid = _sandbox_current_pid(project_id)
+    if pid is not None:
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except OSError:
+            pass
         try:
             _sandbox_pid_path(project_id).unlink()
         except OSError:
             pass
-        logger.info(
-            "supervisor: sandbox stopped pid=%d project_id=%s", pid, project_id
-        )
-        return {"ok": True}
-    except OSError as exc:
-        return {"ok": False, "error": str(exc)}
+
+    # For environment sandboxes the worker already exited; bring down compose.
+    worktree_path_str = state.get("worktree_path")
+    sandbox_id = state.get("sandbox_id")
+    if worktree_path_str:
+        worktree_path = Path(worktree_path_str)
+        sandbox_dir = worktree_path.parent
+        if worktree_path.exists():
+            _run_stop_sh_supervisor(worktree_path, sandbox_dir)
+
+    if sandbox_id:
+        _release_port_slot_supervisor(sandbox_id)
+
+    finished_at = datetime.datetime.now(datetime.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    state["state"] = "stopped"
+    state["finished_at"] = finished_at
+    state_path = _sandbox_state_path(project_id)
+    try:
+        state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    logger.info("supervisor: sandbox stopped project_id=%s", project_id)
+    return {"ok": True}
+
+
+@app.post("/sandbox/{project_id}/stop")
+def sandbox_stop(project_id: str):
+    return _do_sandbox_stop(project_id)
+
+
+@app.delete("/sandbox/{project_id}")
+def sandbox_delete(project_id: str):
+    import shutil
+
+    _do_sandbox_stop(project_id)
+
+    state = _read_sandbox_state(project_id)
+    worktree_path_str = state.get("worktree_path")
+    if worktree_path_str:
+        worktree_path = Path(worktree_path_str)
+        sandbox_dir = worktree_path.parent
+        project_root_str = state.get("project_root")
+
+        if worktree_path.exists():
+            removed = False
+            if project_root_str:
+                try:
+                    result = subprocess.run(
+                        ["git", "worktree", "remove", "--force", str(worktree_path)],
+                        cwd=project_root_str,
+                        capture_output=True,
+                        timeout=30,
+                    )
+                    removed = result.returncode == 0
+                except (OSError, subprocess.TimeoutExpired):
+                    pass
+            if not removed:
+                try:
+                    shutil.rmtree(worktree_path)
+                except OSError as exc:
+                    logger.warning(
+                        "sandbox delete: could not remove worktree %s: %s",
+                        worktree_path, exc,
+                    )
+
+        if sandbox_dir.exists():
+            try:
+                shutil.rmtree(sandbox_dir)
+            except OSError as exc:
+                logger.warning(
+                    "sandbox delete: could not remove sandbox_dir %s: %s",
+                    sandbox_dir, exc,
+                )
+
+    state["state"] = "cleaned"
+    state["finished_at"] = datetime.datetime.now(datetime.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    state_path = _sandbox_state_path(project_id)
+    try:
+        state_path.write_text(json.dumps(state, indent=2), encoding="utf-8")
+    except OSError:
+        pass
+    try:
+        _sandbox_pid_path(project_id).unlink()
+    except OSError:
+        pass
+    logger.info("supervisor: sandbox deleted project_id=%s", project_id)
+    return {"ok": True}
 
 
 # ── auto-fix proposal endpoints ───────────────────────────────────────────────

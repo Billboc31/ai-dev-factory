@@ -123,7 +123,7 @@ def test_worker_full_success(tmp_path):
     run_sandbox._do_sandbox("myproject", proj, "myproject-OK")
 
     state = _read_latest_state(tmp_path)
-    assert state["state"] == "success"
+    assert state["state"] == "validated"
     success_steps = [s for s in state["steps"] if s["status"] == "success"]
     assert len(success_steps) == 4
     # All four required scripts must appear in order.
@@ -371,7 +371,7 @@ def test_scripts_executed_with_worktree_as_cwd(tmp_path):
 
     run_sandbox._do_sandbox("myproject", proj, "myproject-CWD")
     state = _read_latest_state(tmp_path)
-    assert state["state"] == "success"
+    assert state["state"] == "validated"
 
     pwd_check = _sandbox_dir(tmp_path, "myproject-CWD") / "worktree" / "pwd_check.txt"
     assert pwd_check.exists(), "bootstrap must have run with worktree as cwd"
@@ -606,5 +606,145 @@ def test_worker_cli_smoke(tmp_path):
     state = json.loads(
         (runtime_root / "state" / "sandbox-myproject.json").read_text()
     )
-    assert state["state"] in ("success", "failed")
+    assert state["state"] in ("success", "failed", "validated")
     assert state["finished_at"] is not None
+
+
+# ── Lifecycle mode tests ──────────────────────────────────────────────────────
+
+
+def test_validation_mode_writes_validated_state(tmp_path, monkeypatch):
+    """In validation mode, a successful run writes state=validated."""
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path / "runtime"))
+    monkeypatch.setenv("SANDBOX_ROOT", str(tmp_path / "sandboxes"))
+    monkeypatch.setenv("PROJECT_NAME", "testproject")
+
+    proj = _make_git_project(tmp_path)
+    _add_scripts(proj, _required_scripts_all_ok())
+
+    monkeypatch.setattr(run_sandbox, "_start_sandbox_supervisor", lambda *a, **kw: None)
+    monkeypatch.setattr(run_sandbox, "_stop_sandbox_supervisor", lambda *a, **kw: None)
+
+    sandbox_id = run_sandbox._make_sandbox_id("myproject")
+    rc = run_sandbox._do_sandbox("myproject", proj, sandbox_id, mode="validation")
+    assert rc == 0
+
+    state = _read_latest_state(tmp_path)
+    assert state["state"] == "validated"
+    assert state["mode"] == "validation"
+    assert state["finished_at"] is not None
+
+
+def test_validation_mode_releases_port_slot_on_success(tmp_path, monkeypatch):
+    """After validation mode succeeds, the port slot must be freed."""
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path / "runtime"))
+    monkeypatch.setenv("SANDBOX_ROOT", str(tmp_path / "sandboxes"))
+    monkeypatch.setenv("PROJECT_NAME", "testproject")
+
+    proj = _make_git_project(tmp_path)
+    _add_scripts(proj, _required_scripts_all_ok())
+
+    monkeypatch.setattr(run_sandbox, "_start_sandbox_supervisor", lambda *a, **kw: None)
+    monkeypatch.setattr(run_sandbox, "_stop_sandbox_supervisor", lambda *a, **kw: None)
+
+    sandbox_id = run_sandbox._make_sandbox_id("myproject")
+    run_sandbox._do_sandbox("myproject", proj, sandbox_id, mode="validation")
+
+    registry_path, _ = run_sandbox._port_registry_paths()
+    registry = json.loads(registry_path.read_text()) if registry_path.exists() else {}
+    assert sandbox_id not in registry
+
+
+def test_environment_mode_writes_environment_state(tmp_path, monkeypatch):
+    """In environment mode, a successful run writes state=environment."""
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path / "runtime"))
+    monkeypatch.setenv("SANDBOX_ROOT", str(tmp_path / "sandboxes"))
+    monkeypatch.setenv("PROJECT_NAME", "testproject")
+
+    proj = _make_git_project(tmp_path)
+    _add_scripts(proj, _required_scripts_all_ok())
+
+    monkeypatch.setattr(run_sandbox, "_start_sandbox_supervisor", lambda *a, **kw: None)
+    monkeypatch.setattr(run_sandbox, "_stop_sandbox_supervisor", lambda *a, **kw: None)
+
+    sandbox_id = run_sandbox._make_sandbox_id("myproject")
+    rc = run_sandbox._do_sandbox("myproject", proj, sandbox_id, mode="environment")
+    assert rc == 0
+
+    state = _read_latest_state(tmp_path)
+    assert state["state"] == "environment"
+    assert state["mode"] == "environment"
+    assert state["finished_at"] is not None
+
+
+def test_environment_mode_keeps_port_slot_allocated(tmp_path, monkeypatch):
+    """After environment mode succeeds, the port slot must remain allocated."""
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path / "runtime"))
+    monkeypatch.setenv("SANDBOX_ROOT", str(tmp_path / "sandboxes"))
+    monkeypatch.setenv("PROJECT_NAME", "testproject")
+
+    proj = _make_git_project(tmp_path)
+    _add_scripts(proj, _required_scripts_all_ok())
+
+    monkeypatch.setattr(run_sandbox, "_start_sandbox_supervisor", lambda *a, **kw: None)
+    monkeypatch.setattr(run_sandbox, "_stop_sandbox_supervisor", lambda *a, **kw: None)
+
+    sandbox_id = run_sandbox._make_sandbox_id("myproject")
+    run_sandbox._do_sandbox("myproject", proj, sandbox_id, mode="environment")
+
+    registry_path, _ = run_sandbox._port_registry_paths()
+    registry = json.loads(registry_path.read_text()) if registry_path.exists() else {}
+    assert sandbox_id in registry, "port slot must remain allocated for environment mode"
+
+
+def test_environment_mode_failure_releases_port_slot(tmp_path, monkeypatch):
+    """Even in environment mode, a failed run must release the port slot."""
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path / "runtime"))
+    monkeypatch.setenv("SANDBOX_ROOT", str(tmp_path / "sandboxes"))
+    monkeypatch.setenv("PROJECT_NAME", "testproject")
+
+    proj = _make_git_project(tmp_path)
+    _add_scripts(proj, {name: "exit 0" for name in run_sandbox._REQUIRED_SCRIPTS[:-1]})
+    _add_scripts(proj, {"healthcheck.sh": "exit 1"})
+
+    monkeypatch.setattr(run_sandbox, "_start_sandbox_supervisor", lambda *a, **kw: None)
+    monkeypatch.setattr(run_sandbox, "_stop_sandbox_supervisor", lambda *a, **kw: None)
+
+    sandbox_id = run_sandbox._make_sandbox_id("myproject")
+    rc = run_sandbox._do_sandbox("myproject", proj, sandbox_id, mode="environment")
+    assert rc == 1
+
+    state = _read_latest_state(tmp_path)
+    assert state["state"] == "failed"
+
+    registry_path, _ = run_sandbox._port_registry_paths()
+    registry = json.loads(registry_path.read_text()) if registry_path.exists() else {}
+    assert sandbox_id not in registry
+
+
+def test_validation_initial_state_is_validating(tmp_path, monkeypatch):
+    """The first state write must use 'validating', not 'running'."""
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path / "runtime"))
+    monkeypatch.setenv("SANDBOX_ROOT", str(tmp_path / "sandboxes"))
+    monkeypatch.setenv("PROJECT_NAME", "testproject")
+
+    proj = _make_git_project(tmp_path)
+
+    states_seen = []
+
+    original_write = run_sandbox._write_state
+
+    def capture_write(state_path, latest_path, data):
+        states_seen.append(data.get("state"))
+        original_write(state_path, latest_path, data)
+
+    monkeypatch.setattr(run_sandbox, "_write_state", capture_write)
+    monkeypatch.setattr(run_sandbox, "_start_sandbox_supervisor", lambda *a, **kw: None)
+    monkeypatch.setattr(run_sandbox, "_stop_sandbox_supervisor", lambda *a, **kw: None)
+
+    sandbox_id = run_sandbox._make_sandbox_id("myproject")
+    run_sandbox._do_sandbox("myproject", proj, sandbox_id, mode="validation")
+
+    assert states_seen[0] == "validating", (
+        f"first state must be 'validating', got {states_seen[0]!r}"
+    )

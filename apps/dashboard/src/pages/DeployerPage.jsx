@@ -15,12 +15,18 @@ function SandboxStatusPanel({ status, onRefresh }) {
   if (!status || status.state === 'idle') return null
   const colorClass = STATE_COLORS[status.state] || STATE_COLORS.idle
   const portEntries = status.ports ? Object.entries(status.ports) : []
+  const isActive = ['running', 'validating', 'pending'].includes(status.state)
   return (
     <div className="bg-white border border-gray-200 rounded p-4 mt-4 space-y-2">
       <div className="flex items-center gap-3">
         <span className="text-sm font-semibold text-gray-700">Sandbox</span>
+        {status.mode && status.mode !== 'validation' && (
+          <span className="px-1.5 py-0.5 rounded text-xs font-medium bg-blue-50 text-blue-600 border border-blue-200">
+            {status.mode}
+          </span>
+        )}
         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium ${colorClass}`}>
-          {status.state === 'running' && <span className="animate-spin inline-block">↻</span>}
+          {isActive && <span className="animate-spin inline-block">↻</span>}
           {status.state}
         </span>
         {status.sandbox_id && (
@@ -111,9 +117,15 @@ function SandboxLogsPanel({ projectId, isRunning }) {
 
 const STATE_COLORS = {
   idle: 'bg-gray-100 text-gray-700',
+  pending: 'bg-yellow-100 text-yellow-700',
   running: 'bg-yellow-100 text-yellow-700',
+  validating: 'bg-yellow-100 text-yellow-700',
+  validated: 'bg-green-100 text-green-700',
+  environment: 'bg-blue-100 text-blue-700',
   success: 'bg-green-100 text-green-700',
   failed: 'bg-red-100 text-red-700',
+  stopped: 'bg-gray-100 text-gray-700',
+  cleaned: 'bg-gray-100 text-gray-400',
 }
 
 function StatusBadge({ status }) {
@@ -374,11 +386,12 @@ export default function DeployerPage({ projectId }) {
   const isRunning = status?.state === 'running'
   const isAnalysing = analysisStatus?.state === 'running'
   const isGeneratingScripts = scriptsStatus?.state === 'running'
-  const isSandboxRunning = sandboxStatus?.state === 'running' || sandboxStatus?.state === 'pending'
+  const isSandboxActive = ['running', 'pending', 'validating'].includes(sandboxStatus?.state)
+  const isSandboxEnvironment = sandboxStatus?.state === 'environment'
   const pollingDelay = !status || status.state === 'idle' || isRunning ? 5000 : null
   const analysisPollingDelay = isAnalysing ? 5000 : null
   const scriptsPollingDelay = isGeneratingScripts ? 5000 : null
-  const sandboxPollingDelay = isSandboxRunning ? 5000 : null
+  const sandboxPollingDelay = isSandboxActive ? 5000 : null
 
   const refreshStatus = useCallback(() => {
     deployerApi.getDeployerStatus(projectId)
@@ -482,10 +495,29 @@ export default function DeployerPage({ projectId }) {
           disabled={isGeneratingScripts}
         />
         <ActionButton
-          label="Deploy &amp; Test in Sandbox"
+          label="Deploy &amp; Test"
           action={() => deployerApi.startSandboxValidation(projectId).then(refreshSandboxStatus)}
-          disabled={isSandboxRunning}
+          disabled={isSandboxActive || isSandboxEnvironment}
         />
+        <ActionButton
+          label="Start Environment"
+          action={() => deployerApi.startSandboxEnvironment(projectId).then(refreshSandboxStatus)}
+          disabled={isSandboxActive || isSandboxEnvironment}
+        />
+        {isSandboxEnvironment && (
+          <ActionButton
+            label="Stop Environment"
+            action={() => deployerApi.stopSandboxEnvironment(projectId).then(refreshSandboxStatus)}
+            disabled={false}
+          />
+        )}
+        {(isSandboxEnvironment || sandboxStatus?.state === 'stopped') && (
+          <ActionButton
+            label="Delete Environment"
+            action={() => deployerApi.deleteSandboxEnvironment(projectId).then(refreshSandboxStatus)}
+            disabled={false}
+          />
+        )}
       </div>
       <LogsPanel projectId={projectId} isRunning={isRunning} />
       <AnalysisStatusPanel status={analysisStatus} />
@@ -494,7 +526,7 @@ export default function DeployerPage({ projectId }) {
       <ScriptsLogsPanel projectId={projectId} isRunning={isGeneratingScripts} />
       <ScanResultPanel result={scanResult} />
       <SandboxStatusPanel status={sandboxStatus} onRefresh={refreshSandboxStatus} />
-      <SandboxLogsPanel projectId={projectId} isRunning={isSandboxRunning} />
+      <SandboxLogsPanel projectId={projectId} isRunning={isSandboxActive} />
       <SandboxRunsPanel />
     </div>
   )
