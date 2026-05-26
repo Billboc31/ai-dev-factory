@@ -1,7 +1,7 @@
 {
   "ticket_id": "T147",
-  "state": "PLAN_APPROVED",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T147-t147-sandbox-daemon-isolation",
   "issue_number": 142,
-  "updated_at": "2026-05-26T07:11:33Z"
+  "updated_at": "2026-05-26T07:20:45Z"
 }
