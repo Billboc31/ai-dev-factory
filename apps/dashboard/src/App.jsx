@@ -11,6 +11,7 @@ import SandboxPanel from './components/SandboxPanel'
 import AutoFixPanel from './components/AutoFixPanel'
 import ProjectSidebar from './components/ProjectSidebar'
 import RuntimeDashboardPage from './pages/RuntimeDashboardPage'
+import EnvironmentsPage from './pages/EnvironmentsPage'
 import useProjects from './hooks/useProjects'
 
 export const ActiveProjectContext = createContext(null)
@@ -29,6 +30,7 @@ function Nav({ activeProject }) {
       <NavLink to="/mapper-activity" className={linkClass}>Mapper Activity</NavLink>
       <NavLink to="/deployer" className={linkClass}>Deployer</NavLink>
       <NavLink to="/sandboxes" className={linkClass}>Sandboxes</NavLink>
+      <NavLink to="/environments" className={linkClass}>Environments</NavLink>
       <NavLink to="/auto-fix" className={linkClass}>Auto-Fix</NavLink>
       <NavLink to="/runtime-dashboard" className={linkClass}>Runtime</NavLink>
     </nav>
@@ -66,6 +68,7 @@ export default function App() {
                 <Route path="/mapper-activity" element={<IssueMapperActivityPage projectId={activeProject} />} />
                 <Route path="/deployer" element={<DeployerPage projectId={activeProject} />} />
                 <Route path="/sandboxes" element={<SandboxPanel />} />
+                <Route path="/environments" element={<EnvironmentsPage />} />
                 <Route path="/auto-fix" element={<AutoFixPanel projectId={activeProject} />} />
                 <Route path="/runtime-dashboard" element={<RuntimeDashboardPage />} />
               </Routes>
