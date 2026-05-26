@@ -51,3 +51,23 @@
 [2026-05-26T09:04:30Z] auto-run: step=coder done rc=1
 [2026-05-26T09:04:30Z] auto-run: runtime failure: empty_output (rc=1)
 [2026-05-26T09:04:30Z] auto-run: step=coder failed rc=1, state unchanged=PLAN_APPROVED
+[2026-05-26T09:14:24Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-26T09:14:24Z] auto-run: running step=tester
+[2026-05-26T09:14:24Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-26T09:14:24Z] prompt: generic fallback — injecting runs/T149/ticket.md
+[2026-05-26T09:14:24Z] compose: global-context=docs/ai/global-context.md
+[2026-05-26T09:14:24Z] compose: role=ai/roles/tester.md
+[2026-05-26T09:14:24Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-26T09:14:24Z] compose: skill=ai/skills/testing.md
+[2026-05-26T09:14:24Z] compose: skill=ai/skills/debugging.md
+[2026-05-26T09:14:24Z] compose: task (canonical prompt)
+[2026-05-26T09:14:24Z] snapshot: runtime-prompt=runs/T149/prompts/tester-attempt-1.md
+[2026-05-26T09:17:33Z] auto-run: step=tester done rc=0
+[2026-05-26T09:17:33Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-26T09:17:33Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-26T09:17:33Z] commit-checkpoint: unstaged runtime garbage: ['runs/T149/runtime.log']
+[2026-05-26T09:17:33Z] commit-checkpoint: sha=58bed312 files=4 title='test(T149/workflow): tester — update 4 file(s)'
+[2026-05-26T09:17:33Z] auto-run: auto-push triggered
+[2026-05-26T09:17:33Z] push: tolerating runtime dirty files (not blocking): ['runs/T149/runtime.log']
+[2026-05-26T09:17:33Z] push: pushing branch=ticket/T149-t149-sandbox-lifecycle-modes-and-stale-running-cle
+[2026-05-26T09:17:35Z] push: done branch=ticket/T149-t149-sandbox-lifecycle-modes-and-stale-running-cle
