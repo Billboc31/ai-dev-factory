@@ -22,6 +22,27 @@ function StatusBadge({ status }) {
   )
 }
 
+function UrlsTable({ urls }) {
+  const entries = Object.entries(urls)
+  if (entries.length === 0) return null
+  return (
+    <table className="text-xs text-gray-600 mt-1">
+      <tbody>
+        {entries.map(([name, url]) => (
+          <tr key={name}>
+            <td className="pr-3 font-mono text-gray-400">{name}</td>
+            <td className="font-mono">
+              <a href={url} target="_blank" rel="noopener noreferrer" className="text-blue-600 hover:underline">
+                {url}
+              </a>
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  )
+}
+
 function PortsTable({ ports }) {
   const entries = Object.entries(ports)
   if (entries.length === 0) return null
@@ -95,7 +116,10 @@ function SandboxRow({ sandbox, onRefresh }) {
         </div>
         <span className="text-xs text-gray-400">{sandbox.created_at}</span>
       </div>
-      <PortsTable ports={sandbox.ports} />
+      {sandbox.urls && Object.keys(sandbox.urls).length > 0
+        ? <UrlsTable urls={sandbox.urls} />
+        : <PortsTable ports={sandbox.ports} />
+      }
       {sandbox.worktree_path && (
         <p className="text-xs text-gray-400 font-mono truncate">
           worktree: {sandbox.worktree_path}

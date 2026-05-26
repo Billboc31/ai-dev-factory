@@ -29,3 +29,4 @@ class SandboxState(BaseModel):
     worktree_path: str | None = None
     job_type: str | None = None
     completed_at: str | None = None
+    urls: dict[str, str] = {}

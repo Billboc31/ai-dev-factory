@@ -64,7 +64,7 @@ export default function SandboxRunsTable({ runs, onOpenLogs, onDeleted }) {
               <th className="pb-2 pr-4">Project</th>
               <th className="pb-2 pr-4">Started</th>
               <th className="pb-2 pr-4">Finished</th>
-              <th className="pb-2 pr-4">Ports</th>
+              <th className="pb-2 pr-4">Access</th>
               <th className="pb-2 pr-4">Worktree</th>
               <th className="pb-2">Actions</th>
             </tr>
@@ -72,6 +72,7 @@ export default function SandboxRunsTable({ runs, onOpenLogs, onDeleted }) {
           <tbody>
             {runs.map(run => {
               const isActive = ACTIVE_STATUSES.has(run.status)
+              const urlEntries = Object.entries(run.urls || {})
               const portsStr = Object.entries(run.ports || {})
                 .map(([k, v]) => `${k}:${v}`)
                 .join(', ') || '—'
@@ -82,7 +83,20 @@ export default function SandboxRunsTable({ runs, onOpenLogs, onDeleted }) {
                   <td className="py-2 pr-4 text-xs text-gray-600">{run.project_id || '—'}</td>
                   <td className="py-2 pr-4 text-xs text-gray-400">{run.started_at || '—'}</td>
                   <td className="py-2 pr-4 text-xs text-gray-400">{run.finished_at || '—'}</td>
-                  <td className="py-2 pr-4 text-xs text-gray-400">{portsStr}</td>
+                  <td className="py-2 pr-4 text-xs">
+                    {urlEntries.length > 0 ? (
+                      <div className="flex flex-col gap-0.5">
+                        {urlEntries.map(([name, url]) => (
+                          <a key={name} href={url} target="_blank" rel="noopener noreferrer"
+                            className="text-blue-600 hover:underline font-mono">
+                            {name}
+                          </a>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-gray-400">{portsStr}</span>
+                    )}
+                  </td>
                   <td className="py-2 pr-4 text-xs font-mono text-gray-400 max-w-xs truncate">
                     {run.worktree_path || '—'}
                   </td>
