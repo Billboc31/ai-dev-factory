@@ -16,6 +16,19 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 
 cd "$PROJECT_ROOT"
 
+# ── Parse optional CLI overrides (applied after .env so they take precedence) ─
+_ARG_PORT=""
+_ARG_RUNTIME_ROOT=""
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --port)           _ARG_PORT="$2";           shift 2 ;;
+    --port=*)         _ARG_PORT="${1#*=}";       shift ;;
+    --runtime-root)   _ARG_RUNTIME_ROOT="$2";   shift 2 ;;
+    --runtime-root=*) _ARG_RUNTIME_ROOT="${1#*=}"; shift ;;
+    *)                shift ;;
+  esac
+done
+
 # ── Load centralised deploy configuration ────────────────────────────────────
 # deploy/.env is the single source of truth for runtime/project roots,
 # Docker → host path mappings, and the supervisor port. Edit that file on
@@ -37,6 +50,12 @@ fi
 export AI_DEV_FACTORY_PROJECT_ROOT="${AI_DEV_FACTORY_PROJECT_ROOT:-$PROJECT_ROOT}"
 export AI_DEV_FACTORY_RUNTIME_ROOT="${AI_DEV_FACTORY_RUNTIME_ROOT:-$HOME/runtime/ai-dev-factory}"
 SUPERVISOR_PORT="${AI_DEV_FACTORY_SUPERVISOR_PORT:-8090}"
+
+# ── Apply CLI overrides (take precedence over .env and defaults) ──────────────
+if [ -n "$_ARG_PORT" ]; then SUPERVISOR_PORT="$_ARG_PORT"; fi
+if [ -n "$_ARG_RUNTIME_ROOT" ]; then
+  export AI_DEV_FACTORY_RUNTIME_ROOT="$_ARG_RUNTIME_ROOT"
+fi
 
 # ── Activate the host venv ──────────────────────────────────────────────────
 source .venv/bin/activate

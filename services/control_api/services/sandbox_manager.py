@@ -138,7 +138,9 @@ class SandboxManager:
         env_file.write_text(
             f"COMPOSE_PROJECT_NAME={compose_project}\n"
             f"WEB_PORT={web_port}\n"
-            f"API_PORT={api_port}\n",
+            f"API_PORT={api_port}\n"
+            f"AI_DEV_FACTORY_SUPERVISOR_URL=http://host.docker.internal:{supervisor_port}\n"
+            f"AI_DEV_FACTORY_RUNTIME_ROOT={sandbox_runtime_root}\n",
             encoding="utf-8",
         )
 
@@ -161,12 +163,13 @@ class SandboxManager:
 
     def start(self, sandbox_id: str) -> SandboxState:
         state = self._read_state(sandbox_id)
+        supervisor_pid = self._start_sandbox_supervisor(state)
         rc, _out, err = self._run_compose(state, "up", "-d")
         if rc != 0:
             logger.warning("sandbox start failed: %s — %s", sandbox_id, err.strip())
-            state = state.model_copy(update={"status": SandboxStatus.error})
+            state = state.model_copy(update={"status": SandboxStatus.error, "supervisor_pid": supervisor_pid})
         else:
-            state = state.model_copy(update={"status": SandboxStatus.running})
+            state = state.model_copy(update={"status": SandboxStatus.running, "supervisor_pid": supervisor_pid})
         self._write_state(state)
         return state
 
@@ -184,7 +187,7 @@ class SandboxManager:
                         stale.unlink()
                     except OSError:
                         pass
-        state = state.model_copy(update={"status": SandboxStatus.stopped})
+        state = state.model_copy(update={"status": SandboxStatus.stopped, "supervisor_pid": None})
         self._write_state(state)
         return state
 
@@ -251,22 +254,71 @@ class SandboxManager:
                 pass
         return destroyed
 
+    def _start_sandbox_supervisor(self, state: SandboxState) -> int | None:
+        """Spawn a per-sandbox supervisor subprocess. Returns PID or None on failure."""
+        if not state.supervisor_port:
+            return None
+        runtime_root = Path(state.sandbox_runtime_root)
+        runtime_root.mkdir(parents=True, exist_ok=True)
+        for subdir in ("state", "logs", "runs"):
+            (runtime_root / subdir).mkdir(exist_ok=True)
+        env = {
+            **os.environ,
+            "AI_DEV_FACTORY_RUNTIME_ROOT": str(runtime_root),
+            "PYTHONDONTWRITEBYTECODE": "1",
+        }
+        cmd = [
+            sys.executable, "-m", "uvicorn",
+            "services.supervisor.main:app",
+            "--host", "127.0.0.1",
+            "--port", str(state.supervisor_port),
+        ]
+        sup_log = runtime_root / "supervisor.log"
+        try:
+            with sup_log.open("a", encoding="utf-8") as fh:
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=str(_REPO_ROOT),
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=fh,
+                    stderr=fh,
+                    start_new_session=True,
+                )
+            pid_path = runtime_root / "supervisor.pid"
+            pid_path.write_text(
+                json.dumps({"pid": proc.pid, "port": state.supervisor_port}),
+                encoding="utf-8",
+            )
+            logger.info(
+                "sandbox supervisor started: sandbox=%s pid=%d port=%d",
+                state.id, proc.pid, state.supervisor_port,
+            )
+            return proc.pid
+        except OSError as exc:
+            logger.warning(
+                "sandbox supervisor failed to start: sandbox=%s error=%s",
+                state.id, exc,
+            )
+            return None
+
     def _terminate_sandbox_supervisor(self, state: SandboxState) -> None:
-        """SIGTERM the sandbox supervisor process if its PID file exists."""
-        if not state.sandbox_runtime_root:
-            return
-        pid_path = Path(state.sandbox_runtime_root) / "supervisor.pid"
-        if not pid_path.exists():
+        """SIGTERM the sandbox supervisor process."""
+        pid: int | None = state.supervisor_pid
+        if pid is None and state.sandbox_runtime_root:
+            pid_path = Path(state.sandbox_runtime_root) / "supervisor.pid"
+            if pid_path.exists():
+                try:
+                    data = json.loads(pid_path.read_text(encoding="utf-8"))
+                    pid = data.get("pid") if isinstance(data, dict) else int(data)
+                except (OSError, ValueError, json.JSONDecodeError):
+                    pass
+        if not isinstance(pid, int):
             return
         try:
-            data = json.loads(pid_path.read_text(encoding="utf-8"))
-            pid = data.get("pid") if isinstance(data, dict) else int(data)
-            if isinstance(pid, int):
-                os.kill(pid, signal.SIGTERM)
-                logger.info(
-                    "sandbox supervisor SIGTERM: sandbox=%s pid=%d", state.id, pid
-                )
-        except (OSError, ValueError, json.JSONDecodeError):
+            os.kill(pid, signal.SIGTERM)
+            logger.info("sandbox supervisor SIGTERM: sandbox=%s pid=%d", state.id, pid)
+        except OSError:
             pass
 
     def destroy(self, sandbox_id: str) -> None:
