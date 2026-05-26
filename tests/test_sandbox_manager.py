@@ -34,7 +34,12 @@ def _fail_compose(*args, **kwargs):
 
 @pytest.fixture()
 def mgr(tmp_path):
-    return SandboxManager(sandboxes_dir=tmp_path / "sandboxes")
+    m = SandboxManager(sandboxes_dir=tmp_path / "sandboxes")
+    # Disable Traefik auto-start so the tests don't try to talk to
+    # docker. The auto-start path is covered by
+    # ``test_traefik_manager.py`` and ``test_proxy_manager.py``.
+    m._proxy._auto_start = False
+    return m
 
 
 def test_create_allocates_unique_ports(mgr):
@@ -89,6 +94,46 @@ def test_env_file_written_on_create(mgr):
     assert f"WEB_PORT={s.ports['web']}" in content
     assert f"API_PORT={s.ports['api']}" in content
     assert f"COMPOSE_PROJECT_NAME={s.compose_project}" in content
+
+
+def test_env_file_contains_pretty_urls_and_supervisor_split(mgr):
+    """Operational scripts (start.sh / healthcheck.sh) read these env
+    vars to probe the reverse-proxy URLs instead of direct ports, and
+    to use the loopback supervisor URL from host shells (the docker-
+    internal URL is unresolvable there)."""
+    s = mgr.create("T001", "/project")
+    content = Path(s.env_file).read_text()
+    # Pretty URLs deterministic from sandbox id.
+    assert f"SANDBOX_ID={s.id}" in content
+    assert f"SANDBOX_WEB_URL=http://sandbox-{s.id}.ai-dev-factory.localhost" in content
+    assert f"SANDBOX_API_URL=http://api.sandbox-{s.id}.ai-dev-factory.localhost" in content
+    # Two distinct supervisor URLs.
+    assert f"AI_DEV_FACTORY_SUPERVISOR_URL=http://host.docker.internal:{s.supervisor_port}" in content
+    assert f"AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL=http://127.0.0.1:{s.supervisor_port}" in content
+
+
+def test_cleanup_stale_routes_removes_orphans(mgr, tmp_path, monkeypatch):
+    """A sandbox that died without an unregister step leaves a stale
+    route file. ``cleanup_stale_routes`` reaps those without touching
+    routes whose sandbox still exists or the infra-owned dashboard."""
+    # Point the proxy routes dir to a tmp location and disable the
+    # Traefik auto-start path (we're not testing docker here).
+    routes_dir = tmp_path / "routes"
+    mgr._proxy.routes_dir = routes_dir
+    mgr._proxy.routes_dir.mkdir(parents=True, exist_ok=True)
+    mgr._proxy._auto_start = False
+    (routes_dir / "_dashboard.yml").write_text("infra", encoding="utf-8")
+
+    # One live sandbox + two orphan route files.
+    live = mgr.create("T001", "/project")
+    mgr._proxy.register(live.id, live.ports)
+    (routes_dir / "ghost-aaa.yml").write_text("dummy", encoding="utf-8")
+    (routes_dir / "ghost-bbb.yml").write_text("dummy", encoding="utf-8")
+
+    removed = mgr.cleanup_stale_routes()
+    assert sorted(removed) == ["ghost-aaa", "ghost-bbb"]
+    assert (routes_dir / f"{live.id}.yml").exists()
+    assert (routes_dir / "_dashboard.yml").exists()
 
 
 def test_lifecycle_transitions(mgr):

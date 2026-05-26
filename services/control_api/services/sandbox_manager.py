@@ -14,7 +14,7 @@ from pathlib import Path
 
 from ..models.sandbox import SandboxState, SandboxStatus
 from .deployer_runner import _load_deploy_profile
-from .proxy_manager import ProxyManager
+from .proxy_manager import ProxyManager, build_sandbox_urls
 from .runtime_resolver import get_project_sandbox_dir
 from .undeploy_runner import run_cleanup, run_undeploy
 
@@ -146,12 +146,29 @@ class SandboxManager:
         sandbox_dir.mkdir(parents=True, exist_ok=True)
         sandbox_runtime_root = str(sandbox_dir / "runtime")
 
+        # Pre-compute the pretty URLs from the sandbox id. Operational
+        # scripts (start.sh / healthcheck.sh) read these via env so
+        # healthchecks probe the reverse-proxy URL when Traefik routes
+        # are registered, and fall back to direct ``localhost:<port>``
+        # when not.
+        urls = build_sandbox_urls(sandbox_id)
         env_file = sandbox_dir / ".env"
         env_file.write_text(
             f"COMPOSE_PROJECT_NAME={compose_project}\n"
             f"WEB_PORT={web_port}\n"
             f"API_PORT={api_port}\n"
+            f"SANDBOX_ID={sandbox_id}\n"
+            f"SANDBOX_WEB_URL={urls['web']}\n"
+            f"SANDBOX_API_URL={urls['api']}\n"
+            # Two distinct supervisor URLs — see deploy/.env.example:
+            #   * SUPERVISOR_URL: how *containers* reach the host
+            #     supervisor (via host.docker.internal);
+            #   * SUPERVISOR_HEALTH_URL: how *host-side* scripts
+            #     (healthcheck.sh) reach it (host.docker.internal is
+            #     not resolvable from the host, so we need 127.0.0.1).
+            f"AI_DEV_FACTORY_SUPERVISOR_PORT={supervisor_port}\n"
             f"AI_DEV_FACTORY_SUPERVISOR_URL=http://host.docker.internal:{supervisor_port}\n"
+            f"AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL=http://127.0.0.1:{supervisor_port}\n"
             f"AI_DEV_FACTORY_RUNTIME_ROOT={sandbox_runtime_root}\n",
             encoding="utf-8",
         )
@@ -437,6 +454,17 @@ class SandboxManager:
             except Exception:
                 pass
         return sandboxes
+
+    def cleanup_stale_routes(self) -> list[str]:
+        """Remove proxy route files whose sandbox no longer exists.
+
+        Safe to call at any time — only sandbox-prefixed files are
+        considered, infra-owned ``_``-prefixed files (e.g. the
+        Traefik dashboard route) are skipped. Returns the list of
+        sandbox ids whose route files were removed.
+        """
+        active = [s.id for s in self.list()]
+        return self._proxy.cleanup_stale_routes(active)
 
     def cleanup_old(self, max_age_days: int = 7) -> int:
         cutoff = datetime.now(timezone.utc) - timedelta(days=max_age_days)
