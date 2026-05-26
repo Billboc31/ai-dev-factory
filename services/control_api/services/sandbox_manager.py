@@ -14,6 +14,7 @@ from pathlib import Path
 
 from ..models.sandbox import SandboxState, SandboxStatus
 from .deployer_runner import _load_deploy_profile
+from .infra_service_manager import resolve_proxy_routes_dir
 from .proxy_manager import ProxyManager, build_sandbox_urls
 from .runtime_resolver import get_project_sandbox_dir
 from .undeploy_runner import run_cleanup, run_undeploy
@@ -198,6 +199,13 @@ class SandboxManager:
             logger.warning("sandbox start failed: %s — %s", sandbox_id, err.strip())
             state = state.model_copy(update={"status": SandboxStatus.error, "supervisor_pid": supervisor_pid})
         else:
+            # ProxyManager.register ensures reverse_proxy infra and
+            # writes routes under resolve_proxy_routes_dir() (host-global).
+            logger.info(
+                "sandbox start: proxy routes dir=%s sandbox=%s",
+                resolve_proxy_routes_dir(),
+                sandbox_id,
+            )
             urls = self._proxy.register(sandbox_id, state.ports)
             state = state.model_copy(update={"status": SandboxStatus.running, "supervisor_pid": supervisor_pid, "urls": urls})
         self._write_state(state)

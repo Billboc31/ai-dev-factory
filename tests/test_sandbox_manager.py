@@ -38,7 +38,7 @@ def mgr(tmp_path):
     # Disable Traefik auto-start so the tests don't try to talk to
     # docker. The auto-start path is covered by
     # ``test_traefik_manager.py`` and ``test_proxy_manager.py``.
-    m._proxy._auto_start = False
+    m._proxy._auto_ensure_infra = False
     return m
 
 
@@ -121,7 +121,7 @@ def test_cleanup_stale_routes_removes_orphans(mgr, tmp_path, monkeypatch):
     routes_dir = tmp_path / "routes"
     mgr._proxy.routes_dir = routes_dir
     mgr._proxy.routes_dir.mkdir(parents=True, exist_ok=True)
-    mgr._proxy._auto_start = False
+    mgr._proxy._auto_ensure_infra = False
     (routes_dir / "_dashboard.yml").write_text("infra", encoding="utf-8")
 
     # One live sandbox + two orphan route files.

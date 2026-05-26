@@ -84,12 +84,13 @@ _PKG_ROOT = _THIS_DIR.parent.parent
 if str(_PKG_ROOT) not in sys.path:
     sys.path.insert(0, str(_PKG_ROOT))
 
+from services.control_api.services.infra_service_manager import (  # noqa: E402
+    ensure_required_infra,
+    resolve_proxy_routes_dir,
+)
 from services.control_api.services.proxy_manager import (  # noqa: E402
     ProxyManager,
     build_sandbox_urls as _build_sandbox_urls,
-)
-from services.control_api.services.traefik_manager import (  # noqa: E402
-    TraefikManager,
 )
 
 logger = logging.getLogger("run_sandbox")
@@ -238,52 +239,44 @@ def _release_port_slot(sandbox_id: str) -> None:
 # ── Reverse proxy integration ────────────────────────────────────────────────
 
 
-def _ensure_traefik_running(log_path: Path) -> bool:
-    """Idempotent best-effort start of the global Traefik reverse proxy.
-
-    Logged to the worker's ``run.log`` so operators can trace why a
-    sandbox's pretty URLs aren't resolving. Never raises — a
-    docker-less host falls back to direct ``localhost:<port>`` URLs.
-    """
-    try:
-        ok = TraefikManager().ensure_running()
-    except Exception as exc:  # defensive: docker not installed, etc.
-        _append_log(log_path, f"traefik: ensure_running failed: {exc!r}\n")
-        return False
-    _append_log(
-        log_path,
-        f"traefik: ensure_running -> {'up' if ok else 'unavailable'}\n",
+def _ensure_required_infra(log_path: Path) -> dict[str, bool]:
+    """Ensure host-global infra (reverse proxy, …) before route
+    registration and healthcheck. Never raises."""
+    return ensure_required_infra(
+        log=lambda line: _append_log(log_path, f"{line}\n"),
     )
-    return ok
 
 
 def _register_proxy_route(
     sandbox_id: str, api_port: int, web_port: int, log_path: Path
 ) -> None:
-    """Write the sandbox's Traefik route file. Best effort.
+    """Write the sandbox route file under the host-global routes dir.
 
-    Auto-start of the global Traefik is the explicit responsibility of
-    ``_ensure_traefik_running`` above — it ran moments earlier and its
-    outcome is already in the run log. We therefore disable the
-    auto-start branch inside ``ProxyManager.register`` here, otherwise
-    every worker run would issue a redundant ``docker compose ps`` +
-    TCP probe pair. The dashboard's ``SandboxManager.start`` flow,
-    which does NOT call ensure_running directly, keeps the default
-    ``auto_start_traefik=True`` and is unaffected by this change.
+    Infra ensure ran in ``_ensure_required_infra`` immediately before
+    this call. ``auto_ensure_infra=False`` avoids a redundant second
+    ensure inside ``ProxyManager.register``.
     """
+    routes_dir = resolve_proxy_routes_dir()
     try:
-        urls = ProxyManager(auto_start_traefik=False).register(
-            sandbox_id, {"api": api_port, "web": web_port}
+        urls = ProxyManager(
+            routes_dir=routes_dir,
+            auto_ensure_infra=False,
+        ).register(sandbox_id, {"api": api_port, "web": web_port})
+        _append_log(
+            log_path,
+            f"proxy: route registered sandbox={sandbox_id} dir={routes_dir} urls={urls}\n",
         )
-        _append_log(log_path, f"proxy: route registered -> {urls}\n")
     except Exception as exc:
         _append_log(log_path, f"proxy: route registration failed: {exc!r}\n")
 
 
 def _unregister_proxy_route(sandbox_id: str, log_path: Path) -> None:
-    """Remove the sandbox's Traefik route file. Idempotent."""
+    """Remove the sandbox's route file from the host-global routes dir."""
     try:
-        ProxyManager(auto_start_traefik=False).unregister(sandbox_id)
+        ProxyManager(
+            routes_dir=resolve_proxy_routes_dir(),
+            auto_ensure_infra=False,
+        ).unregister(sandbox_id)
         _append_log(log_path, f"proxy: route unregistered for {sandbox_id}\n")
     except Exception as exc:
         _append_log(log_path, f"proxy: route unregister failed: {exc!r}\n")
@@ -813,15 +806,20 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
         "PROJECT_NAME": _project_name(),
     }
 
-    # Auto-start the global Traefik before registering the route so
-    # the URLs above actually resolve. Best-effort: a docker-less or
-    # misconfigured host should not crash the worker — the route file
-    # is still written so the URLs resolve as soon as the operator
-    # brings Traefik up.
-    _ensure_traefik_running(log_path)
-    _register_proxy_route(sandbox_id, api_port, web_port, log_path)
+    # Per-sandbox supervisor — started ONCE here. start.sh must not
+    # spawn a second supervisor on the same port (see
+    # AI_DEV_FACTORY_SUPERVISOR_ALREADY_STARTED below).
+    supervisor_proc = _start_sandbox_supervisor(
+        supervisor_port, sandbox_runtime_root, log_path
+    )
+    if supervisor_proc is not None:
+        extra_env["AI_DEV_FACTORY_SUPERVISOR_ALREADY_STARTED"] = "1"
 
-    supervisor_proc = _start_sandbox_supervisor(supervisor_port, sandbox_runtime_root, log_path)
+    # Infra (reverse proxy) → route registration → scripts/healthcheck.
+    # Order matters: healthcheck probes pretty URLs that only work
+    # after both Traefik is up AND the route file exists.
+    _ensure_required_infra(log_path)
+    _register_proxy_route(sandbox_id, api_port, web_port, log_path)
 
     # Set to True in environment mode on success to skip teardown in finally.
     keep_environment = False
