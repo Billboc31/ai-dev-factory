@@ -500,9 +500,17 @@ def test_sandbox_runner_registers_routes_under_host_runtime(
 
     proj = _make_git_project(tmp_path)
     _add_scripts(proj, _required_scripts_all_ok())
-    monkeypatch.setattr(
-        run_sandbox, "ensure_required_infra", lambda **kw: {"reverse_proxy": True}
-    )
+    def _fake_ensure(**kw):
+        from services.control_api.services.infra_service_manager import (
+            log_infra_path_diagnostics,
+        )
+        log = kw.get("log")
+        if log:
+            log_infra_path_diagnostics(log=log)
+            log("infra: reverse_proxy ready")
+        return {"reverse_proxy": True}
+
+    monkeypatch.setattr(run_sandbox, "ensure_required_infra", _fake_ensure)
     monkeypatch.setattr(run_sandbox, "_unregister_proxy_route", lambda *a, **k: None)
 
     sb_id = "myproject-ROUTES"
@@ -512,6 +520,13 @@ def test_sandbox_runner_registers_routes_under_host_runtime(
         f"route must be under host runtime {host}, not sandbox tree"
     )
     assert not (sandbox_rt / "proxy").exists()
+
+    run_log = _sandbox_dir(tmp_path, sb_id) / "run.log"
+    log_text = run_log.read_text(encoding="utf-8")
+    assert "infra: host runtime root =" in log_text
+    assert "infra: proxy routes dir =" in log_text
+    assert str(host / "proxy" / "routes") in log_text
+    assert f"proxy: route registered sandbox={sb_id} dir=" in log_text
 
 
 def test_sandbox_runner_unregisters_proxy_route_on_teardown(tmp_path, monkeypatch):

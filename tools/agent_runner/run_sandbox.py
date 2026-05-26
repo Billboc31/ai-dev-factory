@@ -264,7 +264,7 @@ def _register_proxy_route(
         ).register(sandbox_id, {"api": api_port, "web": web_port})
         _append_log(
             log_path,
-            f"proxy: route registered dir={routes_dir} -> {urls}\n",
+            f"proxy: route registered sandbox={sandbox_id} dir={routes_dir} urls={urls}\n",
         )
     except Exception as exc:
         _append_log(log_path, f"proxy: route registration failed: {exc!r}\n")

@@ -38,6 +38,18 @@ logger = logging.getLogger("control-api")
 
 LogFn = Callable[[str], None]
 
+# Relative path under ``HOST_RUNTIME_ROOT`` where Traefik's file
+# provider watches dynamic routes. Must stay in sync with::
+#
+#     deploy/infra/docker-compose.traefik.yml
+#       ${HOST_RUNTIME_ROOT}/proxy/routes:/routes
+#
+# and ``deploy/traefik/traefik.yml`` (directory: /routes inside the
+# container). ``resolve_proxy_routes_dir()`` is the single resolver
+# for the host-side absolute path.
+PROXY_ROUTES_RELATIVE = Path("proxy") / "routes"
+DEFAULT_HOST_RUNTIME_ROOT = Path("~/runtime/ai-dev-factory")
+
 
 @dataclass(frozen=True)
 class RequiredInfraService:
@@ -105,12 +117,42 @@ def resolve_host_runtime_root() -> Path:
         if "sandboxes" not in p.parts:
             return p
 
-    return Path("~/runtime/ai-dev-factory").expanduser().resolve()
+    return DEFAULT_HOST_RUNTIME_ROOT.expanduser().resolve()
 
 
 def resolve_proxy_routes_dir() -> Path:
-    """Directory watched by the global Traefik file provider."""
-    return resolve_host_runtime_root() / "proxy" / "routes"
+    """Host-global directory watched by Traefik's file provider.
+
+    Invariant (must hold in production)::
+
+        resolve_proxy_routes_dir()
+        == Path(HOST_RUNTIME_ROOT) / "proxy" / "routes"
+        == host path mounted at /routes in the global Traefik container
+
+    Never returns a path under per-sandbox
+    ``…/sandboxes/<id>/runtime`` even when
+    ``AI_DEV_FACTORY_RUNTIME_ROOT`` points there.
+    """
+    return resolve_host_runtime_root() / PROXY_ROUTES_RELATIVE
+
+
+def log_infra_path_diagnostics(*, log: LogFn | None = None) -> tuple[Path, Path]:
+    """Emit the host runtime + proxy routes paths before infra ensure.
+
+    Makes mismatches between ``deploy/.env``, route registration, and
+    the Traefik compose volume obvious in ``run.log`` / API logs.
+    """
+    host_root = resolve_host_runtime_root()
+    routes_dir = resolve_proxy_routes_dir()
+    for line in (
+        f"infra: host runtime root = {host_root}",
+        f"infra: proxy routes dir = {routes_dir}",
+    ):
+        if log is not None:
+            log(line)
+        else:
+            logger.info(line)
+    return host_root, routes_dir
 
 
 def ensure_required_infra(
@@ -126,6 +168,8 @@ def ensure_required_infra(
     ``infra:`` prefix requested by operators. Otherwise uses the
     module logger.
     """
+    log_infra_path_diagnostics(log=log)
+
     results: dict[str, bool] = {}
     for svc in required_infra_services(kinds):
         line = f"infra: ensuring {svc.kind} (provider={svc.name})"

@@ -77,6 +77,8 @@ def test_ensure_required_infra_logs_and_returns_results(monkeypatch):
     results = ensure_required_infra(log=logs.append)
     assert results == {"reverse_proxy": True}
     assert calls == ["ensure"]
+    assert logs[0].startswith("infra: host runtime root =")
+    assert logs[1].startswith("infra: proxy routes dir =")
     assert any("infra: ensuring reverse_proxy" in line for line in logs)
     assert any("infra: reverse_proxy ready" in line for line in logs)
 
