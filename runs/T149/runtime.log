@@ -34,3 +34,20 @@
 [2026-05-26T08:48:09Z] compose: skill=ai/skills/security.md
 [2026-05-26T08:48:09Z] compose: task (canonical prompt)
 [2026-05-26T08:48:09Z] snapshot: runtime-prompt=runs/T149/prompts/coder-attempt-1.md
+[2026-05-26T09:04:30Z] auto-run start: state=PLAN_APPROVED
+[2026-05-26T09:04:30Z] auto-run: running step=coder
+[2026-05-26T09:04:30Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-26T09:04:30Z] prompt: generic fallback — injecting runs/T149/ticket.md
+[2026-05-26T09:04:30Z] compose: global-context=docs/ai/global-context.md
+[2026-05-26T09:04:30Z] compose: role=ai/roles/coder.md
+[2026-05-26T09:04:30Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-26T09:04:30Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-26T09:04:30Z] compose: skill=ai/skills/code-quality.md
+[2026-05-26T09:04:30Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-26T09:04:30Z] compose: skill=ai/skills/security.md
+[2026-05-26T09:04:30Z] compose: task (canonical prompt)
+[2026-05-26T09:04:30Z] snapshot: runtime-prompt=runs/T149/prompts/coder-attempt-2.md
+[2026-05-26T09:04:30Z] auto-run: runtime failure: empty_output (rc=1)
+[2026-05-26T09:04:30Z] auto-run: step=coder done rc=1
+[2026-05-26T09:04:30Z] auto-run: runtime failure: empty_output (rc=1)
+[2026-05-26T09:04:30Z] auto-run: step=coder failed rc=1, state unchanged=PLAN_APPROVED
