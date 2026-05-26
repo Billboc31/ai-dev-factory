@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import re
 import stat
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -184,4 +185,106 @@ def test_deploy_readme_documents_global_traefik_startup():
     assert "global" in readme.lower() and "traefik" in readme.lower(), (
         "deploy/README.md must call out that Traefik is global/shared "
         "infrastructure (and not a per-sandbox container)"
+    )
+
+
+# ── Live ``docker compose config --services`` cross-checks ───────────────────
+
+
+def _have_docker_compose() -> bool:
+    """Skip the docker-backed cross-checks when docker is missing.
+
+    These tests are valuable as a smoke check on a dev/CI box but the
+    suite as a whole must remain useful on minimal containers that
+    don't ship docker (e.g. some CI runners). We don't fail when the
+    binary is absent — only when it's present and reports the wrong
+    service list."""
+    try:
+        result = subprocess.run(
+            ["docker", "compose", "version"],
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0
+
+
+@pytest.mark.skipif(not _have_docker_compose(), reason="docker compose unavailable")
+def test_root_compose_config_lists_only_application_services():
+    """``docker compose config --services`` exposes the FULL effective
+    service set (after env interpolation, includes/profiles, …). For
+    sandbox isolation to hold, that list MUST be exactly ``api`` and
+    ``web`` — no ``traefik``, no infrastructure service."""
+    result = subprocess.run(
+        ["docker", "compose", "config", "--services"],
+        capture_output=True, text=True, cwd=_REPO_ROOT, check=False, timeout=15,
+    )
+    assert result.returncode == 0, (
+        f"docker compose config failed: {result.stderr.strip()}"
+    )
+    services = sorted(s for s in result.stdout.splitlines() if s.strip())
+    assert services == ["api", "web"], (
+        f"root compose must yield exactly [api, web] — got {services}. "
+        f"Any other service here would be inherited by every "
+        f"``docker compose -p sandbox-… up -d`` and conflict on shared "
+        f"ports (the historic Traefik :80 bug)."
+    )
+
+
+@pytest.mark.skipif(not _have_docker_compose(), reason="docker compose unavailable")
+def test_infra_compose_config_lists_only_traefik():
+    """Conversely the infra compose file must yield ``[traefik]``
+    only — never accidentally taking ownership of api/web."""
+    result = subprocess.run(
+        ["docker", "compose", "-f", str(_INFRA_COMPOSE), "config", "--services"],
+        capture_output=True, text=True, cwd=_REPO_ROOT, check=False, timeout=15,
+    )
+    assert result.returncode == 0, (
+        f"docker compose config (infra) failed: {result.stderr.strip()}"
+    )
+    services = sorted(s for s in result.stdout.splitlines() if s.strip())
+    assert services == ["traefik"], (
+        f"infra compose must yield exactly [traefik] — got {services}"
+    )
+
+
+# ── Sandbox compose run can't spawn Traefik ───────────────────────────────────
+
+
+def test_no_sandbox_traefik_service_in_root_compose():
+    """A sandbox run executes ``docker compose -p sandbox-XXXX up -d``
+    against the ROOT compose file from inside its worktree. Since
+    that file declares no ``traefik`` service, no ``sandbox-*-traefik-1``
+    container can ever be created. This test pins the invariant at
+    the file level (live docker variant is covered above)."""
+    text = _ROOT_COMPOSE.read_text(encoding="utf-8")
+    # No service block whose key is exactly ``traefik`` (the
+    # _parse_compose_services helper above already enforces this; we
+    # repeat it here as a load-bearing comment-free check).
+    assert "\n  traefik:\n" not in text, (
+        "a sandbox `docker compose up -d` against this file would "
+        "spawn sandbox-XYZ-traefik-1 and conflict on host port 80 — "
+        "exactly the bug this PR fixes"
+    )
+
+
+def test_no_port_80_binding_outside_infra_compose():
+    """Audit every compose file we ship: only the infra file may
+    publish port 80. Catches a future regression where someone adds
+    a service like ``proxy`` or ``nginx`` to the root file."""
+    forbidden = []
+    for compose_file in _REPO_ROOT.rglob("docker-compose*.yml"):
+        # Skip the infra file (it legitimately owns port 80) and
+        # generated/temporary files inside runtime/sandboxes.
+        rel = compose_file.relative_to(_REPO_ROOT)
+        if str(rel).startswith(("runtime/", "sandboxes/", "node_modules/")):
+            continue
+        if compose_file == _INFRA_COMPOSE:
+            continue
+        text = compose_file.read_text(encoding="utf-8")
+        if re.search(r'^[^#\n]*-\s*"?80:\d+"?\s*$', text, flags=re.MULTILINE):
+            forbidden.append(str(rel))
+    assert not forbidden, (
+        f"compose files bind host port 80 outside the infra compose "
+        f"file: {forbidden!r}. That port belongs to the GLOBAL Traefik."
     )
