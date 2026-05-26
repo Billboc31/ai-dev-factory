@@ -1,0 +1,37 @@
+# Global Traefik — single shared reverse proxy.
+#
+# This file is intentionally isolated from the project's root
+# docker-compose.yml. Sandbox compose runs (e.g. ``docker compose -p
+# sandbox-… up -d`` inside an isolated worktree) MUST NOT bring this
+# service up — that's what produced the historic failure:
+#
+#     Container sandbox-ai-dev-factory-…-traefik-1 Starting
+#     Bind for 0.0.0.0:80 failed: port is already allocated
+#
+# Start it ONCE per host with::
+#
+#     bash deploy/infra/start_traefik.sh
+#
+# or directly::
+#
+#     docker compose -f deploy/infra/docker-compose.traefik.yml \
+#       -p ai-dev-factory-infra up -d
+#
+# Traefik watches ``${HOST_RUNTIME_ROOT}/proxy/routes`` for dynamic
+# route files written by :mod:`services.control_api.services.proxy_manager`,
+# so sandboxes only register/unregister route files — they never own
+# port 80 and never run their own proxy.
+
+services:
+  traefik:
+    image: traefik:v3.0
+    command:
+      - "--configFile=/etc/traefik/traefik.yml"
+    ports:
+      - "80:80"
+    volumes:
+      - ../traefik/traefik.yml:/etc/traefik/traefik.yml:ro
+      - ${HOST_RUNTIME_ROOT:-~/runtime/ai-dev-factory}/proxy/routes:/routes
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped

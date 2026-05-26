@@ -29,34 +29,27 @@ configuration at startup so you can verify the mapping.
 ## 3. Start the global Traefik reverse proxy (once per host)
 
 ```bash
-docker compose --profile infra up -d traefik
+bash deploy/infra/start_traefik.sh
 ```
 
-Traefik is **shared infrastructure**, not a per-sandbox service. It
-binds port `80` and watches `${HOST_RUNTIME_ROOT}/proxy/routes` for the
-dynamic route files written by `proxy_manager.py`. Sandboxes only
-register/unregister route files there.
+Traefik is **shared infrastructure**, not a per-sandbox container.
+It binds port `80` and watches `${HOST_RUNTIME_ROOT}/proxy/routes` for
+the dynamic route files written by
+`services/control_api/services/proxy_manager.py`. Sandboxes only
+register/unregister route files there; they MUST NEVER start their
+own Traefik. That isolation is why Traefik lives in its own compose
+file (`deploy/infra/docker-compose.traefik.yml`) under a dedicated
+project name (`ai-dev-factory-infra`), separated from the application
+stack below — otherwise every `docker compose up` inside a sandbox
+worktree would try to spawn a Traefik per sandbox and immediately
+fail with `Bind for 0.0.0.0:80 failed: port is already allocated`.
 
-Traefik is gated behind the `infra` Docker Compose profile so that a
-plain `docker compose up -d` (used by sandbox compose runs inside an
-isolated worktree) never tries to spawn a per-sandbox Traefik. Without
-the gate, every sandbox after the first one would fail with:
-
-```text
-Bind for 0.0.0.0:80 failed: port is already allocated
-```
-
-To verify the profile gating is in place:
+The startup script is idempotent (re-running is safe) and re-uses
+`deploy/.env` so `${HOST_RUNTIME_ROOT}` resolves correctly. To stop
+Traefik on a host that no longer needs the proxy:
 
 ```bash
-docker compose config --services                # api, web (no traefik)
-docker compose --profile infra config --services  # api, traefik, web
-```
-
-To stop the global Traefik:
-
-```bash
-docker compose --profile infra down
+bash deploy/infra/start_traefik.sh down
 ```
 
 ## 4. Start the application Docker stack
@@ -65,9 +58,10 @@ docker compose --profile infra down
 docker compose --env-file deploy/.env up -d
 ```
 
-This starts only `api` and `web` — Traefik is excluded by the profile
-gate, so sandbox compose runs (`docker compose -p sandbox-… up -d`)
-will behave identically: no extra Traefik, no port-80 collision.
+This starts only `api` and `web` — Traefik is declared in a separate
+compose file (`deploy/infra/docker-compose.traefik.yml`), so sandbox
+compose runs (`docker compose -p sandbox-… up -d`) inherit the same
+two-service stack: no extra Traefik, no port-80 collision.
 
 The `--env-file deploy/.env` flag is what makes the variables available
 for `${HOST_RUNTIME_ROOT}` interpolation in `docker-compose.yml`. Without
@@ -79,6 +73,9 @@ time, symlink `.env -> deploy/.env`:
 ln -s deploy/.env .env
 docker compose up -d
 ```
+
+Sandbox compose runs use the same root `docker-compose.yml` (no
+Traefik service), so they never collide with the global proxy.
 
 ## How the path mapping works
 
