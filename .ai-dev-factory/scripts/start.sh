@@ -6,35 +6,56 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
 cd "$PROJECT_ROOT"
 
-# ── Port resolution ──────────────────────────────────────────────────────────
+# ── Port + URL resolution ────────────────────────────────────────────────────
 #
-# Sandbox runs (tools/agent_runner/run_sandbox.py) allocate isolated
-# ports and inject them via the process environment. The main runtime
-# normally reads its ports from `deploy/.env`. When both are present
-# the **sandbox-injected values win** — otherwise sourcing deploy/.env
-# would silently downgrade the sandbox to 8080/3000 and produce false-
-# positive healthchecks against the main runtime.
+# Sandbox runs allocate isolated ports and pretty URLs and inject
+# them via the process env (API_PORT / WEB_PORT /
+# AI_DEV_FACTORY_SUPERVISOR_PORT / AI_DEV_FACTORY_SUPERVISOR_URL /
+# AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL / SANDBOX_API_URL /
+# SANDBOX_WEB_URL). The main runtime normally reads its ports from
+# ``deploy/.env`` or falls back to documented defaults.
 #
-# To preserve precedence we snapshot the inbound env first, source
-# deploy/.env (which may export other useful vars like HOST_*), then
-# restore the snapshot.
+# When both an injected value and a deploy/.env value exist, the
+# **sandbox-injected value wins** — otherwise sourcing deploy/.env
+# would silently downgrade the sandbox to the main runtime's
+# 8080/3000/8090 ports and produce false-positive healthchecks
+# against the main runtime.
+#
+# Implementation: snapshot inbound env, source deploy/.env, then
+# restore the snapshot as the final answer.
 
 __SB_API_PORT="${API_PORT:-}"
 __SB_WEB_PORT="${WEB_PORT:-}"
 __SB_SUPERVISOR_PORT="${AI_DEV_FACTORY_SUPERVISOR_PORT:-}"
 __SB_SUPERVISOR_URL="${AI_DEV_FACTORY_SUPERVISOR_URL:-}"
+__SB_SUPERVISOR_HEALTH_URL="${AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL:-}"
+__SB_API_URL="${SANDBOX_API_URL:-}"
+__SB_WEB_URL="${SANDBOX_WEB_URL:-}"
 
 # shellcheck source=/dev/null
 [ -f deploy/.env ] && source deploy/.env || true
 
-# Restore precedence: sandbox > deploy/.env > documented default.
 API_PORT="${__SB_API_PORT:-${API_PORT:-8080}}"
 WEB_PORT="${__SB_WEB_PORT:-${WEB_PORT:-3000}}"
 AI_DEV_FACTORY_SUPERVISOR_PORT="${__SB_SUPERVISOR_PORT:-${AI_DEV_FACTORY_SUPERVISOR_PORT:-8090}}"
-AI_DEV_FACTORY_SUPERVISOR_URL="${__SB_SUPERVISOR_URL:-${AI_DEV_FACTORY_SUPERVISOR_URL:-http://127.0.0.1:${AI_DEV_FACTORY_SUPERVISOR_PORT}}}"
-export API_PORT WEB_PORT AI_DEV_FACTORY_SUPERVISOR_PORT AI_DEV_FACTORY_SUPERVISOR_URL
+# AI_DEV_FACTORY_SUPERVISOR_URL is consumed by Docker containers (it
+# must use host.docker.internal which is not resolvable from host
+# shells). Host-side scripts probe a separate URL — see below.
+AI_DEV_FACTORY_SUPERVISOR_URL="${__SB_SUPERVISOR_URL:-${AI_DEV_FACTORY_SUPERVISOR_URL:-http://host.docker.internal:${AI_DEV_FACTORY_SUPERVISOR_PORT}}}"
+AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL="${__SB_SUPERVISOR_HEALTH_URL:-${AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL:-http://127.0.0.1:${AI_DEV_FACTORY_SUPERVISOR_PORT}}}"
+# Pretty URLs: only set in sandbox mode (or when an operator manually
+# sets them for the main runtime). When unset, the URL block below
+# falls back to direct host:port for both display and probes.
+SANDBOX_API_URL="${__SB_API_URL:-${SANDBOX_API_URL:-}}"
+SANDBOX_WEB_URL="${__SB_WEB_URL:-${SANDBOX_WEB_URL:-}}"
+export API_PORT WEB_PORT
+export AI_DEV_FACTORY_SUPERVISOR_PORT AI_DEV_FACTORY_SUPERVISOR_URL
+export AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL
+export SANDBOX_API_URL SANDBOX_WEB_URL
 
-unset __SB_API_PORT __SB_WEB_PORT __SB_SUPERVISOR_PORT __SB_SUPERVISOR_URL
+unset __SB_API_PORT __SB_WEB_PORT
+unset __SB_SUPERVISOR_PORT __SB_SUPERVISOR_URL __SB_SUPERVISOR_HEALTH_URL
+unset __SB_API_URL __SB_WEB_URL
 
 RUN_DIR="$PROJECT_ROOT/.ai-dev-factory/run"
 mkdir -p "$RUN_DIR"
@@ -68,11 +89,24 @@ else
 fi
 
 # ── Resolved URLs ────────────────────────────────────────────────────────────
+#
+# Announce the URLs that the human operator (and healthcheck.sh)
+# will actually probe. When the sandbox supplied pretty URLs, those
+# are printed instead of ``localhost:<port>`` so the dashboard /
+# CLI log matches the browser experience.
 
 echo "start: done"
-echo "start:   API        http://localhost:${API_PORT}"
-echo "start:   web        http://localhost:${WEB_PORT}"
-echo "start:   supervisor ${AI_DEV_FACTORY_SUPERVISOR_URL}"
+if [ -n "${SANDBOX_API_URL:-}" ]; then
+  echo "start:   API        ${SANDBOX_API_URL}"
+else
+  echo "start:   API        http://localhost:${API_PORT}"
+fi
+if [ -n "${SANDBOX_WEB_URL:-}" ]; then
+  echo "start:   web        ${SANDBOX_WEB_URL}"
+else
+  echo "start:   web        http://localhost:${WEB_PORT}"
+fi
+echo "start:   supervisor ${AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL}"
 if [ -n "${SANDBOX_ID:-}" ]; then
   echo "start:   sandbox    ${SANDBOX_ID}"
 fi

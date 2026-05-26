@@ -75,6 +75,23 @@ if str(_THIS_DIR) not in sys.path:
 
 from compose_utils import normalize_compose_project_name  # noqa: E402
 
+# Cross-layer reach into the control_api services package — same
+# pattern used by ``services/control_api/services/sandbox_manager.py``
+# importing ``tools.agent_runner.compose_utils``. The proxy + Traefik
+# helpers are small and stateless; importing them keeps the worker
+# DRY relative to the dashboard's start path.
+_PKG_ROOT = _THIS_DIR.parent.parent
+if str(_PKG_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PKG_ROOT))
+
+from services.control_api.services.proxy_manager import (  # noqa: E402
+    ProxyManager,
+    build_sandbox_urls as _build_sandbox_urls,
+)
+from services.control_api.services.traefik_manager import (  # noqa: E402
+    TraefikManager,
+)
+
 logger = logging.getLogger("run_sandbox")
 
 # Scripts are produced by the scripts-generation pipeline (`run_scripts.py`)
@@ -216,6 +233,50 @@ def _release_port_slot(sandbox_id: str) -> None:
             registry_path.write_text(json.dumps(registry, indent=2))
         finally:
             fcntl.flock(lf, fcntl.LOCK_UN)
+
+
+# ── Reverse proxy integration ────────────────────────────────────────────────
+
+
+def _ensure_traefik_running(log_path: Path) -> bool:
+    """Idempotent best-effort start of the global Traefik reverse proxy.
+
+    Logged to the worker's ``run.log`` so operators can trace why a
+    sandbox's pretty URLs aren't resolving. Never raises — a
+    docker-less host falls back to direct ``localhost:<port>`` URLs.
+    """
+    try:
+        ok = TraefikManager().ensure_running()
+    except Exception as exc:  # defensive: docker not installed, etc.
+        _append_log(log_path, f"traefik: ensure_running failed: {exc!r}\n")
+        return False
+    _append_log(
+        log_path,
+        f"traefik: ensure_running -> {'up' if ok else 'unavailable'}\n",
+    )
+    return ok
+
+
+def _register_proxy_route(
+    sandbox_id: str, api_port: int, web_port: int, log_path: Path
+) -> None:
+    """Write the sandbox's Traefik route file. Best effort."""
+    try:
+        urls = ProxyManager().register(
+            sandbox_id, {"api": api_port, "web": web_port}
+        )
+        _append_log(log_path, f"proxy: route registered -> {urls}\n")
+    except Exception as exc:
+        _append_log(log_path, f"proxy: route registration failed: {exc!r}\n")
+
+
+def _unregister_proxy_route(sandbox_id: str, log_path: Path) -> None:
+    """Remove the sandbox's Traefik route file. Idempotent."""
+    try:
+        ProxyManager().unregister(sandbox_id)
+        _append_log(log_path, f"proxy: route unregistered for {sandbox_id}\n")
+    except Exception as exc:
+        _append_log(log_path, f"proxy: route unregister failed: {exc!r}\n")
 
 
 def _write_sandbox_env(
@@ -710,28 +771,45 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
     else:
         _append_log(log_path, f"compose_project: {compose_project}\n")
 
-    # Every key here is exported into the subprocess env of every
-    # operational script (bootstrap/build/start/healthcheck/...). The
-    # scripts read API_PORT / WEB_PORT / AI_DEV_FACTORY_SUPERVISOR_*
-    # to expose the isolated sandbox endpoints instead of the main
-    # runtime's hardcoded 8080/3000/8090 — otherwise healthchecks would
-    # silently probe the main runtime and report green even when the
-    # sandbox itself never came up.
+    # Sandbox-aware env injected into every operational script
+    # subprocess. Key invariants:
     #
-    # AI_DEV_FACTORY_RUNTIME_ROOT is included so scripts that resolve
-    # state/logs paths land inside the per-sandbox runtime tree rather
-    # than the shared host runtime root.
+    #   * SANDBOX_*_URL: pretty reverse-proxy URLs. healthcheck.sh
+    #     prefers these over ``localhost:<port>`` so a sandbox-mode
+    #     healthcheck validates the SAME endpoint humans will use in
+    #     the browser, not a backdoor on a host port.
+    #
+    #   * SUPERVISOR_URL: how containers reach the host supervisor
+    #     (``host.docker.internal``, NOT resolvable from host scripts).
+    #     Kept for compose env interpolation.
+    #
+    #   * SUPERVISOR_HEALTH_URL: how host-side scripts probe the
+    #     supervisor (loopback, ``127.0.0.1``). Without this split,
+    #     healthcheck.sh would curl ``host.docker.internal`` from
+    #     the host shell and fail every time.
+    sandbox_urls = _build_sandbox_urls(sandbox_id)
     extra_env = {
         "API_PORT": str(api_port),
         "WEB_PORT": str(web_port),
         "COMPOSE_PROJECT_NAME": compose_project,
         "SANDBOX_ID": sandbox_id,
+        "SANDBOX_WEB_URL": sandbox_urls["web"],
+        "SANDBOX_API_URL": sandbox_urls["api"],
         "AI_DEV_FACTORY_SUPERVISOR_PORT": str(supervisor_port),
         "AI_DEV_FACTORY_SUPERVISOR_URL": f"http://host.docker.internal:{supervisor_port}",
+        "AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL": f"http://127.0.0.1:{supervisor_port}",
         "AI_DEV_FACTORY_RUNTIME_ROOT": str(sandbox_runtime_root),
         "SANDBOX_ROOT": str(_sandbox_root()),
         "PROJECT_NAME": _project_name(),
     }
+
+    # Auto-start the global Traefik before registering the route so
+    # the URLs above actually resolve. Best-effort: a docker-less or
+    # misconfigured host should not crash the worker — the route file
+    # is still written so the URLs resolve as soon as the operator
+    # brings Traefik up.
+    _ensure_traefik_running(log_path)
+    _register_proxy_route(sandbox_id, api_port, web_port, log_path)
 
     supervisor_proc = _start_sandbox_supervisor(supervisor_port, sandbox_runtime_root, log_path)
 
@@ -806,6 +884,11 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
             if worktree_path.exists():
                 _run_stop_script(worktree_path, log_path, extra_env)
             _stop_sandbox_supervisor(supervisor_proc, sandbox_runtime_root, log_path)
+            # Drop the proxy route so an orphan subdomain isn't left
+            # pointing at a recycled port. ``keep_environment=True``
+            # (sandbox-as-environment runs) intentionally leaves the
+            # route in place so the operator can keep browsing it.
+            _unregister_proxy_route(sandbox_id, log_path)
             _release_port_slot(sandbox_id)
 
 

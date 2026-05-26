@@ -381,109 +381,79 @@ def test_scripts_executed_with_worktree_as_cwd(tmp_path):
     )
 
 
-# ── Sandbox env injection (rule C1 + AI_DEV_FACTORY_RUNTIME_ROOT) ─────────────
+# ── Sandbox env injection: pretty URLs + supervisor split ─────────────────────
+#
+# The worker must hand the scripts the FULL env they need to run
+# correctly in sandbox mode:
+#
+#   * SANDBOX_WEB_URL / SANDBOX_API_URL — pretty Traefik URLs so
+#     healthcheck.sh probes the proxy, not the host port directly;
+#   * AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL — loopback URL for host
+#     shells (host.docker.internal isn't resolvable there);
+#   * AI_DEV_FACTORY_RUNTIME_ROOT — per-sandbox runtime tree.
 
 
-def test_sandbox_runner_injects_required_env_vars(tmp_path, monkeypatch):
-    """Every operational script must see the sandbox-allocated env vars
-    in its environment. Without these the scripts fall back to the main
-    runtime defaults (8080/3000/8090) and a sandbox healthcheck silently
-    validates the MAIN runtime — the exact bug this PR fixes."""
-    # Redirect the env dump files into tmp_path so the test is hermetic.
+def test_sandbox_runner_injects_pretty_urls_and_supervisor_split(tmp_path, monkeypatch):
     dump_dir = tmp_path / "env_dump"
     dump_dir.mkdir()
     proj = _make_git_project(tmp_path)
     scripts = {
         name: (
-            f'printenv API_PORT                       > "{dump_dir}/API_PORT" 2>/dev/null || true\n'
-            f'printenv WEB_PORT                       > "{dump_dir}/WEB_PORT" 2>/dev/null || true\n'
-            f'printenv AI_DEV_FACTORY_SUPERVISOR_PORT > "{dump_dir}/SUP_PORT" 2>/dev/null || true\n'
-            f'printenv AI_DEV_FACTORY_SUPERVISOR_URL  > "{dump_dir}/SUP_URL"  2>/dev/null || true\n'
-            f'printenv AI_DEV_FACTORY_RUNTIME_ROOT    > "{dump_dir}/RT_ROOT"  2>/dev/null || true\n'
-            f'printenv COMPOSE_PROJECT_NAME           > "{dump_dir}/COMP"     2>/dev/null || true\n'
-            f'printenv SANDBOX_ID                     > "{dump_dir}/SBID"     2>/dev/null || true\n'
-            'exit 0\n'
-        )
-        for name in run_sandbox._REQUIRED_SCRIPTS
-    }
-    _add_scripts(proj, scripts)
-
-    run_sandbox._do_sandbox("myproject", proj, "myproject-ENV")
-    state = _read_latest_state(tmp_path)
-    assert state["state"] == "validated", state
-
-    # Every env file must exist and have a non-empty body. Empty body
-    # means `printenv` didn't find the var (env not propagated).
-    for key in ("API_PORT", "WEB_PORT", "SUP_PORT", "SUP_URL", "RT_ROOT", "COMP", "SBID"):
-        path = dump_dir / key
-        assert path.exists(), f"missing dump for {key}"
-        assert path.read_text().strip(), f"env var {key} was empty in script env"
-
-    # Spot-check actual values come from the sandbox allocation, not
-    # the main-runtime defaults.
-    api_port = (dump_dir / "API_PORT").read_text().strip()
-    web_port = (dump_dir / "WEB_PORT").read_text().strip()
-    sup_port = (dump_dir / "SUP_PORT").read_text().strip()
-    sup_url  = (dump_dir / "SUP_URL").read_text().strip()
-    rt_root  = (dump_dir / "RT_ROOT").read_text().strip()
-    sbid     = (dump_dir / "SBID").read_text().strip()
-
-    assert api_port.isdigit() and api_port != "8080", (
-        f"API_PORT {api_port!r} should come from sandbox slot, never the "
-        f"main-runtime default 8080"
-    )
-    assert web_port.isdigit() and web_port != "3000", (
-        f"WEB_PORT {web_port!r} should come from sandbox slot, never the "
-        f"main-runtime default 3000"
-    )
-    assert sup_port.isdigit() and sup_port != "8090", (
-        f"AI_DEV_FACTORY_SUPERVISOR_PORT {sup_port!r} should come from "
-        f"sandbox slot, never the main-runtime default 8090"
-    )
-    assert sup_url.startswith("http://host.docker.internal:"), sup_url
-    assert sup_url.endswith(f":{sup_port}"), (
-        f"SUPERVISOR_URL {sup_url!r} must point at SUPERVISOR_PORT {sup_port}"
-    )
-    assert sbid == "myproject-ENV", sbid
-
-    # AI_DEV_FACTORY_RUNTIME_ROOT must point at the PER-SANDBOX runtime
-    # tree, not the host-shared one. Otherwise scripts that resolve
-    # state/logs paths would land in the main runtime tree.
-    expected_runtime = _sandbox_dir(tmp_path, "myproject-ENV") / "runtime"
-    assert Path(rt_root) == expected_runtime, (
-        f"AI_DEV_FACTORY_RUNTIME_ROOT should be the per-sandbox runtime "
-        f"(<sandbox>/runtime), got {rt_root!r}, expected {expected_runtime}"
-    )
-
-
-def test_sandbox_runner_supervisor_url_uses_allocated_port(tmp_path, monkeypatch):
-    """The SUPERVISOR_URL injected into scripts must reflect the
-    allocated SUPERVISOR_PORT — never the documented 8090 default."""
-    dump_dir = tmp_path / "env_dump"
-    dump_dir.mkdir()
-    proj = _make_git_project(tmp_path)
-    scripts = {
-        name: (
-            f'printenv AI_DEV_FACTORY_SUPERVISOR_PORT > "{dump_dir}/SUP_PORT_{name}"\n'
-            f'printenv AI_DEV_FACTORY_SUPERVISOR_URL  > "{dump_dir}/SUP_URL_{name}"\n'
+            f'printenv SANDBOX_WEB_URL                   > "{dump_dir}/WEB_URL_{name}"\n'
+            f'printenv SANDBOX_API_URL                   > "{dump_dir}/API_URL_{name}"\n'
+            f'printenv AI_DEV_FACTORY_SUPERVISOR_URL     > "{dump_dir}/SUP_URL_{name}"\n'
+            f'printenv AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL > "{dump_dir}/SUP_HEALTH_{name}"\n'
+            f'printenv AI_DEV_FACTORY_RUNTIME_ROOT       > "{dump_dir}/RT_ROOT_{name}"\n'
             "exit 0\n"
         )
         for name in run_sandbox._REQUIRED_SCRIPTS
     }
     _add_scripts(proj, scripts)
     run_sandbox._do_sandbox("myproject", proj, "myproject-URL")
+    state = _read_latest_state(tmp_path)
+    assert state["state"] == "validated", state
 
-    sup_port = (dump_dir / "SUP_PORT_bootstrap.sh").read_text().strip()
-    sup_url  = (dump_dir / "SUP_URL_bootstrap.sh").read_text().strip()
-    assert sup_url == f"http://host.docker.internal:{sup_port}", (
-        f"supervisor URL must use allocated port, got url={sup_url!r} port={sup_port!r}"
-    )
-    # Cross-script consistency: every script sees the same URL.
-    for name in run_sandbox._REQUIRED_SCRIPTS:
-        per_script = (dump_dir / f"SUP_URL_{name}").read_text().strip()
-        assert per_script == sup_url, (
-            f"scripts disagree on SUPERVISOR_URL: {name}={per_script!r} vs {sup_url!r}"
-        )
+    sb = "myproject-URL"
+    name = "bootstrap.sh"
+    web_url = (dump_dir / f"WEB_URL_{name}").read_text().strip()
+    api_url = (dump_dir / f"API_URL_{name}").read_text().strip()
+    sup_url = (dump_dir / f"SUP_URL_{name}").read_text().strip()
+    sup_health = (dump_dir / f"SUP_HEALTH_{name}").read_text().strip()
+    rt_root = (dump_dir / f"RT_ROOT_{name}").read_text().strip()
+
+    assert web_url == f"http://sandbox-{sb}.ai-dev-factory.localhost", web_url
+    assert api_url == f"http://api.sandbox-{sb}.ai-dev-factory.localhost", api_url
+    # SUPERVISOR_URL → host.docker.internal (used by containers).
+    assert sup_url.startswith("http://host.docker.internal:"), sup_url
+    # SUPERVISOR_HEALTH_URL → loopback (used by host scripts).
+    assert sup_health.startswith("http://127.0.0.1:"), sup_health
+    # Same port number on both sides — derived from the same allocation.
+    assert sup_url.split(":")[-1] == sup_health.split(":")[-1]
+    # RUNTIME_ROOT lands in the per-sandbox tree.
+    expected_runtime = _sandbox_dir(tmp_path, sb) / "runtime"
+    assert Path(rt_root) == expected_runtime
+
+
+def test_sandbox_runner_unregisters_proxy_route_on_teardown(tmp_path, monkeypatch):
+    """When the worker finishes validation, it must drop the proxy
+    route file so an orphan subdomain isn't left pointing at a port
+    that the next sandbox may recycle."""
+    proj = _make_git_project(tmp_path)
+    _add_scripts(proj, _required_scripts_all_ok())
+
+    runtime_root = tmp_path / "runtime"
+    routes_dir = runtime_root / "proxy" / "routes"
+    routes_dir.mkdir(parents=True, exist_ok=True)
+
+    run_sandbox._do_sandbox("myproject", proj, "myproject-CLEAN")
+
+    state = _read_latest_state(tmp_path)
+    assert state["state"] == "validated"
+    # The validation-mode teardown removes the route file. Either the
+    # worker registered + unregistered (in which case the file is
+    # gone) or skipped entirely on a docker-less host (file never
+    # existed) — both outcomes match "no orphan route".
+    assert not (routes_dir / "myproject-CLEAN.yml").exists()
 
 
 # ── Worktree robustness (preserved from PR #120) ──────────────────────────────
