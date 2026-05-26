@@ -13,7 +13,9 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from ..models.sandbox import SandboxState, SandboxStatus
+from .deployer_runner import _load_deploy_profile
 from .runtime_resolver import get_project_sandbox_dir
+from .undeploy_runner import run_cleanup, run_undeploy
 
 # Single source of truth for compose project-name normalisation, shared
 # with the host-side worker (tools/agent_runner/run_sandbox.py). The
@@ -38,6 +40,14 @@ _registry_lock = threading.Lock()
 
 def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except OSError:
+        return False
 
 
 class SandboxNotFoundError(Exception):
@@ -322,25 +332,75 @@ class SandboxManager:
             pass
 
     def destroy(self, sandbox_id: str) -> None:
+        sandbox_dir = self._sandbox_dir(sandbox_id)
         try:
             state = self._read_state(sandbox_id)
-            self._terminate_sandbox_supervisor(state)
-            if state.worktree_path:
-                subprocess.run(
-                    ["git", "worktree", "remove", "--force", state.worktree_path],
-                    capture_output=True, text=True, check=False,
-                )
-            self._run_compose(state, "down")
         except SandboxNotFoundError:
+            self._release_slot(sandbox_id)
+            if sandbox_dir.exists():
+                shutil.rmtree(sandbox_dir)
+            return
+
+        # 1. Terminate supervisor before undeploy to avoid interference.
+        self._terminate_sandbox_supervisor(state)
+
+        # 2. Resolve project root for deploy profile lookup.
+        worktree = Path(state.worktree_path) if state.worktree_path else None
+        project_root = Path(state.project_root)
+        cwd = worktree if (worktree and worktree.exists()) else project_root
+        profile = _load_deploy_profile(cwd)
+
+        runtime_root = (
+            Path(state.sandbox_runtime_root) if state.sandbox_runtime_root else None
+        )
+
+        # 3. Stop runtime services via undeploy lifecycle.
+        run_undeploy(
+            profile,
+            state.compose_project,
+            state.env_file,
+            cwd,
+            sandbox_id,
+        )
+
+        # 4. Run cleanup hooks and remove stale pid/lock files.
+        run_cleanup(profile, sandbox_dir, runtime_root, sandbox_id)
+
+        # 5. Remove worktree after services are confirmed stopped.
+        if state.worktree_path:
+            subprocess.run(
+                ["git", "worktree", "remove", "--force", state.worktree_path],
+                capture_output=True, text=True, check=False,
+            )
+
+        # 6. Mark as destroyed before removing the directory.
+        try:
+            self._write_state(
+                state.model_copy(
+                    update={"status": SandboxStatus.destroyed, "supervisor_pid": None}
+                )
+            )
+        except OSError:
             pass
+
+        # 7. Release port slot only after undeploy completes.
         self._release_slot(sandbox_id)
-        sandbox_dir = self._sandbox_dir(sandbox_id)
+
+        # 8. Remove sandbox directory.
         if sandbox_dir.exists():
             shutil.rmtree(sandbox_dir)
+
         logger.info("sandbox destroyed: %s", sandbox_id)
 
     def status(self, sandbox_id: str) -> SandboxState:
-        return self._read_state(sandbox_id)
+        state = self._read_state(sandbox_id)
+        if state.status == SandboxStatus.running and state.supervisor_pid is not None:
+            if not _pid_alive(state.supervisor_pid):
+                state = state.model_copy(
+                    update={"status": SandboxStatus.stopped, "supervisor_pid": None}
+                )
+                self._write_state(state)
+        return state
 
     def logs(self, sandbox_id: str, component: str | None = None) -> str:
         state = self._read_state(sandbox_id)

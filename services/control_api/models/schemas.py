@@ -234,6 +234,8 @@ class DeployProfile(BaseModel):
     required_tools: list[str] = []
     components: list[DeployComponent] = []
     healthcheck: DeployHealthcheck | None = None
+    undeploy: list[DeployComponent] = []
+    cleanup: list[DeployComponent] = []
 
 
 class ScanResult(BaseModel):

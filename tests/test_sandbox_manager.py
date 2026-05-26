@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -224,3 +225,118 @@ def test_refresh_returns_state_no_subprocess(mgr):
     mock_run.assert_not_called()
     assert result.id == s.id
     assert result.status == SandboxStatus.stopped
+
+
+# ── T148: undeploy lifecycle tests ───────────────────────────────────────────
+
+
+def test_compose_project_stopped_on_destroy(mgr):
+    """docker compose down is called with the correct project before sandbox files are removed."""
+    s = mgr.create("T001", "/project")
+    compose_down_calls: list[str] = []
+
+    def capture_run(cmd, *args, **kwargs):
+        if isinstance(cmd, str) and "docker compose" in cmd:
+            compose_down_calls.append(cmd)
+        m = MagicMock()
+        m.returncode = 0
+        m.stdout = ""
+        m.stderr = ""
+        return m
+
+    sandbox_dir = mgr.sandboxes_dir / s.id
+
+    # Both sandbox_manager and undeploy_runner use the same subprocess module —
+    # a single patch on the shared target is sufficient.
+    with patch(
+        "services.control_api.services.undeploy_runner.subprocess.run",
+        side_effect=capture_run,
+    ):
+        mgr.destroy(s.id)
+
+    assert not sandbox_dir.exists(), "sandbox dir must be removed after destroy"
+    assert compose_down_calls, "docker compose down must have been called"
+    assert s.compose_project in compose_down_calls[0]
+
+
+def test_runtime_process_terminated_before_file_removal(mgr):
+    """Supervisor SIGTERM must occur before sandbox directory removal."""
+    s = mgr.create("T001", "/project")
+    runtime_root = Path(s.sandbox_runtime_root)
+    runtime_root.mkdir(parents=True, exist_ok=True)
+
+    # Use a PID that cannot exist (> max PID on Linux/macOS) so os.kill would
+    # normally raise; mocking it lets us record the call order safely.
+    fake_pid = 9_999_999
+    pid_path = runtime_root / "supervisor.pid"
+    pid_path.write_text(f'{{"pid": {fake_pid}}}', encoding="utf-8")
+
+    order: list[str] = []
+
+    def record_kill(pid, sig):
+        order.append("kill")
+
+    real_rmtree = shutil.rmtree
+
+    def record_rmtree(path, *a, **kw):
+        order.append("rmtree")
+        real_rmtree(path, *a, **kw)
+
+    with patch("services.control_api.services.sandbox_manager.os.kill", side_effect=record_kill):
+        with patch("services.control_api.services.sandbox_manager.shutil.rmtree", side_effect=record_rmtree):
+            with patch("services.control_api.services.undeploy_runner.subprocess.run", side_effect=_ok_compose):
+                mgr.destroy(s.id)
+
+    assert "kill" in order, "SIGTERM was never sent"
+    assert "rmtree" in order, "rmtree was never called"
+    assert order.index("kill") < order.index("rmtree"), "SIGTERM must happen before rmtree"
+
+
+def test_worktree_removed_after_undeploy(mgr):
+    """git worktree remove is called after undeploy, and the sandbox dir is gone."""
+    s = mgr.create("T001", "/project")
+    worktree_calls: list[list[str]] = []
+
+    def capture_subprocess(cmd, *args, **kwargs):
+        if isinstance(cmd, list) and "worktree" in cmd:
+            worktree_calls.append(cmd)
+        m = MagicMock()
+        m.returncode = 0
+        m.stdout = ""
+        m.stderr = ""
+        return m
+
+    # Patch a worktree_path into the state so destroy tries to remove it.
+    state = mgr.status(s.id)
+    mgr._write_state(state.model_copy(update={"worktree_path": "/tmp/fake_worktree"}))
+
+    with patch("services.control_api.services.undeploy_runner.subprocess.run", side_effect=_ok_compose):
+        with patch(
+            "services.control_api.services.sandbox_manager.subprocess.run",
+            side_effect=capture_subprocess,
+        ):
+            mgr.destroy(s.id)
+
+    assert not (mgr.sandboxes_dir / s.id).exists()
+    assert any("worktree" in cmd for cmd in worktree_calls), "worktree remove must be called"
+
+
+def test_cleanup_idempotency(mgr):
+    """Calling destroy twice on the same sandbox must not raise."""
+    with patch("services.control_api.services.undeploy_runner.subprocess.run", side_effect=_ok_compose):
+        with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+            s = mgr.create("T001", "/project")
+            mgr.destroy(s.id)
+            mgr.destroy(s.id)  # second call must be a no-op
+
+
+def test_recreate_sandbox_after_cleanup(mgr):
+    """Creating a new sandbox after destroying a prior one must succeed without 'already running'."""
+    with patch("services.control_api.services.undeploy_runner.subprocess.run", side_effect=_ok_compose):
+        with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+            s1 = mgr.create("T001", "/project")
+            mgr.destroy(s1.id)
+
+    s2 = mgr.create("T001", "/project")
+    assert s2.id != s1.id
+    assert s2.status == SandboxStatus.stopped

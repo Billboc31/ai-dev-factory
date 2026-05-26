@@ -83,12 +83,26 @@ def _load_deploy_profile(project_root: Path) -> DeployProfile | None:
                 retries=hc_data.get("retries", 3),
                 delay=hc_data.get("delay", 5),
             )
+
+        def _parse_components(raw_list: list) -> list[DeployComponent]:
+            return [
+                DeployComponent(
+                    name=c["name"],
+                    type=c["type"],
+                    service=c.get("service"),
+                    command=c.get("command"),
+                )
+                for c in (raw_list or [])
+            ]
+
         return DeployProfile(
             version=data["version"],
             project=data["project"],
             required_tools=data.get("required_tools") or [],
             components=components,
             healthcheck=healthcheck,
+            undeploy=_parse_components(data.get("undeploy") or []),
+            cleanup=_parse_components(data.get("cleanup") or []),
         )
     except Exception:
         logger.warning("deployer: failed to parse deploy.yml at %s", profile_path)
