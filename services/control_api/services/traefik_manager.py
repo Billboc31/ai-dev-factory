@@ -185,31 +185,82 @@ class TraefikManager:
         low = stderr.lower()
         return all(token in low for token in _NETWORK_MISSING_RE)
 
+    def _ready(self) -> bool:
+        """The strong invariant: port 80 listening AND the
+        ``ai-dev-factory-infra`` compose project's ``traefik`` service
+        is in the *running* state.
+
+        Why both checks:
+
+        * ``is_listening`` alone is a false positive — nginx, apache,
+          a stale Traefik container under a different compose project
+          name, or even a host-side process can occupy port 80. If
+          ``ensure_running`` returned True on TCP-only, route files
+          would still be written, but the pretty URLs would silently
+          fail to resolve because no infra Traefik is actually
+          watching ``${HOST_RUNTIME_ROOT}/proxy/routes``.
+
+        * ``is_running`` alone is insufficient too — docker can report
+          a container as "running" while its entrypoint is still
+          booting and not yet bound to port 80.
+
+        Holding BOTH is the only safe success signal.
+        """
+        return self.is_listening() and self.is_running()
+
     def wait_ready(self, timeout: float = 15.0, interval: float = 0.5) -> bool:
-        """Poll ``is_listening`` until True or the deadline elapses."""
+        """Poll ``_ready`` until True or the deadline elapses."""
         deadline = time.monotonic() + timeout
         while time.monotonic() < deadline:
-            if self.is_listening():
+            if self._ready():
                 return True
             self._sleep(interval)
-        return self.is_listening()
+        return self._ready()
 
     def ensure_running(self, timeout: float = 15.0) -> bool:
-        """Best-effort idempotent startup. Returns True iff Traefik is
-        listening on port 80 by the end of the call.
+        """Best-effort idempotent startup. Returns True iff the infra
+        Traefik is *actually* up by the end of the call — both
+        listening on port 80 AND running under the
+        ``ai-dev-factory-infra`` compose project.
 
-        Never raises — proxy registration must remain best-effort so a
-        misconfigured docker doesn't crash sandbox creation. Callers
-        that need a hard guarantee can check the return value.
+        Never raises: a misconfigured docker, a docker-less host, or
+        an unrelated process bound to port 80 all return False
+        cleanly so the caller can fall back to direct port URLs.
+        Critically, the function must NEVER claim success on a TCP
+        probe alone — that masks the case where another process owns
+        port 80 (nginx, stale containers) and silently breaks pretty
+        URLs without any failing signal.
         """
-        if self.is_listening():
-            logger.debug("traefik: already listening on %s:%d", self.host, self.port)
+        if self._ready():
+            logger.debug(
+                "traefik: ready (listening on %s:%d + %s project running)",
+                self.host, self.port, INFRA_PROJECT_NAME,
+            )
             return True
 
-        logger.info(
-            "traefik: not listening on %s:%d — starting via %s",
-            self.host, self.port, self.start_script,
-        )
+        if self.is_listening():
+            # Port 80 is taken but NOT by us. Don't claim success;
+            # let compose attempt the up. If port 80 really is
+            # unavailable, ``docker compose up`` exits with
+            # "bind 0.0.0.0:80 failed: port is already allocated"
+            # — rc != 0, ``ensure_running`` returns False, and the
+            # caller falls back to direct ports. Way better than a
+            # silent false positive.
+            logger.warning(
+                "traefik: port %d is listening but the %r compose "
+                "project is NOT running. Another process (nginx, "
+                "a stale container, a different docker-compose "
+                "project) likely owns the port. Attempting compose "
+                "up anyway — will return False cleanly if the port "
+                "is unavailable.",
+                self.port, INFRA_PROJECT_NAME,
+            )
+        else:
+            logger.info(
+                "traefik: not listening on %s:%d — starting via %s",
+                self.host, self.port, self.start_script,
+            )
+
         rc, _out, err = self._compose_up()
 
         # Recovery path: stale named-network leftover from a previous run.
@@ -233,8 +284,8 @@ class TraefikManager:
         if not ok:
             logger.error(
                 "traefik: started but did not become ready within %.1fs "
-                "on %s:%d",
-                timeout, self.host, self.port,
+                "on %s:%d (need both listening + %s project running)",
+                timeout, self.host, self.port, INFRA_PROJECT_NAME,
             )
         return ok
 

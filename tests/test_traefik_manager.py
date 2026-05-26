@@ -125,23 +125,85 @@ def test_is_running_returns_false_when_docker_missing():
 # ── ensure_running ───────────────────────────────────────────────────────────
 
 
-def test_ensure_running_noop_when_already_listening():
-    mgr, sock, runner = _mk_mgr(listening=True)
+def test_ensure_running_noop_when_already_ready():
+    """Both invariants hold (port listening + infra project running)
+    → return True without running ``docker compose up``."""
+    sock = _SockFactory(listening=True)
+    # Single ps response — the runner repeats the last entry, so
+    # every is_running() call returns the running-container line.
+    runner = _Runner(responses=[(0, "container-running\n", "")])
+    mgr = TraefikManager(socket_factory=sock, runner=runner)
     assert mgr.ensure_running() is True
-    assert runner.calls == [], "must not exec docker if already up"
+
+    # Exactly one docker call: the `ps` lookup by is_running. No
+    # ``compose up`` was executed.
+    assert len(runner.calls) == 1
+    assert runner.calls[0][0:2] == ["docker", "compose"]
+    assert "ps" in runner.calls[0]
+    assert all(c[0] != "bash" for c in runner.calls), (
+        "must not exec the start script when already ready"
+    )
     assert sock.calls, "must probe TCP at least once"
 
 
+def test_ensure_running_does_not_falsely_succeed_on_listening_only():
+    """Regression: port 80 listening BUT the infra Traefik compose
+    project is NOT running (e.g. nginx or a stale container owns the
+    port). The old short-circuit on ``is_listening`` alone returned
+    True here — route files were written, pretty URLs silently broke.
+
+    The fixed flow must:
+      * NOT short-circuit to True;
+      * attempt ``compose up``;
+      * if that fails with "port already allocated", return False so
+        the caller can fall back to direct port URLs.
+    """
+    sock = _SockFactory(listening=True)
+    runner = _Runner(responses=[
+        (0, "", ""),                                                       # is_running ps → empty
+        (1, "", "Bind for 0.0.0.0:80 failed: port is already allocated"),  # compose up
+    ])
+    mgr = TraefikManager(socket_factory=sock, runner=runner)
+    assert mgr.ensure_running(timeout=0.05) is False
+
+    # Two docker calls: the `ps` for is_running + the `bash
+    # start_traefik.sh up` attempt. No silent True.
+    assert len(runner.calls) == 2
+    assert "ps" in runner.calls[0]
+    assert runner.calls[1][0] == "bash", (
+        "must have attempted compose up rather than claiming success "
+        "on a TCP probe alone"
+    )
+
+
+def test_ensure_running_no_false_success_even_when_port_unavailable_loop(caplog):
+    """Belt-and-suspenders: if port 80 stays listening (still nginx)
+    and the start script keeps failing, ``ensure_running`` must
+    return False instead of looping forever on the TCP probe."""
+    sock = _SockFactory(listening=True)
+    runner = _Runner(responses=[
+        (0, "", ""),                                        # ps → empty
+        (1, "", "Bind for 0.0.0.0:80 failed: port allocated"),
+    ])
+    mgr = TraefikManager(socket_factory=sock, runner=runner)
+    assert mgr.ensure_running(timeout=0.05) is False
+
+
 def test_ensure_running_calls_start_script_when_not_listening():
-    """Not listening before, listening after the script — happy path."""
+    """Happy path: not listening before, listening + running after."""
     sock = _SockFactory(listening=False)
-    runner = _Runner(responses=[(0, "", "")])
+    runner = _Runner(responses=[
+        (0, "", ""),                       # compose up
+        (0, "container-running\n", ""),    # ps inside wait_ready (repeated)
+    ])
+
+    def flip_state(_s):
+        sock.listening = True
+
     mgr = TraefikManager(
-        socket_factory=sock, runner=runner,
-        sleeper=lambda _s: setattr(sock, "listening", True),
+        socket_factory=sock, runner=runner, sleeper=flip_state,
     )
     assert mgr.ensure_running() is True
-    # First call is `bash deploy/infra/start_traefik.sh up`.
     assert runner.calls[0][0] == "bash"
     assert runner.calls[0][-1] == "up"
     assert "start_traefik.sh" in runner.calls[0][1]
@@ -155,6 +217,7 @@ def test_ensure_running_recovers_from_missing_network():
         (1, "", "Error: network 7fa3 not found"),  # up #1 fails
         (0, "", ""),                                # down --remove-orphans
         (0, "", ""),                                # up #2 succeeds
+        (0, "container-running\n", ""),            # ps in wait_ready (repeated)
     ])
     mgr = TraefikManager(
         socket_factory=sock, runner=runner,
@@ -162,15 +225,14 @@ def test_ensure_running_recovers_from_missing_network():
     )
     assert mgr.ensure_running() is True
 
-    assert len(runner.calls) == 3
-    # 1st: up
-    assert runner.calls[0][-1] == "up"
-    # 2nd: down with --remove-orphans (no project / app stack touched)
-    assert "down" in runner.calls[1]
-    assert "--remove-orphans" in runner.calls[1]
-    assert INFRA_PROJECT_NAME in runner.calls[1]
-    # 3rd: retry up
-    assert runner.calls[2][-1] == "up"
+    # 4 calls: up, down, up, ps.
+    docker_calls = [c for c in runner.calls if c[0] != "bash"]
+    bash_calls = [c for c in runner.calls if c[0] == "bash"]
+    assert len(bash_calls) == 2, "must retry the start script exactly once"
+    # The recovery ``compose down`` must touch ONLY the infra project.
+    down_call = next(c for c in docker_calls if "down" in c)
+    assert "--remove-orphans" in down_call
+    assert INFRA_PROJECT_NAME in down_call
 
 
 def test_ensure_running_returns_false_on_non_network_failure():
@@ -201,7 +263,10 @@ def test_ensure_running_returns_false_when_not_ready_before_timeout():
 
 def test_ensure_running_succeeds_when_listening_returns_true_during_wait():
     sock = _SockFactory(listening=False)
-    runner = _Runner(responses=[(0, "", "")])
+    runner = _Runner(responses=[
+        (0, "", ""),                       # compose up
+        (0, "container-running\n", ""),   # repeated ps
+    ])
     poll_count = {"n": 0}
 
     def maybe_open(_s):
@@ -213,6 +278,21 @@ def test_ensure_running_succeeds_when_listening_returns_true_during_wait():
         socket_factory=sock, runner=runner, sleeper=maybe_open,
     )
     assert mgr.ensure_running(timeout=5.0) is True
+
+
+def test_ensure_running_false_when_listening_but_compose_project_never_appears():
+    """Edge case: ``compose up`` succeeds rc=0 (a stale container in
+    the right project state) but the project's traefik service is
+    never reported as running by ``docker compose ps``. wait_ready
+    must NOT loop forever and ``ensure_running`` must return False."""
+    sock = _SockFactory(listening=True)
+    runner = _Runner(responses=[
+        (0, "", ""),                  # ps inside initial _ready: empty
+        (0, "", ""),                  # compose up: rc=0
+        (0, "", ""),                  # ps inside wait_ready: stays empty
+    ])
+    mgr = TraefikManager(socket_factory=sock, runner=runner)
+    assert mgr.ensure_running(timeout=0.05) is False
 
 
 # ── Module-level convenience ─────────────────────────────────────────────────

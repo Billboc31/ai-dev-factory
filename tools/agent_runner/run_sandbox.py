@@ -260,9 +260,19 @@ def _ensure_traefik_running(log_path: Path) -> bool:
 def _register_proxy_route(
     sandbox_id: str, api_port: int, web_port: int, log_path: Path
 ) -> None:
-    """Write the sandbox's Traefik route file. Best effort."""
+    """Write the sandbox's Traefik route file. Best effort.
+
+    Auto-start of the global Traefik is the explicit responsibility of
+    ``_ensure_traefik_running`` above — it ran moments earlier and its
+    outcome is already in the run log. We therefore disable the
+    auto-start branch inside ``ProxyManager.register`` here, otherwise
+    every worker run would issue a redundant ``docker compose ps`` +
+    TCP probe pair. The dashboard's ``SandboxManager.start`` flow,
+    which does NOT call ensure_running directly, keeps the default
+    ``auto_start_traefik=True`` and is unaffected by this change.
+    """
     try:
-        urls = ProxyManager().register(
+        urls = ProxyManager(auto_start_traefik=False).register(
             sandbox_id, {"api": api_port, "web": web_port}
         )
         _append_log(log_path, f"proxy: route registered -> {urls}\n")
@@ -273,7 +283,7 @@ def _register_proxy_route(
 def _unregister_proxy_route(sandbox_id: str, log_path: Path) -> None:
     """Remove the sandbox's Traefik route file. Idempotent."""
     try:
-        ProxyManager().unregister(sandbox_id)
+        ProxyManager(auto_start_traefik=False).unregister(sandbox_id)
         _append_log(log_path, f"proxy: route unregistered for {sandbox_id}\n")
     except Exception as exc:
         _append_log(log_path, f"proxy: route unregister failed: {exc!r}\n")

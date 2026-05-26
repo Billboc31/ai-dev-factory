@@ -434,6 +434,44 @@ def test_sandbox_runner_injects_pretty_urls_and_supervisor_split(tmp_path, monke
     assert Path(rt_root) == expected_runtime
 
 
+def test_sandbox_runner_does_not_double_invoke_traefik_ensure_running(
+    tmp_path, monkeypatch
+):
+    """The worker calls ``TraefikManager.ensure_running`` exactly ONCE
+    per run — explicitly, before scripts execute. The follow-up
+    ``ProxyManager.register`` call must NOT trigger a second
+    auto-start, otherwise every sandbox run would issue a redundant
+    ``docker compose ps`` + TCP probe pair just to learn what it
+    already knew."""
+    proj = _make_git_project(tmp_path)
+    _add_scripts(proj, _required_scripts_all_ok())
+
+    call_log: list[str] = []
+
+    class _CountingTraefik:
+        def __init__(self, *a, **kw):
+            pass
+        def ensure_running(self, timeout: float = 15.0) -> bool:
+            call_log.append("ensure_running")
+            return False  # docker-less host: best-effort path
+
+    # Patch the import sites — both the worker's direct call and the
+    # one the proxy's auto-start would resort to if not disabled.
+    monkeypatch.setattr(run_sandbox, "TraefikManager", _CountingTraefik)
+    import services.control_api.services.proxy_manager as pm
+    monkeypatch.setattr(pm, "TraefikManager", _CountingTraefik)
+
+    run_sandbox._do_sandbox("myproject", proj, "myproject-ONCE")
+    state = _read_latest_state(tmp_path)
+    assert state["state"] == "validated"
+    assert call_log == ["ensure_running"], (
+        f"expected exactly one ensure_running call, got {call_log}. "
+        f"The worker calls it explicitly; the proxy's auto-start path "
+        f"is disabled (auto_start_traefik=False) to avoid the double "
+        f"call."
+    )
+
+
 def test_sandbox_runner_unregisters_proxy_route_on_teardown(tmp_path, monkeypatch):
     """When the worker finishes validation, it must drop the proxy
     route file so an orphan subdomain isn't left pointing at a port
