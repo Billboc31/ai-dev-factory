@@ -1,15 +1,15 @@
-The plan has been written to `runs/T151/plan.md`. Here's a summary of the key design decisions:
+The plan is written. Here's what it covers:
 
-**Core correction from the review**: No second orchestration pipeline. The previous plan introduced `EnvironmentManager`, `run_environment.py`, new supervisor routes, and a second port registry — all rejected. The revised plan eliminates all of that.
+**Backend (3 files modified/created):**
+- `models/sandbox.py` — adds `EnvironmentType`, `EnvironmentMode`, `RefType` enums + 7 optional fields to `SandboxState` (backward-compatible, all default `None`)
+- `sandbox_manager.py` — `create()` accepts env metadata, `start()` stamps `deployed_at`, `stop()` stamps `stopped_at`; all else untouched
+- `routes/environments.py` (new) — 9 thin-wrapper endpoints delegating entirely to `SandboxManager`
+- `main.py` — registers the new router
 
-**What the revised plan does instead**:
+**Frontend (5 files new, 2 modified):**
+- `api/environments.js`, `pages/EnvironmentsPage.jsx`, `components/EnvironmentCard.jsx`, `components/CreateEnvironmentModal.jsx` (new)
+- `App.jsx` + `ProjectSidebar.jsx` — nav wiring
 
-1. **`models/sandbox.py`** — adds `EnvironmentMode` + `EnvironmentType` enums and extends `SandboxState` with 7 optional fields (`env_name`, `env_type`, `env_mode`, `ref`, `ref_type`, `deployed_at`, `stopped_at`). Existing sandboxes deserialize fine with `None` defaults.
+**Tests:** 7 integration tests in `tests/test_environment_routes.py` covering branch/persistent environments, concurrency, timestamps, deletion cleanup, and idempotency.
 
-2. **`sandbox_manager.py`** — minimal extension: `create()` accepts the new env fields, `start()` stamps `deployed_at`, `stop()` stamps `stopped_at`. Core orchestration untouched.
-
-3. **`routes/environments.py`** — new thin-wrapper routes (`/environments/*`) that delegate entirely to the existing `SandboxManager`. No new state machine, no new worker, no new registry.
-
-4. **Frontend** — new `EnvironmentsPage`, `EnvironmentCard`, `CreateEnvironmentModal`, `environments.js` API client, and nav wiring in `App.jsx` + `ProjectSidebar.jsx`.
-
-5. **Tests** — 7 integration tests in `tests/test_environment_routes.py` using the existing test harness.
+No second orchestration pipeline is introduced — the environment layer is purely metadata + UX on top of the existing `SandboxManager`.
