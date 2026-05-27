@@ -1,7 +1,7 @@
 {
   "ticket_id": "T153",
-  "state": "IMPLEMENTATION_APPROVED",
+  "state": "TEST_COMPLETE",
   "branch": "ticket/T153-t153-generic-smoke-tests-and-bounded-auto-fix-depl",
   "issue_number": 158,
-  "updated_at": "2026-05-27T14:06:01Z"
+  "updated_at": "2026-05-27T14:11:47Z"
 }
