@@ -63,7 +63,10 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 import traceback
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 # Make sibling modules importable when this script is launched as
@@ -269,6 +272,30 @@ def _register_proxy_route(
         )
     except Exception as exc:
         _append_log(log_path, f"proxy: route registration failed: {exc!r}\n")
+
+
+def _wait_for_proxy_url(sandbox_id: str, log_path: Path, *, timeout_s: int = 15) -> bool:
+    """Poll the sandbox API URL until Traefik responds or the timeout expires.
+
+    Any HTTP response (including 4xx/5xx) means the route is live.
+    Returns False only when every attempt gets a connection-level error,
+    indicating Traefik itself is unreachable (infra failure).
+    Never raises.
+    """
+    url = f"http://api.sandbox-{sandbox_id}.ai-dev-factory.localhost"
+    for _ in range(timeout_s):
+        try:
+            urllib.request.urlopen(url, timeout=2)
+            _append_log(log_path, "proxy: route active\n")
+            return True
+        except urllib.error.HTTPError:
+            # Any HTTP error response means Traefik forwarded the request.
+            _append_log(log_path, "proxy: route active\n")
+            return True
+        except (urllib.error.URLError, OSError):
+            time.sleep(1)
+    _append_log(log_path, f"proxy: infra unreachable after {timeout_s}s\n")
+    return False
 
 
 def _unregister_proxy_route(sandbox_id: str, log_path: Path) -> None:
@@ -975,6 +1002,7 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
     # after both Traefik is up AND the route file exists.
     _ensure_required_infra(log_path)
     _register_proxy_route(sandbox_id, api_port, web_port, log_path)
+    _wait_for_proxy_url(sandbox_id, log_path)
 
     # Set to True in environment mode on success to skip teardown in finally.
     keep_environment = False
