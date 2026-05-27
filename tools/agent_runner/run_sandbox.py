@@ -63,7 +63,10 @@ import shutil
 import signal
 import subprocess
 import sys
+import time
 import traceback
+import urllib.error
+import urllib.request
 from pathlib import Path
 
 # Make sibling modules importable when this script is launched as
@@ -250,12 +253,14 @@ def _ensure_required_infra(log_path: Path) -> dict[str, bool]:
 
 def _register_proxy_route(
     sandbox_id: str, api_port: int, web_port: int, log_path: Path
-) -> None:
+) -> str | None:
     """Write the sandbox route file under the host-global routes dir.
 
     Infra ensure ran in ``_ensure_required_infra`` immediately before
     this call. ``auto_ensure_infra=False`` avoids a redundant second
     ensure inside ``ProxyManager.register``.
+
+    Returns the registered API URL on success, None on failure.
     """
     routes_dir = resolve_proxy_routes_dir()
     try:
@@ -267,8 +272,33 @@ def _register_proxy_route(
             log_path,
             f"proxy: route registered sandbox={sandbox_id} dir={routes_dir} urls={urls}\n",
         )
+        return urls.get("api")
     except Exception as exc:
         _append_log(log_path, f"proxy: route registration failed: {exc!r}\n")
+        return None
+
+
+def _wait_for_proxy_url(url: str, log_path: Path, *, timeout_s: int = 15) -> bool:
+    """Poll the given URL until Traefik responds or the timeout expires.
+
+    Any HTTP response (including 4xx/5xx) means the route is live.
+    Returns False only when every attempt gets a connection-level error,
+    indicating Traefik itself is unreachable (infra failure).
+    Never raises.
+    """
+    for _ in range(timeout_s):
+        try:
+            urllib.request.urlopen(url, timeout=2)
+            _append_log(log_path, "proxy: route active (backend healthy)\n")
+            return True
+        except urllib.error.HTTPError:
+            # Any HTTP error response means Traefik forwarded the request.
+            _append_log(log_path, "proxy: route active (backend not healthy yet)\n")
+            return True
+        except (urllib.error.URLError, OSError):
+            time.sleep(1)
+    _append_log(log_path, f"proxy: infra unreachable after {timeout_s}s\n")
+    return False
 
 
 def _unregister_proxy_route(sandbox_id: str, log_path: Path) -> None:
@@ -974,7 +1004,9 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
     # Order matters: healthcheck probes pretty URLs that only work
     # after both Traefik is up AND the route file exists.
     _ensure_required_infra(log_path)
-    _register_proxy_route(sandbox_id, api_port, web_port, log_path)
+    api_url = _register_proxy_route(sandbox_id, api_port, web_port, log_path)
+    if api_url:
+        _wait_for_proxy_url(api_url, log_path)
 
     # Set to True in environment mode on success to skip teardown in finally.
     keep_environment = False
