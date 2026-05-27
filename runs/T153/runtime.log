@@ -55,3 +55,14 @@
 [2026-05-27T09:00:01Z] compose: extra-context=runs/T153/fixes/context-20260527T090001Z.md
 [2026-05-27T09:00:01Z] snapshot: runtime-prompt=runs/T153/prompts/planner-attempt-3.md
 [2026-05-27T09:02:20Z] auto-run: step=planner done rc=0
+[2026-05-27T09:02:22Z] planner checkpoint: committed
+[2026-05-27T09:02:22Z] planner checkpoint: pushed
+[2026-05-27T09:02:22Z] planner validation success
+[2026-05-27T09:02:22Z] auto-run: transition PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED
+[2026-05-27T09:02:22Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-27T09:02:22Z] commit-checkpoint: unstaged runtime garbage: ['runs/T153/runtime.log']
+[2026-05-27T09:02:22Z] commit-checkpoint: sha=52feae87 files=2 title='docs(T153/workflow): planner — update 2 file(s)'
+[2026-05-27T09:02:22Z] auto-run: auto-push triggered
+[2026-05-27T09:02:22Z] push: tolerating runtime dirty files (not blocking): ['runs/T153/runtime.log']
+[2026-05-27T09:02:22Z] push: pushing branch=ticket/T153-t153-generic-smoke-tests-and-bounded-auto-fix-depl
+[2026-05-27T09:02:24Z] push: done branch=ticket/T153-t153-generic-smoke-tests-and-bounded-auto-fix-depl
