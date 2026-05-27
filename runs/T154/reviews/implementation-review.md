@@ -1,97 +1,80 @@
-I have enough to write the review. Let me produce it now.
+I have a complete picture. Writing the review now.
 
 ---
 
-## Review — T154 Stabilize Traefik dynamic route lifecycle
+## Review — T154 — Stabilize Traefik dynamic route lifecycle
 
 ### Résumé
 
-T154 ajoute deux comportements manquants sur une base ProxyManager déjà solide : attente active de la joignabilité du proxy après enregistrement de la route, et classification explicite des échecs proxy vs application dans le healthcheck. Changeset minimal (4 fichiers, ~70 lignes), bien scoped.
+This is the review following the `IMPLEMENTATION_FIX_REQUIRED` decision on `implementation-fix-1.md`, which flagged three blockers: hardcoded URL in `_wait_for_proxy_url()`, wrong probe endpoint in `healthcheck.sh`, and undistinguished log messages. All three corrections are now present in the current code. Changeset remains minimal (4 files, ~75 lines), scoped correctly to the two remaining gaps identified in the plan.
 
 ---
 
 ### Vérifications effectuées
 
-- Lu le diff complet `main...HEAD` : 4 fichiers modifiés/créés
-- Lu `_wait_for_proxy_url()` et son call site dans `run_sandbox.py`
-- Lu la modification de `healthcheck.sh`
-- Lu les deux nouveaux fichiers de tests
-- Vérifié la couverture des tests proxy manager pre-existants (`test_proxy_manager.py`)
+- Read `_wait_for_proxy_url()` signature and body in `run_sandbox.py:281–301`
+- Read `_register_proxy_route()` return type and call site (`run_sandbox.py:254–278`, `1006–1009`)
+- Read `healthcheck.sh` full file
+- Read `test_proxy_route_wait.py` (4 tests)
+- Read `test_healthcheck_classification.py` (1 integration test)
+- Verified `test_proxy_manager.py` route directory isolation
+- Read `proxy_manager.py` full file
+- Cross-checked all three blockers from `implementation-fix-1.md` against current code
 
 ---
 
 ### Points validés
 
-**Atomic write** — `proxy_manager.py` utilise `tmp_file.rename(route_file)` (rename POSIX atomique). Présent avant T154, inchangé. Traefik ne voit jamais de fichier `.yml.tmp`. ✓
+**Bloquant 1 résolu** — `_wait_for_proxy_url(url: str, log_path, ...)` prend l'URL en paramètre direct (`run_sandbox.py:281`). `_register_proxy_route()` retourne `urls.get("api")` (ligne 275). Call site : `api_url = _register_proxy_route(...); if api_url: _wait_for_proxy_url(api_url, log_path)` (lignes 1007–1009). Pas de reconstruction manuelle du domaine. ✓
 
-**Idempotent unregister** — `unregister()` catch `FileNotFoundError` silencieusement ; ne touche que `{sandbox_id}.yml`. ✓
+**Bloquant 2 résolu** — `healthcheck.sh:74` : `probe "proxy-infra" "${SANDBOX_API_URL}" || echo "PROXY_INFRA_FAIL"`. Pas de référence à `http://traefik.ai-dev-factory.localhost`. ✓
 
-**Stale route cleanup** — `cleanup_stale_routes()` saute tous les fichiers `_*.yml` (infra Traefik) ; supprime uniquement les routes dont le sandbox n'est plus actif. ✓
+**Bloquant 3 résolu** — HTTP 200 → `"proxy: route active (backend healthy)"` (ligne 292). `HTTPError` → `"proxy: route active (backend not healthy yet)"` (ligne 296). Les deux cas sont distingués dans les logs et couverts par les tests `test_wait_returns_true_when_backend_healthy` et `test_wait_returns_true_when_traefik_responds_http_error`. ✓
 
-**Isolation des tests** — tous les tests utilisent `tmp_path` ; jamais le répertoire réel de routes. `test_proxy_manager.py` (pre-existant), `test_proxy_route_wait.py`, `test_healthcheck_classification.py` (T154). ✓
+**Atomic write** — `proxy_manager.py:126–128` : `tmp_file.write_text(content)` suivi de `tmp_file.rename(route_file)`. Traefik ne voit jamais de fichier `.yml.tmp`. Inchangé et correct. ✓
 
-**Proxy reachability** (`run_sandbox.py:277-298`) — `_wait_for_proxy_url()` distingue correctement :
-- `HTTPError` → route active (Traefik a répondu, même avec 4xx/5xx)
-- `URLError`/`OSError` → infra unreachable, retry
-Appelé juste après `_register_proxy_route()` ligne 1005. Sémantique correcte. ✓
+**Idempotent unregister** — `proxy_manager.py:147–151` : `route_file.unlink()` + catch silencieux `FileNotFoundError`. Ne touche que `{sandbox_id}.yml`. ✓
 
-**Healthcheck classification** (`healthcheck.sh:74`) — probe `proxy-infra` avant la probe `api`; émet `PROXY_INFRA_FAIL` sur stdout si Traefik est down. `|| true` sur la probe `api` évite de masquer le signal d'infra. ✓
+**Stale cleanup** — `proxy_manager.py:153–186` : préserve tous les fichiers `_`-préfixés ; expose `list[str]` pour assertion. Câblé via `SandboxManager.cleanup_stale_routes()`. Couvert par 5 tests dans `test_proxy_manager.py` et 1 dans `test_sandbox_manager.py`. ✓
 
-**Protection de Traefik global** — `unregister` et `cleanup_stale_routes` ne touchent jamais `_dashboard.yml` ni aucun fichier `_`-préfixé. Le bloc `finally` de `_do_sandbox` n'appelle que `_unregister_proxy_route()`. ✓
+**Protection Traefik global** — `unregister()` et `cleanup_stale_routes()` ne peuvent pas supprimer `_dashboard.yml` ni aucun fichier `_`-préfixé (logique `_INFRA_PREFIX`). Le bloc `finally` de `_do_sandbox` appelle uniquement `_unregister_proxy_route()` (ligne 1127). ✓
+
+**Isolation des tests** — `test_proxy_manager.py` (fixture `mgr` → `tmp_path/routes`), `test_proxy_route_wait.py` (log via `tmp_path`), `test_healthcheck_classification.py` (`cwd=tmp_path`, PATH injection). Aucune référence au répertoire réel `~/runtime/ai-dev-factory/proxy/routes`. ✓
+
+**Scope borné** — Aucun changement à `sandbox_manager.py`, au deploy loop, à l'infra Traefik, ni aux tests pré-existants. ✓
 
 ---
 
 ### Problèmes détectés
 
-#### Observation 1 — Valeur de retour de `_wait_for_proxy_url` silencieusement ignorée (minor)
+#### Observation 1 — `time.sleep` non mocké dans les tests de timeout (minor)
 
+`test_wait_returns_false_on_connection_error` et `test_wait_logs_infra_failure` utilisent `timeout_s=2` sans mocker `time.sleep`. Ces deux tests dorment 2 secondes réelles à chaque exécution. Acceptable, mais ralentit la suite inutilement.
+
+Correction suggérée (non bloquante) :
 ```python
-# run_sandbox.py:1005
-_wait_for_proxy_url(sandbox_id, log_path)   # retour bool ignoré
+with patch("run_sandbox.time.sleep"):
+    result = run_sandbox._wait_for_proxy_url(_TEST_URL, log, timeout_s=2)
 ```
 
-La fonction retourne `False` si Traefik est injoignable après 15 secondes, mais le caller ne réagit pas. Le sandbox continue. Le ticket exige de "verify the proxy URL is actually reachable before healthcheck continues" — la vérification a lieu mais n'est pas bloquante. Dans le contexte d'un ticket "stabilize" (non bloquant voulu pour la résilience), c'est défendable. Mais si l'intention était de bloquer/signaler un échec infra avant d'aller plus loin, il faudrait au minimum logger un warning au niveau du caller, voire propager l'état dans `state.json`.
+#### Observation 2 — probe proxy-infra sur-sensible avec `curl -sf` (cosmétique)
 
-**Correction suggérée** (non bloquante) :
-```python
-if not _wait_for_proxy_url(sandbox_id, log_path):
-    _append_log(log_path, "proxy: continuing despite unreachable proxy (infra may be starting)\n")
-```
+`probe "proxy-infra" "${SANDBOX_API_URL}"` utilise `curl -sf`. Le flag `-f` fait échouer curl sur toute réponse 4xx/5xx. Si le backend applicatif répond 404 sur sa racine, `PROXY_INFRA_FAIL` est émis alors que Traefik route correctement. Le plan-fix-1 avait mentionné cette alternative (sonder avec en-tête Host sur 127.0.0.1) mais l'avait classée comme suggestion, pas comme requis. Le comportement actuel est conservateur (over-reporting infra failures) mais acceptable pour le périmètre "stabilize".
 
-#### Observation 2 — `time.sleep` non mocké dans les tests timeout (minor)
+#### Observation 3 — Test d'écriture atomique implicite seulement (cosmétique)
 
-`test_wait_returns_false_on_connection_error` et `test_wait_logs_infra_failure` utilisent `timeout_s=2`. Chaque test dort donc 2 secondes réelles (2 itérations × `sleep(1)`). Pas bloquant mais ralentit inutilement la suite.
-
-**Correction suggérée** :
-```python
-with patch("time.sleep"):
-    result = run_sandbox._wait_for_proxy_url("abc123", log, timeout_s=2)
-```
-
-#### Observation 3 — Test "atomic write" implicite seulement (minor)
-
-Le ticket requiert un test explicite de l'écriture atomique. `test_register_creates_route_file` vérifie que `abc123.yml` existe, mais pas que :
-- aucun fichier `.yml.tmp` n'est laissé
-- le fichier n'existe pas à mi-écriture
-
-Le test existant est suffisant pour valider le comportement final, mais ne teste pas le contrat atomique explicitement. Acceptable pour un ticket "stabilize" mais à compléter si des régressions sont survenues.
-
-#### Observation 4 — Test `test_wait_returns_false_on_connection_error` n'assert pas le log (cosmétique)
-
-Contrairement à `test_wait_logs_infra_failure`, ce test ne vérifie pas le contenu du log. Incohérence mineure, les deux tests se chevauchent partiellement.
+`test_register_creates_route_file` vérifie l'existence finale du fichier `.yml`, mais ne vérifie pas l'absence de résidu `.yml.tmp`. Non bloquant pour le ticket.
 
 ---
 
 ### Risques éventuels
 
-**Probe proxy-infra ne court-circuite pas la probe api** — Si Traefik est down, `PROXY_INFRA_FAIL` est émis, PUIS `probe "api"` tente quand même une connexion (qui échouera silencieusement via `|| true`). Ce comportement est correct : le signal d'infra est bien isolé et la probe app ne pollue pas le diagnostic. Risque nul.
-
-**Timeout 15s fixe** — La constante `timeout_s=15` est non configurable par variable d'environnement. Acceptable pour le scope actuel.
+Aucun risque bloquant. `_wait_for_proxy_url()` retournant `False` n'arrête pas le sandbox — c'est intentionnel (résilience, healthcheck.sh reste l'arbitre). Le timeout fixe à 15s est non configurable mais adapté au scope.
 
 ---
 
 ### Décision
 
-L'implémentation couvre tous les critères d'acceptance du ticket. Les observations sont mineures et non bloquantes. Changeset propre, scoped, sans drift. Les tests nouveaux couvrent les deux ajouts principaux.
+Les trois blockers identifiés dans `implementation-fix-1.md` sont tous corrigés. Les critères d'acceptation du plan sont remplis. Le changeset est propre, scoped, sans drift. Les observations restantes sont mineures et non bloquantes.
 
 IMPLEMENTATION_APPROVED
