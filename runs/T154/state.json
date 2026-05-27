@@ -1,0 +1,7 @@
+{
+  "ticket_id": "T154",
+  "state": "INIT",
+  "branch": "ticket/T154-t154-stabilize-traefik-dynamic-route-lifecycle",
+  "issue_number": 160,
+  "updated_at": "2026-05-27T19:40:17Z"
+}
