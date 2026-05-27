@@ -112,6 +112,7 @@ _REQUIRED_SCRIPTS = [
     "start.sh",
     "healthcheck.sh",
 ]
+_SMOKE_SCRIPT = "smoke.sh"
 
 _WORKTREE_TIMEOUT_SECONDS = int(
     os.environ.get("AI_DEV_FACTORY_SANDBOX_WORKTREE_TIMEOUT", "60")
@@ -621,6 +622,160 @@ def _run_stop_script(
         _append_log(log_path, f"stop.sh failed to run: {exc} (continuing cleanup)\n")
 
 
+# ── Smoke tests + validation artifact + fix proposal ────────────────────────
+
+
+def _run_smoke_tests(
+    worktree_path: Path,
+    log_path: Path,
+    extra_env: dict | None = None,
+) -> tuple[str, str | None]:
+    """Run smoke.sh if present; return (smoke_status, failing_step).
+
+    smoke_status: "skipped" | "success" | "failed"
+    failing_step: "smoke" when failed, None otherwise.
+    """
+    smoke_rel = f"{_SCRIPTS_DIR}/{_SMOKE_SCRIPT}"
+    smoke_path = worktree_path / smoke_rel
+
+    if not smoke_path.exists():
+        _append_log(log_path, f"\n--- smoke tests: {smoke_rel} not found, skipping ---\n")
+        return "skipped", None
+
+    _append_log(log_path, f"\n--- smoke tests: {smoke_rel} ---\n")
+    script_env = {**os.environ, **(extra_env or {})}
+
+    try:
+        result = subprocess.run(
+            ["bash", smoke_rel],
+            capture_output=True,
+            text=True,
+            cwd=str(worktree_path),
+            stdin=subprocess.DEVNULL,
+            start_new_session=True,
+            timeout=_SCRIPT_TIMEOUT_SECONDS,
+            env=script_env,
+        )
+    except subprocess.TimeoutExpired:
+        _append_log(log_path, f"smoke tests timed out after {_SCRIPT_TIMEOUT_SECONDS}s\n")
+        return "failed", "smoke"
+
+    if result.stdout:
+        _append_log(log_path, result.stdout)
+    if result.stderr:
+        _append_log(log_path, result.stderr)
+
+    if result.returncode == 0:
+        _append_log(log_path, "smoke tests passed\n")
+        return "success", None
+
+    _append_log(log_path, f"smoke tests failed (exit {result.returncode})\n")
+    return "failed", "smoke"
+
+
+def _write_validation_json(
+    sandbox_runtime_root: Path,
+    sandbox_id: str,
+    healthcheck_status: str,
+    smoke_status: str,
+    failing_step: str | None,
+    proxy_urls: dict[str, str],
+    ports: dict[str, int],
+    started_at: str,
+    log_path: Path,
+) -> Path:
+    """Write validation.json to sandbox_runtime_root; return the path."""
+    data = {
+        "sandbox_id": sandbox_id,
+        "healthcheck_status": healthcheck_status,
+        "smoke_status": smoke_status,
+        "failing_step": failing_step,
+        "proxy_urls": proxy_urls,
+        "ports": ports,
+        "timestamps": {
+            "started_at": started_at,
+            "finished_at": _now_iso(),
+        },
+        "log_path": str(log_path),
+    }
+    out = sandbox_runtime_root / "validation.json"
+    out.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    _append_log(log_path, f"validation.json written to {out}\n")
+    return out
+
+
+def _call_fix_proposer(
+    sandbox_runtime_root: Path,
+    validation_json_path: Path,
+    worktree_path: Path,
+    log_path: Path,
+) -> None:
+    """Pipe validation context to AI_DEV_FACTORY_EXEC_CMD; write fix-proposal.md.
+
+    Only called when AI_DEV_FACTORY_EXEC_CMD is set and smoke tests failed.
+    Never modifies files outside sandbox_runtime_root.
+    """
+    exec_cmd = os.environ.get("AI_DEV_FACTORY_EXEC_CMD", "").strip()
+    if not exec_cmd:
+        return
+
+    _append_log(log_path, "\n--- calling AI fix proposer ---\n")
+
+    context_parts: list[str] = []
+
+    if validation_json_path.exists():
+        context_parts.append(
+            f"=== validation.json ===\n{validation_json_path.read_text(encoding='utf-8')}"
+        )
+
+    deploy_yml = worktree_path / ".ai-dev-factory" / "deploy.yml"
+    if deploy_yml.exists():
+        context_parts.append(
+            f"=== deploy.yml ===\n{deploy_yml.read_text(encoding='utf-8')}"
+        )
+
+    scripts_dir = worktree_path / _SCRIPTS_DIR
+    if scripts_dir.exists():
+        artifact_list = "\n".join(
+            str(f.relative_to(worktree_path))
+            for f in sorted(scripts_dir.iterdir())
+            if f.is_file()
+        )
+        context_parts.append(f"=== allowed deployment artifacts ===\n{artifact_list}")
+
+    if log_path.exists():
+        lines = log_path.read_text(encoding="utf-8").splitlines()
+        context_parts.append(
+            "=== recent run.log (last 200 lines) ===\n" + "\n".join(lines[-200:])
+        )
+
+    context = "\n\n".join(context_parts)
+
+    try:
+        result = subprocess.run(
+            exec_cmd,
+            shell=True,
+            input=context,
+            capture_output=True,
+            text=True,
+            cwd=str(worktree_path),
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        _append_log(log_path, "fix proposer timed out\n")
+        return
+    except OSError as exc:
+        _append_log(log_path, f"fix proposer failed to run: {exc}\n")
+        return
+
+    if result.stderr:
+        _append_log(log_path, f"fix proposer stderr: {result.stderr[:500]}\n")
+
+    proposal_path = sandbox_runtime_root / "fix-proposal.md"
+    proposal_path.write_text(result.stdout, encoding="utf-8")
+    _append_log(log_path, f"fix-proposal.md written to {proposal_path}\n")
+
+
 # ── Main pipeline ────────────────────────────────────────────────────────────
 
 
@@ -841,6 +996,38 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
             extra_env=extra_env,
         )
 
+        # Derive healthcheck_status from the steps list.
+        healthcheck_status = "skipped"
+        for step in steps:
+            if step["name"] == "healthcheck.sh":
+                healthcheck_status = step["status"]
+
+        # Run smoke tests only after all required scripts (incl. healthcheck) pass.
+        smoke_status = "skipped"
+        failing_step: str | None = None
+        if success and mode == "validation":
+            smoke_status, smoke_fail = _run_smoke_tests(worktree_path, log_path, extra_env)
+            if smoke_fail is not None:
+                failing_step = smoke_fail
+                success = False
+                error = "smoke tests failed"
+        elif not success and steps:
+            failing_step = steps[-1]["name"]
+
+        # Always write validation.json so the result is observable.
+        validation_json_path = _write_validation_json(
+            sandbox_runtime_root, sandbox_id,
+            healthcheck_status, smoke_status, failing_step,
+            {"web": sandbox_urls["web"], "api": sandbox_urls["api"]},
+            ports, started_at, log_path,
+        )
+
+        # If smoke tests failed and an AI exec_cmd is configured, generate a fix proposal.
+        if smoke_status == "failed":
+            _call_fix_proposer(
+                sandbox_runtime_root, validation_json_path, worktree_path, log_path
+            )
+
         finished_at = _now_iso()
         if success and mode == "environment":
             # Leave compose services and supervisor running; worker exits cleanly.
@@ -852,6 +1039,8 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
                 "error": None,
                 "last_step": steps[-1]["name"] if steps else state_base["last_step"],
                 "steps": steps,
+                "healthcheck_status": healthcheck_status,
+                "smoke_status": smoke_status,
             })
             _append_log(
                 log_path,
@@ -860,13 +1049,20 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
             return 0
         else:
             final_state = "validated" if success else "failed"
+            last_step = (
+                failing_step
+                if failing_step
+                else (steps[-1]["name"] if steps else state_base["last_step"])
+            )
             _write_state(state_path, latest_state_path, {
                 **state_base,
                 "state": final_state,
                 "finished_at": finished_at,
                 "error": error,
-                "last_step": steps[-1]["name"] if steps else state_base["last_step"],
+                "last_step": last_step,
                 "steps": steps,
+                "healthcheck_status": healthcheck_status,
+                "smoke_status": smoke_status,
             })
             outcome = "validated" if success else "failed"
             _append_log(

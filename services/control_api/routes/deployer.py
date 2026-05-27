@@ -37,6 +37,7 @@ def get_deployer_status(
         finished_at=state.finished_at,
         error=state.error,
         last_step=state.last_step,
+        smoke_status=state.smoke_status,
     )
 
 
