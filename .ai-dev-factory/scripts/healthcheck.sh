@@ -71,7 +71,7 @@ probe() {
 # In main-runtime mode SANDBOX_*_URL is empty and we fall back to
 # the direct host port — exactly the behaviour we want there.
 if [ -n "$SANDBOX_API_URL" ]; then
-  probe "proxy-infra" "http://traefik.ai-dev-factory.localhost" || echo "PROXY_INFRA_FAIL"
+  probe "proxy-infra" "${SANDBOX_API_URL}" || echo "PROXY_INFRA_FAIL"
   probe "api" "${SANDBOX_API_URL}/health" || true
 else
   probe "api" "http://localhost:${API_PORT}/health" || true
