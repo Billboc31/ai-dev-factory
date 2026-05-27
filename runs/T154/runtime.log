@@ -22,3 +22,17 @@
 [2026-05-27T19:44:20Z] push: pushing branch=ticket/T154-t154-stabilize-traefik-dynamic-route-lifecycle
 [2026-05-27T19:44:23Z] push: done branch=ticket/T154-t154-stabilize-traefik-dynamic-route-lifecycle
 [2026-05-27T19:57:55Z] human-approval: approve-plan — PLAN_REVIEW_NEEDED → PLAN_APPROVED
+[2026-05-27T20:04:23Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-27T20:04:23Z] auto-run: running step=review
+[2026-05-27T20:04:23Z] auto-run: review decision context: context_file=runs/T154/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-27T20:04:23Z] prompt: resolved=prompts/generic/review.md source=generic
+[2026-05-27T20:04:23Z] prompt: generic fallback — injecting runs/T154/ticket.md
+[2026-05-27T20:04:23Z] compose: global-context=docs/ai/global-context.md
+[2026-05-27T20:04:23Z] compose: role=ai/roles/reviewer.md
+[2026-05-27T20:04:23Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-27T20:04:23Z] compose: skill=ai/skills/code-quality.md
+[2026-05-27T20:04:23Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-27T20:04:23Z] compose: skill=ai/skills/security.md
+[2026-05-27T20:04:23Z] compose: task (canonical prompt)
+[2026-05-27T20:04:23Z] compose: extra-context=runs/T154/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-27T20:04:23Z] snapshot: runtime-prompt=runs/T154/prompts/review-attempt-1.md
