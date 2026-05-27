@@ -918,3 +918,185 @@ def test_validation_initial_state_is_validating(tmp_path, monkeypatch):
     assert states_seen[0] == "validating", (
         f"first state must be 'validating', got {states_seen[0]!r}"
     )
+
+
+# ── Smoke tests ───────────────────────────────────────────────────────────────
+
+
+def test_smoke_absent_sets_status_skipped(tmp_path):
+    """No smoke.sh → smoke_status must be 'skipped' and run must still succeed."""
+    proj = _make_git_project(tmp_path)
+    _add_scripts(proj, _required_scripts_all_ok())
+    run_sandbox._do_sandbox("myproject", proj, "myproject-SMKSKIP")
+
+    state = _read_latest_state(tmp_path)
+    assert state["state"] == "validated"
+    assert state["smoke_status"] == "skipped"
+    assert state["healthcheck_status"] == "success"
+
+
+def test_smoke_exit_0_sets_status_success(tmp_path):
+    """smoke.sh exiting 0 → smoke_status == 'success' and run must succeed."""
+    proj = _make_git_project(tmp_path)
+    scripts = _required_scripts_all_ok()
+    scripts[run_sandbox._SMOKE_SCRIPT] = "exit 0"
+    _add_scripts(proj, scripts)
+    run_sandbox._do_sandbox("myproject", proj, "myproject-SMKOK")
+
+    state = _read_latest_state(tmp_path)
+    assert state["state"] == "validated"
+    assert state["smoke_status"] == "success"
+    assert state["healthcheck_status"] == "success"
+
+
+def test_smoke_exit_nonzero_sets_status_failed(tmp_path):
+    """smoke.sh exiting non-zero → smoke_status == 'failed' and run must fail."""
+    proj = _make_git_project(tmp_path)
+    scripts = _required_scripts_all_ok()
+    scripts[run_sandbox._SMOKE_SCRIPT] = "exit 1"
+    _add_scripts(proj, scripts)
+    run_sandbox._do_sandbox("myproject", proj, "myproject-SMKFAIL")
+
+    state = _read_latest_state(tmp_path)
+    assert state["state"] == "failed"
+    assert state["smoke_status"] == "failed"
+    assert state["healthcheck_status"] == "success"
+    assert state["last_step"] == "smoke"
+
+
+def test_smoke_receives_proxy_urls(tmp_path):
+    """smoke.sh must receive SANDBOX_WEB_URL and SANDBOX_API_URL env vars."""
+    dump_dir = tmp_path / "env_dump"
+    dump_dir.mkdir()
+    proj = _make_git_project(tmp_path)
+    scripts = _required_scripts_all_ok()
+    scripts[run_sandbox._SMOKE_SCRIPT] = (
+        f'printenv SANDBOX_WEB_URL > "{dump_dir}/WEB_URL"\n'
+        f'printenv SANDBOX_API_URL > "{dump_dir}/API_URL"\n'
+        "exit 0\n"
+    )
+    _add_scripts(proj, scripts)
+    run_sandbox._do_sandbox("myproject", proj, "myproject-SMKURL")
+
+    web_url = (dump_dir / "WEB_URL").read_text().strip()
+    api_url = (dump_dir / "API_URL").read_text().strip()
+    assert "ai-dev-factory.localhost" in web_url, web_url
+    assert "ai-dev-factory.localhost" in api_url, api_url
+
+
+def test_validation_json_written_on_success(tmp_path):
+    """validation.json must be written to sandbox_runtime_root after a successful run."""
+    proj = _make_git_project(tmp_path)
+    _add_scripts(proj, _required_scripts_all_ok())
+    sandbox_id = "myproject-VALJSON"
+    run_sandbox._do_sandbox("myproject", proj, sandbox_id)
+
+    sdir = _sandbox_dir(tmp_path, sandbox_id) / "runtime"
+    vj = sdir / "validation.json"
+    assert vj.exists(), "validation.json must exist after a successful run"
+
+    data = json.loads(vj.read_text())
+    assert data["sandbox_id"] == sandbox_id
+    assert data["healthcheck_status"] == "success"
+    assert data["smoke_status"] == "skipped"
+    assert data["failing_step"] is None
+    assert "web" in data["proxy_urls"]
+    assert "api" in data["proxy_urls"]
+    assert "started_at" in data["timestamps"]
+    assert "finished_at" in data["timestamps"]
+
+
+def test_validation_json_written_on_smoke_failure(tmp_path):
+    """validation.json must be written even when smoke tests fail."""
+    proj = _make_git_project(tmp_path)
+    scripts = _required_scripts_all_ok()
+    scripts[run_sandbox._SMOKE_SCRIPT] = "exit 1"
+    _add_scripts(proj, scripts)
+    sandbox_id = "myproject-VALFAIL"
+    run_sandbox._do_sandbox("myproject", proj, sandbox_id)
+
+    sdir = _sandbox_dir(tmp_path, sandbox_id) / "runtime"
+    vj = sdir / "validation.json"
+    assert vj.exists(), "validation.json must exist even on smoke failure"
+
+    data = json.loads(vj.read_text())
+    assert data["smoke_status"] == "failed"
+    assert data["healthcheck_status"] == "success"
+    assert data["failing_step"] == "smoke"
+
+
+def test_fix_proposal_written_when_exec_cmd_set_and_smoke_fails(tmp_path, monkeypatch):
+    """When AI_DEV_FACTORY_EXEC_CMD is set and smoke tests fail, fix-proposal.md
+    must be written inside sandbox_runtime_root and nowhere else."""
+    proj = _make_git_project(tmp_path)
+    scripts = _required_scripts_all_ok()
+    scripts[run_sandbox._SMOKE_SCRIPT] = "exit 1"
+    _add_scripts(proj, scripts)
+
+    monkeypatch.setenv("AI_DEV_FACTORY_EXEC_CMD", "echo 'fix proposal output'")
+    sandbox_id = "myproject-FIXPROP"
+    run_sandbox._do_sandbox("myproject", proj, sandbox_id)
+
+    sdir = _sandbox_dir(tmp_path, sandbox_id) / "runtime"
+    fp = sdir / "fix-proposal.md"
+    assert fp.exists(), "fix-proposal.md must be written when exec_cmd is set"
+    assert "fix proposal output" in fp.read_text()
+
+
+def test_fix_proposal_not_written_without_exec_cmd(tmp_path, monkeypatch):
+    """Without AI_DEV_FACTORY_EXEC_CMD, fix-proposal.md must NOT be created."""
+    proj = _make_git_project(tmp_path)
+    scripts = _required_scripts_all_ok()
+    scripts[run_sandbox._SMOKE_SCRIPT] = "exit 1"
+    _add_scripts(proj, scripts)
+
+    monkeypatch.delenv("AI_DEV_FACTORY_EXEC_CMD", raising=False)
+    sandbox_id = "myproject-NOFIXPROP"
+    run_sandbox._do_sandbox("myproject", proj, sandbox_id)
+
+    sdir = _sandbox_dir(tmp_path, sandbox_id) / "runtime"
+    assert not (sdir / "fix-proposal.md").exists()
+
+
+def test_smoke_not_run_when_required_scripts_fail(tmp_path, monkeypatch):
+    """If required scripts fail, smoke tests must not run at all."""
+    proj = _make_git_project(tmp_path)
+    _add_scripts(proj, {
+        "bootstrap.sh": "exit 0",
+        "build.sh": "exit 1",
+        "start.sh": "exit 0",
+        "healthcheck.sh": "exit 0",
+        run_sandbox._SMOKE_SCRIPT: "exit 0",
+    })
+
+    called: list[str] = []
+    real_smoke = run_sandbox._run_smoke_tests
+
+    def spy_smoke(*a, **kw):
+        called.append("smoke")
+        return real_smoke(*a, **kw)
+
+    monkeypatch.setattr(run_sandbox, "_run_smoke_tests", spy_smoke)
+    run_sandbox._do_sandbox("myproject", proj, "myproject-NSMOKE")
+
+    state = _read_latest_state(tmp_path)
+    assert state["state"] == "failed"
+    assert called == [], "smoke tests must not run when required scripts fail"
+    assert state["smoke_status"] == "skipped"
+
+
+def test_healthcheck_status_reflected_on_healthcheck_failure(tmp_path):
+    """When healthcheck.sh fails, healthcheck_status must be 'failed'."""
+    proj = _make_git_project(tmp_path)
+    _add_scripts(proj, {
+        "bootstrap.sh": "exit 0",
+        "build.sh": "exit 0",
+        "start.sh": "exit 0",
+        "healthcheck.sh": "exit 1",
+    })
+    run_sandbox._do_sandbox("myproject", proj, "myproject-HCFAIL")
+
+    state = _read_latest_state(tmp_path)
+    assert state["state"] == "failed"
+    assert state["healthcheck_status"] == "failed"
+    assert state["smoke_status"] == "skipped"

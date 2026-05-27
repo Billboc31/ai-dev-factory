@@ -252,6 +252,7 @@ class DeployState(BaseModel):
     finished_at: str | None = None
     error: str | None = None
     last_step: str | None = None
+    smoke_status: Literal["skipped", "success", "failed"] = "skipped"
 
 
 class DeployerStatus(BaseModel):
@@ -262,6 +263,7 @@ class DeployerStatus(BaseModel):
     finished_at: str | None = None
     error: str | None = None
     last_step: str | None = None
+    smoke_status: Literal["skipped", "success", "failed"] = "skipped"
 
 
 class DeployLogsResponse(BaseModel):
@@ -300,6 +302,8 @@ class SandboxValidationState(BaseModel):
     error: str | None = None
     last_step: str | None = None
     steps: list[SandboxValidationStep] = []
+    healthcheck_status: Literal["skipped", "success", "failed"] = "skipped"
+    smoke_status: Literal["skipped", "success", "failed"] = "skipped"
     ports: dict[str, int] = {}
     worktree_path: str | None = None
     compose_project: str | None = None
@@ -318,6 +322,8 @@ class SandboxValidationStatus(BaseModel):
     error: str | None = None
     last_step: str | None = None
     steps: list[SandboxValidationStep] = []
+    healthcheck_status: Literal["skipped", "success", "failed"] = "skipped"
+    smoke_status: Literal["skipped", "success", "failed"] = "skipped"
     ports: dict[str, int] = {}
     worktree_path: str | None = None
     compose_project: str | None = None

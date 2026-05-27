@@ -155,6 +155,7 @@ def get_deploy_state(project_root: Path) -> DeployState:
         finished_at=raw.get("finished_at"),
         error=raw.get("error"),
         last_step=raw.get("last_step"),
+        smoke_status=raw.get("smoke_status", "skipped"),
     )
 
 
@@ -164,6 +165,47 @@ def _build_deploy_cmd(component: DeployComponent) -> str | None:
             return None
         return f"docker compose up -d {component.service}"
     return component.command
+
+
+def _run_smoke_tests(cwd: Path, log_path: Path) -> tuple[str, ActionResult | None]:
+    """Run .ai-dev-factory/scripts/smoke.sh if present.
+
+    Returns (smoke_status, failure_result).
+    smoke_status: "skipped" | "success" | "failed"
+    failure_result: None on success/skip, ActionResult(ok=False) on failure.
+    """
+    smoke_rel = ".ai-dev-factory/scripts/smoke.sh"
+    smoke_path = cwd / smoke_rel
+    if not smoke_path.exists():
+        _append_log(log_path, f"\n--- smoke tests: {smoke_rel} not found, skipping ---\n")
+        return "skipped", None
+
+    _append_log(log_path, f"\n--- smoke tests: {smoke_rel} ---\n")
+    try:
+        result = subprocess.run(
+            ["bash", smoke_rel],
+            capture_output=True,
+            text=True,
+            cwd=str(cwd),
+            timeout=300,
+        )
+    except subprocess.TimeoutExpired:
+        msg = "smoke tests timed out"
+        _append_log(log_path, f"{msg}\n")
+        return "failed", ActionResult(ok=False, message=msg, error=msg)
+
+    if result.stdout:
+        _append_log(log_path, result.stdout)
+    if result.stderr:
+        _append_log(log_path, result.stderr)
+
+    if result.returncode == 0:
+        _append_log(log_path, "smoke tests passed\n")
+        return "success", None
+
+    msg = f"smoke tests failed (exit {result.returncode})"
+    _append_log(log_path, f"{msg}\n")
+    return "failed", ActionResult(ok=False, message=msg, error=msg)
 
 
 def _run_healthcheck(
@@ -287,14 +329,27 @@ def _do_deploy(
                 "state": "failed", "pid": pid,
                 "started_at": started_at, "finished_at": finished_at,
                 "error": hc_result.message, "last_step": "healthcheck",
+                "smoke_status": "skipped",
             })
             return hc_result
+
+    smoke_status, smoke_failure = _run_smoke_tests(cwd, log_path)
+    if smoke_failure is not None:
+        finished_at = _now_iso()
+        _write_state(state_path, {
+            "state": "failed", "pid": pid,
+            "started_at": started_at, "finished_at": finished_at,
+            "error": smoke_failure.message, "last_step": "smoke",
+            "smoke_status": smoke_status,
+        })
+        return smoke_failure
 
     finished_at = _now_iso()
     _write_state(state_path, {
         "state": "success", "pid": pid,
         "started_at": started_at, "finished_at": finished_at,
         "error": None, "last_step": None,
+        "smoke_status": smoke_status,
     })
     _append_log(log_path, f"\n=== deploy finished {finished_at} ===\n")
     return ActionResult(ok=True, message="deploy completed successfully")

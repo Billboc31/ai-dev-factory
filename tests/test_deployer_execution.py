@@ -147,6 +147,64 @@ def test_deploy_healthcheck_failure(tmp_path, monkeypatch):
     assert r2.json()["state"] == "failed"
 
 
+def test_smoke_step_recorded_in_state(tmp_path, monkeypatch):
+    """When smoke.sh is present and passes, smoke_status must be 'success' in state."""
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app, proj = _make_app(tmp_path)
+    _write_deploy_yml(proj, _DEPLOY_YML_HOST.format(cmd="true"))
+
+    smoke_dir = proj / ".ai-dev-factory" / "scripts"
+    smoke_dir.mkdir(parents=True, exist_ok=True)
+    (smoke_dir / "smoke.sh").write_text("#!/bin/bash\nexit 0\n")
+
+    client = TestClient(app)
+    client.post("/projects/myproject/deployer/deploy")
+
+    r = client.get("/projects/myproject/deployer/status")
+    assert r.status_code == 200
+    data = r.json()
+    assert data["smoke_status"] == "success"
+
+
+def test_smoke_failure_recorded_in_state(tmp_path, monkeypatch):
+    """When smoke.sh fails, smoke_status must be 'failed' and deploy must fail."""
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app, proj = _make_app(tmp_path)
+    _write_deploy_yml(proj, _DEPLOY_YML_HOST.format(cmd="true"))
+
+    smoke_dir = proj / ".ai-dev-factory" / "scripts"
+    smoke_dir.mkdir(parents=True, exist_ok=True)
+    (smoke_dir / "smoke.sh").write_text("#!/bin/bash\nexit 1\n")
+
+    client = TestClient(app)
+    r = client.post("/projects/myproject/deployer/deploy")
+    assert r.json()["ok"] is False
+    assert "smoke" in r.json()["error"].lower()
+
+    r2 = client.get("/projects/myproject/deployer/status")
+    assert r2.json()["state"] == "failed"
+    assert r2.json()["smoke_status"] == "failed"
+
+
+def test_smoke_skipped_when_absent_in_state(tmp_path, monkeypatch):
+    """When smoke.sh is absent, smoke_status must be 'skipped' in state."""
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app, proj = _make_app(tmp_path)
+    _write_deploy_yml(proj, _DEPLOY_YML_HOST.format(cmd="true"))
+
+    client = TestClient(app)
+    client.post("/projects/myproject/deployer/deploy")
+
+    r = client.get("/projects/myproject/deployer/status")
+    assert r.json()["smoke_status"] == "skipped"
+
+
 def test_restart_success(tmp_path, monkeypatch):
     monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
     from fastapi.testclient import TestClient
