@@ -32,3 +32,11 @@
 [2026-05-28T20:01:45Z] compose: skill=ai/skills/debugging.md
 [2026-05-28T20:01:45Z] compose: task (canonical prompt)
 [2026-05-28T20:01:45Z] snapshot: runtime-prompt=runs/T157/prompts/tester-attempt-1.md
+[2026-05-28T20:12:13Z] auto-run: step=tester done rc=0
+[2026-05-28T20:12:13Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-28T20:12:13Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-28T20:12:13Z] commit-checkpoint: unstaged runtime garbage: ['runs/T157/runtime.log']
+[2026-05-28T20:12:13Z] commit-checkpoint: sha=5e00e9eb files=4 title='test(T157/workflow): tester — update 4 file(s)'
+[2026-05-28T20:12:13Z] auto-run: auto-push triggered
+[2026-05-28T20:12:13Z] push: tolerating runtime dirty files (not blocking): ['runs/T157/runtime.log']
+[2026-05-28T20:12:13Z] push: pushing branch=ticket/T157-t157-ensure-deployer-fetches-and-checks-out-the-re
