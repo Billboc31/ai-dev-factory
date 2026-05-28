@@ -1,7 +1,7 @@
 {
   "ticket_id": "T157",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T157-t157-ensure-deployer-fetches-and-checks-out-the-re",
   "issue_number": 164,
-  "updated_at": "2026-05-28T19:43:14Z"
+  "updated_at": "2026-05-28T19:47:17Z"
 }
