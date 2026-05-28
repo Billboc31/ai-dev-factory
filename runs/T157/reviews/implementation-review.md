@@ -1,90 +1,73 @@
-I have all the information needed to write the review.
+I have all the information I need. Let me compile the review.
 
 ---
 
-# PR Review — T157: Ensure deployer fetches and checks out the requested branch
+## Review — T157: Ensure deployer fetches and checks out the requested branch before deployment
 
-## Résumé
+### Summary
 
-L'implémentation ajoute à la pipeline de déploiement sandbox la récupération explicite du ref remote, la résolution via SHA, et la persistance de métadonnées d'identité. 4 fichiers de production modifiés, 5 nouveaux tests. Toutes les exigences du ticket sont couvertes.
+The implementation directly addresses all ticket requirements. Four files were modified: `SandboxState` model, `sandbox_manager.py`, `deployer.py`, and `test_sandbox_worktree.py`. The changes are tightly scoped and backward-compatible.
 
-## Vérifications effectuées
+---
 
-- Lecture complète des diffs sur les 4 fichiers modifiés (`sandbox.py`, `deployer.py`, `sandbox_manager.py`, `test_sandbox_worktree.py`)
-- Vérification du flux complet : route → `run_deploy_sandboxed` → `create_with_worktree` → `_do_deploy`
-- Confirmation que `_do_deploy` utilise `sandbox.worktree_path` comme `cwd` (ligne 260 de `deployer_runner.py`)
-- Vérification du comportement de cleanup en cas d'erreur (fetch fail, rev-parse fail, worktree add fail)
-- Vérification de la persistance sur disque et du rechargement des métadonnées
+### Correctness against acceptance criteria
 
-## Points validés
+| Criterion | Status | Notes |
+|---|---|---|
+| Fetch latest remote commit before sandbox creation | ✅ | `git fetch origin <branch>` runs before `git worktree add` |
+| Sandbox worktree HEAD equals fetched remote branch HEAD | ✅ | `git rev-parse origin/<branch>` → SHA used in `--detach <sha>` |
+| New commit pushed → subsequent deploy uses it | ✅ | Every deploy fetches fresh; SHA resolved after fetch |
+| Missing branch fails with clear error, no silent fallback to main | ✅ | `RuntimeError` raised with branch name, sandbox destroyed |
+| SandboxState exposes deployed ref and commit SHA | ✅ | `requested_ref`, `resolved_ref`, `commit_sha` persisted to `state.json` |
+| Runtime UI can display deployed commit/ref | ✅ | Fields in model, serialized via `model_dump_json` |
+| Existing deploys from main still work | ✅ | No-branch path routes to existing `run_deploy` unchanged |
+| Sandbox isolation intact | ✅ | Worktree per sandbox, no mutation of main clone working tree |
 
-**1. Fetch avant checkout**
-`git fetch origin <branch>` est exécuté explicitement avant toute création de worktree. Le SHA est résolu via `git rev-parse origin/<branch>` après le fetch. L'ordre est vérifié par `test_create_with_worktree_fetches_before_checkout`.
+---
 
-**2. Checkout déterministe sur SHA**
-`git worktree add --detach <path> <sha>` utilise le SHA résolu, pas le nom de branche local. Garantit que le worktree HEAD correspond exactement au dernier commit remote fetché. Vérifié par `test_create_with_worktree_uses_remote_sha_not_branch_name`.
+### Code quality
 
-**3. Déploiement depuis le worktree**
-`_do_deploy` utilise `Path(sandbox.worktree_path)` comme `cwd` quand un sandbox est fourni (ligne 260 de `deployer_runner.py`). Le déploiement s'exécute bien depuis le code checké, pas depuis le clone principal.
+**`sandbox_manager.py:239–310`** — Logic is clean and correct:
+- Fetch → rev-parse → worktree add, in that order, each step gated on the previous
+- Both fetch failure and rev-parse failure paths destroy the sandbox before raising
+- `--detach <sha>` eliminates any ambiguity about which commit is checked out
+- State identity fields correctly initialized to `None` for the no-branch path
 
-**4. Persistance des métadonnées**
-Trois champs ajoutés à `SandboxState` : `requested_ref`, `resolved_ref`, `commit_sha`. Écrits après création du worktree, rechargés via `status()`. La persistance round-trip est vérifiée par `test_create_with_worktree_records_ref_identity_in_state`.
+**`_do_deploy` in `deployer_runner.py:260`** — Correctly uses `Path(sandbox.worktree_path)` as `cwd` when a sandbox is provided. Deploy scripts execute against the fetched branch code. ✅
 
-**5. Échec explicite si branche inexistante**
-Fetch failure → `RuntimeError` avec le nom de la branche dans le message, sandbox détruit (`len(mgr.list()) == 0`). Pas de fallback silencieux sur `main`. Couvert par `test_create_with_worktree_fails_loudly_if_fetch_fails`.
+**`deployer.py:50–70`** — Route change is minimal. Lazy `SandboxManager` init via app state is a workable pattern. Backward compat is preserved cleanly.
 
-**6. Compatibilité descendante**
-- Route sans `body.branch` → path `run_deploy` original inchangé
-- `create_with_worktree` sans `branch` → comportement `--detach` identique à avant
-- Les champs `SandboxState` sont optionnels avec `None` par défaut
+---
 
-**7. Sécurité git**
-- `git fetch` uniquement sur le clone source (autorisé par les contraintes)
-- Checkout isolé dans le worktree sandbox
-- Appels subprocess en forme liste (pas de shell injection)
-- Clone principal jamais muté
+### Tests
 
-**8. Cleanup sur erreur**
-`self.destroy(state.id)` appelé dans les deux chemins d'erreur (fetch fail et rev-parse fail) avant le `raise`. Si `create_with_worktree` lève, `sandbox` reste `None` dans `run_deploy_sandboxed` et le finally ne tente pas `mark_completed` sur un ID inexistant.
+4 new tests cover the critical behaviors:
 
-## Problèmes détectés
+- `test_create_with_worktree_fetches_before_checkout` — ordering assertion ✅
+- `test_create_with_worktree_uses_remote_sha_not_branch_name` — SHA vs branch name ✅
+- `test_create_with_worktree_fails_loudly_if_fetch_fails` — loud failure + sandbox destroyed ✅
+- `test_create_with_worktree_records_ref_identity_in_state` — all 3 fields persist to disk ✅
 
-Aucun problème bloquant.
+---
 
-## Risques éventuels
+### Minor observations (non-blocking)
 
-**Mineur — Initialisation du singleton non atomique (`deployer.py` ligne 58-59)**
+1. **`rev-parse` failure path has no test.** If `git fetch origin <branch>` succeeds but `git rev-parse origin/<branch>` subsequently fails, the sandbox is destroyed and a `RuntimeError` is raised correctly — but there is no dedicated test for this path. Low risk given how unlikely this is after a successful fetch, but the coverage gap exists.
 
-```python
-if not hasattr(request.app.state, "_sandbox_manager"):
-    request.app.state._sandbox_manager = SandboxManager()
-```
+2. **`sandbox_manager: object` type hint in `deployer_runner.py:371`.** This is imprecise. `SandboxManager` is the concrete type; using `object` loses IDE and static analysis benefits. Not a functional issue.
 
-Deux requêtes concurrentes pourraient créer deux instances `SandboxManager`. En pratique non-bloquant : `SandboxManager()` est idempotent (crée juste le répertoire) et le registre de ports utilise un lock fichier. Aucun comportement dangereux. L'utilisation d'un `threading.Lock()` serait plus propre mais n'est pas requise pour ce ticket.
+3. **No route-level integration test for `POST /projects/{id}/deployer/deploy` with a branch body.** The unit tests thoroughly cover `create_with_worktree`, but the thin `trigger_deploy` route is untested. Not blocking given simplicity of the route.
 
-**Mineur — Pas de test pour l'échec rev-parse**
+---
 
-`test_create_with_worktree_fails_loudly_if_fetch_fails` couvre le fetch fail mais il n'y a pas de test équivalent pour le cas où `git rev-parse` échoue (fetch réussi, ref non résolvable). Le comportement est correct dans le code, mais le test manquant est une lacune mineure de couverture.
+### Scope compliance
 
-**Mineur — Pas de validation du SHA retourné**
+Changes are bounded to: deployer route, sandbox manager worktree logic, sandbox model, and tests. No changes to Traefik, ports, smoke tests, persistent environment management, or merge/rebase logic. Fully compliant with ticket exclusions and constraints.
 
-Si `rev_result.stdout.strip()` est vide avec returncode 0 (cas pathologique), l'erreur ne surgira que lors du `worktree add` avec un message moins clair. Une assertion explicite `if not commit_sha` amènerait un message d'erreur plus précis, mais la failure reste explicite.
+---
 
-## Décision
+### Verdict
 
-L'implémentation satisfait intégralement les exigences de T157 :
-- Fetch remote avant création du worktree ✓
-- Checkout déterministe sur SHA remote ✓  
-- Persistance de `requested_ref`, `resolved_ref`, `commit_sha` ✓
-- Échec explicite si branche inexistante ✓
-- Déploiement effectif depuis le worktree checké ✓
-- Compatibilité descendante main/non-branch ✓
-- Tests couvrant les chemins critiques ✓
-
-Les observations mineures (thread safety, test rev-parse) ne justifient pas de bloquer le merge.
-
-## Actions demandées
-
-Aucune action bloquante requise.
+The implementation is correct, well-scoped, and satisfies all acceptance criteria. The observations above are non-blocking.
 
 IMPLEMENTATION_APPROVED
