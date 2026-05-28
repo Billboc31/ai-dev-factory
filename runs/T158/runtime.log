@@ -10,3 +10,13 @@
 [2026-05-28T20:00:14Z] compose: task (canonical prompt)
 [2026-05-28T20:00:14Z] snapshot: runtime-prompt=runs/T158/prompts/planner-attempt-1.md
 [2026-05-28T20:02:55Z] auto-run: step=planner done rc=0
+[2026-05-28T20:02:58Z] planner checkpoint: committed
+[2026-05-28T20:02:58Z] planner checkpoint: pushed
+[2026-05-28T20:02:58Z] planner validation success
+[2026-05-28T20:02:58Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-28T20:02:58Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-28T20:02:58Z] commit-checkpoint: unstaged runtime garbage: ['runs/T158/runtime.log']
+[2026-05-28T20:02:58Z] commit-checkpoint: sha=cf7029a5 files=2 title='docs(T158/workflow): planner — update 2 file(s)'
+[2026-05-28T20:02:58Z] auto-run: auto-push triggered
+[2026-05-28T20:02:58Z] push: tolerating runtime dirty files (not blocking): ['runs/T158/runtime.log']
+[2026-05-28T20:02:58Z] push: pushing branch=ticket/T158-t158-add-named-environments-with-configurable-trae
