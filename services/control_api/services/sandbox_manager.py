@@ -245,10 +245,46 @@ class SandboxManager:
     ) -> SandboxState:
         state = self.create(ticket_id, project_root)
         worktree_path = self._sandbox_dir(state.id) / "worktree"
+
+        requested_ref: str | None = None
+        resolved_ref: str | None = None
+        commit_sha: str | None = None
+
         if branch:
-            cmd = ["git", "worktree", "add", str(worktree_path), branch]
+            requested_ref = branch
+            remote_ref = f"origin/{branch}"
+            logger.info(
+                "sandbox worktree: fetching remote ref=%s sandbox=%s",
+                remote_ref, state.id,
+            )
+            fetch_result = subprocess.run(
+                ["git", "fetch", "origin", branch],
+                capture_output=True, text=True, cwd=project_root, check=False,
+            )
+            if fetch_result.returncode != 0:
+                self.destroy(state.id)
+                raise RuntimeError(
+                    f"git fetch origin {branch} failed: {fetch_result.stderr.strip()}"
+                )
+            rev_result = subprocess.run(
+                ["git", "rev-parse", remote_ref],
+                capture_output=True, text=True, cwd=project_root, check=False,
+            )
+            if rev_result.returncode != 0:
+                self.destroy(state.id)
+                raise RuntimeError(
+                    f"git rev-parse {remote_ref} failed: {rev_result.stderr.strip()}"
+                )
+            commit_sha = rev_result.stdout.strip()
+            resolved_ref = remote_ref
+            logger.info(
+                "sandbox worktree: resolved branch=%s sha=%s worktree=%s",
+                branch, commit_sha, worktree_path,
+            )
+            cmd = ["git", "worktree", "add", "--detach", str(worktree_path), commit_sha]
         else:
             cmd = ["git", "worktree", "add", "--detach", str(worktree_path)]
+
         result = subprocess.run(
             cmd, capture_output=True, text=True, cwd=project_root, check=False
         )
@@ -258,7 +294,13 @@ class SandboxManager:
                 f"git worktree add failed: {result.stderr.strip()}"
             )
         state = state.model_copy(
-            update={"worktree_path": str(worktree_path), "job_type": job_type}
+            update={
+                "worktree_path": str(worktree_path),
+                "job_type": job_type,
+                "requested_ref": requested_ref,
+                "resolved_ref": resolved_ref,
+                "commit_sha": commit_sha,
+            }
         )
         self._write_state(state)
         logger.info(

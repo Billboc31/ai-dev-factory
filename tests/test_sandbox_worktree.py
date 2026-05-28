@@ -14,6 +14,9 @@ from services.control_api.models.sandbox import SandboxStatus
 from services.control_api.services.sandbox_manager import SandboxManager, SandboxNotFoundError
 
 
+_FAKE_SHA = "abc1234567890abcdef1234567890abcdef123456"
+
+
 def _ok_subprocess(*args, **kwargs):
     m = MagicMock()
     m.returncode = 0
@@ -27,6 +30,19 @@ def _fail_subprocess(*args, **kwargs):
     m.returncode = 1
     m.stdout = ""
     m.stderr = "fatal: worktree error"
+    return m
+
+
+def _branch_subprocess(*args, **kwargs):
+    """Returns appropriate mock for branch deploy: SHA for rev-parse, ok for rest."""
+    cmd = args[0]
+    m = MagicMock()
+    m.returncode = 0
+    m.stderr = ""
+    if "rev-parse" in cmd:
+        m.stdout = _FAKE_SHA + "\n"
+    else:
+        m.stdout = "ok"
     return m
 
 
@@ -79,15 +95,78 @@ def test_create_with_worktree_uses_branch_when_given(mgr):
 
     def capture(*args, **kwargs):
         calls.append(args[0])
-        return _ok_subprocess()
+        return _branch_subprocess(*args, **kwargs)
 
     with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=capture):
         mgr.create_with_worktree("T001", "/project", branch="my-branch")
 
-    worktree_calls = [c for c in calls if "worktree" in c]
-    assert len(worktree_calls) == 1
-    assert "my-branch" in worktree_calls[0]
-    assert "--detach" not in worktree_calls[0]
+    worktree_add_calls = [c for c in calls if "worktree" in c and "add" in c]
+    assert len(worktree_add_calls) == 1
+    assert "--detach" in worktree_add_calls[0]
+    assert _FAKE_SHA in worktree_add_calls[0]
+    assert "my-branch" not in worktree_add_calls[0]
+
+
+def test_create_with_worktree_fetches_before_checkout(mgr):
+    calls = []
+
+    def capture(*args, **kwargs):
+        calls.append(args[0])
+        return _branch_subprocess(*args, **kwargs)
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=capture):
+        mgr.create_with_worktree("T001", "/project", branch="ticket/T156-foo")
+
+    fetch_idx = next(i for i, c in enumerate(calls) if "fetch" in c)
+    worktree_idx = next(i for i, c in enumerate(calls) if "worktree" in c and "add" in c)
+    assert fetch_idx < worktree_idx
+
+
+def test_create_with_worktree_uses_remote_sha_not_branch_name(mgr):
+    calls = []
+
+    def capture(*args, **kwargs):
+        calls.append(args[0])
+        return _branch_subprocess(*args, **kwargs)
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=capture):
+        mgr.create_with_worktree("T001", "/project", branch="ticket/T156-foo")
+
+    worktree_add_calls = [c for c in calls if "worktree" in c and "add" in c]
+    assert len(worktree_add_calls) == 1
+    assert _FAKE_SHA in worktree_add_calls[0]
+    assert "ticket/T156-foo" not in worktree_add_calls[0]
+
+
+def test_create_with_worktree_fails_loudly_if_fetch_fails(mgr):
+    def side_effect(*args, **kwargs):
+        if "fetch" in args[0]:
+            m = MagicMock()
+            m.returncode = 1
+            m.stdout = ""
+            m.stderr = "fatal: couldn't find remote ref ticket/T156-foo"
+            return m
+        return _ok_subprocess()
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=side_effect):
+        with pytest.raises(RuntimeError, match="ticket/T156-foo"):
+            mgr.create_with_worktree("T001", "/project", branch="ticket/T156-foo")
+
+    assert len(mgr.list()) == 0
+
+
+def test_create_with_worktree_records_ref_identity_in_state(mgr):
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_branch_subprocess):
+        state = mgr.create_with_worktree("T001", "/project", branch="ticket/T156-foo")
+
+    assert state.requested_ref == "ticket/T156-foo"
+    assert state.resolved_ref == "origin/ticket/T156-foo"
+    assert state.commit_sha == _FAKE_SHA
+
+    reloaded = mgr.status(state.id)
+    assert reloaded.requested_ref == "ticket/T156-foo"
+    assert reloaded.resolved_ref == "origin/ticket/T156-foo"
+    assert reloaded.commit_sha == _FAKE_SHA
 
 
 def test_create_with_worktree_destroys_sandbox_on_git_failure(mgr):
