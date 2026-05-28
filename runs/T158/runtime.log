@@ -20,3 +20,16 @@
 [2026-05-28T20:02:58Z] auto-run: auto-push triggered
 [2026-05-28T20:02:58Z] push: tolerating runtime dirty files (not blocking): ['runs/T158/runtime.log']
 [2026-05-28T20:02:58Z] push: pushing branch=ticket/T158-t158-add-named-environments-with-configurable-trae
+[2026-05-28T20:27:46Z] auto-run start: state=PLAN_APPROVED
+[2026-05-28T20:27:46Z] auto-run: running step=coder
+[2026-05-28T20:27:47Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-28T20:27:47Z] prompt: generic fallback — injecting runs/T158/ticket.md
+[2026-05-28T20:27:47Z] compose: global-context=docs/ai/global-context.md
+[2026-05-28T20:27:47Z] compose: role=ai/roles/coder.md
+[2026-05-28T20:27:47Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-28T20:27:47Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-28T20:27:47Z] compose: skill=ai/skills/code-quality.md
+[2026-05-28T20:27:47Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-28T20:27:47Z] compose: skill=ai/skills/security.md
+[2026-05-28T20:27:47Z] compose: task (canonical prompt)
+[2026-05-28T20:27:47Z] snapshot: runtime-prompt=runs/T158/prompts/coder-attempt-3.md

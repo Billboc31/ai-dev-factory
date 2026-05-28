@@ -232,3 +232,55 @@ def test_cleanup_stale_routes_does_not_remove_global_traefik(mgr, tmp_path):
     mgr.register("orphan", {"web": 1, "api": 2})
     mgr.cleanup_stale_routes([])
     assert (mgr.routes_dir / "_metrics.yml").exists()
+
+
+# ── T158: custom host overrides ──────────────────────────────────────────────
+
+
+def test_register_with_custom_web_host(mgr):
+    urls = mgr.register("abc123", {"web": 3100, "api": 8180}, web_host="demo.ai-dev-factory.localhost")
+    assert urls["web"] == "http://demo.ai-dev-factory.localhost"
+    assert urls["api"] == "http://api.sandbox-abc123.ai-dev-factory.localhost"
+    content = (mgr.routes_dir / "abc123.yml").read_text()
+    assert "Host(`demo.ai-dev-factory.localhost`)" in content
+
+
+def test_register_with_custom_api_host(mgr):
+    urls = mgr.register("abc123", {"web": 3100, "api": 8180}, api_host="api.demo.ai-dev-factory.localhost")
+    assert urls["web"] == "http://sandbox-abc123.ai-dev-factory.localhost"
+    assert urls["api"] == "http://api.demo.ai-dev-factory.localhost"
+    content = (mgr.routes_dir / "abc123.yml").read_text()
+    assert "Host(`api.demo.ai-dev-factory.localhost`)" in content
+
+
+def test_register_with_both_custom_hosts(mgr):
+    urls = mgr.register(
+        "abc123",
+        {"web": 3100, "api": 8180},
+        web_host="my-env.ai-dev-factory.localhost",
+        api_host="api.my-env.ai-dev-factory.localhost",
+    )
+    assert urls["web"] == "http://my-env.ai-dev-factory.localhost"
+    assert urls["api"] == "http://api.my-env.ai-dev-factory.localhost"
+    content = (mgr.routes_dir / "abc123.yml").read_text()
+    assert "Host(`my-env.ai-dev-factory.localhost`)" in content
+    assert "Host(`api.my-env.ai-dev-factory.localhost`)" in content
+    # Default hostnames must NOT appear in any Host() rule
+    assert "sandbox-abc123.ai-dev-factory.localhost" not in content
+
+
+def test_build_sandbox_urls_with_custom_hosts():
+    urls = build_sandbox_urls(
+        "abc123",
+        web_host="my-env.ai-dev-factory.localhost",
+        api_host="api.my-env.ai-dev-factory.localhost",
+    )
+    assert urls["web"] == "http://my-env.ai-dev-factory.localhost"
+    assert urls["api"] == "http://api.my-env.ai-dev-factory.localhost"
+
+
+def test_register_custom_host_still_writes_port(mgr):
+    mgr.register("abc123", {"web": 9999, "api": 7777}, web_host="custom.localhost")
+    content = (mgr.routes_dir / "abc123.yml").read_text()
+    assert "9999" in content
+    assert "7777" in content

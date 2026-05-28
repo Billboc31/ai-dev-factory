@@ -77,8 +77,13 @@ function LogsModal({ envId, onClose }) {
   )
 }
 
+function copyToClipboard(text) {
+  navigator.clipboard?.writeText(text).catch(() => {})
+}
+
 export default function EnvironmentCard({ env, onAction }) {
   const [showLogs, setShowLogs] = useState(false)
+  const [showDebug, setShowDebug] = useState(false)
   const [error, setError] = useState(null)
 
   async function handle(action) {
@@ -93,9 +98,13 @@ export default function EnvironmentCard({ env, onAction }) {
 
   const statusColor = STATUS_COLORS[env.status] ?? 'bg-gray-100 text-gray-600'
   const typeColor = TYPE_COLORS[env.env_type] ?? 'bg-gray-100 text-gray-600'
+  const webUrl = env.urls?.web
+  const apiUrl = env.urls?.api
+  const hasPorts = env.ports && Object.keys(env.ports).length > 0
 
   return (
     <div className="bg-white rounded-lg shadow border border-gray-200 p-4 flex flex-col gap-3">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 flex-wrap">
           <span className="font-semibold text-gray-800">{env.env_name}</span>
@@ -111,6 +120,7 @@ export default function EnvironmentCard({ env, onAction }) {
         <span className="text-xs text-gray-400 font-mono">{env.id}</span>
       </div>
 
+      {/* Ref */}
       {env.ref && (
         <div className="text-xs text-gray-600">
           <span className="font-medium">{env.ref_type ?? 'ref'}:</span>{' '}
@@ -118,29 +128,61 @@ export default function EnvironmentCard({ env, onAction }) {
         </div>
       )}
 
-      {Object.keys(env.urls ?? {}).length > 0 && (
-        <div className="flex flex-wrap gap-2">
-          {Object.entries(env.urls).map(([name, url]) => (
-            <a
-              key={name}
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="text-xs text-blue-600 hover:underline"
-            >
-              {name}: {url}
-            </a>
-          ))}
+      {/* Primary URLs */}
+      {(webUrl || apiUrl) && (
+        <div className="flex flex-col gap-1.5">
+          {webUrl && (
+            <div className="flex items-center gap-2">
+              <a
+                href={webUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-3 py-1.5 bg-blue-50 text-blue-700 rounded text-xs font-medium hover:bg-blue-100"
+              >
+                Open Web ↗
+              </a>
+              <span className="text-xs text-gray-500 font-mono truncate flex-1">{webUrl}</span>
+              <button
+                onClick={() => copyToClipboard(webUrl)}
+                className="text-xs text-gray-400 hover:text-gray-600 px-1"
+                title="Copy URL"
+              >
+                ⎘
+              </button>
+            </div>
+          )}
+          {apiUrl && (
+            <div className="flex items-center gap-2">
+              <a
+                href={apiUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 px-3 py-1.5 bg-indigo-50 text-indigo-700 rounded text-xs font-medium hover:bg-indigo-100"
+              >
+                Open API ↗
+              </a>
+              <span className="text-xs text-gray-500 font-mono truncate flex-1">{apiUrl}</span>
+              <button
+                onClick={() => copyToClipboard(apiUrl)}
+                className="text-xs text-gray-400 hover:text-gray-600 px-1"
+                title="Copy URL"
+              >
+                ⎘
+              </button>
+            </div>
+          )}
         </div>
       )}
 
-      <div className="flex flex-wrap gap-1 text-xs text-gray-400">
+      {/* Timestamps */}
+      <div className="flex flex-wrap gap-2 text-xs text-gray-400">
         {env.deployed_at && <span>Deployed: {env.deployed_at}</span>}
         {env.stopped_at && <span>· Stopped: {env.stopped_at}</span>}
       </div>
 
       {error && <p className="text-xs text-red-600">{error}</p>}
 
+      {/* Actions */}
       <div className="flex flex-wrap gap-2">
         <ActionButton label="Redeploy" onClick={() => handle(() => api.redeployEnvironment(env.id))} />
         <ActionButton label="Stop" onClick={() => handle(() => api.stopEnvironment(env.id))} />
@@ -153,6 +195,25 @@ export default function EnvironmentCard({ env, onAction }) {
           View Logs
         </button>
       </div>
+
+      {/* Debug section — raw ports, collapsed by default */}
+      {hasPorts && (
+        <div>
+          <button
+            onClick={() => setShowDebug((v) => !v)}
+            className="text-xs text-gray-400 hover:text-gray-600"
+          >
+            {showDebug ? '▾' : '▸'} Debug
+          </button>
+          {showDebug && (
+            <div className="mt-1 bg-gray-50 rounded p-2 text-xs font-mono text-gray-500 space-y-0.5">
+              {Object.entries(env.ports).map(([k, v]) => (
+                <div key={k}>{k}: {v}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {showLogs && <LogsModal envId={env.id} onClose={() => setShowLogs(false)} />}
     </div>

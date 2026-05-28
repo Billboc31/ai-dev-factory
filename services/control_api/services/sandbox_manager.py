@@ -63,13 +63,20 @@ class SandboxNotFoundError(Exception):
 
 
 class SandboxManager:
-    def __init__(self, sandboxes_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        sandboxes_dir: Path | None = None,
+        proxy_routes_dir: Path | None = None,
+    ) -> None:
         if sandboxes_dir is None:
             sandboxes_dir = get_project_sandbox_dir()
         self.sandboxes_dir = sandboxes_dir
         self.sandboxes_dir.mkdir(parents=True, exist_ok=True)
         self._registry_path = self.sandboxes_dir / "port-registry.json"
-        self._proxy = ProxyManager()
+        self._proxy = ProxyManager(
+            routes_dir=proxy_routes_dir,
+            auto_ensure_infra=proxy_routes_dir is None,
+        )
 
     # --- port registry ---
 
