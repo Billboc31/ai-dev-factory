@@ -6,6 +6,7 @@ export const listSandboxRuns = () => client.get('/runtime-dashboard/sandbox-runs
 export const getSandboxLogs = (id, offset = 0) =>
   client.get(`/runtime-dashboard/sandbox-runs/${id}/logs`, { params: { offset } })
 export const deleteSandboxRun = (id) => client.delete(`/runtime-dashboard/sandbox-runs/${id}`)
+export const stopSandboxRun = (id) => client.post(`/runtime-dashboard/sandbox-runs/${id}/stop`)
 
 export const listProposalRuns = () => client.get('/runtime-dashboard/proposal-runs')
 export const getProposalSummary = (id) => client.get(`/runtime-dashboard/proposal-runs/${id}`)

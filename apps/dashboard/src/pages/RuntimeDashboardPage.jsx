@@ -135,7 +135,7 @@ export default function RuntimeDashboardPage() {
         <SandboxTopologyPanel overview={overview} />
       </Section>
 
-      <Section title="Sandbox Runs">
+      <Section title="Running Environments">
         <SandboxRunsTable
           runs={sandboxRuns}
           onOpenLogs={handleOpenLogs}
