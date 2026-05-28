@@ -40,3 +40,16 @@
 - prev: PLAN_APPROVED
 - step: coder
 - next: IMPLEMENTATION_REVIEW_NEEDED
+
+## 2026-05-28T21:10:00Z
+
+- prev: IMPLEMENTATION_REVIEW_NEEDED
+- step: coder (fix)
+- next: IMPLEMENTATION_REVIEW_NEEDED
+- notes: Fixed 2 failing tests — HOST_RUNTIME_ROOT isolation in test_environment_routes.py; 40/40 tests pass
+
+## 2026-05-28T20:40:25Z
+
+- prev: PLAN_APPROVED
+- step: coder
+- next: IMPLEMENTATION_REVIEW_NEEDED
