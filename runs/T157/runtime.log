@@ -10,3 +10,14 @@
 [2026-05-28T19:43:20Z] compose: task (canonical prompt)
 [2026-05-28T19:43:20Z] snapshot: runtime-prompt=runs/T157/prompts/planner-attempt-1.md
 [2026-05-28T19:47:15Z] auto-run: step=planner done rc=0
+[2026-05-28T19:47:17Z] planner checkpoint: committed
+[2026-05-28T19:47:17Z] planner checkpoint: pushed
+[2026-05-28T19:47:17Z] planner validation success
+[2026-05-28T19:47:17Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-28T19:47:17Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-28T19:47:17Z] commit-checkpoint: unstaged runtime garbage: ['runs/T157/runtime.log']
+[2026-05-28T19:47:18Z] commit-checkpoint: sha=d943d9be files=2 title='docs(T157/workflow): planner — update 2 file(s)'
+[2026-05-28T19:47:18Z] auto-run: auto-push triggered
+[2026-05-28T19:47:18Z] push: tolerating runtime dirty files (not blocking): ['runs/T157/runtime.log']
+[2026-05-28T19:47:18Z] push: pushing branch=ticket/T157-t157-ensure-deployer-fetches-and-checks-out-the-re
+[2026-05-28T19:47:20Z] push: done branch=ticket/T157-t157-ensure-deployer-fetches-and-checks-out-the-re
