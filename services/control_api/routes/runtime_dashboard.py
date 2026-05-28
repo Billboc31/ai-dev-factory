@@ -23,6 +23,8 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
+from ..services.infra_service_manager import resolve_proxy_routes_dir
+from ..services.proxy_manager import build_sandbox_urls
 from ..services.runtime_resolver import get_project_name, get_project_sandbox_dir, get_sandbox_root
 from ..services.sandbox_manager import SandboxManager, SandboxNotFoundError
 
@@ -99,6 +101,14 @@ class SandboxRunSummary(BaseModel):
     compose_project: str | None = None
     runtime_root: str | None = None
     uptime_seconds: float | None = None
+    urls: dict[str, str] = {}
+    ref: str | None = None
+    proxy_ready: bool | None = None
+    healthcheck_status: str | None = None
+    smoke_status: str | None = None
+    failing_step: str | None = None
+    created_at: str | None = None
+    last_checked_at: str | None = None
 
 
 class ProposalRunSummary(BaseModel):
@@ -140,6 +150,7 @@ def _parse_sandbox_state(state_path: Path) -> SandboxRunSummary | None:
     project_id = raw.get("project_id") or raw.get("ticket_id") or raw.get("project_root", "")
     status = raw.get("state") or raw.get("status") or "unknown"
     started_at = raw.get("started_at") or raw.get("created_at")
+    created_at = raw.get("created_at")
     finished_at = raw.get("finished_at") or raw.get("completed_at")
     uptime_seconds: float | None = None
     if status == "running" and started_at:
@@ -150,6 +161,33 @@ def _parse_sandbox_state(state_path: Path) -> SandboxRunSummary | None:
             uptime_seconds = (datetime.now(timezone.utc) - t).total_seconds()
         except (ValueError, TypeError):
             pass
+
+    urls: dict[str, str] = raw.get("urls") or {}
+    if not urls:
+        try:
+            urls = build_sandbox_urls(sandbox_id)
+        except Exception:
+            pass
+
+    proxy_ready: bool | None = None
+    try:
+        proxy_ready = (resolve_proxy_routes_dir() / f"{sandbox_id}.yml").exists()
+    except Exception:
+        pass
+
+    healthcheck_status: str | None = None
+    smoke_status: str | None = None
+    failing_step: str | None = None
+    last_checked_at: str | None = None
+    try:
+        v = json.loads((state_path.parent / "validation.json").read_text(encoding="utf-8"))
+        healthcheck_status = v.get("healthcheck_status")
+        smoke_status = v.get("smoke_status")
+        failing_step = v.get("failing_step")
+        last_checked_at = v.get("last_checked_at") or v.get("checked_at")
+    except (OSError, json.JSONDecodeError):
+        pass
+
     return SandboxRunSummary(
         id=sandbox_id,
         project_id=str(project_id),
@@ -161,6 +199,14 @@ def _parse_sandbox_state(state_path: Path) -> SandboxRunSummary | None:
         compose_project=raw.get("compose_project"),
         runtime_root=raw.get("sandbox_runtime_root") or None,
         uptime_seconds=uptime_seconds,
+        urls=urls,
+        ref=raw.get("ref") or raw.get("branch") or raw.get("commit"),
+        proxy_ready=proxy_ready,
+        healthcheck_status=healthcheck_status,
+        smoke_status=smoke_status,
+        failing_step=failing_step,
+        created_at=created_at,
+        last_checked_at=last_checked_at,
     )
 
 
