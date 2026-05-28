@@ -30,3 +30,6 @@ class SandboxState(BaseModel):
     job_type: str | None = None
     completed_at: str | None = None
     urls: dict[str, str] = {}
+    requested_ref: str | None = None
+    resolved_ref: str | None = None
+    commit_sha: str | None = None

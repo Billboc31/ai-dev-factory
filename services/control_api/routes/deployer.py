@@ -4,7 +4,8 @@ import logging
 import os
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, Request
+from pydantic import BaseModel
 
 from ..dependencies import resolve_project
 from ..models.schemas import (
@@ -16,6 +17,11 @@ from ..models.schemas import (
     ScriptsStatus,
 )
 from ..services import analysis_manager, deployer_runner, project_scanner, scripts_manager
+from ..services.sandbox_manager import SandboxManager
+
+
+class DeployRequest(BaseModel):
+    branch: str | None = None
 
 logger = logging.getLogger("control-api")
 
@@ -44,10 +50,21 @@ def get_deployer_status(
 @project_router.post("/{project_id}/deployer/deploy", response_model=ActionResult)
 def trigger_deploy(
     project_id: str,
+    request: Request,
     project_root: Path = Depends(resolve_project),
+    body: DeployRequest | None = Body(default=None),
 ) -> ActionResult:
     logger.info("api: POST /projects/%s/deployer/deploy", project_id)
-    result = deployer_runner.run_deploy(project_id, project_root)
+    branch = body.branch if body else None
+    if branch:
+        if not hasattr(request.app.state, "_sandbox_manager"):
+            request.app.state._sandbox_manager = SandboxManager()
+        sandbox_manager = request.app.state._sandbox_manager
+        result = deployer_runner.run_deploy_sandboxed(
+            project_id, project_root, sandbox_manager, branch=branch
+        )
+    else:
+        result = deployer_runner.run_deploy(project_id, project_root)
     if result.error == "locked":
         raise HTTPException(status_code=409, detail="deploy already in progress")
     return result
