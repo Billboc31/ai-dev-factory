@@ -49,6 +49,8 @@ function CopyButton({ text }) {
     navigator.clipboard.writeText(text).then(() => {
       setCopied(true)
       setTimeout(() => setCopied(false), 1500)
+    }).catch(() => {
+      setCopied(false)
     })
   }
   return (
@@ -62,7 +64,7 @@ function CopyButton({ text }) {
   )
 }
 
-function EnvironmentCard({ run, onOpenLogs, onStopRequest, onDeleteRequest, deleting }) {
+function EnvironmentCard({ run, onOpenLogs, onStopRequest, onDeleteRequest, onRefresh, deleting }) {
   const [showPorts, setShowPorts] = useState(false)
   const isActive = ACTIVE_STATUSES.has(run.status)
   const urls = run.urls || {}
@@ -221,6 +223,12 @@ function EnvironmentCard({ run, onOpenLogs, onStopRequest, onDeleteRequest, dele
       <div className="flex gap-1.5 pt-1 border-t border-gray-100">
         <button
           className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 text-gray-600"
+          onClick={() => onRefresh?.()}
+        >
+          Refresh
+        </button>
+        <button
+          className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 text-gray-600"
           onClick={() => onOpenLogs?.(run.id)}
         >
           View Logs
@@ -298,6 +306,7 @@ export default function SandboxRunsTable({ runs, onOpenLogs, onDeleted }) {
             onOpenLogs={onOpenLogs}
             onStopRequest={handleStopRequest}
             onDeleteRequest={handleDeleteRequest}
+            onRefresh={onDeleted}
             deleting={deleting}
           />
         ))}
