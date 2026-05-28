@@ -1,7 +1,7 @@
 {
   "ticket_id": "T155",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T155-t155-improve-runtime-tab-with-running-environments",
   "issue_number": 162,
-  "updated_at": "2026-05-28T17:04:23Z"
+  "updated_at": "2026-05-28T17:06:34Z"
 }
