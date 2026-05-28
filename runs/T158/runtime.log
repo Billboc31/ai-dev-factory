@@ -33,3 +33,11 @@
 [2026-05-28T20:27:47Z] compose: skill=ai/skills/security.md
 [2026-05-28T20:27:47Z] compose: task (canonical prompt)
 [2026-05-28T20:27:47Z] snapshot: runtime-prompt=runs/T158/prompts/coder-attempt-3.md
+[2026-05-28T20:37:04Z] auto-run: step=coder done rc=0
+[2026-05-28T20:37:04Z] auto-run: transition PLAN_APPROVED → IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-28T20:37:04Z] auto-run: auto-commit triggered (step=coder, include_code=True)
+[2026-05-28T20:37:04Z] commit-checkpoint: unstaged runtime garbage: ['runs/T158/runtime.log']
+[2026-05-28T20:37:04Z] commit-checkpoint: sha=e2ff7c2f files=3 title='chore(T158/workflow): coder — update 3 file(s)'
+[2026-05-28T20:37:04Z] auto-run: auto-push triggered
+[2026-05-28T20:37:04Z] push: tolerating runtime dirty files (not blocking): ['runs/T158/runtime.log']
+[2026-05-28T20:37:04Z] push: pushing branch=ticket/T158-t158-add-named-environments-with-configurable-trae
