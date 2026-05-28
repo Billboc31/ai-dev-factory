@@ -1,7 +1,7 @@
 {
   "ticket_id": "T158",
-  "state": "PLAN_APPROVED",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T158-t158-add-named-environments-with-configurable-trae",
   "issue_number": 165,
-  "updated_at": "2026-05-28T20:20:10Z"
+  "updated_at": "2026-05-28T20:37:04Z"
 }
