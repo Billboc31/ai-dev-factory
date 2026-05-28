@@ -63,6 +63,33 @@ probe() {
   return 1
 }
 
+# Proxy-infra is not an application probe. Its only job is to verify
+# that the reverse proxy route is reachable at transport level.
+#
+# curl -f would incorrectly mark valid HTTP responses such as 404, 405,
+# 502 or 503 as failures. For proxy readiness, any HTTP response means
+# Traefik/DNS/route matching is alive. Backend health is checked below by
+# the API and web probes.
+probe_proxy_infra() {
+  local url="$1"
+  local attempt=0
+  local http_code=""
+  while [ "$attempt" -lt "$RETRIES" ]; do
+    http_code="$(curl -sS -o /dev/null -w "%{http_code}" --max-time "$TIMEOUT" "$url" 2>/dev/null || true)"
+    if [ -n "$http_code" ] && [ "$http_code" != "000" ]; then
+      echo "PASS  proxy-infra  ($url)  — route reachable, http=$http_code"
+      PASS=$((PASS + 1))
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    [ "$attempt" -lt "$RETRIES" ] && sleep "$DELAY"
+  done
+  echo "FAIL  proxy-infra  ($url)  — no HTTP response after $RETRIES attempts"
+  echo "PROXY_INFRA_FAIL"
+  FAIL=$((FAIL + 1))
+  return 1
+}
+
 # Prefer sandbox pretty URLs when set. These are the URLs users see
 # in the dashboard and resolve via Traefik, so probing them validates
 # the FULL deploy path (compose → containers → proxy routes →
@@ -71,7 +98,7 @@ probe() {
 # In main-runtime mode SANDBOX_*_URL is empty and we fall back to
 # the direct host port — exactly the behaviour we want there.
 if [ -n "$SANDBOX_API_URL" ]; then
-  probe "proxy-infra" "${SANDBOX_API_URL}" || echo "PROXY_INFRA_FAIL"
+  probe_proxy_infra "${SANDBOX_API_URL}" || true
   probe "api" "${SANDBOX_API_URL}/health" || true
 else
   probe "api" "http://localhost:${API_PORT}/health" || true
