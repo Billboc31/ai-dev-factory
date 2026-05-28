@@ -33,3 +33,13 @@
 [2026-05-28T17:06:34Z] push: pushing branch=ticket/T155-t155-improve-runtime-tab-with-running-environments
 [2026-05-28T17:06:37Z] push: done branch=ticket/T155-t155-improve-runtime-tab-with-running-environments
 [2026-05-28T17:07:43Z] auto-run: step=planner done rc=0
+[2026-05-28T17:07:45Z] planner checkpoint: committed
+[2026-05-28T17:07:45Z] planner checkpoint: pushed
+[2026-05-28T17:07:45Z] planner validation success
+[2026-05-28T17:07:45Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-28T17:07:45Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-28T17:07:45Z] commit-checkpoint: unstaged runtime garbage: ['runs/T155/runtime.log']
+[2026-05-28T17:07:45Z] commit-checkpoint: sha=c312bbc5 files=2 title='docs(T155/workflow): planner — update 2 file(s)'
+[2026-05-28T17:07:45Z] auto-run: auto-push triggered
+[2026-05-28T17:07:45Z] push: tolerating runtime dirty files (not blocking): ['runs/T155/runtime.log']
+[2026-05-28T17:07:45Z] push: pushing branch=ticket/T155-t155-improve-runtime-tab-with-running-environments
