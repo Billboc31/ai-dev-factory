@@ -1,94 +1,98 @@
-I now have everything needed for a thorough review. Let me write it.
+I have a complete picture. Writing the review now.
 
 ---
 
-# PR Review — T156: Improve Runtime tab with running environments
+## T156 — Implementation Review
 
-## Résumé
-
-L'implémentation étend le Runtime tab avec une vue en cartes par sandbox, des URLs proxy comme élément primaire, et les statuts healthcheck/smoke/proxy. Le backend Pydantic est étendu de 8 champs, le composant `SandboxRunsTable.jsx` est réécrit en `EnvironmentCard`, et l'API client reçoit le `stopSandboxRun` manquant. L'ensemble est défensif, ciblé et respecte le scope du ticket.
-
-## Vérifications effectuées
-
-- Comparaison fichier par fichier vs. les critères d'acceptation du plan et du ticket
-- Lecture complète de `SandboxRunsTable.jsx` (319 lignes), `runtime_dashboard.py` (parse logic), `runtimeDashboard.js`
-- Vérification des imports backend (`resolve_proxy_routes_dir`, `build_sandbox_urls`)
-- Analyse de la gestion des erreurs (try/except, fallbacks)
-- Recherche de la présence ou absence d'un bouton "Refresh" dans la codebase
-
-## Points validés
-
-| Critère | Statut |
-|---------|--------|
-| `SandboxRunSummary` expose `urls`, `ref`, `proxy_ready`, `healthcheck_status`, `smoke_status`, `failing_step`, `created_at`, `last_checked_at` | ✅ |
-| `validation.json` absent → champs `null` sans erreur (guard try/except ligne 182-189) | ✅ |
-| Carte par sandbox, URLs pretty au-dessus du fold | ✅ |
-| Ports dans section collapsible uniquement | ✅ |
-| Bouton copy-to-clipboard par URL | ✅ |
-| Chips proxy/healthcheck/smoke avec bonne couleur | ✅ |
-| Banner failing_step avec lien vers logs | ✅ |
-| Actions Stop, Delete, View Logs opérationnelles | ✅ |
-| Render correct sur liste vide | ✅ |
-| Fallback URL via `build_sandbox_urls()` si `state.json` n'a pas de champ `urls` | ✅ |
-| Ajout de `stopSandboxRun` dans `runtimeDashboard.js` (nécessaire pour le bouton Stop) | ✅ |
-| Aucune modification hors scope (SandboxManager, ProposalRunsTable, proxy infra) | ✅ |
-
-## Problèmes détectés
-
-### 🔴 Bloquant — Action "Refresh" manquante
-
-Le ticket spécifie explicitement l'action **"refresh status"** dans la liste des actions. Le plan l'énumère dans les action buttons : `Open Web, Open API, Copy URL, **Refresh**, View Logs, Stop, Delete`.
-
-L'implémentation n'a pas de bouton Refresh sur les cartes (`SandboxRunsTable.jsx` ligne 220-242 : uniquement View Logs, Stop, Delete). Le polling global à 5s (`usePolling(fetchSandboxRuns, 5000)`) couvre le cas d'usage automatiquement, mais l'action explicite est absente.
-
-**Fix attendu** : Ajouter un bouton "Refresh" dans la barre d'actions de `EnvironmentCard` qui déclenche `onDeleted?.()` (qui remonte à `fetchSandboxRuns` dans la page parente). Un seul bouton suffit — pas besoin de nouvel endpoint.
-
-```jsx
-// Ligne ~226, dans la div.flex des actions
-<button
-  className="px-2 py-1 text-xs border border-gray-300 rounded hover:bg-gray-50 text-gray-600"
-  onClick={() => onDeleted?.()}
->
-  Refresh
-</button>
-```
-
-### 🟡 Mineur — `CopyButton` sans gestion d'erreur clipboard
-
-`navigator.clipboard.writeText` est une Promise qui peut être rejetée (contexte non-HTTPS, permission refusée). La ligne 49 n'a pas de `.catch()` — le rejet est silencieux, le bouton ne donne aucun feedback à l'utilisateur.
-
-**Fix suggéré** :
-```javascript
-navigator.clipboard.writeText(text).then(() => {
-  setCopied(true)
-  setTimeout(() => setCopied(false), 1500)
-}).catch(() => {
-  // Fallback: could show an error indicator or use document.execCommand
-})
-```
-
-### 🟡 Mineur — Label URL tronqué à `w-8` (32px)
-
-La largeur fixe `w-8` pour le label de URL (ligne 119 : `<span className="text-xs text-gray-500 w-8 shrink-0 uppercase font-medium">`) peut tronquer visuellement des noms de clé plus longs que 3-4 caractères sans indiquer la troncature. Pas fonctionnel, mais peut induire en erreur.
-
-### 🟡 Note — Déviation mineure du plan sur `runtimeDashboard.js`
-
-Le plan déclarait "No changes needed" pour ce fichier, mais l'implémentation y a ajouté `stopSandboxRun`. Cette déviation est justifiée : sans cette fonction, le bouton Stop n'aurait pas d'appel API. C'est une correction de l'omission du plan, pas une dérive de scope.
-
-## Risques éventuels
-
-- **Performance** : vérification d'existence du fichier proxy route à chaque poll (5s × N sandboxes) — acceptable en usage dev, à surveiller si le nombre de sandboxes actifs devient élevé.
-- **`started_at` fallback sur `created_at`** (ligne 152) : si les deux champs sont absents du `state.json`, `started_at` est `None`, ce qui désactive le calcul `uptime_seconds`. Comportement correct.
-
-## Décision
-
-L'implémentation est de haute qualité, défensive, et couvre ~95% du ticket. Le seul point bloquant est l'absence du bouton "Refresh" action explicitement requis par le ticket et le plan. Le fix est trivial (un bouton qui appelle `onDeleted?.()` déjà disponible).
-
-## Actions demandées
-
-1. **[Requis]** Ajouter un bouton "Refresh" dans les actions de `EnvironmentCard` (une ligne dans `SandboxRunsTable.jsx`)
-2. **[Recommandé]** Ajouter `.catch()` dans `CopyButton.handleCopy` pour les contextes où l'API clipboard est indisponible
+**Reviewer:** Claude Sonnet 4.6
+**Date:** 2026-05-28
+**Branch:** `ticket/T156-t156-improve-runtime-tab-with-running-environments`
 
 ---
 
-IMPLEMENTATION_FIX_REQUIRED
+### Scope compliance
+
+The implementation touches exactly the four files identified in the plan. No extraneous changes to `SandboxManager`, proxy infrastructure, `ProposalRunsTable`, or `RuntimeHealthPanel`. One minor plan inaccuracy: `runtimeDashboard.js` was listed as "No changes needed" but `stopSandboxRun` was added. This is not a scope drift — the Stop action button in the plan required it and it was simply an oversight in the plan itself.
+
+---
+
+### Backend — `services/control_api/routes/runtime_dashboard.py`
+
+**Model extensions (lines 104–111):** All eight planned fields are present on `SandboxRunSummary`: `urls`, `ref`, `proxy_ready`, `healthcheck_status`, `smoke_status`, `failing_step`, `created_at`, `last_checked_at`. Types and defaults are correct.
+
+**`_parse_sandbox_state` (lines 144–210):**
+- `urls`: reads from `state.json["urls"]` with fallback to `build_sandbox_urls(sandbox_id)`, wrapped in try/except. ✅
+- `proxy_ready`: checks `{proxy_routes_dir}/{sandbox_id}.yml` existence, guarded with try/except. ✅
+- `validation.json`: loaded with try/except on `OSError | json.JSONDecodeError`; gracefully returns `None` for all three derived fields when the file is absent. ✅
+- `ref` fallback chain (`ref → branch → commit`) is correct. ✅
+- `sandbox_id` input validation via `re.fullmatch(r"[a-zA-Z0-9_\-]+", sandbox_id)` on all mutating endpoints prevents path traversal. ✅
+- `shutil.rmtree` guarded by prior `404` check and active-status/lock checks — acceptable. ✅
+
+One minor observation: `started_at = raw.get("started_at") or raw.get("created_at")` means a sandbox with only `created_at` in state.json will show the same value in both the `started_at` and `created_at` fields of the UI. Not a bug, just potentially confusing display. Non-blocking.
+
+---
+
+### Frontend — `SandboxRunsTable.jsx`
+
+**Visual hierarchy:** Pretty URLs rendered before ports — fully compliant with the "primary URLs first" UX requirement. The "no proxy" badge handles the empty-URLs case cleanly.
+
+**Collapsible ports (lines 150–168):** Ports are hidden by default, toggled per-card. ✅
+
+**Status chips (lines 170–183):** `proxy_ready`, `healthcheck_status`, `smoke_status` each mapped to green/red/gray correctly. The conditional rendering `run.proxy_ready !== null && run.proxy_ready !== undefined` correctly handles the three-state (true/false/unknown) case. ✅
+
+**Failing step banner (lines 103–114):** Shown only when `failing_step` is non-null; "View logs" links to the log drawer. ✅
+
+**Action buttons (lines 222–249):**
+- Refresh: calls `onRefresh?.()` which maps to `fetchSandboxRuns`. ✅
+- Stop: disabled when `!isActive || deleting === run.id`. ✅
+- Delete: disabled when `isActive || deleting === run.id` (prevents deleting a running sandbox from the UI layer in addition to the backend 409 guard). ✅
+- Confirmation dialogs for both Stop and Delete. ✅
+
+**CopyButton `.catch()` (line 52):** Clipboard failures are caught; no silent rejection. ✅
+
+**Empty state (line 293):** "No running environments found." message renders when `runs.length === 0`. ✅
+
+**Plan deviation — action bar vs. inline buttons:** The plan listed "Open Web, Open API, Copy URL" as action bar buttons. The implementation places these inline with each URL row instead. This is better UX: the button is immediately adjacent to the URL it acts on rather than requiring mapping in an action bar. Not a defect.
+
+**Minor:** The URL name label is fixed at `w-8` (32px). Labels longer than ~4 characters (e.g. "admin", "metrics") will overflow. Non-blocking cosmetic issue.
+
+**Minor:** `onDeleted` callback is reused as both delete-completion handler and Refresh handler (`onRefresh={onDeleted}` at line 309). Semantically awkward but functionally correct — both cases need a re-fetch.
+
+---
+
+### Frontend — `RuntimeDashboardPage.jsx`
+
+Section renamed to "Running Environments" (line 138). Polling unchanged at 5s intervals. `fetchSandboxRuns` correctly wired as both `onDeleted` and implicitly `onRefresh`. ✅
+
+---
+
+### Frontend — `runtimeDashboard.js`
+
+`stopSandboxRun` added (line 9), necessary for the Stop action. All other API functions present. ✅
+
+---
+
+### Acceptance criteria checklist
+
+| Criterion | Status |
+|---|---|
+| `SandboxRunSummary` serializes all 8 new fields | ✅ |
+| Missing `validation.json` returns `null` fields without error | ✅ |
+| Runtime tab renders one card per sandbox | ✅ |
+| Web/API pretty URLs appear prominently | ✅ |
+| Ports only in collapsed section | ✅ |
+| Copy-to-clipboard per URL | ✅ |
+| Status chips for proxy/health/smoke | ✅ |
+| Failing step banner when set | ✅ |
+| Stop, Delete, and log-viewer actions work | ✅ |
+| UI renders without JS errors on empty list | ✅ |
+| Refresh action available | ✅ |
+| Generic, project-agnostic | ✅ |
+
+---
+
+### Summary
+
+The implementation fully satisfies all acceptance criteria. The four minor observations (started_at/created_at overlap, URL label width, onDeleted callback reuse, action layout deviation from plan) are all non-blocking and do not warrant a fix cycle.
+
+IMPLEMENTATION_APPROVED
