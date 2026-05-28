@@ -21,3 +21,5 @@
 [2026-05-28T17:28:00Z] push: tolerating runtime dirty files (not blocking): ['runs/T156/runtime.log']
 [2026-05-28T17:28:00Z] push: pushing branch=ticket/T156-t156-improve-runtime-tab-with-running-environments
 [2026-05-28T17:28:02Z] push: done branch=ticket/T156-t156-improve-runtime-tab-with-running-environments
+[2026-05-28T18:39:12Z] push: refused — failed to determine current git branch
+[2026-05-28T18:39:14Z] commit-checkpoint: refused — failed to determine current git branch
