@@ -1,63 +1,59 @@
-Now I have enough context to write the plan.
+I have a complete picture of the codebase. Here is the implementation plan.
+
+---
 
 ## Objective
 
-Redesign the Runtime tab (`SandboxRunsTable` + supporting backend) so that each sandbox/environment card prominently shows its pretty proxy URLs and consolidated status, turning the Runtime tab into the canonical access dashboard for running environments.
+Upgrade the Runtime tab sandbox cards to surface pretty URLs as the primary access element, add proxy/healthcheck/smoke status indicators, expose git ref and timestamps, and complete the action set (stop, copy URL, refresh) — all without changing the sandbox creation pipeline or other dashboard sections.
 
 ## Included
 
-**Backend — `/services/control_api/routes/runtime_dashboard.py` and helpers:**
+**`services/control_api/routes/runtime_dashboard.py`**
+- Add `ValidationSummary` Pydantic model with fields: `healthcheck_status: str`, `smoke_status: str`, `failing_step: str | None`
+- Extend `SandboxRunSummary` with new optional fields: `urls: dict[str, str]`, `created_at: str | None`, `proxy_ready: bool`, `git_ref: str | None`, `validation: ValidationSummary | None`
+- Update `_parse_sandbox_state()` to populate all new fields:
+  - `urls` — from `state.json["urls"]` (already stored, currently discarded)
+  - `created_at` — from `state.json["created_at"]`
+  - `proxy_ready` — check existence of `{HOST_RUNTIME_ROOT}/proxy/routes/{sandbox_id}.yml` via `runtime_resolver.get_host_runtime_root()`
+  - `git_ref` — read `{worktree_path}/.git/HEAD` if `worktree_path` is set; parse branch name (`ref: refs/heads/<branch>`) or return the raw SHA prefix
+  - `validation` — parse `{sandbox_runtime_root}/validation.json` if `sandbox_runtime_root` is set and the file exists
 
-- Extend `SandboxRunSummary` (or equivalent Pydantic model) to include:
-  - `web_url`, `api_url` (pretty proxy URLs read from `validation.json` → `proxy_urls`)
-  - `healthcheck_status`, `smoke_status`, `failing_step` (from `validation.json`)
-  - `proxy_ready` (bool, derived from `validation.json` or proxy state)
-  - `ref` / `commit` / `branch` if present in state or worktree metadata
-  - `created_at`, `started_at`, `last_checked_at` timestamps from `validation.json` or `state.json`
-  - `compose_project` (already present — verify it is exposed)
-  - `worktree_path` (already present — verify it is exposed)
-- Update `_parse_sandbox_state()` (in `runtime_dashboard.py` or `runtime_resolver.py`) to read and merge `validation.json` fields into the returned object when the file exists.
-- No new endpoints required — enriched data flows through existing `GET /runtime-dashboard/sandbox-runs`.
+**`apps/dashboard/src/api/runtimeDashboard.js`**
+- Add `stopSandboxRun(id)` → `POST /runtime-dashboard/sandbox-runs/{id}/stop`
+- Add `restartSandboxRun(id)` → `POST /runtime-dashboard/sandbox-runs/{id}/restart`
 
-**Frontend — `/apps/dashboard/src/api/runtimeDashboard.js`:**
+**`apps/dashboard/src/components/runtime-dashboard/SandboxRunsTable.jsx`**
+- Replace the flat table with per-sandbox cards; each card contains:
+  - **Primary access row**: web URL and API URL as prominent `<a>` links, each with an "Open" button and a "Copy" button (uses `navigator.clipboard.writeText`)
+  - **Status row**: main status badge + `proxy_ready` indicator (green dot / grey dot) + `healthcheck_status` badge + `smoke_status` badge (only when `validation` is present)
+  - **Meta row**: project_id, compose_project, git_ref (when known), worktree_path (truncated, monospace)
+  - **Timestamps row**: created_at, started_at, uptime in human-readable form
+  - **Ports section** (collapsible): fallback `key:port` pairs, visible on toggle
+  - **Error section**: when status is `error`/`failed` and `validation.failing_step` is set, render a red alert showing the failing step and a direct "View logs" link
+  - **Actions bar**: Refresh (triggers `onRefresh` callback), Logs, Stop (POST stop then `onRefresh`; shown only when active), Delete (with confirm dialog; shown only when inactive)
+- `SandboxRunsTable` receives an `onRefresh` prop (same as the existing `onDeleted` pattern) wired to `fetchSandboxRuns` in `RuntimeDashboardPage`
 
-- No structural change needed; the richer payload is handled automatically.
-
-**Frontend — `/apps/dashboard/src/components/runtime-dashboard/SandboxRunsTable.jsx`:**
-
-- Redesign the per-row (or per-card) layout:
-  - **Primary block**: `web_url` and `api_url` as large, clickable links with copy-to-clipboard buttons; shown first.
-  - **Status badges row**: running/stopped/failed · proxy ready · healthcheck status · smoke status.
-  - **Meta row**: sandbox id, ref/commit/branch (if known), compose project, worktree path.
-  - **Timestamps row**: created · started · last checked (relative or absolute).
-  - **Fallback ports**: collapsible section below the main block, labelled "Debug / fallback ports".
-  - **Actions**: open web URL, open API URL, copy URL, refresh, view logs, stop, delete — each as an icon button with a tooltip.
-  - **Failed state callout**: when status is `failed`, display `failing_step` inline and a direct link to logs.
-- Keep existing `ConfirmDialog` usage for stop/delete actions.
-- Keep existing polling cadence from `RuntimeDashboardPage` (5 s).
-
-**Frontend — `/apps/dashboard/src/pages/RuntimeDashboardPage.jsx`:**
-
-- No structural change; may need minor prop threading if `SandboxRunsTable` receives new action callbacks (refresh single row).
+**`apps/dashboard/src/pages/RuntimeDashboardPage.jsx`**
+- Pass `onRefresh={fetchSandboxRuns}` to `SandboxRunsTable` (alongside the existing `onDeleted`)
 
 ## Excluded
 
-- Redesign of `ProposalRunsTable`, `RuntimeHealthPanel`, or `LogViewerDrawer`.
-- Changes to port allocation logic or supervisor implementation.
-- New backend endpoints or authentication.
-- Mobile-responsive layout beyond what Tailwind provides by default.
-- Historical / archived sandbox runs (only active/recent runs as currently listed).
-- Any change to how proxy URLs are generated or assigned.
+- `ProposalRunsTable`, `RuntimeHealthPanel`, `SandboxTopologyPanel` — no changes
+- `SandboxState` Pydantic model — no persistence schema change; new fields are read at display time only
+- Backend `stop`/`restart` endpoint logic — already implemented, no changes needed
+- Proxy route creation or Traefik config — already handled by `run_sandbox.py`
+- Any changes to how validation.json is written
 
 ## Acceptance criteria
 
-- `GET /runtime-dashboard/sandbox-runs` returns `web_url`, `api_url`, `healthcheck_status`, `smoke_status`, `failing_step`, `proxy_ready`, `created_at`, `started_at`, `last_checked_at` for each sandbox where `validation.json` is present; fields are `null` when the file is absent.
-- Runtime tab displays `web_url` and `api_url` as the top-level visual element for each sandbox row/card; each URL has a copy button and an "open in browser" link.
-- Fallback ports are rendered but hidden by default behind a collapsible toggle.
-- Status area shows at least four badges: overall status (running/stopped/failed), proxy ready (yes/no), healthcheck status, smoke status.
-- When `failing_step` is non-null the card renders it as an inline callout with a shortcut to the log viewer.
-- `ref`/`branch`/`commit`, compose project, worktree path, and timestamps are visible in each card when available.
-- Stop and delete actions remain functional and use the existing confirm dialog.
-- A manual refresh button triggers an immediate re-fetch without waiting for the 5 s poll.
-- The UI renders correctly when `validation.json` is absent (all new fields degrade gracefully to "—" or hidden).
-- Existing `RuntimeHealthPanel` and `ProposalRunsTable` are unaffected.
+- `GET /api/runtime-dashboard/sandbox-runs` returns `urls`, `proxy_ready`, `git_ref`, `created_at`, and `validation` fields on each item (non-null values whenever the underlying data is present)
+- Each sandbox card renders web and API pretty URLs as the first visible element; raw ports are hidden behind a collapsible toggle
+- Clicking "Open" on a URL opens it in a new browser tab
+- Clicking "Copy" copies the URL to the clipboard without page navigation
+- "Stop" button calls the stop endpoint and triggers an immediate data refresh; button is only visible for active sandboxes
+- "Refresh" button triggers a manual data fetch
+- When `validation` is present, `healthcheck_status` and `smoke_status` are shown as colored badges
+- When status is error/failed and `validation.failing_step` is non-null, a red alert block shows the failing step with a "View logs" shortcut
+- `proxy_ready` indicator is green when the route file exists, grey otherwise
+- `git_ref` is displayed (branch name or short SHA) when `worktree_path` is set and the HEAD file is readable
+- The UI contains no project-specific assumptions
