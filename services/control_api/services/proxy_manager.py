@@ -48,17 +48,24 @@ def _api_hostname(sandbox_id: str) -> str:
     return f"api.sandbox-{sandbox_id}.{_HOSTNAME_SUFFIX}"
 
 
-def build_sandbox_urls(sandbox_id: str) -> dict[str, str]:
+def build_sandbox_urls(
+    sandbox_id: str,
+    *,
+    web_host: str | None = None,
+    api_host: str | None = None,
+) -> dict[str, str]:
     """Return the ``{web, api}`` pretty URLs for *sandbox_id*.
 
     Pure function — used by callers that need the URLs (sandbox env
     file writers, the host-side worker) without touching the proxy
     routes directory.
+
+    If *web_host* / *api_host* are provided they are used verbatim;
+    otherwise the default ``sandbox-<id>.*`` pattern is used.
     """
-    return {
-        "web": f"http://{_web_hostname(sandbox_id)}",
-        "api": f"http://{_api_hostname(sandbox_id)}",
-    }
+    wh = web_host or _web_hostname(sandbox_id)
+    ah = api_host or _api_hostname(sandbox_id)
+    return {"web": f"http://{wh}", "api": f"http://{ah}"}
 
 
 class ProxyManager:
@@ -82,7 +89,14 @@ class ProxyManager:
             auto_ensure_infra = auto_start_traefik
         self._auto_ensure_infra = auto_ensure_infra
 
-    def register(self, sandbox_id: str, ports: dict[str, int]) -> dict[str, str]:
+    def register(
+        self,
+        sandbox_id: str,
+        ports: dict[str, int],
+        *,
+        web_host: str | None = None,
+        api_host: str | None = None,
+    ) -> dict[str, str]:
         if self._auto_ensure_infra:
             results = ensure_required_infra(kinds=["reverse_proxy"])
             if not results.get("reverse_proxy", False):
@@ -93,8 +107,8 @@ class ProxyManager:
                     self.routes_dir,
                 )
 
-        web_host = _web_hostname(sandbox_id)
-        api_host = _api_hostname(sandbox_id)
+        wh = web_host or _web_hostname(sandbox_id)
+        ah = api_host or _api_hostname(sandbox_id)
         web_port = ports.get("web", 3000)
         api_port = ports.get("api", 8080)
 
@@ -102,12 +116,12 @@ class ProxyManager:
             f"http:\n"
             f"  routers:\n"
             f"    sandbox-{sandbox_id}-web:\n"
-            f"      rule: \"Host(`{web_host}`)\"\n"
+            f"      rule: \"Host(`{wh}`)\"\n"
             f"      service: sandbox-{sandbox_id}-web\n"
             f"      entryPoints:\n"
             f"        - web\n"
             f"    sandbox-{sandbox_id}-api:\n"
-            f"      rule: \"Host(`{api_host}`)\"\n"
+            f"      rule: \"Host(`{ah}`)\"\n"
             f"      service: sandbox-{sandbox_id}-api\n"
             f"      entryPoints:\n"
             f"        - web\n"
@@ -127,7 +141,7 @@ class ProxyManager:
         tmp_file.write_text(content, encoding="utf-8")
         tmp_file.rename(route_file)
 
-        urls = build_sandbox_urls(sandbox_id)
+        urls = build_sandbox_urls(sandbox_id, web_host=web_host, api_host=api_host)
         logger.info(
             "proxy: route registered sandbox=%s dir=%s urls=%s",
             sandbox_id,

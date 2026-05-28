@@ -12,7 +12,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from ..models.sandbox import SandboxState, SandboxStatus
+from ..models.sandbox import (
+    EnvironmentMode,
+    EnvironmentType,
+    RefType,
+    SandboxState,
+    SandboxStatus,
+)
 from .deployer_runner import _load_deploy_profile
 from .infra_service_manager import resolve_proxy_routes_dir
 from .proxy_manager import ProxyManager, build_sandbox_urls
@@ -133,7 +139,19 @@ class SandboxManager:
 
     # --- public API ---
 
-    def create(self, ticket_id: str, project_root: str) -> SandboxState:
+    def create(
+        self,
+        ticket_id: str,
+        project_root: str,
+        *,
+        env_name: str | None = None,
+        env_type: EnvironmentType | None = None,
+        ref: str | None = None,
+        ref_type: RefType | None = None,
+        deployment_mode: EnvironmentMode | None = None,
+        web_host: str | None = None,
+        api_host: str | None = None,
+    ) -> SandboxState:
         sandbox_id = uuid.uuid4().hex[:12]
         slot = self._allocate_slot(sandbox_id)
 
@@ -147,12 +165,9 @@ class SandboxManager:
         sandbox_dir.mkdir(parents=True, exist_ok=True)
         sandbox_runtime_root = str(sandbox_dir / "runtime")
 
-        # Pre-compute the pretty URLs from the sandbox id. Operational
-        # scripts (start.sh / healthcheck.sh) read these via env so
-        # healthchecks probe the reverse-proxy URL when Traefik routes
-        # are registered, and fall back to direct ``localhost:<port>``
-        # when not.
-        urls = build_sandbox_urls(sandbox_id)
+        # Pre-compute the pretty URLs. Custom hosts (if provided) are used
+        # verbatim; otherwise the default sandbox-<id>.* pattern applies.
+        urls = build_sandbox_urls(sandbox_id, web_host=web_host, api_host=api_host)
         env_file = sandbox_dir / ".env"
         env_file.write_text(
             f"COMPOSE_PROJECT_NAME={compose_project}\n"
@@ -186,6 +201,13 @@ class SandboxManager:
             slot=slot,
             supervisor_port=supervisor_port,
             sandbox_runtime_root=sandbox_runtime_root,
+            env_name=env_name,
+            env_type=env_type,
+            ref=ref,
+            ref_type=ref_type,
+            deployment_mode=deployment_mode,
+            web_host=web_host,
+            api_host=api_host,
         )
         self._write_state(state)
         logger.info("sandbox created: %s (slot=%d ports=%s)", sandbox_id, slot, ports)
@@ -206,8 +228,13 @@ class SandboxManager:
                 resolve_proxy_routes_dir(),
                 sandbox_id,
             )
-            urls = self._proxy.register(sandbox_id, state.ports)
-            state = state.model_copy(update={"status": SandboxStatus.running, "supervisor_pid": supervisor_pid, "urls": urls})
+            urls = self._proxy.register(
+                sandbox_id,
+                state.ports,
+                web_host=state.web_host,
+                api_host=state.api_host,
+            )
+            state = state.model_copy(update={"status": SandboxStatus.running, "supervisor_pid": supervisor_pid, "urls": urls, "deployed_at": _now_iso()})
         self._write_state(state)
         return state
 
@@ -225,7 +252,7 @@ class SandboxManager:
                         stale.unlink()
                     except OSError:
                         pass
-        state = state.model_copy(update={"status": SandboxStatus.stopped, "supervisor_pid": None})
+        state = state.model_copy(update={"status": SandboxStatus.stopped, "supervisor_pid": None, "stopped_at": _now_iso()})
         self._write_state(state)
         return state
 
