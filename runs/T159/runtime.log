@@ -110,3 +110,13 @@
 [2026-05-29T08:29:55Z] compose: task (canonical prompt)
 [2026-05-29T08:29:55Z] compose: extra-context=runs/T159/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
 [2026-05-29T08:29:55Z] snapshot: runtime-prompt=runs/T159/prompts/review-attempt-1.md
+[2026-05-29T08:32:20Z] auto-run: step=review done rc=0
+[2026-05-29T08:32:20Z] auto-run: review parsed from: runs/T159/reviews/implementation-review.md
+[2026-05-29T08:32:20Z] auto-run: review keyword detected: IMPLEMENTATION_APPROVED
+[2026-05-29T08:32:20Z] auto-run: transition IMPLEMENTATION_REVIEW_NEEDED → IMPLEMENTATION_APPROVED
+[2026-05-29T08:32:20Z] auto-run: auto-commit triggered (step=review, include_code=True)
+[2026-05-29T08:32:20Z] commit-checkpoint: unstaged runtime garbage: ['runs/T159/runtime.log']
+[2026-05-29T08:32:21Z] commit-checkpoint: sha=6f45ae88 files=3 title='chore(T159/workflow): review — update 3 file(s)'
+[2026-05-29T08:32:21Z] auto-run: auto-push triggered
+[2026-05-29T08:32:21Z] push: tolerating runtime dirty files (not blocking): ['runs/T159/runtime.log']
+[2026-05-29T08:32:21Z] push: pushing branch=ticket/T159-t159-harden-runtime-sqlite-architecture-and-degrad
