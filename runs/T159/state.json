@@ -1,7 +1,7 @@
 {
   "ticket_id": "T159",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_APPROVED",
   "branch": "ticket/T159-t159-harden-runtime-sqlite-architecture-and-degrad",
   "issue_number": 166,
-  "updated_at": "2026-05-29T08:07:39Z"
+  "updated_at": "2026-05-29T08:09:51Z"
 }
