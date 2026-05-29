@@ -120,3 +120,14 @@
 [2026-05-29T08:32:21Z] auto-run: auto-push triggered
 [2026-05-29T08:32:21Z] push: tolerating runtime dirty files (not blocking): ['runs/T159/runtime.log']
 [2026-05-29T08:32:21Z] push: pushing branch=ticket/T159-t159-harden-runtime-sqlite-architecture-and-degrad
+[2026-05-29T08:35:32Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-29T08:35:32Z] auto-run: running step=tester
+[2026-05-29T08:35:32Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-29T08:35:32Z] prompt: generic fallback — injecting runs/T159/ticket.md
+[2026-05-29T08:35:32Z] compose: global-context=docs/ai/global-context.md
+[2026-05-29T08:35:32Z] compose: role=ai/roles/tester.md
+[2026-05-29T08:35:32Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-29T08:35:32Z] compose: skill=ai/skills/testing.md
+[2026-05-29T08:35:32Z] compose: skill=ai/skills/debugging.md
+[2026-05-29T08:35:32Z] compose: task (canonical prompt)
+[2026-05-29T08:35:32Z] snapshot: runtime-prompt=runs/T159/prompts/tester-attempt-1.md
