@@ -84,6 +84,28 @@ def _load_runtime_db(project_root: Path):
         return None, None
 
 
+def _try_load_runtime_db(project_root: Path) -> tuple:
+    """Like _load_runtime_db but returns (module, db_path, degraded).
+
+    degraded=True when the DB file exists but loading failed.
+    degraded=False when the DB is absent (not yet initialized) or fully healthy.
+    """
+    runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if runtime_root:
+        db_path = Path(runtime_root) / ".runtime" / "ai-dev-factory.sqlite"
+    else:
+        db_path = project_root / ".runtime" / "ai-dev-factory.sqlite"
+    if not db_path.exists():
+        return None, None, False
+    try:
+        mod, path = _load_runtime_db(project_root)
+        if mod is None:
+            return None, None, True
+        return mod, path, False
+    except Exception:
+        return None, None, True
+
+
 def _fetch_ai_ready_issues(repo: str | None) -> list[dict]:
     cmd = ["gh", "issue", "list", "--label", "ai-ready", "--json", "number,title", "--state", "open"]
     if repo:
@@ -102,13 +124,17 @@ def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path |
     state_dir = resolve_state_dir(project_root)
     columns: dict[str, list[BoardItem]] = {col_id: [] for col_id, _ in _COLUMN_ORDER}
 
-    rdb, db_path = _load_runtime_db(project_root)
+    rdb, db_path, degraded = _try_load_runtime_db(project_root)
 
     if rdb and db_path:
-        workers = {
-            w["ticket_id"]: {"pid": w["pid"], "branch": w["branch"], "worktree_path": w["worktree_path"]}
-            for w in rdb.list_workers(db_path)
-        }
+        try:
+            workers = {
+                w["ticket_id"]: {"pid": w["pid"], "branch": w["branch"], "worktree_path": w["worktree_path"]}
+                for w in rdb.list_workers(db_path)
+            }
+        except Exception:
+            workers = _load_workers_registry(state_dir) if state_dir.exists() else {}
+            degraded = True
     else:
         workers = _load_workers_registry(state_dir) if state_dir.exists() else {}
 
@@ -146,7 +172,7 @@ def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path |
             for row in rdb.list_ticket_runtime(db_path):
                 sqlite_ticket_states[row["ticket_id"]] = row
         except Exception:
-            pass  # degraded: fall back to state.json only
+            degraded = True  # fall back to state.json only
 
     # Union of filesystem-discovered tickets and SQLite-known tickets
     all_ticket_ids = sorted(set(ticket_dirs.keys()) | set(sqlite_ticket_states.keys()))
@@ -205,7 +231,11 @@ def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path |
 
     # Backlog: ai-ready issues not yet ingested — SQLite primary, JSON fallback
     if rdb and db_path:
-        issue_index = {str(r["issue_number"]): r["ticket_id"] for r in rdb.list_issue_intake(db_path)}
+        try:
+            issue_index = {str(r["issue_number"]): r["ticket_id"] for r in rdb.list_issue_intake(db_path)}
+        except Exception:
+            issue_index = _load_issue_index(state_dir) if state_dir.exists() else {}
+            degraded = True
     else:
         issue_index = _load_issue_index(state_dir) if state_dir.exists() else {}
     ingested = set(issue_index.keys())
@@ -220,5 +250,6 @@ def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path |
         columns=[
             BoardColumn(id=col_id, label=label, items=columns[col_id])
             for col_id, label in _COLUMN_ORDER
-        ]
+        ],
+        degraded=degraded,
     )

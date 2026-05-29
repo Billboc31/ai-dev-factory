@@ -130,6 +130,7 @@ class BoardColumn(BaseModel):
 
 class BoardResponse(BaseModel):
     columns: list[BoardColumn]
+    degraded: bool = False
 
 
 class ProjectMapTicket(BaseModel):

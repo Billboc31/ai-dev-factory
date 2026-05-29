@@ -9,6 +9,7 @@ otherwise resolved via git rev-parse --git-common-dir so all worktrees share one
 from __future__ import annotations
 
 import datetime
+import fcntl
 import json
 import os
 import sqlite3
@@ -106,6 +107,8 @@ def init_runtime_db(db_path: Path) -> None:
     db_path.parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(str(db_path)) as conn:
         conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA busy_timeout=5000")
+        conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(_SCHEMA)
 
 
@@ -113,7 +116,76 @@ def _connect(db_path: Path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(db_path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
+
+
+def check_and_recover_db(db_path: Path) -> bool:
+    """Integrity-check the DB and recover if corrupt.
+
+    Entire sequence runs inside LOCK_EX on <db_path>.recovery.lock so
+    concurrent callers are serialized — only one process performs recovery.
+    Returns True when the DB is healthy or was recovered successfully.
+    Returns False only when quarantine itself fails.
+    """
+    lock_path = Path(str(db_path) + ".recovery.lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(lock_path, "w") as lock_fh:
+        fcntl.flock(lock_fh, fcntl.LOCK_EX)
+        try:
+            return _check_and_recover_locked(db_path)
+        finally:
+            fcntl.flock(lock_fh, fcntl.LOCK_UN)
+
+
+def _check_and_recover_locked(db_path: Path) -> bool:
+    """Internal: runs inside LOCK_EX. Check integrity → quarantine → recover/recreate."""
+    if not db_path.exists():
+        return True
+
+    # integrity_check
+    try:
+        with sqlite3.connect(str(db_path), timeout=5) as conn:
+            row = conn.execute("PRAGMA integrity_check").fetchone()
+            if row and row[0] == "ok":
+                return True
+    except Exception as exc:
+        print(f"[runtime_db] integrity_check error: {exc}", flush=True)
+
+    # quarantine corrupt DB
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    quarantine = db_path.with_name(db_path.name + f".corrupt.{ts}")
+    print(f"[runtime_db] DB corrupt — entering degraded mode", flush=True)
+    print(f"[runtime_db] quarantining {db_path.name} -> {quarantine.name}", flush=True)
+    try:
+        db_path.rename(quarantine)
+    except OSError as exc:
+        print(f"[runtime_db] quarantine rename failed: {exc}", flush=True)
+        return False
+
+    # attempt recovery via sqlite3 CLI .recover (best-effort, not always available)
+    try:
+        result = subprocess.run(
+            ["sqlite3", str(quarantine), ".recover"],
+            capture_output=True, text=True, check=False, timeout=30,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            with sqlite3.connect(str(db_path), timeout=5) as conn:
+                conn.executescript(result.stdout)
+            print(f"[runtime_db] recovery succeeded from {quarantine.name}", flush=True)
+            return True
+    except Exception as exc:
+        print(f"[runtime_db] .recover attempt failed: {exc}", flush=True)
+
+    # recreate empty DB
+    print(f"[runtime_db] recovery impossible — creating empty DB", flush=True)
+    try:
+        init_runtime_db(db_path)
+        return True
+    except Exception as exc:
+        print(f"[runtime_db] empty DB creation failed: {exc}", flush=True)
+        return False
 
 
 # ── issue_intake ──────────────────────────────────────────────────────────────
