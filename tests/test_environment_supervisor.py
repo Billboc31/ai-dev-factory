@@ -53,9 +53,22 @@ def test_supervisor_provision_maps_and_validates_host_project_root(
 
     client = TestClient(sup_main.app)
     with patch(
-        "services.control_api.services.sandbox_manager.subprocess.run",
-        side_effect=_ok_compose,
-    ):
+        "services.control_api.services.environment_provision.deploy_operational_runtime",
+    ) as mock_deploy:
+        from services.control_api.services.sandbox_runtime_deploy import (
+            OperationalDeployResult,
+        )
+        from services.control_api.services.proxy_manager import build_sandbox_urls
+
+        def _ok(state, **kw):
+            return OperationalDeployResult(
+                success=True,
+                urls=build_sandbox_urls(state.id),
+                supervisor_pid=424242,
+                route_registered=True,
+            )
+
+        mock_deploy.side_effect = _ok
         r = client.post(
             "/environments/provision",
             json={

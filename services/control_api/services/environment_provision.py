@@ -17,9 +17,12 @@ from ..models.sandbox import (
     EnvironmentType,
     RefType,
     SandboxState,
-    SandboxStatus,
 )
 from .sandbox_manager import SandboxManager
+from .sandbox_runtime_deploy import (
+    apply_deploy_result_to_state,
+    deploy_operational_runtime,
+)
 
 logger = logging.getLogger("control-api")
 
@@ -141,16 +144,23 @@ def provision_environment(
         api_host=api_host,
         sandbox_path=host_sandbox,
     )
+    sandbox_dir = mgr._storage_dir(state.id)
     try:
-        started = mgr.start(state.id)
+        result = deploy_operational_runtime(
+            state,
+            sandbox_dir=sandbox_dir,
+            mode="environment",
+        )
     except Exception as exc:
         _destroy_quietly(mgr, state.id)
         raise RuntimeError(f"environment provisioning failed: {exc}") from exc
-    if started.status == SandboxStatus.error:
+    if not result.success:
         _destroy_quietly(mgr, state.id)
         raise RuntimeError(
-            "environment provisioning failed: docker compose up failed"
+            f"environment provisioning failed: {result.error or 'operational deploy failed'}"
         )
+    started = apply_deploy_result_to_state(state, result)
+    mgr._write_state(started)
     return started
 
 
