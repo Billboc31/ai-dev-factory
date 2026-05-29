@@ -445,7 +445,7 @@ def test_failed_provisioning_returns_500(tmp_path, monkeypatch):
     assert r.status_code >= 500, f"expected 5xx but got {r.status_code}: {r.text}"
 
 
-def test_failed_provisioning_no_environment_card(tmp_path, monkeypatch):
+def test_failed_provisioning_persists_environment_card(tmp_path, monkeypatch):
     monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
     from fastapi.testclient import TestClient
 
@@ -457,10 +457,12 @@ def test_failed_provisioning_no_environment_card(tmp_path, monkeypatch):
 
     r = client.get("/environments")
     assert r.status_code == 200
-    assert r.json() == [], f"expected empty list but got: {r.json()}"
+    envs = r.json()
+    assert len(envs) == 1, f"expected one failed environment but got: {envs}"
+    assert envs[0]["status"] == "error", f"expected status=error but got: {envs[0]['status']}"
 
 
-def test_failed_provisioning_sandbox_dir_removed(tmp_path, monkeypatch):
+def test_failed_provisioning_preserves_sandbox_dir(tmp_path, monkeypatch):
     monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
     from fastapi.testclient import TestClient
 
@@ -472,7 +474,7 @@ def test_failed_provisioning_sandbox_dir_removed(tmp_path, monkeypatch):
 
     sandboxes_dir = tmp_path / "sandboxes"
     subdirs = [d for d in sandboxes_dir.iterdir() if d.is_dir()] if sandboxes_dir.exists() else []
-    assert subdirs == [], f"expected no sandbox dirs but found: {subdirs}"
+    assert len(subdirs) == 1, f"expected sandbox dir to be preserved but found: {subdirs}"
 
 
 def test_create_environment_sandbox_id_from_manager(tmp_path, monkeypatch):
@@ -580,7 +582,7 @@ def test_create_environment_auto_creates_nested_custom_sandbox_path(tmp_path, mo
     assert (nested / "state.json").exists()
 
 
-def test_failed_provisioning_cleans_custom_sandbox_path(tmp_path, monkeypatch):
+def test_failed_provisioning_preserves_custom_sandbox_path(tmp_path, monkeypatch):
     monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
     from fastapi.testclient import TestClient
 
@@ -601,9 +603,11 @@ def test_failed_provisioning_cleans_custom_sandbox_path(tmp_path, monkeypatch):
 
     list_r = client.get("/environments")
     assert list_r.status_code == 200
-    assert list_r.json() == []
+    envs = list_r.json()
+    assert len(envs) == 1, f"expected failed environment to persist but got: {envs}"
+    assert envs[0]["status"] == "error", f"expected status=error but got: {envs[0]['status']}"
 
-    assert not custom.exists(), f"expected custom sandbox dir removed, found: {list(custom.rglob('*'))}"
+    assert custom.exists(), f"expected custom sandbox dir preserved for debugging, not found"
 
 
 # ── Shared operational deploy pipeline (environments = deployer sandbox path) ─

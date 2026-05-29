@@ -1,7 +1,7 @@
 {
   "ticket_id": "T163",
-  "state": "PLAN_APPROVED",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T163-t163-persist-failed-environment-deployments-for-de",
   "issue_number": 176,
-  "updated_at": "2026-05-29T13:20:52Z"
+  "updated_at": "2026-05-29T13:23:55Z"
 }
