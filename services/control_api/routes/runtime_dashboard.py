@@ -442,16 +442,8 @@ def get_runtime_health(request: Request) -> RuntimeHealth:
     # SQLite degraded detection: DB exists but is inaccessible
     sqlite_degraded = False
     try:
-        runtime_root_env = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
-        db_path = (
-            Path(runtime_root_env) / ".runtime" / "ai-dev-factory.sqlite"
-            if runtime_root_env
-            else root / ".runtime" / "ai-dev-factory.sqlite"
-        )
-        if db_path.exists():
-            from ..services.board_service import _load_runtime_db
-            rdb, _ = _load_runtime_db(root)
-            sqlite_degraded = (rdb is None)
+        from ..services.board_service import _try_load_runtime_db
+        _, _, sqlite_degraded = _try_load_runtime_db(root)
     except Exception:
         sqlite_degraded = True
 

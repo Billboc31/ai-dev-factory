@@ -66,19 +66,20 @@ def _load_issue_index(runs_dir: Path) -> dict[str, str]:
 
 
 def _load_runtime_db(project_root: Path):
-    """Load the runtime_db module if the SQLite DB exists. Returns (module, db_path) or (None, None)."""
-    runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
-    if runtime_root:
-        db_path = Path(runtime_root) / ".runtime" / "ai-dev-factory.sqlite"
-    else:
-        db_path = project_root / ".runtime" / "ai-dev-factory.sqlite"
-    if not db_path.exists():
-        return None, None
+    """Load the runtime_db module and return (module, db_path) using the module's canonical path.
+
+    Uses mod.get_db_path() so the DB resolves to the global location regardless of
+    which worktree the service is running from.  Returns (None, None) if the DB
+    does not exist or cannot be loaded.
+    """
     try:
         _tools = Path(__file__).resolve().parent.parent.parent.parent / "tools" / "agent_runner"
         spec = importlib.util.spec_from_file_location("_rdb_board", _tools / "runtime_db.py")
         mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
         spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        db_path = mod.get_db_path()
+        if db_path is None or not db_path.exists():
+            return None, None
         return mod, db_path
     except Exception:
         return None, None
@@ -87,21 +88,18 @@ def _load_runtime_db(project_root: Path):
 def _try_load_runtime_db(project_root: Path) -> tuple:
     """Like _load_runtime_db but returns (module, db_path, degraded).
 
-    degraded=True when the DB file exists but loading failed.
+    degraded=True when the module loads but something fails (DB inaccessible).
     degraded=False when the DB is absent (not yet initialized) or fully healthy.
     """
-    runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
-    if runtime_root:
-        db_path = Path(runtime_root) / ".runtime" / "ai-dev-factory.sqlite"
-    else:
-        db_path = project_root / ".runtime" / "ai-dev-factory.sqlite"
-    if not db_path.exists():
-        return None, None, False
     try:
-        mod, path = _load_runtime_db(project_root)
-        if mod is None:
-            return None, None, True
-        return mod, path, False
+        _tools = Path(__file__).resolve().parent.parent.parent.parent / "tools" / "agent_runner"
+        spec = importlib.util.spec_from_file_location("_rdb_board", _tools / "runtime_db.py")
+        mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        db_path = mod.get_db_path()
+        if db_path is None or not db_path.exists():
+            return None, None, False
+        return mod, db_path, False
     except Exception:
         return None, None, True
 
