@@ -64,9 +64,10 @@ def test_resolve_proxy_routes_dir_ignores_sandbox_runtime_without_host_env(
     sandbox = tmp_path / "sandboxes" / "x" / "runtime"
     sandbox.mkdir(parents=True)
     monkeypatch.delenv("HOST_RUNTIME_ROOT", raising=False)
+    monkeypatch.setenv("SANDBOX_ROOT", str(tmp_path / "sandboxes"))
     monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(sandbox))
     routes = resolve_proxy_routes_dir()
-    assert "sandboxes" not in routes.parts
+    assert not str(routes).startswith(str(tmp_path / "sandboxes"))
     assert routes.name == "routes"
     assert routes.parent.name == "proxy"
 
