@@ -47,6 +47,13 @@ def test_deploy_operational_runtime_success(tmp_path):
     registered = {"web": "http://w.test", "api": "http://a.test"}
 
     routes_dir = tmp_path / "routes"
+
+    def _scripts_ok(*_args, **kwargs):
+        cb = kwargs.get("on_step_complete")
+        if cb:
+            cb("start.sh")
+        return True, None, [{"name": "healthcheck.sh", "status": "pass"}]
+
     with (
         patch(
             "services.control_api.services.sandbox_runtime_deploy.resolve_proxy_routes_dir",
@@ -58,10 +65,7 @@ def test_deploy_operational_runtime_success(tmp_path):
         ),
         patch("tools.agent_runner.run_sandbox._ensure_required_infra"),
         patch("tools.agent_runner.run_sandbox._wait_for_proxy_url", return_value=True),
-        patch(
-            "tools.agent_runner.run_sandbox._run_scripts",
-            return_value=(True, None, [{"name": "healthcheck.sh", "status": "pass"}]),
-        ),
+        patch("tools.agent_runner.run_sandbox._run_scripts", side_effect=_scripts_ok),
         patch(
             "services.control_api.services.proxy_manager.ProxyManager.register",
             return_value=registered,
@@ -136,7 +140,9 @@ def test_deploy_operational_runtime_script_failure_cleans_up(tmp_path):
         )
 
     assert result.success is False
-    mock_unreg.assert_called_once_with(state.id)
+    mock_unreg.assert_called_once_with(
+        state.id, compose_project=state.compose_project
+    )
 
 
 def test_format_environment_logs_includes_lifecycle_sections(tmp_path):

@@ -253,13 +253,19 @@ def _ensure_required_infra(log_path: Path) -> dict[str, bool]:
 
 
 def _register_proxy_route(
-    sandbox_id: str, api_port: int, web_port: int, log_path: Path
+    sandbox_id: str,
+    api_port: int,
+    web_port: int,
+    log_path: Path,
+    *,
+    compose_project: str | None = None,
+    web_host: str | None = None,
+    api_host: str | None = None,
 ) -> str | None:
     """Write the sandbox route file under the host-global routes dir.
 
-    Infra ensure ran in ``_ensure_required_infra`` immediately before
-    this call. ``auto_ensure_infra=False`` avoids a redundant second
-    ensure inside ``ProxyManager.register``.
+    When *compose_project* is set, Traefik is attached to that compose
+    network and routes target ``http://api:8080`` / ``http://web:80``.
 
     Returns the registered API URL on success, None on failure.
     """
@@ -268,7 +274,14 @@ def _register_proxy_route(
         urls = ProxyManager(
             routes_dir=routes_dir,
             auto_ensure_infra=False,
-        ).register(sandbox_id, {"api": api_port, "web": web_port})
+        ).register(
+            sandbox_id,
+            {"api": api_port, "web": web_port},
+            compose_project=compose_project,
+            web_host=web_host,
+            api_host=api_host,
+            log=lambda line: _append_log(log_path, line),
+        )
         _append_log(
             log_path,
             f"proxy: route registered sandbox={sandbox_id} dir={routes_dir} urls={urls}\n",
@@ -302,13 +315,22 @@ def _wait_for_proxy_url(url: str, log_path: Path, *, timeout_s: int = 15) -> boo
     return False
 
 
-def _unregister_proxy_route(sandbox_id: str, log_path: Path) -> None:
+def _unregister_proxy_route(
+    sandbox_id: str,
+    log_path: Path,
+    *,
+    compose_project: str | None = None,
+) -> None:
     """Remove the sandbox's route file from the host-global routes dir."""
     try:
         ProxyManager(
             routes_dir=resolve_proxy_routes_dir(),
             auto_ensure_infra=False,
-        ).unregister(sandbox_id)
+        ).unregister(
+            sandbox_id,
+            compose_project=compose_project,
+            log=lambda line: _append_log(log_path, line),
+        )
         _append_log(log_path, f"proxy: route unregistered for {sandbox_id}\n")
     except Exception as exc:
         _append_log(log_path, f"proxy: route unregister failed: {exc!r}\n")
@@ -517,6 +539,7 @@ def _run_scripts(
     state_base: dict,
     extra_env: dict | None = None,
     on_step_start: Callable[[str], None] | None = None,
+    on_step_complete: Callable[[str], bool | None] | None = None,
 ) -> tuple[bool, str | None, list[dict]]:
     steps: list[dict] = []
     scripts_dir_abs = worktree_path / _SCRIPTS_DIR
@@ -600,6 +623,11 @@ def _run_scripts(
 
         if result.returncode != 0:
             return False, f"{script_name} failed (exit {result.returncode})", steps
+
+        if on_step_complete is not None:
+            cont = on_step_complete(script_name)
+            if cont is False:
+                return False, "post-start hook failed", steps
 
     return True, None, steps
 
@@ -1004,13 +1032,23 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
     if supervisor_proc is not None:
         extra_env["AI_DEV_FACTORY_SUPERVISOR_ALREADY_STARTED"] = "1"
 
-    # Infra (reverse proxy) → route registration → scripts/healthcheck.
-    # Order matters: healthcheck probes pretty URLs that only work
-    # after both Traefik is up AND the route file exists.
+    # Infra first; routes are registered after start.sh once compose is up
+    # and Traefik is attached to the environment network.
     _ensure_required_infra(log_path)
-    api_url = _register_proxy_route(sandbox_id, api_port, web_port, log_path)
-    if api_url:
-        _wait_for_proxy_url(api_url, log_path)
+
+    def _after_start(script_name: str) -> bool | None:
+        if script_name != "start.sh":
+            return None
+        api_url = _register_proxy_route(
+            sandbox_id,
+            api_port,
+            web_port,
+            log_path,
+            compose_project=compose_project,
+        )
+        if not api_url:
+            return False
+        return _wait_for_proxy_url(api_url, log_path)
 
     # Set to True in environment mode on success to skip teardown in finally.
     keep_environment = False
@@ -1030,6 +1068,7 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
         success, error, steps = _run_scripts(
             worktree_path, state_path, latest_state_path, log_path, state_base,
             extra_env=extra_env,
+            on_step_complete=_after_start,
         )
 
         # Derive healthcheck_status from the steps list.
@@ -1128,7 +1167,9 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
             # pointing at a recycled port. ``keep_environment=True``
             # (sandbox-as-environment runs) intentionally leaves the
             # route in place so the operator can keep browsing it.
-            _unregister_proxy_route(sandbox_id, log_path)
+            _unregister_proxy_route(
+                sandbox_id, log_path, compose_project=compose_project
+            )
             _release_port_slot(sandbox_id)
 
 

@@ -326,6 +326,7 @@ class SandboxManager:
                 state.ports,
                 web_host=state.web_host,
                 api_host=state.api_host,
+                compose_project=state.compose_project,
             )
             state = state.model_copy(update={"status": SandboxStatus.running, "supervisor_pid": supervisor_pid, "urls": urls, "deployed_at": _now_iso()})
         self._write_state(state)
@@ -534,7 +535,10 @@ class SandboxManager:
 
         # 1. Terminate supervisor before undeploy to avoid interference.
         self._terminate_sandbox_supervisor(state)
-        self._proxy.unregister(sandbox_id)
+        self._proxy.unregister(
+            sandbox_id,
+            compose_project=state.compose_project,
+        )
 
         # 2. Resolve project root for deploy profile lookup.
         worktree = Path(state.worktree_path) if state.worktree_path else None

@@ -15,10 +15,14 @@ Required host-global infra (reverse proxy) is ensured via
 from __future__ import annotations
 
 import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from .infra_service_manager import ensure_required_infra, resolve_proxy_routes_dir
+from .proxy_network import (
+    detach_traefik_from_compose_project,
+    resolve_route_backends,
+)
 
 logger = logging.getLogger("control-api")
 
@@ -96,6 +100,8 @@ class ProxyManager:
         *,
         web_host: str | None = None,
         api_host: str | None = None,
+        compose_project: str | None = None,
+        log: Callable[[str], None] | None = None,
     ) -> dict[str, str]:
         if self._auto_ensure_infra:
             results = ensure_required_infra(kinds=["reverse_proxy"])
@@ -109,8 +115,9 @@ class ProxyManager:
 
         wh = web_host or _web_hostname(sandbox_id)
         ah = api_host or _api_hostname(sandbox_id)
-        web_port = ports.get("web", 3000)
-        api_port = ports.get("api", 8080)
+        backends, backend_mode = resolve_route_backends(
+            ports, compose_project, log=log
+        )
 
         content = (
             f"http:\n"
@@ -129,11 +136,11 @@ class ProxyManager:
             f"    sandbox-{sandbox_id}-web:\n"
             f"      loadBalancer:\n"
             f"        servers:\n"
-            f"          - url: \"http://host.docker.internal:{web_port}\"\n"
+            f"          - url: \"{backends['web']}\"\n"
             f"    sandbox-{sandbox_id}-api:\n"
             f"      loadBalancer:\n"
             f"        servers:\n"
-            f"          - url: \"http://host.docker.internal:{api_port}\"\n"
+            f"          - url: \"{backends['api']}\"\n"
         )
 
         route_file = self.routes_dir / f"{sandbox_id}.yml"
@@ -143,14 +150,21 @@ class ProxyManager:
 
         urls = build_sandbox_urls(sandbox_id, web_host=web_host, api_host=api_host)
         logger.info(
-            "proxy: route registered sandbox=%s dir=%s urls=%s",
+            "proxy: route registered sandbox=%s dir=%s backend=%s urls=%s",
             sandbox_id,
             self.routes_dir,
+            backend_mode,
             urls,
         )
         return urls
 
-    def unregister(self, sandbox_id: str) -> None:
+    def unregister(
+        self,
+        sandbox_id: str,
+        *,
+        compose_project: str | None = None,
+        log: Callable[[str], None] | None = None,
+    ) -> None:
         """Remove the route file for *sandbox_id*. No-op if missing.
 
         Never touches the global Traefik infrastructure (the
@@ -163,6 +177,8 @@ class ProxyManager:
             logger.info("proxy route unregistered: sandbox=%s", sandbox_id)
         except FileNotFoundError:
             pass
+        if compose_project:
+            detach_traefik_from_compose_project(compose_project, log=log)
 
     def cleanup_stale_routes(
         self, active_sandbox_ids: Iterable[str]

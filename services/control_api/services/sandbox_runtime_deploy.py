@@ -276,66 +276,47 @@ def deploy_operational_runtime(
 
     rs._ensure_required_infra(log_path)
     routes_dir = resolve_proxy_routes_dir()
-    try:
-        registered_urls = ProxyManager(
-            routes_dir=routes_dir,
-            auto_ensure_infra=False,
-        ).register(
-            state.id,
-            state.ports,
-            web_host=state.web_host,
-            api_host=state.api_host,
-        )
-    except Exception as exc:
-        rs._stop_sandbox_supervisor(supervisor_proc, runtime_root, log_path)
-        err = f"proxy route registration failed: {exc}"
-        _persist(LifecyclePhase.failed, last_step="routes", lifecycle_error=err)
-        return OperationalDeployResult(
-            success=False,
-            error=err,
-            supervisor_pid=supervisor_pid,
-            last_step="routes",
-        )
+    registered_urls: dict[str, str] = {}
+    route_registered = False
 
-    route_file = routes_dir / f"{state.id}.yml"
-    if not route_file.exists():
-        rs._stop_sandbox_supervisor(supervisor_proc, runtime_root, log_path)
-        err = "proxy route file was not created on host runtime"
-        _persist(LifecyclePhase.failed, last_step="routes", lifecycle_error=err)
-        return OperationalDeployResult(
-            success=False,
-            error=err,
-            supervisor_pid=supervisor_pid,
-            last_step="routes",
+    def _register_proxy_routes_after_compose() -> str | None:
+        """Attach Traefik to the compose network and write route file."""
+        nonlocal registered_urls, route_registered
+        _persist(LifecyclePhase.provisioning, last_step="routes")
+        try:
+            registered_urls = ProxyManager(
+                routes_dir=routes_dir,
+                auto_ensure_infra=False,
+            ).register(
+                state.id,
+                state.ports,
+                web_host=state.web_host,
+                api_host=state.api_host,
+                compose_project=state.compose_project,
+                log=lambda line: rs._append_log(log_path, line),
+            )
+        except Exception as exc:
+            return f"proxy route registration failed: {exc}"
+        route_file = routes_dir / f"{state.id}.yml"
+        if not route_file.exists():
+            return "proxy route file was not created on host runtime"
+        route_registered = True
+        rs._append_log(
+            log_path,
+            f"proxy: route registered sandbox={state.id} dir={routes_dir} urls={registered_urls}\n",
         )
-
-    rs._append_log(
-        log_path,
-        f"proxy: route registered sandbox={state.id} dir={routes_dir} urls={registered_urls}\n",
-    )
-    probe_url = registered_urls.get("api") or urls["api"]
-    if not rs._wait_for_proxy_url(probe_url, log_path):
-        rs._stop_sandbox_supervisor(supervisor_proc, runtime_root, log_path)
-        ProxyManager(routes_dir=routes_dir, auto_ensure_infra=False).unregister(
-            state.id
-        )
-        err = "reverse proxy route did not become reachable on host runtime"
-        _persist(LifecyclePhase.failed, last_step="routes", lifecycle_error=err)
-        return OperationalDeployResult(
-            success=False,
-            error=err,
-            urls=registered_urls,
-            supervisor_pid=supervisor_pid,
-            route_registered=True,
-            last_step="routes",
-        )
+        probe_url = registered_urls.get("api") or urls["api"]
+        if not rs._wait_for_proxy_url(probe_url, log_path):
+            return "reverse proxy route did not become reachable on host runtime"
+        return None
 
     if use_worktree:
         ok, wt_error = rs._create_worktree(project_root, worktree_path, log_path)
         if not ok:
             rs._stop_sandbox_supervisor(supervisor_proc, runtime_root, log_path)
             ProxyManager(routes_dir=routes_dir, auto_ensure_infra=False).unregister(
-                state.id
+                state.id,
+                compose_project=state.compose_project,
             )
             err = wt_error or "worktree creation failed"
             _persist(LifecyclePhase.failed, last_step="worktree", lifecycle_error=err)
@@ -352,6 +333,12 @@ def deploy_operational_runtime(
         phase = _SCRIPT_PHASE.get(script_name, LifecyclePhase.provisioning)
         _persist(phase, last_step=script_name)
 
+    def _on_step_complete(script_name: str) -> bool | None:
+        if script_name != "start.sh":
+            return None
+        route_err = _register_proxy_routes_after_compose()
+        return route_err is None
+
     success, script_error, steps = rs._run_scripts(
         worktree_path,
         pipeline_state_path,
@@ -360,6 +347,7 @@ def deploy_operational_runtime(
         state_base,
         extra_env=extra_env,
         on_step_start=_on_step_start if persist_state else None,
+        on_step_complete=_on_step_complete,
     )
 
     healthcheck_status = "skipped"
@@ -403,7 +391,8 @@ def deploy_operational_runtime(
         rs._run_stop_script(worktree_path, log_path, extra_env)
         rs._stop_sandbox_supervisor(supervisor_proc, runtime_root, log_path)
         ProxyManager(routes_dir=routes_dir, auto_ensure_infra=False).unregister(
-            state.id
+            state.id,
+            compose_project=state.compose_project,
         )
         err = script_error or "operational scripts failed"
         _persist(
