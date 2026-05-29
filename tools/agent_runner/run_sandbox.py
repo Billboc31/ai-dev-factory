@@ -314,8 +314,6 @@ def _wait_for_proxy_url(url: str, log_path: Path, *, timeout_s: int = 15) -> boo
 def _unregister_proxy_route(
     sandbox_id: str,
     log_path: Path,
-    *,
-    compose_project: str | None = None,
 ) -> None:
     """Remove the sandbox's route file from the host-global routes dir."""
     try:
@@ -324,7 +322,6 @@ def _unregister_proxy_route(
             auto_ensure_infra=False,
         ).unregister(
             sandbox_id,
-            compose_project=compose_project,
             remove_route_file=True,
             log=lambda line: _append_log(log_path, line),
         )
@@ -1163,9 +1160,7 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
             # pointing at a recycled port. ``keep_environment=True``
             # (sandbox-as-environment runs) intentionally leaves the
             # route in place so the operator can keep browsing it.
-            _unregister_proxy_route(
-                sandbox_id, log_path, compose_project=compose_project
-            )
+            _unregister_proxy_route(sandbox_id, log_path)
             _release_port_slot(sandbox_id)
 
 
