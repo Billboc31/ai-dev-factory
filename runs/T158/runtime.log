@@ -52,3 +52,11 @@
 [2026-05-28T20:42:50Z] compose: skill=ai/skills/debugging.md
 [2026-05-28T20:42:50Z] compose: task (canonical prompt)
 [2026-05-28T20:42:50Z] snapshot: runtime-prompt=runs/T158/prompts/tester-attempt-1.md
+[2026-05-28T20:51:51Z] auto-run: step=tester done rc=0
+[2026-05-28T20:51:51Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-28T20:51:51Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-28T20:51:51Z] commit-checkpoint: unstaged runtime garbage: ['runs/T158/runtime.log']
+[2026-05-28T20:51:51Z] commit-checkpoint: sha=a6f8022b files=3 title='test(T158/workflow): tester — update 3 file(s)'
+[2026-05-28T20:51:51Z] auto-run: auto-push triggered
+[2026-05-28T20:51:51Z] push: tolerating runtime dirty files (not blocking): ['runs/T158/runtime.log']
+[2026-05-28T20:51:51Z] push: pushing branch=ticket/T158-t158-add-named-environments-with-configurable-trae
