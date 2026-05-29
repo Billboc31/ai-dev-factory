@@ -1,7 +1,7 @@
 {
   "ticket_id": "T161",
-  "state": "PLAN_APPROVED",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T161-t161-fix-environments-create-flow-to-provision-rea",
   "issue_number": 172,
-  "updated_at": "2026-05-29T10:33:28Z"
+  "updated_at": "2026-05-29T10:33:47Z"
 }
