@@ -10,3 +10,13 @@
 [2026-05-29T08:09:32Z] compose: task (canonical prompt)
 [2026-05-29T08:09:32Z] snapshot: runtime-prompt=runs/T160/prompts/planner-attempt-1.md
 [2026-05-29T08:15:21Z] auto-run: step=planner done rc=0
+[2026-05-29T08:15:23Z] planner checkpoint: committed
+[2026-05-29T08:15:23Z] planner checkpoint: pushed
+[2026-05-29T08:15:23Z] planner validation success
+[2026-05-29T08:15:23Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-29T08:15:23Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-29T08:15:23Z] commit-checkpoint: unstaged runtime garbage: ['runs/T160/runtime.log']
+[2026-05-29T08:15:23Z] commit-checkpoint: sha=638acc87 files=2 title='docs(T160/workflow): planner — update 2 file(s)'
+[2026-05-29T08:15:23Z] auto-run: auto-push triggered
+[2026-05-29T08:15:23Z] push: tolerating runtime dirty files (not blocking): ['runs/T160/runtime.log']
+[2026-05-29T08:15:23Z] push: pushing branch=ticket/T160-t160-fix-environment-sandbox-path-resolution-and-r
