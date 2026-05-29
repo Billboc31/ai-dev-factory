@@ -324,3 +324,151 @@ def test_no_hardcoded_sandboxes_path_in_sandbox_manager():
     content = src.read_text(encoding="utf-8")
     assert 'Path("/sandboxes")' not in content, 'found hardcoded Path("/sandboxes")'
     assert '"/sandboxes/"' not in content, 'found hardcoded "/sandboxes/" string'
+
+
+# ── T161: real sandbox provisioning on create ─────────────────────────────────
+
+
+def _fail_compose_up(*args, **kwargs):
+    """Return rc=1 for compose up commands, rc=0 for everything else."""
+    m = MagicMock()
+    cmd_list = args[0] if args else kwargs.get("args", [])
+    if isinstance(cmd_list, list) and "up" in cmd_list:
+        m.returncode = 1
+        m.stdout = ""
+        m.stderr = "container start failed"
+    else:
+        m.returncode = 0
+        m.stdout = "done"
+        m.stderr = ""
+    return m
+
+
+def test_create_environment_creates_real_sandbox_dir(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        r = client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": "/project"})
+    assert r.status_code == 201, r.text
+    env_id = r.json()["id"]
+    assert (tmp_path / "sandboxes" / env_id).exists()
+
+
+def test_create_environment_creates_state_json(tmp_path, monkeypatch):
+    import json as _json
+
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        r = client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": "/project"})
+    assert r.status_code == 201, r.text
+    env_id = r.json()["id"]
+    state_file = tmp_path / "sandboxes" / env_id / "state.json"
+    assert state_file.exists(), "state.json not created"
+    data = _json.loads(state_file.read_text())
+    assert data["id"] == env_id
+
+
+def test_create_environment_creates_env_file(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        r = client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": "/project"})
+    assert r.status_code == 201, r.text
+    env_id = r.json()["id"]
+    assert (tmp_path / "sandboxes" / env_id / ".env").exists()
+
+
+def test_failed_provisioning_returns_500(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_fail_compose_up):
+        r = client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": "/project"})
+    assert r.status_code >= 500, f"expected 5xx but got {r.status_code}: {r.text}"
+
+
+def test_failed_provisioning_no_environment_card(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_fail_compose_up):
+        client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": "/project"})
+
+    r = client.get("/environments")
+    assert r.status_code == 200
+    assert r.json() == [], f"expected empty list but got: {r.json()}"
+
+
+def test_failed_provisioning_sandbox_dir_removed(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_fail_compose_up):
+        client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": "/project"})
+
+    sandboxes_dir = tmp_path / "sandboxes"
+    subdirs = [d for d in sandboxes_dir.iterdir() if d.is_dir()] if sandboxes_dir.exists() else []
+    assert subdirs == [], f"expected no sandbox dirs but found: {subdirs}"
+
+
+def test_create_environment_sandbox_id_from_manager(tmp_path, monkeypatch):
+    import re
+
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        r = client.post("/environments", json={"env_name": "demo", "project_root": "/project"})
+    assert r.status_code == 201, r.text
+    env_id = r.json()["id"]
+    assert re.fullmatch(r"[0-9a-f]{12}", env_id), f"id is not a 12-char hex string: {env_id!r}"
+
+
+def test_environment_actions_work_after_create(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        r = client.post("/environments", json={"env_name": "demo", "project_root": "/project"})
+        assert r.status_code == 201, r.text
+        env_id = r.json()["id"]
+
+        refresh_r = client.post(f"/environments/{env_id}/refresh")
+        assert refresh_r.status_code < 500, f"refresh returned {refresh_r.status_code}"
+
+        stop_r = client.post(f"/environments/{env_id}/stop")
+        assert stop_r.status_code < 500, f"stop returned {stop_r.status_code}"
+
+        redeploy_r = client.post(f"/environments/{env_id}/redeploy")
+        assert redeploy_r.status_code < 500, f"redeploy returned {redeploy_r.status_code}"
+
+        del_r = client.delete(f"/environments/{env_id}")
+        assert del_r.status_code < 500, f"delete returned {del_r.status_code}"
