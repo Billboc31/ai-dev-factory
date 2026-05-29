@@ -1,0 +1,9 @@
+{
+  "ticket_id": "T162",
+  "state": "TEST_COMPLETE",
+  "branch": "ticket/T162-t162-repair-existing-pr-conflict-reviewer-detectio",
+  "issue_number": 175,
+  "updated_at": "2026-05-29T14:01:58Z",
+  "pr_number": 178,
+  "pr_synced": true
+}

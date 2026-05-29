@@ -651,6 +651,26 @@ def create_or_update_pr(ticket_id: str, run_dir: Path, repo: str | None) -> None
         except (json.JSONDecodeError, FileNotFoundError, OSError):
             _log(f"{ticket_id}: gh pr list failed — proceeding with create")
 
+    if pr_number is None:
+        # Fallback: branch may have been renamed — search open PRs by ticket_id prefix
+        prefix = f"ticket/{ticket_id}-"
+        fallback_cmd = ["gh", "pr", "list", "--state", "open", "--json", "number,headRefName", "--limit", "100"]
+        if repo:
+            fallback_cmd += ["--repo", repo]
+        try:
+            fb_result = subprocess.run(fallback_cmd, capture_output=True, text=True, check=False)
+            if fb_result.returncode == 0 and fb_result.stdout.strip():
+                all_prs = json.loads(fb_result.stdout)
+                matching = [p for p in all_prs if isinstance(p, dict) and str(p.get("headRefName", "")).startswith(prefix)]
+                if matching:
+                    pr_number = matching[0]["number"]
+                    head_ref = matching[0].get("headRefName", "")
+                    _log(f"{ticket_id}: found PR #{pr_number} via branch prefix {prefix!r} (headRef={head_ref!r}) — branch may have been renamed")
+                    state["pr_number"] = pr_number
+                    _save_state_json(run_dir, state)
+        except (json.JSONDecodeError, FileNotFoundError, OSError):
+            pass
+
     if pr_number is not None:
         edit_cmd = ["gh", "pr", "edit", str(pr_number), "--body", body]
         if repo:
@@ -856,7 +876,15 @@ def handle_test_complete(
         _log(f"{ticket_id}: pre-PR push failed — PR skipped")
         return
     create_or_update_pr(ticket_id, run_dir, repo)
-    auto_merge_pr(ticket_id, run_dir, repo)
+    if not auto_merge_pr(ticket_id, run_dir, repo):
+        state_data = _load_state_json(run_dir)
+        pr_number = state_data.get("pr_number")
+        if pr_number:
+            if not detect_pr_conflict(ticket_id, pr_number, run_dir, repo):
+                _log(f"{ticket_id}: auto-merge failed but PR #{pr_number} has no conflicts — no state transition needed")
+        else:
+            _log(f"{ticket_id}: auto-merge failed but no pr_number in state.json — cannot check for conflicts")
+        return
     check_and_close_issue(ticket_id, run_dir, repo)
 
 
@@ -1698,6 +1726,8 @@ def run_once(
                     _checkpoint_and_push_before_pr(ticket_id, cwd=worktree_cwd)
                 else:
                     _log(f"dry-run: would checkpoint/push {ticket_id} for PLAN_REVIEW_NEEDED")
+            elif state == "CONFLICT_RESOLUTION_NEEDED":
+                _log(f"Ticket {ticket_id} already in CONFLICT_RESOLUTION_NEEDED, skipping re-detection")
             _log(f"skipping {ticket_id} state={state} (human gate)")
         else:
             _log(f"skipping {ticket_id} state={state}")
