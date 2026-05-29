@@ -1,7 +1,7 @@
 {
   "ticket_id": "T162",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_APPROVED",
   "branch": "ticket/T162-t162-repair-existing-pr-conflict-reviewer-detectio",
   "issue_number": 175,
-  "updated_at": "2026-05-29T12:12:37Z"
+  "updated_at": "2026-05-29T13:32:43Z"
 }
