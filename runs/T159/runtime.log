@@ -131,3 +131,12 @@
 [2026-05-29T08:35:32Z] compose: skill=ai/skills/debugging.md
 [2026-05-29T08:35:32Z] compose: task (canonical prompt)
 [2026-05-29T08:35:32Z] snapshot: runtime-prompt=runs/T159/prompts/tester-attempt-1.md
+[2026-05-29T08:40:53Z] auto-run: step=tester done rc=0
+[2026-05-29T08:40:53Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-29T08:40:53Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-29T08:40:53Z] commit-checkpoint: unstaged runtime garbage: ['runs/T159/runtime.log']
+[2026-05-29T08:40:53Z] commit-checkpoint: sha=6dbb3820 files=4 title='test(T159/workflow): tester — update 4 file(s)'
+[2026-05-29T08:40:53Z] auto-run: auto-push triggered
+[2026-05-29T08:40:53Z] push: tolerating runtime dirty files (not blocking): ['runs/T159/runtime.log']
+[2026-05-29T08:40:53Z] push: pushing branch=ticket/T159-t159-harden-runtime-sqlite-architecture-and-degrad
+[2026-05-29T08:40:55Z] push: done branch=ticket/T159-t159-harden-runtime-sqlite-architecture-and-degrad
