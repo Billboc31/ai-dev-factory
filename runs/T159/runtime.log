@@ -172,3 +172,14 @@
 [2026-05-29T09:13:29Z] auto-run: step=review done rc=1
 [2026-05-29T09:13:29Z] auto-run: runtime failure: process_failed (rc=1)
 [2026-05-29T09:13:29Z] auto-run: step=review failed rc=1, state unchanged=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-29T09:54:54Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-05-29T09:54:54Z] auto-run: running step=tester
+[2026-05-29T09:54:54Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-05-29T09:54:54Z] prompt: generic fallback — injecting runs/T159/ticket.md
+[2026-05-29T09:54:54Z] compose: global-context=docs/ai/global-context.md
+[2026-05-29T09:54:54Z] compose: role=ai/roles/tester.md
+[2026-05-29T09:54:54Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-29T09:54:54Z] compose: skill=ai/skills/testing.md
+[2026-05-29T09:54:54Z] compose: skill=ai/skills/debugging.md
+[2026-05-29T09:54:54Z] compose: task (canonical prompt)
+[2026-05-29T09:54:54Z] snapshot: runtime-prompt=runs/T159/prompts/tester-attempt-2.md
