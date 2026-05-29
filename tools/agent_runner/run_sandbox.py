@@ -258,14 +258,12 @@ def _register_proxy_route(
     web_port: int,
     log_path: Path,
     *,
-    compose_project: str | None = None,
     web_host: str | None = None,
     api_host: str | None = None,
 ) -> str | None:
     """Write the sandbox route file under the host-global routes dir.
 
-    When *compose_project* is set, Traefik is attached to that compose
-    network and routes target ``http://api:8080`` / ``http://web:80``.
+    Routes target the per-sandbox DNS aliases on ``ai-dev-factory-runtime``.
 
     Returns the registered API URL on success, None on failure.
     """
@@ -276,8 +274,6 @@ def _register_proxy_route(
             auto_ensure_infra=False,
         ).register(
             sandbox_id,
-            {"api": api_port, "web": web_port},
-            compose_project=compose_project,
             web_host=web_host,
             api_host=api_host,
             log=lambda line: _append_log(log_path, line),
@@ -1045,7 +1041,6 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
             api_port,
             web_port,
             log_path,
-            compose_project=compose_project,
         )
         if not api_url:
             return False

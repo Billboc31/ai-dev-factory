@@ -21,3 +21,16 @@
 [2026-05-29T14:57:27Z] push: tolerating runtime dirty files (not blocking): ['runs/T164/runtime.log']
 [2026-05-29T14:57:27Z] push: pushing branch=ticket/T164-t164-replace-docker-compose-v2-5-style-environment
 [2026-05-29T14:57:30Z] push: done branch=ticket/T164-t164-replace-docker-compose-v2-5-style-environment
+[2026-05-29T15:02:13Z] auto-run start: state=PLAN_APPROVED
+[2026-05-29T15:02:13Z] auto-run: running step=coder
+[2026-05-29T15:02:13Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-29T15:02:13Z] prompt: generic fallback — injecting runs/T164/ticket.md
+[2026-05-29T15:02:13Z] compose: global-context=docs/ai/global-context.md
+[2026-05-29T15:02:13Z] compose: role=ai/roles/coder.md
+[2026-05-29T15:02:13Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-29T15:02:13Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-29T15:02:13Z] compose: skill=ai/skills/code-quality.md
+[2026-05-29T15:02:13Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-29T15:02:13Z] compose: skill=ai/skills/security.md
+[2026-05-29T15:02:13Z] compose: task (canonical prompt)
+[2026-05-29T15:02:13Z] snapshot: runtime-prompt=runs/T164/prompts/coder-attempt-1.md

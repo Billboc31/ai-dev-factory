@@ -28,10 +28,12 @@ from __future__ import annotations
 
 import logging
 import os
+import subprocess
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .proxy_network import RUNTIME_NETWORK_NAME
 from .runtime_resolver import get_sandbox_root
 from .traefik_manager import TraefikManager
 
@@ -66,7 +68,26 @@ class RequiredInfraService:
     """Idempotent ensure hook. Must not raise — return False on failure."""
 
 
+def ensure_runtime_network() -> None:
+    """Create the shared ingress network if it does not exist yet."""
+    result = subprocess.run(
+        ["docker", "network", "create", "--driver", "bridge", RUNTIME_NETWORK_NAME],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        stderr = result.stderr.lower()
+        if "already exists" not in stderr and "network with name" not in stderr:
+            logger.warning(
+                "infra: could not create network %s: %s",
+                RUNTIME_NETWORK_NAME,
+                result.stderr.strip(),
+            )
+
+
 def _ensure_traefik_reverse_proxy() -> bool:
+    ensure_runtime_network()
     try:
         return TraefikManager().ensure_running()
     except Exception as exc:  # defensive: docker missing, etc.

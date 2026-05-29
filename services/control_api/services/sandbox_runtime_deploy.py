@@ -290,10 +290,8 @@ def deploy_operational_runtime(
                 auto_ensure_infra=False,
             ).register(
                 state.id,
-                state.ports,
                 web_host=state.web_host,
                 api_host=state.api_host,
-                compose_project=state.compose_project,
                 log=lambda line: rs._append_log(log_path, line),
             )
         except Exception as exc:

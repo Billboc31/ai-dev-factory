@@ -44,11 +44,11 @@ def test_register_route_file_contains_hostnames(mgr):
     assert "api.sandbox-abc123.ai-dev-factory.localhost" in content
 
 
-def test_register_route_file_contains_ports(mgr):
-    mgr.register("abc123", {"web": 3100, "api": 8180})
+def test_register_route_file_contains_alias_urls(mgr):
+    mgr.register("abc123")
     content = (mgr.routes_dir / "abc123.yml").read_text()
-    assert "3100" in content
-    assert "8180" in content
+    assert "sandbox-abc123-api:8080" in content
+    assert "sandbox-abc123-web:80" in content
 
 
 def test_unregister_removes_route_file(mgr):
@@ -62,10 +62,10 @@ def test_unregister_missing_file_is_safe(mgr):
 
 
 def test_register_is_idempotent(mgr):
-    mgr.register("abc123", {"web": 3100, "api": 8180})
-    urls = mgr.register("abc123", {"web": 3200, "api": 8280})
+    mgr.register("abc123")
+    urls = mgr.register("abc123")
     content = (mgr.routes_dir / "abc123.yml").read_text()
-    assert "3200" in content
+    assert "sandbox-abc123-api:8080" in content
     assert urls["web"] == "http://sandbox-abc123.ai-dev-factory.localhost"
 
 
@@ -279,8 +279,8 @@ def test_build_sandbox_urls_with_custom_hosts():
     assert urls["api"] == "http://api.my-env.ai-dev-factory.localhost"
 
 
-def test_register_custom_host_still_writes_port(mgr):
-    mgr.register("abc123", {"web": 9999, "api": 7777}, web_host="custom.localhost")
+def test_register_custom_host_writes_alias_backends(mgr):
+    mgr.register("abc123", web_host="custom.localhost")
     content = (mgr.routes_dir / "abc123.yml").read_text()
-    assert "9999" in content
-    assert "7777" in content
+    assert "sandbox-abc123-api:8080" in content
+    assert "sandbox-abc123-web:80" in content
