@@ -472,3 +472,90 @@ def test_environment_actions_work_after_create(tmp_path, monkeypatch):
 
         del_r = client.delete(f"/environments/{env_id}")
         assert del_r.status_code < 500, f"delete returned {del_r.status_code}"
+
+
+# ── Custom sandbox directory auto-creation ────────────────────────────────────
+
+
+def test_create_environment_auto_creates_custom_sandbox_path(tmp_path, monkeypatch):
+    """sandbox_path is the runtime location; parent dirs are created automatically."""
+    import json as _json
+
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    custom = tmp_path / "sandboxes" / "demo"
+    assert not custom.exists()
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        r = client.post(
+            "/environments",
+            json={
+                "env_name": "demo",
+                "project_root": "/project",
+                "sandbox_path": str(custom),
+            },
+        )
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert custom.exists()
+    assert (custom / ".env").exists()
+    assert (custom / "state.json").exists()
+    state = _json.loads((custom / "state.json").read_text(encoding="utf-8"))
+    assert state["id"] == data["id"]
+    assert state["sandbox_dir"] == str(custom.resolve())
+    assert data["sandbox_dir"] == str(custom.resolve())
+
+
+def test_create_environment_auto_creates_nested_custom_sandbox_path(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    nested = tmp_path / "custom" / "envs" / "demo" / "runtime"
+    assert not nested.parent.exists()
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        r = client.post(
+            "/environments",
+            json={
+                "env_name": "nested",
+                "project_root": "/project",
+                "sandbox_path": str(nested),
+            },
+        )
+    assert r.status_code == 201, r.text
+    assert nested.exists()
+    assert (nested / ".env").exists()
+    assert (nested / "state.json").exists()
+
+
+def test_failed_provisioning_cleans_custom_sandbox_path(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    custom = tmp_path / "sandboxes" / "demo"
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_fail_compose_up):
+        r = client.post(
+            "/environments",
+            json={
+                "env_name": "demo",
+                "project_root": "/project",
+                "sandbox_path": str(custom),
+            },
+        )
+    assert r.status_code >= 500, r.text
+
+    list_r = client.get("/environments")
+    assert list_r.status_code == 200
+    assert list_r.json() == []
+
+    assert not custom.exists(), f"expected custom sandbox dir removed, found: {list(custom.rglob('*'))}"

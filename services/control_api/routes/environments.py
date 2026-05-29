@@ -78,6 +78,8 @@ class CreateEnvironmentRequest(BaseModel):
     deployment_mode: EnvironmentMode | None = None
     web_host: str | None = None
     api_host: str | None = None
+    # Host path where .env, state.json and runtime/ are stored (created if missing).
+    sandbox_path: str | None = None
 
 
 class EnvironmentLogsResponse(BaseModel):
@@ -117,6 +119,7 @@ def create_environment(body: CreateEnvironmentRequest, request: Request) -> Sand
         deployment_mode=body.deployment_mode,
         web_host=body.web_host,
         api_host=body.api_host,
+        sandbox_path=body.sandbox_path,
     )
     try:
         started = mgr.start(state.id)

@@ -92,6 +92,7 @@ class SandboxManager:
         )
 
     def _allocate_slot(self, sandbox_id: str) -> int:
+        self.sandboxes_dir.mkdir(parents=True, exist_ok=True)
         with _registry_lock:
             registry = self._read_registry()
             used = set(registry.values())
@@ -108,30 +109,102 @@ class SandboxManager:
             registry.pop(sandbox_id, None)
             self._write_registry(registry)
 
+    # --- custom storage index (sandbox_id → absolute host path) ---
+
+    def _storage_index_path(self) -> Path:
+        return self.sandboxes_dir / ".sandbox-storage.json"
+
+    def _read_storage_index(self) -> dict[str, str]:
+        try:
+            data = json.loads(self._storage_index_path().read_text(encoding="utf-8"))
+            return data if isinstance(data, dict) else {}
+        except (OSError, json.JSONDecodeError):
+            return {}
+
+    def _write_storage_index(self, index: dict[str, str]) -> None:
+        self.sandboxes_dir.mkdir(parents=True, exist_ok=True)
+        self._storage_index_path().write_text(
+            json.dumps(index, indent=2), encoding="utf-8"
+        )
+
+    def _register_storage_dir(self, sandbox_id: str, storage_dir: Path) -> None:
+        with _registry_lock:
+            index = self._read_storage_index()
+            index[sandbox_id] = str(storage_dir)
+            self._write_storage_index(index)
+
+    def _unregister_storage_dir(self, sandbox_id: str) -> None:
+        with _registry_lock:
+            index = self._read_storage_index()
+            if sandbox_id in index:
+                index.pop(sandbox_id, None)
+                self._write_storage_index(index)
+
+    def _ensure_storage_dir(
+        self, sandbox_id: str, sandbox_path: str | None
+    ) -> tuple[Path, str | None]:
+        """Create the sandbox storage directory before any file writes.
+
+        Returns ``(storage_dir, sandbox_dir_field)`` where *sandbox_dir_field*
+        is persisted on :class:`SandboxState` when the path is user-specified.
+        """
+        self.sandboxes_dir.mkdir(parents=True, exist_ok=True)
+        if sandbox_path:
+            storage = Path(sandbox_path).expanduser().resolve()
+            storage.mkdir(parents=True, exist_ok=True)
+            self._register_storage_dir(sandbox_id, storage)
+            return storage, str(storage)
+        storage = self.sandboxes_dir / sandbox_id
+        storage.mkdir(parents=True, exist_ok=True)
+        return storage, None
+
     # --- state helpers ---
 
-    def _sandbox_dir(self, sandbox_id: str) -> Path:
+    def _storage_dir_for_state(self, state: SandboxState) -> Path:
+        if state.sandbox_dir:
+            return Path(state.sandbox_dir)
+        return self.sandboxes_dir / state.id
+
+    def _storage_dir(self, sandbox_id: str) -> Path:
+        indexed = self._read_storage_index().get(sandbox_id)
+        if indexed:
+            return Path(indexed)
         return self.sandboxes_dir / sandbox_id
 
+    def _sandbox_dir(self, sandbox_id: str) -> Path:
+        return self._storage_dir(sandbox_id)
+
     def _state_path(self, sandbox_id: str) -> Path:
-        return self._sandbox_dir(sandbox_id) / "state.json"
+        return self._storage_dir(sandbox_id) / "state.json"
 
     def _env_file_path(self, sandbox_id: str) -> Path:
-        return self._sandbox_dir(sandbox_id) / ".env"
+        return self._storage_dir(sandbox_id) / ".env"
 
     def _runtime_root_path(self, sandbox_id: str) -> Path:
-        return self._sandbox_dir(sandbox_id) / "runtime"
+        return self._storage_dir(sandbox_id) / "runtime"
+
+    def _state_file_candidates(self, sandbox_id: str) -> list[Path]:
+        candidates: list[Path] = []
+        indexed = self._read_storage_index().get(sandbox_id)
+        if indexed:
+            candidates.append(Path(indexed) / "state.json")
+        default = self.sandboxes_dir / sandbox_id / "state.json"
+        if default not in candidates:
+            candidates.append(default)
+        return candidates
 
     def _read_state(self, sandbox_id: str) -> SandboxState:
-        path = self._state_path(sandbox_id)
-        try:
-            return SandboxState.model_validate_json(path.read_text(encoding="utf-8"))
-        except FileNotFoundError:
-            raise SandboxNotFoundError(f"sandbox not found: {sandbox_id}")
+        for path in self._state_file_candidates(sandbox_id):
+            if path.exists():
+                return SandboxState.model_validate_json(
+                    path.read_text(encoding="utf-8")
+                )
+        raise SandboxNotFoundError(f"sandbox not found: {sandbox_id}")
 
     def _write_state(self, state: SandboxState) -> None:
-        path = self._state_path(state.id)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        storage = self._storage_dir_for_state(state)
+        storage.mkdir(parents=True, exist_ok=True)
+        path = storage / "state.json"
         path.write_text(state.model_dump_json(indent=2), encoding="utf-8")
 
     # --- compose helper ---
@@ -165,8 +238,12 @@ class SandboxManager:
         deployment_mode: EnvironmentMode | None = None,
         web_host: str | None = None,
         api_host: str | None = None,
+        sandbox_path: str | None = None,
     ) -> SandboxState:
         sandbox_id = uuid.uuid4().hex[:12]
+        storage_dir, sandbox_dir_field = self._ensure_storage_dir(
+            sandbox_id, sandbox_path
+        )
         slot = self._allocate_slot(sandbox_id)
 
         compose_project = normalize_compose_project_name(f"sandbox-{sandbox_id}")
@@ -175,10 +252,8 @@ class SandboxManager:
         supervisor_port = 8090 + slot
         ports: dict[str, int] = {"web": web_port, "api": api_port}
 
-        sandbox_dir = self._sandbox_dir(sandbox_id)
-        sandbox_dir.mkdir(parents=True, exist_ok=True)
-        env_file = self._env_file_path(sandbox_id)
-        sandbox_runtime_root = str(self._runtime_root_path(sandbox_id))
+        env_file = storage_dir / ".env"
+        sandbox_runtime_root = str(storage_dir / "runtime")
 
         # Pre-compute the pretty URLs. Custom hosts (if provided) are used
         # verbatim; otherwise the default sandbox-<id>.* pattern applies.
@@ -222,9 +297,13 @@ class SandboxManager:
             deployment_mode=deployment_mode,
             web_host=web_host,
             api_host=api_host,
+            sandbox_dir=sandbox_dir_field,
         )
         self._write_state(state)
-        logger.info("sandbox created: %s (slot=%d ports=%s)", sandbox_id, slot, ports)
+        logger.info(
+            "sandbox created: %s (slot=%d storage=%s ports=%s)",
+            sandbox_id, slot, storage_dir, ports,
+        )
         return state
 
     def start(self, sandbox_id: str) -> SandboxState:
@@ -448,6 +527,7 @@ class SandboxManager:
             state = self._read_state(sandbox_id)
         except SandboxNotFoundError:
             self._release_slot(sandbox_id)
+            self._unregister_storage_dir(sandbox_id)
             if sandbox_dir.exists():
                 shutil.rmtree(sandbox_dir)
             return
@@ -495,6 +575,7 @@ class SandboxManager:
 
         # 7. Release port slot only after undeploy completes.
         self._release_slot(sandbox_id)
+        self._unregister_storage_dir(sandbox_id)
 
         # 8. Remove sandbox directory.
         if sandbox_dir.exists():
@@ -532,16 +613,24 @@ class SandboxManager:
         return result.stdout or result.stderr or ""
 
     def list(self) -> list[SandboxState]:
-        sandboxes = []
-        for state_file in sorted(self.sandboxes_dir.glob("*/state.json")):
+        seen: set[str] = set()
+        sandboxes: list[SandboxState] = []
+        state_files: list[Path] = list(self.sandboxes_dir.glob("*/state.json"))
+        for storage in self._read_storage_index().values():
+            candidate = Path(storage) / "state.json"
+            if candidate not in state_files:
+                state_files.append(candidate)
+        for state_file in sorted(state_files):
             try:
-                sandboxes.append(
-                    SandboxState.model_validate_json(
-                        state_file.read_text(encoding="utf-8")
-                    )
+                state = SandboxState.model_validate_json(
+                    state_file.read_text(encoding="utf-8")
                 )
             except Exception:
-                pass
+                continue
+            if state.id in seen:
+                continue
+            seen.add(state.id)
+            sandboxes.append(state)
         return sandboxes
 
     def cleanup_stale_routes(self) -> list[str]:

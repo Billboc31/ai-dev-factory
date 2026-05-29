@@ -17,6 +17,7 @@ export default function CreateEnvironmentModal({ onClose, onCreated }) {
   const [form, setForm] = useState({
     env_name: '',
     project_root: '',
+    sandbox_path: '',
     ref: '',
     ref_type: 'branch',
     env_type: 'feature',
@@ -61,6 +62,7 @@ export default function CreateEnvironmentModal({ onClose, onCreated }) {
       const payload = {
         env_name: form.env_name,
         project_root: form.project_root,
+        sandbox_path: form.sandbox_path || null,
         ref: form.ref || null,
         ref_type: form.ref ? form.ref_type : null,
         env_type: form.env_type || null,
@@ -116,6 +118,16 @@ export default function CreateEnvironmentModal({ onClose, onCreated }) {
               value={form.project_root}
               onChange={set('project_root')}
               placeholder="/path/to/project"
+              className="border rounded px-2 py-1.5 text-sm font-mono"
+            />
+          </label>
+
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="font-medium">Sandbox Directory</span>
+            <input
+              value={form.sandbox_path}
+              onChange={set('sandbox_path')}
+              placeholder="e.g. ~/sandboxes/demo (created automatically if missing)"
               className="border rounded px-2 py-1.5 text-sm font-mono"
             />
           </label>
