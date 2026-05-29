@@ -130,6 +130,7 @@ class RuntimeHealth(BaseModel):
     active_jobs: int
     stale_pid_files: list[str]
     stale_locks: list[str]
+    sqlite_degraded: bool = False
 
 
 class OverviewResponse(BaseModel):
@@ -438,9 +439,18 @@ def get_runtime_health(request: Request) -> RuntimeHealth:
             if data and isinstance(data.get("pid"), int) and not _is_pid_alive(data["pid"]):
                 stale_pid_files.append(str(pid_file.relative_to(root)))
 
+    # SQLite degraded detection: DB exists but is inaccessible
+    sqlite_degraded = False
+    try:
+        from ..services.board_service import _try_load_runtime_db
+        _, _, sqlite_degraded = _try_load_runtime_db(root)
+    except Exception:
+        sqlite_degraded = True
+
     return RuntimeHealth(
         supervisor_status=supervisor_status,
         active_jobs=active_jobs,
         stale_pid_files=stale_pid_files,
         stale_locks=stale_locks,
+        sqlite_degraded=sqlite_degraded,
     )

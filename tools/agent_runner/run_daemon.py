@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import errno
+import fcntl
 import importlib.util
 import json
 import os
@@ -82,6 +84,7 @@ _rdb_mod = importlib.util.module_from_spec(_rdb_spec)  # type: ignore[arg-type]
 _rdb_spec.loader.exec_module(_rdb_mod)  # type: ignore[union-attr]
 _rdb_get_db_path = _rdb_mod.get_db_path
 _rdb_init = _rdb_mod.init_runtime_db
+_rdb_check_and_recover = _rdb_mod.check_and_recover_db
 _rdb_record_intake = _rdb_mod.record_issue_intake
 _rdb_list_intake = _rdb_mod.list_issue_intake
 _rdb_upsert_ticket = _rdb_mod.upsert_ticket_runtime
@@ -105,6 +108,9 @@ _DB_PATH_RESOLVED: bool = False
 _DB_PATH_VALUE: "Path | None" = None
 _DB_INITIALIZED: bool = False
 
+# Singleton guard — file handle kept open for process lifetime so the exclusive lock holds.
+_SINGLETON_LOCK_FH = None
+
 
 def _cached_db_path() -> "Path | None":
     global _DB_PATH_RESOLVED, _DB_PATH_VALUE
@@ -122,12 +128,37 @@ def _ensure_db() -> "Path | None":
         return None
     if not _DB_INITIALIZED:
         try:
+            _rdb_check_and_recover(db_path)
             _rdb_init(db_path)
             _DB_INITIALIZED = True
         except Exception as exc:
             _log(f"SQLite init failed: {exc}")
             return None
     return db_path
+
+
+def _acquire_daemon_singleton(lock_dir: Path) -> bool:
+    """Acquire a process-lifetime LOCK_EX|LOCK_NB on daemon-singleton.lock.
+
+    Returns False immediately if another daemon process already holds the lock,
+    so the caller can exit cleanly instead of racing on SQLite.
+    """
+    global _SINGLETON_LOCK_FH
+    lock_path = lock_dir / "daemon-singleton.lock"
+    try:
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        fh = open(lock_path, "w")
+        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        fh.write(json.dumps({"pid": os.getpid(), "started_at": _now_iso()}) + "\n")
+        fh.flush()
+        _SINGLETON_LOCK_FH = fh  # keep open so lock holds for process lifetime
+        return True
+    except OSError as exc:
+        if exc.errno in (errno.EACCES, errno.EAGAIN):
+            return False
+        # Cannot determine — proceed rather than refusing to start
+        _log(f"daemon singleton lock warning: {exc}")
+        return True
 
 AUTO_RUNNABLE_STATES = frozenset({
     "INIT",
@@ -1795,6 +1826,11 @@ def main(argv: list[str]) -> int:
         _log("project-map polling enabled")
     if args.use_project_map:
         _log("project-map scheduling enabled (fallback: FIFO)")
+
+    # Singleton guard — reject a second daemon instance before it can race on SQLite.
+    if not _acquire_daemon_singleton(state_dir):
+        _log("another daemon instance is already running (singleton lock held) — exiting cleanly")
+        return 1
 
     _cleanup_stale_workers(state_dir)
 

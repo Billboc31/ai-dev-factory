@@ -1,6 +1,8 @@
 """Tests for T111 — runtime_db SQLite module."""
 
+import sqlite3
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -8,7 +10,9 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "tools" / "agent_runner"))
 
 from runtime_db import (
+    _connect,
     append_runtime_event,
+    check_and_recover_db,
     get_issue_intake,
     get_ticket_runtime,
     init_runtime_db,
@@ -160,6 +164,88 @@ def test_runtime_event_metadata_roundtrip(db: Path) -> None:
     import json
     stored = json.loads(events[0]["metadata_json"])
     assert stored == meta
+
+
+# ── check_and_recover_db ──────────────────────────────────────────────────────
+
+def test_check_and_recover_db_healthy_db(tmp_path: Path) -> None:
+    """Healthy DB passes check unchanged — no quarantine file is created."""
+    db_path = tmp_path / ".runtime" / "ai-dev-factory.sqlite"
+    init_runtime_db(db_path)
+    record_issue_intake(db_path, 1, "T001")
+
+    result = check_and_recover_db(db_path)
+
+    assert result is True
+    assert db_path.exists()
+    # No quarantine file should exist
+    corrupt_files = list(db_path.parent.glob("*.corrupt.*"))
+    assert corrupt_files == []
+    # Original data still readable
+    assert get_issue_intake(db_path, 1) is not None
+
+
+def test_check_and_recover_db_corrupt_db_quarantined(tmp_path: Path) -> None:
+    """Corrupt DB is quarantined and a fresh empty DB is recreated."""
+    db_path = tmp_path / ".runtime" / "ai-dev-factory.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    # Write garbage so SQLite sees a malformed file
+    db_path.write_bytes(b"SQLite format 3\x00" + b"\xff" * 512)
+
+    result = check_and_recover_db(db_path)
+
+    assert result is True
+    # Quarantine file exists
+    corrupt_files = list(db_path.parent.glob("*.corrupt.*"))
+    assert len(corrupt_files) == 1
+    # A new empty DB was recreated
+    assert db_path.exists()
+    # New DB is usable
+    record_issue_intake(db_path, 99, "T099")
+    assert get_issue_intake(db_path, 99) is not None
+
+
+def test_check_and_recover_db_lock_serialization(tmp_path: Path) -> None:
+    """Concurrent callers are serialized — second caller waits for first to finish."""
+    db_path = tmp_path / ".runtime" / "ai-dev-factory.sqlite"
+    init_runtime_db(db_path)
+
+    results: list[bool] = []
+    errors: list[Exception] = []
+
+    def run():
+        try:
+            results.append(check_and_recover_db(db_path))
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=run) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=10)
+
+    assert errors == [], f"threads raised: {errors}"
+    assert len(results) == 4
+    assert all(r is True for r in results)
+
+
+def test_check_and_recover_db_pragmas(tmp_path: Path) -> None:
+    """busy_timeout and synchronous=NORMAL pragmas are applied by _connect()."""
+    db_path = tmp_path / ".runtime" / "ai-dev-factory.sqlite"
+    init_runtime_db(db_path)
+
+    # PRAGMA values are connection-level — must use _connect() to see them applied
+    conn = _connect(db_path)
+    try:
+        (busy_timeout,) = conn.execute("PRAGMA busy_timeout").fetchone()
+        (synchronous,) = conn.execute("PRAGMA synchronous").fetchone()
+    finally:
+        conn.close()
+
+    assert busy_timeout == 5000
+    # NORMAL = 1 in SQLite's numeric encoding
+    assert synchronous == 1
 
 
 # ── DB persistence ────────────────────────────────────────────────────────────
