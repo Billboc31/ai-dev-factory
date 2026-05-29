@@ -44,3 +44,11 @@
 [2026-05-29T09:46:37Z] compose: skill=ai/skills/debugging.md
 [2026-05-29T09:46:37Z] compose: task (canonical prompt)
 [2026-05-29T09:46:37Z] snapshot: runtime-prompt=runs/T160/prompts/tester-attempt-1.md
+[2026-05-29T09:53:13Z] auto-run: step=tester done rc=0
+[2026-05-29T09:53:13Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-29T09:53:13Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-29T09:53:13Z] commit-checkpoint: unstaged runtime garbage: ['runs/T160/runtime.log']
+[2026-05-29T09:53:13Z] commit-checkpoint: sha=f028e237 files=4 title='test(T160/workflow): tester — update 4 file(s)'
+[2026-05-29T09:53:13Z] auto-run: auto-push triggered
+[2026-05-29T09:53:13Z] push: tolerating runtime dirty files (not blocking): ['runs/T160/runtime.log']
+[2026-05-29T09:53:13Z] push: pushing branch=ticket/T160-t160-fix-environment-sandbox-path-resolution-and-r
