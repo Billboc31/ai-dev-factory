@@ -10,3 +10,14 @@
 [2026-05-29T13:14:22Z] compose: task (canonical prompt)
 [2026-05-29T13:14:22Z] snapshot: runtime-prompt=runs/T163/prompts/planner-attempt-1.md
 [2026-05-29T13:17:15Z] auto-run: step=planner done rc=0
+[2026-05-29T13:17:18Z] planner checkpoint: committed
+[2026-05-29T13:17:18Z] planner checkpoint: pushed
+[2026-05-29T13:17:18Z] planner validation success
+[2026-05-29T13:17:18Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-05-29T13:17:18Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-05-29T13:17:18Z] commit-checkpoint: unstaged runtime garbage: ['runs/T163/runtime.log']
+[2026-05-29T13:17:18Z] commit-checkpoint: sha=83dcd684 files=2 title='docs(T163/workflow): planner — update 2 file(s)'
+[2026-05-29T13:17:18Z] auto-run: auto-push triggered
+[2026-05-29T13:17:18Z] push: tolerating runtime dirty files (not blocking): ['runs/T163/runtime.log']
+[2026-05-29T13:17:18Z] push: pushing branch=ticket/T163-t163-persist-failed-environment-deployments-for-de
+[2026-05-29T13:17:20Z] push: done branch=ticket/T163-t163-persist-failed-environment-deployments-for-de
