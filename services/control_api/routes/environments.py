@@ -1,4 +1,4 @@
-"""Routes for the Deployment Environments dashboard (T151).
+"""Routes for the Deployment Environments dashboard (T151/T158).
 
 All handlers delegate to :class:`SandboxManager`. Environments are sandboxes
 that carry ``env_name`` and related deployment metadata.
@@ -6,6 +6,8 @@ that carry ``env_name`` and related deployment metadata.
 from __future__ import annotations
 
 import logging
+import re
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
@@ -16,6 +18,42 @@ from ..services.sandbox_manager import SandboxManager, SandboxNotFoundError
 logger = logging.getLogger("control-api")
 
 router = APIRouter(prefix="/environments", tags=["environments"])
+
+# --- host validation helpers ---
+
+_DNS_LABEL_RE = re.compile(r"^[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?$|^[a-z0-9]$")
+_RESERVED_PREFIXES = ("traefik.", "_")
+_RESERVED_EXACT = {"localhost"}
+_HOST_RULE_RE = re.compile(r"Host\(`([^`]+)`\)")
+
+
+def _validate_host_format(host: str) -> str | None:
+    """Return an error message if *host* is invalid, else None."""
+    if not host:
+        return "host cannot be empty"
+    if host in _RESERVED_EXACT:
+        return f"reserved host: {host!r}"
+    for prefix in _RESERVED_PREFIXES:
+        if host.startswith(prefix):
+            return f"reserved host prefix in {host!r}"
+    for label in host.split("."):
+        if not _DNS_LABEL_RE.match(label):
+            return f"invalid DNS label {label!r} in {host!r} — use lowercase alphanumeric and hyphens only"
+    return None
+
+
+def _declared_hosts(routes_dir: Path) -> set[str]:
+    """Collect all hostnames already declared in Traefik route files."""
+    hosts: set[str] = set()
+    for yml in routes_dir.glob("*.yml"):
+        if yml.stem.startswith("_"):
+            continue
+        try:
+            for m in _HOST_RULE_RE.finditer(yml.read_text(encoding="utf-8")):
+                hosts.add(m.group(1))
+        except OSError:
+            pass
+    return hosts
 
 
 def _get_manager(request: Request) -> SandboxManager:
@@ -31,6 +69,8 @@ class CreateEnvironmentRequest(BaseModel):
     ref_type: RefType | None = None
     env_type: EnvironmentType | None = None
     deployment_mode: EnvironmentMode | None = None
+    web_host: str | None = None
+    api_host: str | None = None
 
 
 class EnvironmentLogsResponse(BaseModel):
@@ -40,7 +80,26 @@ class EnvironmentLogsResponse(BaseModel):
 @router.post("", response_model=SandboxState, status_code=201)
 def create_environment(body: CreateEnvironmentRequest, request: Request) -> SandboxState:
     logger.info("api: POST /environments env_name=%s ref=%s", body.env_name, body.ref)
+
     mgr = _get_manager(request)
+
+    # Validate custom hosts before touching any sandbox state.
+    for field, host in (("web_host", body.web_host), ("api_host", body.api_host)):
+        if host is None:
+            continue
+        err = _validate_host_format(host)
+        if err:
+            raise HTTPException(status_code=422, detail=f"{field}: {err}")
+
+    if body.web_host or body.api_host:
+        # Use the same routes dir as the proxy manager for consistency.
+        declared = _declared_hosts(mgr._proxy.routes_dir)
+        for field, host in (("web_host", body.web_host), ("api_host", body.api_host)):
+            if host and host in declared:
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"{field}: host already in use: {host!r}",
+                )
     state = mgr.create(
         ticket_id=body.env_name,
         project_root=body.project_root,
@@ -49,6 +108,8 @@ def create_environment(body: CreateEnvironmentRequest, request: Request) -> Sand
         ref=body.ref,
         ref_type=body.ref_type,
         deployment_mode=body.deployment_mode,
+        web_host=body.web_host,
+        api_host=body.api_host,
     )
     try:
         state = mgr.start(state.id)

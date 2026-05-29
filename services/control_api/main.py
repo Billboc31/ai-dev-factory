@@ -15,7 +15,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .routes import auto_fix, daemon, deployer, health, issues, project_map, providers, runtime_dashboard, sandbox, tickets
+from .routes import auto_fix, daemon, deployer, environments, health, issues, project_map, providers, runtime_dashboard, sandbox, tickets
 from .services.project_registry import ProjectRegistry
 from .services.runtime_resolver import resolve_worktrees_dir
 
@@ -122,6 +122,8 @@ def create_app(
     app.include_router(auto_fix.router)
     # T139: /runtime-dashboard/* — sandbox runs, proposal runs, health, log tailing.
     app.include_router(runtime_dashboard.router)
+    # T158: /environments — named environments with configurable Traefik hosts.
+    app.include_router(environments.router)
 
     return app
 

@@ -12,7 +12,13 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from ..models.sandbox import SandboxState, SandboxStatus
+from ..models.sandbox import (
+    EnvironmentMode,
+    EnvironmentType,
+    RefType,
+    SandboxState,
+    SandboxStatus,
+)
 from .deployer_runner import _load_deploy_profile
 from .infra_service_manager import resolve_proxy_routes_dir
 from .proxy_manager import ProxyManager, build_sandbox_urls
@@ -57,13 +63,20 @@ class SandboxNotFoundError(Exception):
 
 
 class SandboxManager:
-    def __init__(self, sandboxes_dir: Path | None = None) -> None:
+    def __init__(
+        self,
+        sandboxes_dir: Path | None = None,
+        proxy_routes_dir: Path | None = None,
+    ) -> None:
         if sandboxes_dir is None:
             sandboxes_dir = get_project_sandbox_dir()
         self.sandboxes_dir = sandboxes_dir
         self.sandboxes_dir.mkdir(parents=True, exist_ok=True)
         self._registry_path = self.sandboxes_dir / "port-registry.json"
-        self._proxy = ProxyManager()
+        self._proxy = ProxyManager(
+            routes_dir=proxy_routes_dir,
+            auto_ensure_infra=proxy_routes_dir is None,
+        )
 
     # --- port registry ---
 
@@ -133,7 +146,19 @@ class SandboxManager:
 
     # --- public API ---
 
-    def create(self, ticket_id: str, project_root: str) -> SandboxState:
+    def create(
+        self,
+        ticket_id: str,
+        project_root: str,
+        *,
+        env_name: str | None = None,
+        env_type: EnvironmentType | None = None,
+        ref: str | None = None,
+        ref_type: RefType | None = None,
+        deployment_mode: EnvironmentMode | None = None,
+        web_host: str | None = None,
+        api_host: str | None = None,
+    ) -> SandboxState:
         sandbox_id = uuid.uuid4().hex[:12]
         slot = self._allocate_slot(sandbox_id)
 
@@ -147,12 +172,9 @@ class SandboxManager:
         sandbox_dir.mkdir(parents=True, exist_ok=True)
         sandbox_runtime_root = str(sandbox_dir / "runtime")
 
-        # Pre-compute the pretty URLs from the sandbox id. Operational
-        # scripts (start.sh / healthcheck.sh) read these via env so
-        # healthchecks probe the reverse-proxy URL when Traefik routes
-        # are registered, and fall back to direct ``localhost:<port>``
-        # when not.
-        urls = build_sandbox_urls(sandbox_id)
+        # Pre-compute the pretty URLs. Custom hosts (if provided) are used
+        # verbatim; otherwise the default sandbox-<id>.* pattern applies.
+        urls = build_sandbox_urls(sandbox_id, web_host=web_host, api_host=api_host)
         env_file = sandbox_dir / ".env"
         env_file.write_text(
             f"COMPOSE_PROJECT_NAME={compose_project}\n"
@@ -186,6 +208,13 @@ class SandboxManager:
             slot=slot,
             supervisor_port=supervisor_port,
             sandbox_runtime_root=sandbox_runtime_root,
+            env_name=env_name,
+            env_type=env_type,
+            ref=ref,
+            ref_type=ref_type,
+            deployment_mode=deployment_mode,
+            web_host=web_host,
+            api_host=api_host,
         )
         self._write_state(state)
         logger.info("sandbox created: %s (slot=%d ports=%s)", sandbox_id, slot, ports)
@@ -206,8 +235,13 @@ class SandboxManager:
                 resolve_proxy_routes_dir(),
                 sandbox_id,
             )
-            urls = self._proxy.register(sandbox_id, state.ports)
-            state = state.model_copy(update={"status": SandboxStatus.running, "supervisor_pid": supervisor_pid, "urls": urls})
+            urls = self._proxy.register(
+                sandbox_id,
+                state.ports,
+                web_host=state.web_host,
+                api_host=state.api_host,
+            )
+            state = state.model_copy(update={"status": SandboxStatus.running, "supervisor_pid": supervisor_pid, "urls": urls, "deployed_at": _now_iso()})
         self._write_state(state)
         return state
 
@@ -225,7 +259,7 @@ class SandboxManager:
                         stale.unlink()
                     except OSError:
                         pass
-        state = state.model_copy(update={"status": SandboxStatus.stopped, "supervisor_pid": None})
+        state = state.model_copy(update={"status": SandboxStatus.stopped, "supervisor_pid": None, "stopped_at": _now_iso()})
         self._write_state(state)
         return state
 
@@ -245,10 +279,46 @@ class SandboxManager:
     ) -> SandboxState:
         state = self.create(ticket_id, project_root)
         worktree_path = self._sandbox_dir(state.id) / "worktree"
+
+        requested_ref: str | None = None
+        resolved_ref: str | None = None
+        commit_sha: str | None = None
+
         if branch:
-            cmd = ["git", "worktree", "add", str(worktree_path), branch]
+            requested_ref = branch
+            remote_ref = f"origin/{branch}"
+            logger.info(
+                "sandbox worktree: fetching remote ref=%s sandbox=%s",
+                remote_ref, state.id,
+            )
+            fetch_result = subprocess.run(
+                ["git", "fetch", "origin", branch],
+                capture_output=True, text=True, cwd=project_root, check=False,
+            )
+            if fetch_result.returncode != 0:
+                self.destroy(state.id)
+                raise RuntimeError(
+                    f"git fetch origin {branch} failed: {fetch_result.stderr.strip()}"
+                )
+            rev_result = subprocess.run(
+                ["git", "rev-parse", remote_ref],
+                capture_output=True, text=True, cwd=project_root, check=False,
+            )
+            if rev_result.returncode != 0:
+                self.destroy(state.id)
+                raise RuntimeError(
+                    f"git rev-parse {remote_ref} failed: {rev_result.stderr.strip()}"
+                )
+            commit_sha = rev_result.stdout.strip()
+            resolved_ref = remote_ref
+            logger.info(
+                "sandbox worktree: resolved branch=%s sha=%s worktree=%s",
+                branch, commit_sha, worktree_path,
+            )
+            cmd = ["git", "worktree", "add", "--detach", str(worktree_path), commit_sha]
         else:
             cmd = ["git", "worktree", "add", "--detach", str(worktree_path)]
+
         result = subprocess.run(
             cmd, capture_output=True, text=True, cwd=project_root, check=False
         )
@@ -258,7 +328,13 @@ class SandboxManager:
                 f"git worktree add failed: {result.stderr.strip()}"
             )
         state = state.model_copy(
-            update={"worktree_path": str(worktree_path), "job_type": job_type}
+            update={
+                "worktree_path": str(worktree_path),
+                "job_type": job_type,
+                "requested_ref": requested_ref,
+                "resolved_ref": resolved_ref,
+                "commit_sha": commit_sha,
+            }
         )
         self._write_state(state)
         logger.info(
