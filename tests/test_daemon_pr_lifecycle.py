@@ -66,10 +66,11 @@ def test_save_state_json_writes_atomically(tmp_path):
 def test_create_or_update_pr_creates_new_pr(tmp_path):
     run_dir = _make_run_dir(tmp_path, issue_number=21)
     mock_list = MagicMock(returncode=0, stdout="[]")
+    mock_fallback = MagicMock(returncode=0, stdout="[]")
     mock_create = MagicMock(returncode=0, stdout="https://github.com/owner/repo/pull/42\n")
-    with patch("run_daemon.subprocess.run", side_effect=[mock_list, mock_create]) as mock_sub:
+    with patch("run_daemon.subprocess.run", side_effect=[mock_list, mock_fallback, mock_create]) as mock_sub:
         create_or_update_pr("T001", run_dir, None)
-    create_args = mock_sub.call_args_list[1][0][0]
+    create_args = mock_sub.call_args_list[2][0][0]
     assert "gh" in create_args
     assert "pr" in create_args
     assert "create" in create_args
@@ -237,11 +238,12 @@ def test_checkpoint_and_push_before_pr_returns_true_on_success():
 def test_create_or_update_pr_marks_archived_on_no_diff_error(tmp_path):
     run_dir = _make_run_dir(tmp_path)
     mock_list = MagicMock(returncode=0, stdout="[]")
+    mock_fallback = MagicMock(returncode=0, stdout="[]")
     mock_create = MagicMock(
         returncode=1, stdout="",
         stderr="No commits between main and ticket/T001-my-feature",
     )
-    with patch("run_daemon.subprocess.run", side_effect=[mock_list, mock_create]):
+    with patch("run_daemon.subprocess.run", side_effect=[mock_list, mock_fallback, mock_create]):
         create_or_update_pr("T001", run_dir, None)
     saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved.get("pr_skipped_no_diff") is True
@@ -251,8 +253,9 @@ def test_create_or_update_pr_marks_archived_on_no_diff_error(tmp_path):
 def test_create_or_update_pr_does_not_mark_archived_on_other_error(tmp_path):
     run_dir = _make_run_dir(tmp_path)
     mock_list = MagicMock(returncode=0, stdout="[]")
+    mock_fallback = MagicMock(returncode=0, stdout="[]")
     mock_create = MagicMock(returncode=1, stdout="", stderr="some other gh error")
-    with patch("run_daemon.subprocess.run", side_effect=[mock_list, mock_create]):
+    with patch("run_daemon.subprocess.run", side_effect=[mock_list, mock_fallback, mock_create]):
         create_or_update_pr("T001", run_dir, None)
     saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved.get("pr_skipped_no_diff") is None
@@ -363,3 +366,59 @@ def test_auto_merge_pr_does_not_mark_finalized_on_gh_view_failure(tmp_path):
     assert result is False
     saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved.get("pr_merged") is None
+
+
+# ── handle_test_complete conflict detection (T162) ────────────────────────────
+
+def test_handle_test_complete_calls_detect_conflict_on_failed_merge(tmp_path):
+    run_dir = _make_run_dir(tmp_path, pr_number=42)
+    with patch("run_daemon._checkpoint_and_push_before_pr", return_value=True), \
+         patch("run_daemon.create_or_update_pr"), \
+         patch("run_daemon.auto_merge_pr", return_value=False), \
+         patch("run_daemon.detect_pr_conflict") as mock_detect, \
+         patch("run_daemon.check_and_close_issue") as mock_close:
+        handle_test_complete("T001", run_dir, None)
+    mock_detect.assert_called_once_with("T001", 42, run_dir, None)
+    mock_close.assert_not_called()
+
+
+def test_handle_test_complete_transitions_to_conflict_state(tmp_path):
+    run_dir = _make_run_dir(tmp_path, pr_number=42)
+    with patch("run_daemon._checkpoint_and_push_before_pr", return_value=True), \
+         patch("run_daemon.create_or_update_pr"), \
+         patch("run_daemon.auto_merge_pr", return_value=False), \
+         patch("run_daemon.detect_pr_conflict", return_value=True), \
+         patch("run_daemon.check_and_close_issue") as mock_close:
+        handle_test_complete("T001", run_dir, None)
+    mock_close.assert_not_called()
+
+
+def test_handle_test_complete_no_conflict_detection_without_pr_number(tmp_path):
+    run_dir = _make_run_dir(tmp_path)  # no pr_number in state
+    with patch("run_daemon._checkpoint_and_push_before_pr", return_value=True), \
+         patch("run_daemon.create_or_update_pr"), \
+         patch("run_daemon.auto_merge_pr", return_value=False), \
+         patch("run_daemon.detect_pr_conflict") as mock_detect, \
+         patch("run_daemon.check_and_close_issue") as mock_close:
+        handle_test_complete("T001", run_dir, None)
+    mock_detect.assert_not_called()
+    mock_close.assert_not_called()
+
+
+# ── create_or_update_pr branch prefix fallback (T162) ────────────────────────
+
+def test_create_or_update_pr_finds_pr_by_ticket_prefix_fallback(tmp_path):
+    run_dir = _make_run_dir(tmp_path)  # no pr_number, branch is ticket/T001-my-feature
+    mock_branch_list = MagicMock(returncode=0, stdout="[]")
+    mock_prefix_list = MagicMock(
+        returncode=0,
+        stdout=json.dumps([{"number": 77, "headRefName": "ticket/T001-renamed-title"}]),
+    )
+    mock_edit = MagicMock(returncode=0, stdout="")
+    with patch("run_daemon.subprocess.run", side_effect=[mock_branch_list, mock_prefix_list, mock_edit]) as mock_sub:
+        create_or_update_pr("T001", run_dir, None)
+    saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert saved["pr_number"] == 77
+    edit_cmd = mock_sub.call_args_list[2][0][0]
+    assert "edit" in edit_cmd
+    assert "77" in edit_cmd

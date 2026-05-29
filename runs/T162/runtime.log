@@ -36,3 +36,16 @@
 [2026-05-29T12:12:37Z] push: tolerating runtime dirty files (not blocking): ['runs/T162/runtime.log']
 [2026-05-29T12:12:37Z] push: pushing branch=ticket/T162-t162-repair-existing-pr-conflict-reviewer-detectio
 [2026-05-29T12:12:39Z] push: done branch=ticket/T162-t162-repair-existing-pr-conflict-reviewer-detectio
+[2026-05-29T13:33:20Z] auto-run start: state=PLAN_APPROVED
+[2026-05-29T13:33:20Z] auto-run: running step=coder
+[2026-05-29T13:33:20Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-05-29T13:33:20Z] prompt: generic fallback — injecting runs/T162/ticket.md
+[2026-05-29T13:33:20Z] compose: global-context=docs/ai/global-context.md
+[2026-05-29T13:33:20Z] compose: role=ai/roles/coder.md
+[2026-05-29T13:33:20Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-29T13:33:20Z] compose: skill=ai/skills/git-discipline.md
+[2026-05-29T13:33:20Z] compose: skill=ai/skills/code-quality.md
+[2026-05-29T13:33:20Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-29T13:33:20Z] compose: skill=ai/skills/security.md
+[2026-05-29T13:33:20Z] compose: task (canonical prompt)
+[2026-05-29T13:33:20Z] snapshot: runtime-prompt=runs/T162/prompts/coder-attempt-1.md
