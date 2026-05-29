@@ -61,3 +61,6 @@ class SandboxState(BaseModel):
     api_host: str | None = None
     deployed_at: str | None = None
     stopped_at: str | None = None
+    requested_ref: str | None = None
+    resolved_ref: str | None = None
+    commit_sha: str | None = None
