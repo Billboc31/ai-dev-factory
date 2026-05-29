@@ -170,10 +170,15 @@ def provision_environment(
             persist_state=_persist,
         )
     except Exception as exc:
-        _destroy_quietly(mgr, state.id)
+        failed = apply_deploy_failure(
+            state,
+            OperationalDeployResult(success=False, error=str(exc)),
+        )
+        mgr._write_state(failed)
         raise RuntimeError(f"environment provisioning failed: {exc}") from exc
     if not result.success:
-        _destroy_quietly(mgr, state.id)
+        failed = apply_deploy_failure(state, result)
+        mgr._write_state(failed)
         raise RuntimeError(
             f"environment provisioning failed: {result.error or 'operational deploy failed'}"
         )
