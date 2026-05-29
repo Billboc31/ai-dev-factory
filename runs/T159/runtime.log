@@ -154,3 +154,21 @@
 [2026-05-29T09:08:08Z] compose: task (canonical prompt)
 [2026-05-29T09:08:08Z] compose: extra-context=runs/T159/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
 [2026-05-29T09:08:08Z] snapshot: runtime-prompt=runs/T159/prompts/review-attempt-2.md
+[2026-05-29T09:13:29Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-29T09:13:29Z] auto-run: running step=review
+[2026-05-29T09:13:29Z] auto-run: review decision context: context_file=runs/T159/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-29T09:13:29Z] prompt: resolved=prompts/generic/review.md source=generic
+[2026-05-29T09:13:29Z] prompt: generic fallback — injecting runs/T159/ticket.md
+[2026-05-29T09:13:29Z] compose: global-context=docs/ai/global-context.md
+[2026-05-29T09:13:29Z] compose: role=ai/roles/reviewer.md
+[2026-05-29T09:13:29Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-29T09:13:29Z] compose: skill=ai/skills/code-quality.md
+[2026-05-29T09:13:29Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-29T09:13:29Z] compose: skill=ai/skills/security.md
+[2026-05-29T09:13:29Z] compose: task (canonical prompt)
+[2026-05-29T09:13:29Z] compose: extra-context=runs/T159/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-29T09:13:29Z] snapshot: runtime-prompt=runs/T159/prompts/review-attempt-4.md
+[2026-05-29T09:13:29Z] auto-run: runtime failure: process_failed (rc=1)
+[2026-05-29T09:13:29Z] auto-run: step=review done rc=1
+[2026-05-29T09:13:29Z] auto-run: runtime failure: process_failed (rc=1)
+[2026-05-29T09:13:29Z] auto-run: step=review failed rc=1, state unchanged=IMPLEMENTATION_REVIEW_NEEDED
