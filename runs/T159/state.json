@@ -3,5 +3,7 @@
   "state": "TEST_COMPLETE",
   "branch": "ticket/T159-t159-harden-runtime-sqlite-architecture-and-degrad",
   "issue_number": 166,
-  "updated_at": "2026-05-29T08:40:53Z"
+  "updated_at": "2026-05-29T08:41:25Z",
+  "pr_number": 170,
+  "pr_synced": true
 }
