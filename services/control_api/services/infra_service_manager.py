@@ -32,6 +32,7 @@ from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
+from .runtime_resolver import get_sandbox_root
 from .traefik_manager import TraefikManager
 
 logger = logging.getLogger("control-api")
@@ -112,9 +113,9 @@ def resolve_host_runtime_root() -> Path:
     rr = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT", "").strip()
     if rr:
         p = Path(rr).expanduser().resolve()
-        # Per-sandbox supervisors set RUNTIME_ROOT to
-        # …/sandboxes/<id>/runtime — routes must NOT go there.
-        if "sandboxes" not in p.parts:
+        # Per-sandbox supervisors set RUNTIME_ROOT to a path under the
+        # sandbox root — routes must NOT go there.
+        if not p.is_relative_to(get_sandbox_root()):
             return p
 
     return DEFAULT_HOST_RUNTIME_ROOT.expanduser().resolve()

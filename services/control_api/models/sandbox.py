@@ -41,7 +41,7 @@ class SandboxState(BaseModel):
     project_root: str
     compose_project: str
     ports: dict[str, int]
-    env_file: str
+    env_file: str = ""  # informational; runtime paths are reconstructed dynamically
     status: SandboxStatus
     created_at: str
     slot: int

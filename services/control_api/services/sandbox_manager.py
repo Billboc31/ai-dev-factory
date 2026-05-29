@@ -116,11 +116,18 @@ class SandboxManager:
     def _state_path(self, sandbox_id: str) -> Path:
         return self._sandbox_dir(sandbox_id) / "state.json"
 
+    def _env_file_path(self, sandbox_id: str) -> Path:
+        return self._sandbox_dir(sandbox_id) / ".env"
+
+    def _runtime_root_path(self, sandbox_id: str) -> Path:
+        return self._sandbox_dir(sandbox_id) / "runtime"
+
     def _read_state(self, sandbox_id: str) -> SandboxState:
         path = self._state_path(sandbox_id)
-        if not path.exists():
+        try:
+            return SandboxState.model_validate_json(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
             raise SandboxNotFoundError(f"sandbox not found: {sandbox_id}")
-        return SandboxState.model_validate_json(path.read_text(encoding="utf-8"))
 
     def _write_state(self, state: SandboxState) -> None:
         path = self._state_path(state.id)
@@ -133,7 +140,7 @@ class SandboxManager:
         cmd = [
             "docker", "compose",
             "-p", sandbox.compose_project,
-            "--env-file", sandbox.env_file,
+            "--env-file", str(self._env_file_path(sandbox.id)),
         ] + list(args)
         result = subprocess.run(
             cmd,
@@ -170,12 +177,12 @@ class SandboxManager:
 
         sandbox_dir = self._sandbox_dir(sandbox_id)
         sandbox_dir.mkdir(parents=True, exist_ok=True)
-        sandbox_runtime_root = str(sandbox_dir / "runtime")
+        env_file = self._env_file_path(sandbox_id)
+        sandbox_runtime_root = str(self._runtime_root_path(sandbox_id))
 
         # Pre-compute the pretty URLs. Custom hosts (if provided) are used
         # verbatim; otherwise the default sandbox-<id>.* pattern applies.
         urls = build_sandbox_urls(sandbox_id, web_host=web_host, api_host=api_host)
-        env_file = sandbox_dir / ".env"
         env_file.write_text(
             f"COMPOSE_PROJECT_NAME={compose_project}\n"
             f"WEB_PORT={web_port}\n"
@@ -251,8 +258,8 @@ class SandboxManager:
         rc, _out, err = self._run_compose(state, "down")
         if rc != 0:
             logger.warning("sandbox stop warning: %s — %s", sandbox_id, err.strip())
-        if state.sandbox_runtime_root:
-            runtime_root = Path(state.sandbox_runtime_root)
+        runtime_root = self._runtime_root_path(sandbox_id)
+        if runtime_root.exists():
             for pattern in ("*.pid", "*.lock"):
                 for stale in runtime_root.glob(pattern):
                     try:
@@ -372,7 +379,7 @@ class SandboxManager:
         """Spawn a per-sandbox supervisor subprocess. Returns PID or None on failure."""
         if not state.supervisor_port:
             return None
-        runtime_root = Path(state.sandbox_runtime_root)
+        runtime_root = self._runtime_root_path(state.id)
         runtime_root.mkdir(parents=True, exist_ok=True)
         for subdir in ("state", "logs", "runs"):
             (runtime_root / subdir).mkdir(exist_ok=True)
@@ -419,8 +426,8 @@ class SandboxManager:
     def _terminate_sandbox_supervisor(self, state: SandboxState) -> None:
         """SIGTERM the sandbox supervisor process."""
         pid: int | None = state.supervisor_pid
-        if pid is None and state.sandbox_runtime_root:
-            pid_path = Path(state.sandbox_runtime_root) / "supervisor.pid"
+        if pid is None:
+            pid_path = self._runtime_root_path(state.id) / "supervisor.pid"
             if pid_path.exists():
                 try:
                     data = json.loads(pid_path.read_text(encoding="utf-8"))
@@ -455,15 +462,13 @@ class SandboxManager:
         cwd = worktree if (worktree and worktree.exists()) else project_root
         profile = _load_deploy_profile(cwd)
 
-        runtime_root = (
-            Path(state.sandbox_runtime_root) if state.sandbox_runtime_root else None
-        )
+        runtime_root = self._runtime_root_path(sandbox_id)
 
         # 3. Stop runtime services via undeploy lifecycle.
         run_undeploy(
             profile,
             state.compose_project,
-            state.env_file,
+            str(self._env_file_path(sandbox_id)),
             cwd,
             sandbox_id,
         )
@@ -512,7 +517,7 @@ class SandboxManager:
         cmd = [
             "docker", "compose",
             "-p", state.compose_project,
-            "--env-file", state.env_file,
+            "--env-file", str(self._env_file_path(sandbox_id)),
             "logs", "--no-color",
         ]
         if component:
