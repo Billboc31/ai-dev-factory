@@ -281,7 +281,7 @@ def deploy_operational_runtime(
     route_registered = False
 
     def _register_proxy_routes_after_compose() -> str | None:
-        """Attach Traefik to the compose network and write route file."""
+        """Write route file and register sandbox backends with the proxy."""
         nonlocal registered_urls, route_registered
         _persist(LifecyclePhase.provisioning, last_step="routes")
         try:
@@ -290,10 +290,8 @@ def deploy_operational_runtime(
                 auto_ensure_infra=False,
             ).register(
                 state.id,
-                state.ports,
                 web_host=state.web_host,
                 api_host=state.api_host,
-                compose_project=state.compose_project,
                 log=lambda line: rs._append_log(log_path, line),
             )
         except Exception as exc:
@@ -390,7 +388,6 @@ def deploy_operational_runtime(
         rs._stop_sandbox_supervisor(supervisor_proc, runtime_root, log_path)
         ProxyManager(routes_dir=routes_dir, auto_ensure_infra=False).unregister(
             state.id,
-            compose_project=state.compose_project,
             remove_route_file=False,
         )
         err = script_error or "operational scripts failed"

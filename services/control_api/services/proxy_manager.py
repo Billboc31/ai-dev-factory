@@ -19,10 +19,7 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from .infra_service_manager import ensure_required_infra, resolve_proxy_routes_dir
-from .proxy_network import (
-    detach_traefik_from_compose_project,
-    resolve_route_backends,
-)
+from .proxy_network import sandbox_backend_urls
 from .proxy_route_files import (
     atomic_write_route_file,
     cleanup_orphan_temp_files,
@@ -105,11 +102,10 @@ class ProxyManager:
     def register(
         self,
         sandbox_id: str,
-        ports: dict[str, int],
+        ports: dict[str, int] | None = None,
         *,
         web_host: str | None = None,
         api_host: str | None = None,
-        compose_project: str | None = None,
         log: Callable[[str], None] | None = None,
     ) -> dict[str, str]:
         if self._auto_ensure_infra:
@@ -124,9 +120,7 @@ class ProxyManager:
 
         wh = web_host or _web_hostname(sandbox_id)
         ah = api_host or _api_hostname(sandbox_id)
-        backends, backend_mode = resolve_route_backends(
-            ports, compose_project, log=log
-        )
+        backends = sandbox_backend_urls(sandbox_id)
 
         content = (
             f"http:\n"
@@ -172,10 +166,9 @@ class ProxyManager:
 
         urls = build_sandbox_urls(sandbox_id, web_host=web_host, api_host=api_host)
         logger.info(
-            "proxy: route registered sandbox=%s dir=%s backend=%s urls=%s file=%s",
+            "proxy: route registered sandbox=%s dir=%s urls=%s file=%s",
             sandbox_id,
             self.routes_dir,
-            backend_mode,
             urls,
             route_file,
         )
@@ -185,11 +178,10 @@ class ProxyManager:
         self,
         sandbox_id: str,
         *,
-        compose_project: str | None = None,
         remove_route_file: bool = False,
         log: Callable[[str], None] | None = None,
     ) -> None:
-        """Detach Traefik from the compose network and optionally remove the route.
+        """Optionally remove the route file for *sandbox_id*.
 
         *remove_route_file* defaults to False so redeploy/healthcheck failures
         do not delete routes while Traefik's watcher may still reference them.
@@ -199,8 +191,6 @@ class ProxyManager:
             route_file = route_file_path(self.routes_dir, sandbox_id)
             safe_remove_route_file(route_file)
             logger.info("proxy route removed: sandbox=%s file=%s", sandbox_id, route_file)
-        if compose_project:
-            detach_traefik_from_compose_project(compose_project, log=log)
 
     def cleanup_stale_routes(
         self, active_sandbox_ids: Iterable[str]

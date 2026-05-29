@@ -50,33 +50,29 @@ def test_safe_remove_does_not_leave_yml(tmp_path):
 
 def test_register_does_not_leave_tmp_files(tmp_path):
     mgr = ProxyManager(routes_dir=tmp_path / "routes", auto_ensure_infra=False)
-    mgr.register("stable1", {"api": 8080, "web": 3000})
+    mgr.register("stable1")
     assert (mgr.routes_dir / "stable1.yml").exists()
     assert list(mgr.routes_dir.glob(".*.tmp")) == []
 
 
 def test_unregister_without_remove_keeps_file(tmp_path):
     mgr = ProxyManager(routes_dir=tmp_path / "routes", auto_ensure_infra=False)
-    mgr.register("keep", {"api": 8080, "web": 3000})
+    mgr.register("keep")
     mgr.unregister("keep", remove_route_file=False)
     assert (mgr.routes_dir / "keep.yml").exists()
 
 
 def test_unregister_with_remove_deletes_file(tmp_path):
     mgr = ProxyManager(routes_dir=tmp_path / "routes", auto_ensure_infra=False)
-    mgr.register("gone", {"api": 8080, "web": 3000})
+    mgr.register("gone")
     mgr.unregister("gone", remove_route_file=True)
     assert not (mgr.routes_dir / "gone.yml").exists()
 
 
 def test_redeploy_register_replaces_same_filename(tmp_path):
     mgr = ProxyManager(routes_dir=tmp_path / "routes", auto_ensure_infra=False)
-    with patch(
-        "services.control_api.services.proxy_network.attach_traefik_to_compose_project",
-        return_value=False,
-    ):
-        mgr.register("env1", {"api": 8080, "web": 3000}, compose_project="sandbox-env1")
-        mgr.register("env1", {"api": 8180, "web": 3100}, compose_project="sandbox-env1")
+    mgr.register("env1")
+    mgr.register("env1")
     names = [p.name for p in mgr.routes_dir.glob("env1*")]
     assert names == ["env1.yml"]
-    assert "8180" in (mgr.routes_dir / "env1.yml").read_text(encoding="utf-8")
+    assert "sandbox-env1-api:8080" in (mgr.routes_dir / "env1.yml").read_text(encoding="utf-8")
