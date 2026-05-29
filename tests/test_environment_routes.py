@@ -267,3 +267,60 @@ def test_create_environment_localhost_reserved(tmp_path, monkeypatch):
     })
     assert r.status_code == 422
     assert "api_host" in r.json()["detail"]
+
+
+# ── T160: path resolution and error handling ──────────────────────────────────
+
+
+def test_custom_sandbox_root_resolves_correctly(tmp_path, monkeypatch):
+    """Environment actions use a configurable sandbox root, not hardcoded paths."""
+    custom_root = tmp_path / "custom-sandbox-root"
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+    from services.control_api.services.sandbox_manager import SandboxManager
+
+    app = _make_app(tmp_path)
+    app.state._sandbox_manager = SandboxManager(
+        sandboxes_dir=custom_root / "myproject",
+        proxy_routes_dir=tmp_path / "proxy_routes",
+    )
+    client = TestClient(app)
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        r = client.post("/environments", json={"env_name": "custom-env", "project_root": "/project"})
+    assert r.status_code == 201, r.text
+    env_id = r.json()["id"]
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        stop_r = client.post(f"/environments/{env_id}/stop")
+    assert stop_r.status_code == 200
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        del_r = client.delete(f"/environments/{env_id}")
+    assert del_r.status_code == 204
+
+
+def test_missing_sandbox_returns_readable_404(tmp_path, monkeypatch):
+    """Requesting an action on a non-existent sandbox returns 404 with a human-readable message."""
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    nonexistent = "deadbeef0000"
+    r = client.get(f"/environments/{nonexistent}")
+    assert r.status_code == 404
+    assert "environment not found" in r.json()["detail"]
+
+    r2 = client.post(f"/environments/{nonexistent}/stop")
+    assert r2.status_code == 404
+    assert "environment not found" in r2.json()["detail"]
+
+
+def test_no_hardcoded_sandboxes_path_in_sandbox_manager():
+    """sandbox_manager.py must not contain hardcoded /sandboxes/... path construction."""
+    src = Path(__file__).resolve().parents[1] / "services" / "control_api" / "services" / "sandbox_manager.py"
+    content = src.read_text(encoding="utf-8")
+    assert 'Path("/sandboxes")' not in content, 'found hardcoded Path("/sandboxes")'
+    assert '"/sandboxes/"' not in content, 'found hardcoded "/sandboxes/" string'

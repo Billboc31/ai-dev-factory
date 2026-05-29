@@ -44,9 +44,10 @@ def test_resolve_host_runtime_root_skips_sandbox_scoped_runtime(monkeypatch, tmp
     sandbox = tmp_path / "sandboxes" / "abc" / "runtime"
     sandbox.mkdir(parents=True)
     monkeypatch.delenv("HOST_RUNTIME_ROOT", raising=False)
+    monkeypatch.setenv("SANDBOX_ROOT", str(tmp_path / "sandboxes"))
     monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(sandbox))
     root = resolve_host_runtime_root()
-    assert "sandboxes" not in root.parts
+    assert not str(root).startswith(str(tmp_path / "sandboxes"))
     assert root == Path("~/runtime/ai-dev-factory").expanduser().resolve()
 
 

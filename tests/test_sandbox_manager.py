@@ -385,3 +385,68 @@ def test_recreate_sandbox_after_cleanup(mgr):
     s2 = mgr.create("T001", "/project")
     assert s2.id != s1.id
     assert s2.status == SandboxStatus.stopped
+
+
+# ── T160: path resolution via helpers ────────────────────────────────────────
+
+
+def test_path_helpers_use_sandboxes_dir(tmp_path):
+    """_env_file_path and _runtime_root_path resolve under the configured sandboxes_dir."""
+    custom_dir = tmp_path / "custom_sandboxes"
+    m = SandboxManager(sandboxes_dir=custom_dir)
+    m._proxy._auto_ensure_infra = False
+    assert m._env_file_path("abc123") == custom_dir / "abc123" / ".env"
+    assert m._runtime_root_path("abc123") == custom_dir / "abc123" / "runtime"
+
+
+def test_stop_uses_helper_path_ignoring_stale_env_file(mgr):
+    """stop() resolves the env file through the path helper, not state.env_file."""
+    s = mgr.create("T001", "/project")
+    mgr._write_state(s.model_copy(update={"env_file": "/wrong/stale/path/.env"}))
+
+    invoked_cmds: list[list[str]] = []
+
+    def capture(cmd, *args, **kwargs):
+        if isinstance(cmd, list):
+            invoked_cmds.append(cmd)
+        m = MagicMock()
+        m.returncode = 0
+        m.stdout = ""
+        m.stderr = ""
+        return m
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=capture):
+        mgr.stop(s.id)
+
+    env_file_cmds = [cmd for cmd in invoked_cmds if "--env-file" in cmd]
+    assert env_file_cmds, "compose down must have been called with --env-file"
+    idx = env_file_cmds[0].index("--env-file") + 1
+    used_path = env_file_cmds[0][idx]
+    assert used_path.startswith(str(mgr.sandboxes_dir)), "env-file must be under sandboxes_dir"
+    assert "/wrong/stale/path" not in used_path
+
+
+def test_logs_uses_helper_path_ignoring_stale_env_file(mgr):
+    """logs() resolves the env file through the path helper, not state.env_file."""
+    s = mgr.create("T001", "/project")
+    mgr._write_state(s.model_copy(update={"env_file": "/stale/.env"}))
+
+    invoked_cmds: list[list[str]] = []
+    mock_result = MagicMock()
+    mock_result.returncode = 0
+    mock_result.stdout = "log output"
+    mock_result.stderr = ""
+
+    def capture(cmd, *args, **kwargs):
+        if isinstance(cmd, list):
+            invoked_cmds.append(cmd)
+        return mock_result
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=capture):
+        mgr.logs(s.id)
+
+    assert invoked_cmds, "subprocess must have been called"
+    idx = invoked_cmds[0].index("--env-file") + 1
+    used_path = invoked_cmds[0][idx]
+    assert used_path.startswith(str(mgr.sandboxes_dir)), "env-file must be under sandboxes_dir"
+    assert "/stale" not in used_path
