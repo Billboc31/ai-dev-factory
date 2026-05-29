@@ -329,6 +329,7 @@ def _unregister_proxy_route(
         ).unregister(
             sandbox_id,
             compose_project=compose_project,
+            remove_route_file=True,
             log=lambda line: _append_log(log_path, line),
         )
         _append_log(log_path, f"proxy: route unregistered for {sandbox_id}\n")

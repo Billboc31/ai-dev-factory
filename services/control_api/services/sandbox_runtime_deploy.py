@@ -22,6 +22,7 @@ from pathlib import Path
 from ..models.sandbox import EnvironmentMode, LifecyclePhase, SandboxState, SandboxStatus
 from .infra_service_manager import resolve_proxy_routes_dir
 from .proxy_manager import ProxyManager, build_sandbox_urls
+from .proxy_route_files import route_file_path, validate_route_file
 
 logger = logging.getLogger("control-api")
 
@@ -297,9 +298,10 @@ def deploy_operational_runtime(
             )
         except Exception as exc:
             return f"proxy route registration failed: {exc}"
-        route_file = routes_dir / f"{state.id}.yml"
-        if not route_file.exists():
-            return "proxy route file was not created on host runtime"
+        route_file = route_file_path(routes_dir, state.id)
+        err = validate_route_file(route_file)
+        if err:
+            return err
         route_registered = True
         rs._append_log(
             log_path,
@@ -314,10 +316,6 @@ def deploy_operational_runtime(
         ok, wt_error = rs._create_worktree(project_root, worktree_path, log_path)
         if not ok:
             rs._stop_sandbox_supervisor(supervisor_proc, runtime_root, log_path)
-            ProxyManager(routes_dir=routes_dir, auto_ensure_infra=False).unregister(
-                state.id,
-                compose_project=state.compose_project,
-            )
             err = wt_error or "worktree creation failed"
             _persist(LifecyclePhase.failed, last_step="worktree", lifecycle_error=err)
             return OperationalDeployResult(
@@ -393,6 +391,7 @@ def deploy_operational_runtime(
         ProxyManager(routes_dir=routes_dir, auto_ensure_infra=False).unregister(
             state.id,
             compose_project=state.compose_project,
+            remove_route_file=False,
         )
         err = script_error or "operational scripts failed"
         _persist(

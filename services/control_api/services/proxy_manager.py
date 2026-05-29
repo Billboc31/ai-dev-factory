@@ -23,6 +23,14 @@ from .proxy_network import (
     detach_traefik_from_compose_project,
     resolve_route_backends,
 )
+from .proxy_route_files import (
+    atomic_write_route_file,
+    cleanup_orphan_temp_files,
+    route_file_path,
+    safe_remove_route_file,
+    validate_route_file,
+    verify_route_visible_in_traefik_container,
+)
 
 logger = logging.getLogger("control-api")
 
@@ -83,11 +91,12 @@ class ProxyManager:
     ) -> None:
         if routes_dir is None:
             routes_dir = resolve_proxy_routes_dir()
-        self.routes_dir = routes_dir
+        self.routes_dir = routes_dir.resolve()
         self.routes_dir.mkdir(parents=True, exist_ok=True)
+        cleanup_orphan_temp_files(self.routes_dir)
         dashboard_file = self.routes_dir / "_dashboard.yml"
         if not dashboard_file.exists():
-            dashboard_file.write_text(_DASHBOARD_ROUTE, encoding="utf-8")
+            atomic_write_route_file(dashboard_file, _DASHBOARD_ROUTE)
         # ``auto_ensure_infra=False`` keeps register() hermetic in tests.
         if auto_start_traefik is not None:
             auto_ensure_infra = auto_start_traefik
@@ -143,18 +152,32 @@ class ProxyManager:
             f"          - url: \"{backends['api']}\"\n"
         )
 
-        route_file = self.routes_dir / f"{sandbox_id}.yml"
-        tmp_file = route_file.with_suffix(".yml.tmp")
-        tmp_file.write_text(content, encoding="utf-8")
-        tmp_file.rename(route_file)
+        route_file = route_file_path(self.routes_dir, sandbox_id)
+        atomic_write_route_file(route_file, content)
+
+        err = validate_route_file(route_file)
+        if err:
+            raise RuntimeError(err)
+
+        container_err = verify_route_visible_in_traefik_container(route_file)
+        if container_err:
+            if log:
+                log(f"proxy: warning: {container_err}\n")
+            logger.warning(container_err)
+        elif log:
+            log(
+                f"proxy: route file verified on host and in Traefik container: "
+                f"{route_file}\n"
+            )
 
         urls = build_sandbox_urls(sandbox_id, web_host=web_host, api_host=api_host)
         logger.info(
-            "proxy: route registered sandbox=%s dir=%s backend=%s urls=%s",
+            "proxy: route registered sandbox=%s dir=%s backend=%s urls=%s file=%s",
             sandbox_id,
             self.routes_dir,
             backend_mode,
             urls,
+            route_file,
         )
         return urls
 
@@ -163,20 +186,19 @@ class ProxyManager:
         sandbox_id: str,
         *,
         compose_project: str | None = None,
+        remove_route_file: bool = False,
         log: Callable[[str], None] | None = None,
     ) -> None:
-        """Remove the route file for *sandbox_id*. No-op if missing.
+        """Detach Traefik from the compose network and optionally remove the route.
 
-        Never touches the global Traefik infrastructure (the
-        ``_dashboard.yml`` file or any other ``_``-prefixed file) and
-        never touches other sandboxes' routes.
+        *remove_route_file* defaults to False so redeploy/healthcheck failures
+        do not delete routes while Traefik's watcher may still reference them.
+        Environment destruction passes ``remove_route_file=True``.
         """
-        route_file = self.routes_dir / f"{sandbox_id}.yml"
-        try:
-            route_file.unlink()
-            logger.info("proxy route unregistered: sandbox=%s", sandbox_id)
-        except FileNotFoundError:
-            pass
+        if remove_route_file:
+            route_file = route_file_path(self.routes_dir, sandbox_id)
+            safe_remove_route_file(route_file)
+            logger.info("proxy route removed: sandbox=%s file=%s", sandbox_id, route_file)
         if compose_project:
             detach_traefik_from_compose_project(compose_project, log=log)
 
@@ -203,14 +225,8 @@ class ProxyManager:
                 continue
             if name in active:
                 continue
-            try:
-                route_file.unlink()
-                removed.append(name)
-            except OSError as exc:
-                logger.warning(
-                    "proxy: failed to remove stale route %s: %s",
-                    route_file, exc,
-                )
+            safe_remove_route_file(route_file)
+            removed.append(name)
         if removed:
             logger.info("proxy: cleaned %d stale route(s): %s", len(removed), removed)
         return removed

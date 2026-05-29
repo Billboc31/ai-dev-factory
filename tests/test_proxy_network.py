@@ -137,5 +137,5 @@ def test_unregister_detaches_compose_network(tmp_path):
     ) as mock_detach:
         mgr = ProxyManager(routes_dir=routes, auto_ensure_infra=False)
         (routes / "x.yml").write_text("http:\n  routers: {}\n", encoding="utf-8")
-        mgr.unregister("x", compose_project="sandbox-x")
+        mgr.unregister("x", compose_project="sandbox-x", remove_route_file=True)
     mock_detach.assert_called_once_with("sandbox-x", log=None)

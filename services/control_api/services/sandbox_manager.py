@@ -538,6 +538,7 @@ class SandboxManager:
         self._proxy.unregister(
             sandbox_id,
             compose_project=state.compose_project,
+            remove_route_file=True,
         )
 
         # 2. Resolve project root for deploy profile lookup.

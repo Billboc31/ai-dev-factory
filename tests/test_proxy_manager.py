@@ -53,12 +53,12 @@ def test_register_route_file_contains_ports(mgr):
 
 def test_unregister_removes_route_file(mgr):
     mgr.register("abc123", {"web": 3100, "api": 8180})
-    mgr.unregister("abc123")
+    mgr.unregister("abc123", remove_route_file=True)
     assert not (mgr.routes_dir / "abc123.yml").exists()
 
 
 def test_unregister_missing_file_is_safe(mgr):
-    mgr.unregister("nonexistent")
+    mgr.unregister("nonexistent", remove_route_file=True)
 
 
 def test_register_is_idempotent(mgr):
@@ -86,7 +86,7 @@ def test_concurrent_sandboxes_have_separate_files(mgr):
 def test_unregister_only_removes_target_sandbox(mgr):
     mgr.register("aaa111", {"web": 3100, "api": 8180})
     mgr.register("bbb222", {"web": 3200, "api": 8280})
-    mgr.unregister("aaa111")
+    mgr.unregister("aaa111", remove_route_file=True)
     assert not (mgr.routes_dir / "aaa111.yml").exists()
     assert (mgr.routes_dir / "bbb222.yml").exists()
 

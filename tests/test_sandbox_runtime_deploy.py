@@ -141,7 +141,9 @@ def test_deploy_operational_runtime_script_failure_cleans_up(tmp_path):
 
     assert result.success is False
     mock_unreg.assert_called_once_with(
-        state.id, compose_project=state.compose_project
+        state.id,
+        compose_project=state.compose_project,
+        remove_route_file=False,
     )
 
 
