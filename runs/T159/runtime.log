@@ -140,3 +140,17 @@
 [2026-05-29T08:40:53Z] push: tolerating runtime dirty files (not blocking): ['runs/T159/runtime.log']
 [2026-05-29T08:40:53Z] push: pushing branch=ticket/T159-t159-harden-runtime-sqlite-architecture-and-degrad
 [2026-05-29T08:40:55Z] push: done branch=ticket/T159-t159-harden-runtime-sqlite-architecture-and-degrad
+[2026-05-29T09:08:08Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-05-29T09:08:08Z] auto-run: running step=review
+[2026-05-29T09:08:08Z] auto-run: review decision context: context_file=runs/T159/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-29T09:08:08Z] prompt: resolved=prompts/generic/review.md source=generic
+[2026-05-29T09:08:08Z] prompt: generic fallback — injecting runs/T159/ticket.md
+[2026-05-29T09:08:08Z] compose: global-context=docs/ai/global-context.md
+[2026-05-29T09:08:08Z] compose: role=ai/roles/reviewer.md
+[2026-05-29T09:08:08Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-05-29T09:08:08Z] compose: skill=ai/skills/code-quality.md
+[2026-05-29T09:08:08Z] compose: skill=ai/skills/refactor-safety.md
+[2026-05-29T09:08:08Z] compose: skill=ai/skills/security.md
+[2026-05-29T09:08:08Z] compose: task (canonical prompt)
+[2026-05-29T09:08:08Z] compose: extra-context=runs/T159/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-05-29T09:08:08Z] snapshot: runtime-prompt=runs/T159/prompts/review-attempt-2.md
