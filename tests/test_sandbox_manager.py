@@ -399,6 +399,23 @@ def test_path_helpers_use_sandboxes_dir(tmp_path):
     assert m._runtime_root_path("abc123") == custom_dir / "abc123" / "runtime"
 
 
+def test_create_with_custom_sandbox_path_auto_mkdir(tmp_path):
+    """sandbox_path is used verbatim as the storage root; parents are created."""
+    registry_dir = tmp_path / "registry"
+    target = tmp_path / "sandboxes" / "demo"
+    m = SandboxManager(sandboxes_dir=registry_dir)
+    m._proxy._auto_ensure_infra = False
+    assert not target.exists()
+
+    state = m.create("demo", "/project", sandbox_path=str(target))
+
+    assert target.exists()
+    assert (target / ".env").exists()
+    assert (target / "state.json").exists()
+    assert state.sandbox_dir == str(target.resolve())
+    assert m._env_file_path(state.id) == target / ".env"
+
+
 def test_stop_uses_helper_path_ignoring_stale_env_file(mgr):
     """stop() resolves the env file through the path helper, not state.env_file."""
     s = mgr.create("T001", "/project")

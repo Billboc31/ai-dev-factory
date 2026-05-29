@@ -17,6 +17,37 @@ def _ok_compose(*args, **kwargs):
     return m
 
 
+def _deploy_ok_from_state(state, **kwargs):
+    from services.control_api.services.proxy_manager import build_sandbox_urls
+    from services.control_api.services.sandbox_runtime_deploy import OperationalDeployResult
+
+    urls = build_sandbox_urls(
+        state.id, web_host=state.web_host, api_host=state.api_host
+    )
+    return OperationalDeployResult(
+        success=True,
+        urls=urls,
+        supervisor_pid=424242,
+        route_registered=True,
+    )
+
+
+def _patch_deploy_ok():
+    return patch(
+        "services.control_api.services.environment_provision.deploy_operational_runtime",
+        side_effect=lambda state, **kw: _deploy_ok_from_state(state, **kw),
+    )
+
+
+def _patch_deploy_fail(error: str = "operational deploy failed"):
+    from services.control_api.services.sandbox_runtime_deploy import OperationalDeployResult
+
+    return patch(
+        "services.control_api.services.environment_provision.deploy_operational_runtime",
+        return_value=OperationalDeployResult(success=False, error=error),
+    )
+
+
 def _make_app(tmp_path: Path):
     from services.control_api.main import create_app
     from services.control_api.services.sandbox_manager import SandboxManager
@@ -40,10 +71,10 @@ def test_deploy_branch_environment(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+    with _patch_deploy_ok():
         r = client.post("/environments", json={
             "env_name": "feature/my-branch",
-            "project_root": "/project",
+            "project_root": str(tmp_path / "myproject"),
             "ref": "feature/my-branch",
             "ref_type": "branch",
             "env_type": "feature",
@@ -64,10 +95,10 @@ def test_deploy_persistent_environment(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+    with _patch_deploy_ok():
         r = client.post("/environments", json={
             "env_name": "develop",
-            "project_root": "/project",
+            "project_root": str(tmp_path / "myproject"),
             "deployment_mode": "persistent",
         })
 
@@ -82,9 +113,9 @@ def test_concurrent_environment_deployments(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
-        client.post("/environments", json={"env_name": "env-a", "project_root": "/project"})
-        client.post("/environments", json={"env_name": "env-b", "project_root": "/project"})
+    with _patch_deploy_ok():
+        client.post("/environments", json={"env_name": "env-a", "project_root": str(tmp_path / "myproject")})
+        client.post("/environments", json={"env_name": "env-b", "project_root": str(tmp_path / "myproject")})
 
     r = client.get("/environments")
     assert r.status_code == 200
@@ -100,8 +131,8 @@ def test_environment_deletion_cleanup(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
-        r = client.post("/environments", json={"env_name": "to-delete", "project_root": "/project"})
+    with _patch_deploy_ok():
+        r = client.post("/environments", json={"env_name": "to-delete", "project_root": str(tmp_path / "myproject")})
         env_id = r.json()["id"]
         del_r = client.delete(f"/environments/{env_id}")
 
@@ -117,10 +148,10 @@ def test_branch_ref_display_correctness(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+    with _patch_deploy_ok():
         r = client.post("/environments", json={
             "env_name": "preview-1",
-            "project_root": "/project",
+            "project_root": str(tmp_path / "myproject"),
             "ref": "refs/pull/42/merge",
             "ref_type": "pr_ref",
         })
@@ -140,8 +171,8 @@ def test_environment_lifecycle_transitions(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
-        r = client.post("/environments", json={"env_name": "staging", "project_root": "/project"})
+    with _patch_deploy_ok():
+        r = client.post("/environments", json={"env_name": "staging", "project_root": str(tmp_path / "myproject")})
         env_id = r.json()["id"]
         assert r.json()["deployed_at"] is not None
 
@@ -158,8 +189,11 @@ def test_dashboard_action_idempotency(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
-        r = client.post("/environments", json={"env_name": "idem", "project_root": "/project"})
+    with _patch_deploy_ok(), patch(
+        "services.control_api.services.sandbox_manager.subprocess.run",
+        side_effect=_ok_compose,
+    ):
+        r = client.post("/environments", json={"env_name": "idem", "project_root": str(tmp_path / "myproject")})
         env_id = r.json()["id"]
         client.post(f"/environments/{env_id}/stop")
         # Stop an already-stopped environment — must not 5xx
@@ -179,10 +213,10 @@ def test_create_environment_with_custom_hosts(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+    with _patch_deploy_ok():
         r = client.post("/environments", json={
             "env_name": "demo",
-            "project_root": "/project",
+            "project_root": str(tmp_path / "myproject"),
             "web_host": "demo.ai-dev-factory.localhost",
             "api_host": "api.demo.ai-dev-factory.localhost",
         })
@@ -204,7 +238,7 @@ def test_create_environment_invalid_host_format(tmp_path, monkeypatch):
 
     r = client.post("/environments", json={
         "env_name": "bad",
-        "project_root": "/project",
+        "project_root": str(tmp_path / "myproject"),
         "web_host": "my host!.localhost",
     })
     assert r.status_code == 422
@@ -220,7 +254,7 @@ def test_create_environment_reserved_host(tmp_path, monkeypatch):
 
     r = client.post("/environments", json={
         "env_name": "bad",
-        "project_root": "/project",
+        "project_root": str(tmp_path / "myproject"),
         "web_host": "traefik.ai-dev-factory.localhost",
     })
     assert r.status_code == 422
@@ -235,22 +269,27 @@ def test_create_environment_host_collision(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+    with _patch_deploy_ok():
         r1 = client.post("/environments", json={
             "env_name": "first",
-            "project_root": "/project",
+            "project_root": str(tmp_path / "myproject"),
             "web_host": "shared.ai-dev-factory.localhost",
         })
-    assert r1.status_code == 201, r1.text
+        assert r1.status_code == 201, r1.text
+        route_file = tmp_path / "proxy_routes" / f"{r1.json()['id']}.yml"
+        route_file.write_text(
+            "http:\n  routers:\n    web:\n      rule: Host(`shared.ai-dev-factory.localhost`)\n",
+            encoding="utf-8",
+        )
 
-    # Second environment trying to claim the same host must be rejected.
-    r2 = client.post("/environments", json={
+        # Second environment trying to claim the same host must be rejected.
+        r2 = client.post("/environments", json={
         "env_name": "second",
-        "project_root": "/project",
-        "web_host": "shared.ai-dev-factory.localhost",
-    })
-    assert r2.status_code == 422
-    assert "web_host" in r2.json()["detail"]
+        "project_root": str(tmp_path / "myproject"),
+            "web_host": "shared.ai-dev-factory.localhost",
+        })
+        assert r2.status_code == 422
+        assert "web_host" in r2.json()["detail"]
 
 
 def test_create_environment_localhost_reserved(tmp_path, monkeypatch):
@@ -262,7 +301,7 @@ def test_create_environment_localhost_reserved(tmp_path, monkeypatch):
 
     r = client.post("/environments", json={
         "env_name": "bad",
-        "project_root": "/project",
+        "project_root": str(tmp_path / "myproject"),
         "api_host": "localhost",
     })
     assert r.status_code == 422
@@ -286,8 +325,11 @@ def test_custom_sandbox_root_resolves_correctly(tmp_path, monkeypatch):
     )
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
-        r = client.post("/environments", json={"env_name": "custom-env", "project_root": "/project"})
+    with _patch_deploy_ok(), patch(
+        "services.control_api.services.sandbox_manager.subprocess.run",
+        side_effect=_ok_compose,
+    ):
+        r = client.post("/environments", json={"env_name": "custom-env", "project_root": str(tmp_path / "myproject")})
     assert r.status_code == 201, r.text
     env_id = r.json()["id"]
 
@@ -351,8 +393,8 @@ def test_create_environment_creates_real_sandbox_dir(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
-        r = client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": "/project"})
+    with _patch_deploy_ok():
+        r = client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": str(tmp_path / "myproject")})
     assert r.status_code == 201, r.text
     env_id = r.json()["id"]
     assert (tmp_path / "sandboxes" / env_id).exists()
@@ -367,8 +409,8 @@ def test_create_environment_creates_state_json(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
-        r = client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": "/project"})
+    with _patch_deploy_ok():
+        r = client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": str(tmp_path / "myproject")})
     assert r.status_code == 201, r.text
     env_id = r.json()["id"]
     state_file = tmp_path / "sandboxes" / env_id / "state.json"
@@ -384,8 +426,8 @@ def test_create_environment_creates_env_file(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
-        r = client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": "/project"})
+    with _patch_deploy_ok():
+        r = client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": str(tmp_path / "myproject")})
     assert r.status_code == 201, r.text
     env_id = r.json()["id"]
     assert (tmp_path / "sandboxes" / env_id / ".env").exists()
@@ -398,8 +440,8 @@ def test_failed_provisioning_returns_500(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_fail_compose_up):
-        r = client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": "/project"})
+    with _patch_deploy_fail("sandbox supervisor failed to start"):
+        r = client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": str(tmp_path / "myproject")})
     assert r.status_code >= 500, f"expected 5xx but got {r.status_code}: {r.text}"
 
 
@@ -410,8 +452,8 @@ def test_failed_provisioning_no_environment_card(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_fail_compose_up):
-        client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": "/project"})
+    with _patch_deploy_fail():
+        client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": str(tmp_path / "myproject")})
 
     r = client.get("/environments")
     assert r.status_code == 200
@@ -425,8 +467,8 @@ def test_failed_provisioning_sandbox_dir_removed(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_fail_compose_up):
-        client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": "/project"})
+    with _patch_deploy_fail():
+        client.post("/environments", json={"env_name": "demo-ai-dev-factory", "project_root": str(tmp_path / "myproject")})
 
     sandboxes_dir = tmp_path / "sandboxes"
     subdirs = [d for d in sandboxes_dir.iterdir() if d.is_dir()] if sandboxes_dir.exists() else []
@@ -442,8 +484,8 @@ def test_create_environment_sandbox_id_from_manager(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
-        r = client.post("/environments", json={"env_name": "demo", "project_root": "/project"})
+    with _patch_deploy_ok():
+        r = client.post("/environments", json={"env_name": "demo", "project_root": str(tmp_path / "myproject")})
     assert r.status_code == 201, r.text
     env_id = r.json()["id"]
     assert re.fullmatch(r"[0-9a-f]{12}", env_id), f"id is not a 12-char hex string: {env_id!r}"
@@ -456,8 +498,11 @@ def test_environment_actions_work_after_create(tmp_path, monkeypatch):
     app = _make_app(tmp_path)
     client = TestClient(app)
 
-    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
-        r = client.post("/environments", json={"env_name": "demo", "project_root": "/project"})
+    with _patch_deploy_ok(), patch(
+        "services.control_api.services.sandbox_manager.subprocess.run",
+        side_effect=_ok_compose,
+    ):
+        r = client.post("/environments", json={"env_name": "demo", "project_root": str(tmp_path / "myproject")})
         assert r.status_code == 201, r.text
         env_id = r.json()["id"]
 
@@ -472,3 +517,212 @@ def test_environment_actions_work_after_create(tmp_path, monkeypatch):
 
         del_r = client.delete(f"/environments/{env_id}")
         assert del_r.status_code < 500, f"delete returned {del_r.status_code}"
+
+
+# ── Custom sandbox directory auto-creation ────────────────────────────────────
+
+
+def test_create_environment_auto_creates_custom_sandbox_path(tmp_path, monkeypatch):
+    """sandbox_path is the runtime location; parent dirs are created automatically."""
+    import json as _json
+
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    custom = tmp_path / "sandboxes" / "demo"
+    assert not custom.exists()
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with _patch_deploy_ok():
+        r = client.post(
+            "/environments",
+            json={
+                "env_name": "demo",
+                "project_root": str(tmp_path / "myproject"),
+                "sandbox_path": str(custom),
+            },
+        )
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert custom.exists()
+    assert (custom / ".env").exists()
+    assert (custom / "state.json").exists()
+    state = _json.loads((custom / "state.json").read_text(encoding="utf-8"))
+    assert state["id"] == data["id"]
+    assert state["sandbox_dir"] == str(custom.resolve())
+    assert data["sandbox_dir"] == str(custom.resolve())
+
+
+def test_create_environment_auto_creates_nested_custom_sandbox_path(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    nested = tmp_path / "custom" / "envs" / "demo" / "runtime"
+    assert not nested.parent.exists()
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with _patch_deploy_ok():
+        r = client.post(
+            "/environments",
+            json={
+                "env_name": "nested",
+                "project_root": str(tmp_path / "myproject"),
+                "sandbox_path": str(nested),
+            },
+        )
+    assert r.status_code == 201, r.text
+    assert nested.exists()
+    assert (nested / ".env").exists()
+    assert (nested / "state.json").exists()
+
+
+def test_failed_provisioning_cleans_custom_sandbox_path(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    custom = tmp_path / "sandboxes" / "demo"
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with _patch_deploy_fail():
+        r = client.post(
+            "/environments",
+            json={
+                "env_name": "demo",
+                "project_root": str(tmp_path / "myproject"),
+                "sandbox_path": str(custom),
+            },
+        )
+    assert r.status_code >= 500, r.text
+
+    list_r = client.get("/environments")
+    assert list_r.status_code == 200
+    assert list_r.json() == []
+
+    assert not custom.exists(), f"expected custom sandbox dir removed, found: {list(custom.rglob('*'))}"
+
+
+# ── Shared operational deploy pipeline (environments = deployer sandbox path) ─
+
+
+def test_create_environment_calls_deploy_operational_runtime(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with patch(
+        "services.control_api.services.environment_provision.deploy_operational_runtime",
+        side_effect=lambda state, **kw: _deploy_ok_from_state(state, **kw),
+    ) as mock_deploy:
+        r = client.post(
+            "/environments",
+            json={"env_name": "pipeline", "project_root": str(tmp_path / "myproject")},
+        )
+
+    assert r.status_code == 201, r.text
+    mock_deploy.assert_called_once()
+    call_kw = mock_deploy.call_args.kwargs
+    assert call_kw["mode"] == "environment"
+    assert call_kw["sandbox_dir"].exists()
+    assert r.json()["id"] in str(call_kw["sandbox_dir"])
+
+
+def test_create_environment_supervisor_pid_from_deploy_result(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with _patch_deploy_ok():
+        r = client.post(
+            "/environments",
+            json={"env_name": "supervised", "project_root": str(tmp_path / "myproject")},
+        )
+
+    assert r.status_code == 201, r.text
+    assert r.json()["supervisor_pid"] == 424242
+    assert r.json()["status"] == "running"
+
+
+def test_environment_logs_include_lifecycle_section(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with _patch_deploy_ok():
+        r = client.post(
+            "/environments",
+            json={"env_name": "logged", "project_root": str(tmp_path / "myproject")},
+        )
+    assert r.status_code == 201, r.text
+    env_id = r.json()["id"]
+    sandbox_dir = tmp_path / "sandboxes" / env_id
+    (sandbox_dir / "run.log").write_text(
+        "--- bootstrap.sh ---\nbuild ok\n", encoding="utf-8"
+    )
+
+    logs_r = client.get(f"/environments/{env_id}/logs")
+    assert logs_r.status_code == 200, logs_r.text
+    assert "Lifecycle" in logs_r.json()["logs"]
+    assert "bootstrap.sh" in logs_r.json()["logs"]
+
+
+def test_redeploy_calls_operational_deploy_pipeline(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with _patch_deploy_ok():
+        created = client.post(
+            "/environments",
+            json={"env_name": "redep", "project_root": str(tmp_path / "myproject")},
+        )
+    env_id = created.json()["id"]
+
+    with patch(
+        "services.control_api.services.environment_provision.deploy_operational_runtime",
+        side_effect=lambda state, **kw: _deploy_ok_from_state(state, **kw),
+    ) as mock_deploy, patch(
+        "services.control_api.services.sandbox_manager.subprocess.run",
+        side_effect=_ok_compose,
+    ):
+        redeploy_r = client.post(f"/environments/{env_id}/redeploy")
+
+    assert redeploy_r.status_code == 200, redeploy_r.text
+    mock_deploy.assert_called_once()
+    assert mock_deploy.call_args.kwargs["mode"] == "environment"
+
+
+def test_create_environment_urls_from_route_metadata(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with _patch_deploy_ok():
+        r = client.post(
+            "/environments",
+            json={
+                "env_name": "routed",
+                "project_root": str(tmp_path / "myproject"),
+                "web_host": "app.example.test",
+                "api_host": "api.example.test",
+            },
+        )
+
+    assert r.status_code == 201, r.text
+    assert r.json()["urls"]["web"] == "http://app.example.test"
+    assert r.json()["urls"]["api"] == "http://api.example.test"
+    assert r.json()["deployed_at"] is not None

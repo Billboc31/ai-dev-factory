@@ -54,6 +54,7 @@ The previously container-side runner could hang forever during
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 import datetime
 import fcntl
 import json
@@ -515,6 +516,7 @@ def _run_scripts(
     log_path: Path,
     state_base: dict,
     extra_env: dict | None = None,
+    on_step_start: Callable[[str], None] | None = None,
 ) -> tuple[bool, str | None, list[dict]]:
     steps: list[dict] = []
     scripts_dir_abs = worktree_path / _SCRIPTS_DIR
@@ -546,6 +548,8 @@ def _run_scripts(
             return False, error, steps
 
         step_started = _now_iso()
+        if on_step_start is not None:
+            on_step_start(script_name)
         _append_log(
             log_path,
             f"\n--- {script_name} ({script_rel}) ---\n",

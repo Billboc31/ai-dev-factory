@@ -1239,6 +1239,190 @@ def sandbox_delete(project_id: str):
     return {"ok": True}
 
 
+# ── named environments (host-side SandboxManager) ────────────────────────────
+#
+# Dashboard → API container (routes/environments.py)
+#            → services/control_api/services/environment_runner.py
+#            → POST /environments/provision (this surface)
+#            → environment_provision.provision_environment + _sandbox_manager
+
+
+class EnvironmentProvisionRequest(BaseModel):
+    env_name: str
+    project_root: str
+    ref: str | None = None
+    ref_type: str | None = None
+    env_type: str | None = None
+    deployment_mode: str | None = None
+    web_host: str | None = None
+    api_host: str | None = None
+    sandbox_path: str | None = None
+
+
+def _environment_mgr_unavailable():
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(
+        status_code=503,
+        content={"ok": False, "error": "sandbox manager unavailable on supervisor"},
+    )
+
+
+@app.post("/environments/provision")
+def environments_provision(body: EnvironmentProvisionRequest):
+    from fastapi.responses import JSONResponse
+
+    from services.control_api.services.environment_provision import (
+        provision_environment_from_body,
+    )
+
+    if _sandbox_manager is None:
+        return _environment_mgr_unavailable()
+    try:
+        state = provision_environment_from_body(
+            _sandbox_manager,
+            body.model_dump(),
+            mapper.map,
+        )
+        return {"ok": True, "state": state.model_dump(mode="json")}
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=422,
+            content={"ok": False, "error": str(exc)},
+        )
+    except Exception as exc:
+        logger.exception("supervisor: environment provision failed")
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": str(exc)},
+        )
+
+
+@app.get("/environments")
+def environments_list():
+    from fastapi.responses import JSONResponse
+
+    if _sandbox_manager is None:
+        return _environment_mgr_unavailable()
+    envs = [s.model_dump(mode="json") for s in _sandbox_manager.list() if s.env_name]
+    return {"ok": True, "environments": envs}
+
+
+@app.get("/environments/{env_id}")
+def environments_get(env_id: str):
+    from fastapi.responses import JSONResponse
+
+    from services.control_api.services.sandbox_manager import SandboxNotFoundError
+
+    if _sandbox_manager is None:
+        return _environment_mgr_unavailable()
+    try:
+        state = _sandbox_manager.status(env_id)
+        return {"ok": True, "state": state.model_dump(mode="json")}
+    except SandboxNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error": f"environment not found: {env_id}"},
+        )
+
+
+@app.post("/environments/{env_id}/redeploy")
+def environments_redeploy(env_id: str):
+    from fastapi.responses import JSONResponse
+
+    from services.control_api.services.sandbox_manager import SandboxNotFoundError
+
+    if _sandbox_manager is None:
+        return _environment_mgr_unavailable()
+    from services.control_api.services.environment_provision import redeploy_environment
+
+    try:
+        state = redeploy_environment(_sandbox_manager, env_id)
+        return {"ok": True, "state": state.model_dump(mode="json")}
+    except SandboxNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error": f"environment not found: {env_id}"},
+        )
+    except RuntimeError as exc:
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": str(exc)},
+        )
+
+
+@app.post("/environments/{env_id}/stop")
+def environments_stop(env_id: str):
+    from fastapi.responses import JSONResponse
+
+    from services.control_api.services.sandbox_manager import SandboxNotFoundError
+
+    if _sandbox_manager is None:
+        return _environment_mgr_unavailable()
+    try:
+        state = _sandbox_manager.stop(env_id)
+        return {"ok": True, "state": state.model_dump(mode="json")}
+    except SandboxNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error": f"environment not found: {env_id}"},
+        )
+
+
+@app.post("/environments/{env_id}/refresh")
+def environments_refresh(env_id: str):
+    from fastapi.responses import JSONResponse
+
+    from services.control_api.services.sandbox_manager import SandboxNotFoundError
+
+    if _sandbox_manager is None:
+        return _environment_mgr_unavailable()
+    try:
+        state = _sandbox_manager.refresh(env_id)
+        return {"ok": True, "state": state.model_dump(mode="json")}
+    except SandboxNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error": f"environment not found: {env_id}"},
+        )
+
+
+@app.delete("/environments/{env_id}")
+def environments_delete(env_id: str):
+    from fastapi.responses import JSONResponse
+
+    from services.control_api.services.sandbox_manager import SandboxNotFoundError
+
+    if _sandbox_manager is None:
+        return _environment_mgr_unavailable()
+    try:
+        _sandbox_manager.destroy(env_id)
+        return {"ok": True}
+    except SandboxNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error": f"environment not found: {env_id}"},
+        )
+
+
+@app.get("/environments/{env_id}/logs")
+def environments_logs(env_id: str):
+    from fastapi.responses import JSONResponse
+
+    from services.control_api.services.sandbox_manager import SandboxNotFoundError
+
+    if _sandbox_manager is None:
+        return _environment_mgr_unavailable()
+    try:
+        logs = _sandbox_manager.logs(env_id)
+        return {"ok": True, "logs": logs}
+    except SandboxNotFoundError:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error": f"environment not found: {env_id}"},
+        )
+
+
 # ── auto-fix proposal endpoints ───────────────────────────────────────────────
 #
 # Architecture:

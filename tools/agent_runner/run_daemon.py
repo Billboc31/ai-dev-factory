@@ -881,9 +881,9 @@ def handle_test_complete(
         pr_number = state_data.get("pr_number")
         if pr_number:
             if not detect_pr_conflict(ticket_id, pr_number, run_dir, repo):
-                _log(f"{ticket_id}: Failed to transition ticket {ticket_id} to CONFLICT_RESOLUTION_NEEDED")
+                _log(f"{ticket_id}: auto-merge failed but PR #{pr_number} has no conflicts — no state transition needed")
         else:
-            _log(f"{ticket_id}: PR conflict detected but no PR number in state.json for ticket {ticket_id}")
+            _log(f"{ticket_id}: auto-merge failed but no pr_number in state.json — cannot check for conflicts")
         return
     check_and_close_issue(ticket_id, run_dir, repo)
 

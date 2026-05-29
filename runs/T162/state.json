@@ -1,7 +1,7 @@
 {
   "ticket_id": "T162",
-  "state": "IMPLEMENTATION_FIX_REQUIRED",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T162-t162-repair-existing-pr-conflict-reviewer-detectio",
   "issue_number": 175,
-  "updated_at": "2026-05-29T13:47:19Z"
+  "updated_at": "2026-05-29T13:49:15Z"
 }
