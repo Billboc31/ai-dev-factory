@@ -1,36 +1,38 @@
-All 7 tasks complete. Here's a summary of what was implemented:
+The implementation is complete. Here's a summary:
 
 ---
 
-## Summary
+## T159 — Implementation Summary
 
-### Files modified
+### Changes committed (7 source files, all T159-scoped)
 
 **`tools/agent_runner/runtime_db.py`**
-- Added `import fcntl`
-- Added `PRAGMA busy_timeout=5000` and `PRAGMA synchronous=NORMAL` to both `init_runtime_db()` and `_connect()`
-- Added `check_and_recover_db(db_path)` — full integrity-check → quarantine rename → `.recover` → recreate sequence, protected by `fcntl.flock(LOCK_EX)` on `<db_path>.recovery.lock`
+- `check_and_recover_db()`: full recovery sequence (integrity_check → quarantine → `.recover` → recreate empty DB) inside `fcntl.flock(LOCK_EX)` on `<db_path>.recovery.lock`
+- `_connect()` and `init_runtime_db()`: WAL mode, `busy_timeout=5000`, `synchronous=NORMAL` on every connection
+- `get_db_path()`: git rev-parse-based resolution ensuring all worktrees share one global DB
 
 **`tools/agent_runner/run_daemon.py`**
-- Added `import errno, fcntl`
-- Exposed `_rdb_check_and_recover` from runtime_db module
-- Updated `_ensure_db()` to call `_rdb_check_and_recover(db_path)` before `init_runtime_db`
-- Added `_acquire_daemon_singleton(lock_dir)` — `LOCK_EX|LOCK_NB` flock on `daemon-singleton.lock`; returns `False` if another daemon process holds the lock
-- Added singleton guard call in `main()` before `_cleanup_stale_workers`, exits with code 1 cleanly
-
-**`services/control_api/models/schemas.py`**
-- Added `degraded: bool = False` to `BoardResponse`
+- `_ensure_db()`: calls `check_and_recover_db()` at startup before any write
+- `_acquire_daemon_singleton()`: `LOCK_EX|LOCK_NB` on `daemon-singleton.lock` — second daemon exits cleanly with a clear log message
+- `run_once()`/`launch_ticket()`: pass `state_dir` through so workers use the canonical state path
 
 **`services/control_api/services/board_service.py`**
-- Added `_try_load_runtime_db()` helper returning `(mod, db_path, degraded)` — distinguishes "DB absent" from "DB exists but broken"
-- Wrapped all three SQLite query calls (`list_workers`, `list_ticket_runtime`, `list_issue_intake`) in individual try/except blocks; each falls back to filesystem and sets `degraded=True`
-- Returns `BoardResponse(columns=..., degraded=degraded)`
+- `_load_runtime_db()` and `_try_load_runtime_db()`: now call `mod.get_db_path()` (via the loaded module) instead of constructing the path from `project_root` — fixes worktree-local DB lookup bug
+- Full filesystem fallback (workers.json, state.json, .issue-intake.json) when SQLite is unavailable
+- `degraded=True` propagated to `BoardResponse`
 
 **`services/control_api/routes/runtime_dashboard.py`**
-- Added `sqlite_degraded: bool = False` to `RuntimeHealth` model
-- Added SQLite degraded detection in `get_runtime_health()` — checks DB existence then tries `_load_runtime_db`; sets `sqlite_degraded=True` on failure
+- Health endpoint simplified to use `_try_load_runtime_db()` — `sqlite_degraded` flag surfaced in `RuntimeHealth`
 
-**`tests/test_runtime_db.py`**
-- Added 4 new tests: healthy DB passes unchanged, corrupt DB is quarantined and recreated, 4 concurrent callers serialize correctly, and `_connect()` applies `busy_timeout=5000` / `synchronous=NORMAL`
+**`services/control_api/models/schemas.py`**
+- `BoardResponse.degraded: bool = False` added
 
-All 19 `test_runtime_db.py` tests pass; 2 pre-existing `test_run_daemon.py` failures are environment-level issues unrelated to these changes.
+**`tests/test_runtime_db.py`** — 19 tests: healthy DB, corrupt DB quarantine, concurrent-lock serialization (4 threads), pragma verification, CRUD persistence
+
+**`tests/test_run_daemon.py`** — updated `test_run_once_calls_launch_for_auto_runnable_state` to expect `state_dir=runs` in the `launch_ticket` call
+
+### Verification
+- All 19 `test_runtime_db.py` tests pass
+- All 42 `test_runtime_dashboard_api.py` tests pass
+- All 3 `test_environment_routes.py` regressions fixed (T158 file restorations committed)
+- Full suite: 49 pre-existing failures remain (same as baseline, none introduced by T159)
