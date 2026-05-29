@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
-from ..models.sandbox import EnvironmentMode, EnvironmentType, RefType, SandboxState
+from ..models.sandbox import EnvironmentMode, EnvironmentType, RefType, SandboxState, SandboxStatus
 from ..services.sandbox_manager import SandboxManager, SandboxNotFoundError
 
 logger = logging.getLogger("control-api")
@@ -54,6 +54,13 @@ def _declared_hosts(routes_dir: Path) -> set[str]:
         except OSError:
             pass
     return hosts
+
+
+def _destroy_silently(mgr: SandboxManager, sandbox_id: str) -> None:
+    try:
+        mgr.destroy(sandbox_id)
+    except Exception as exc:
+        logger.warning("environment cleanup failed: sandbox_id=%s error=%s", sandbox_id, exc)
 
 
 def _get_manager(request: Request) -> SandboxManager:
@@ -112,10 +119,14 @@ def create_environment(body: CreateEnvironmentRequest, request: Request) -> Sand
         api_host=body.api_host,
     )
     try:
-        state = mgr.start(state.id)
+        started = mgr.start(state.id)
     except Exception as exc:
-        logger.warning("environment start failed after create: %s", exc)
-    return state
+        _destroy_silently(mgr, state.id)
+        raise HTTPException(status_code=500, detail=f"environment provisioning failed: {exc}")
+    if started.status == SandboxStatus.error:
+        _destroy_silently(mgr, started.id)
+        raise HTTPException(status_code=500, detail="environment provisioning failed: docker compose up failed")
+    return started
 
 
 @router.get("", response_model=list[SandboxState])
