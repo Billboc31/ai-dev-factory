@@ -595,6 +595,13 @@ class SandboxManager:
 
     def logs(self, sandbox_id: str, component: str | None = None) -> str:
         state = self._read_state(sandbox_id)
+        sandbox_dir = self._storage_dir(sandbox_id)
+        if state.env_name is not None:
+            from .sandbox_runtime_deploy import format_environment_logs
+
+            return format_environment_logs(
+                sandbox_dir, state, docker_component=component
+            )
         cmd = [
             "docker", "compose",
             "-p", state.compose_project,

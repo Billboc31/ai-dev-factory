@@ -18,6 +18,7 @@ from ..models.sandbox import EnvironmentMode, EnvironmentType, RefType, SandboxS
 from ..services import environment_runner
 from ..services.environment_provision import (
     provision_environment,
+    redeploy_environment as run_environment_redeploy,
     validate_host_format,
 )
 from ..services.environment_runner import ProvisionError
@@ -149,9 +150,11 @@ def redeploy_environment(env_id: str, request: Request) -> SandboxState:
             raise _provision_error_to_http(exc) from exc
     mgr = _get_manager(request)
     try:
-        return mgr.restart(env_id)
+        return run_environment_redeploy(mgr, env_id)
     except SandboxNotFoundError:
         raise HTTPException(status_code=404, detail=f"environment not found: {env_id}")
+    except RuntimeError as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
 @router.post("/{env_id}/stop", response_model=SandboxState)

@@ -1334,13 +1334,20 @@ def environments_redeploy(env_id: str):
 
     if _sandbox_manager is None:
         return _environment_mgr_unavailable()
+    from services.control_api.services.environment_provision import redeploy_environment
+
     try:
-        state = _sandbox_manager.restart(env_id)
+        state = redeploy_environment(_sandbox_manager, env_id)
         return {"ok": True, "state": state.model_dump(mode="json")}
     except SandboxNotFoundError:
         return JSONResponse(
             status_code=404,
             content={"ok": False, "error": f"environment not found: {env_id}"},
+        )
+    except RuntimeError as exc:
+        return JSONResponse(
+            status_code=500,
+            content={"ok": False, "error": str(exc)},
         )
 
 

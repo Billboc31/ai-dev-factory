@@ -11,10 +11,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from services.control_api.models.sandbox import SandboxState, SandboxStatus
 from services.control_api.services.sandbox_manager import SandboxManager
+from services.control_api.models.sandbox import EnvironmentMode, LifecyclePhase
 from services.control_api.services.sandbox_runtime_deploy import (
     OperationalDeployResult,
     apply_deploy_result_to_state,
     deploy_operational_runtime,
+    format_environment_logs,
 )
 
 
@@ -135,3 +137,80 @@ def test_deploy_operational_runtime_script_failure_cleans_up(tmp_path):
 
     assert result.success is False
     mock_unreg.assert_called_once_with(state.id)
+
+
+def test_format_environment_logs_includes_lifecycle_sections(tmp_path):
+    mgr, state, sandbox_dir = _sample_state(tmp_path)
+    (sandbox_dir / "run.log").write_text(
+        "--- bootstrap.sh ---\nok\n", encoding="utf-8"
+    )
+    (sandbox_dir / "runtime").mkdir(exist_ok=True)
+    (sandbox_dir / "runtime" / "supervisor.log").write_text(
+        "supervisor listening\n", encoding="utf-8"
+    )
+    text = format_environment_logs(sandbox_dir, state)
+    assert "Lifecycle" in text
+    assert "bootstrap.sh" in text
+    assert "Supervisor" in text
+    assert "supervisor listening" in text
+
+
+def test_deploy_runs_smoke_for_deploy_and_test_mode(tmp_path):
+    mgr, state, sandbox_dir = _sample_state(tmp_path)
+    state = mgr.create(
+        "env-smoke",
+        str(tmp_path / "project"),
+        env_name="env-smoke",
+        deployment_mode=EnvironmentMode.deploy_and_test,
+    )
+    sandbox_dir = mgr._storage_dir(state.id)
+    smoke = tmp_path / "project" / ".ai-dev-factory" / "scripts" / "smoke.sh"
+    smoke.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+    smoke.chmod(0o755)
+
+    fake_proc = MagicMock()
+    fake_proc.pid = 99
+    registered = {"web": "http://w", "api": "http://a"}
+    routes_dir = tmp_path / "routes"
+    phases: list[LifecyclePhase] = []
+
+    def capture(s):
+        if s.lifecycle_phase:
+            phases.append(s.lifecycle_phase)
+
+    with (
+        patch(
+            "services.control_api.services.sandbox_runtime_deploy.resolve_proxy_routes_dir",
+            return_value=routes_dir,
+        ),
+        patch(
+            "tools.agent_runner.run_sandbox._start_sandbox_supervisor",
+            return_value=fake_proc,
+        ),
+        patch("tools.agent_runner.run_sandbox._ensure_required_infra"),
+        patch("tools.agent_runner.run_sandbox._wait_for_proxy_url", return_value=True),
+        patch(
+            "tools.agent_runner.run_sandbox._run_scripts",
+            return_value=(True, None, [{"name": "healthcheck.sh", "status": "success"}]),
+        ),
+        patch(
+            "tools.agent_runner.run_sandbox._run_smoke_tests",
+            return_value=("success", None),
+        ) as mock_smoke,
+        patch(
+            "services.control_api.services.proxy_manager.ProxyManager.register",
+            return_value=registered,
+        ),
+    ):
+        (routes_dir / f"{state.id}.yml").write_text("x")
+        result = deploy_operational_runtime(
+            state,
+            sandbox_dir=sandbox_dir,
+            mode="environment",
+            persist_state=capture,
+        )
+
+    assert result.success is True
+    assert result.smoke_status == "success"
+    mock_smoke.assert_called_once()
+    assert LifecyclePhase.validating in phases

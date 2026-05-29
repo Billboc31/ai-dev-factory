@@ -9,6 +9,17 @@ const STATUS_COLORS = {
   destroyed: 'bg-gray-200 text-gray-500',
 }
 
+const LIFECYCLE_COLORS = {
+  provisioning: 'bg-amber-100 text-amber-800',
+  bootstrapping: 'bg-yellow-100 text-yellow-800',
+  building: 'bg-orange-100 text-orange-800',
+  starting: 'bg-sky-100 text-sky-800',
+  healthchecking: 'bg-cyan-100 text-cyan-800',
+  validating: 'bg-violet-100 text-violet-800',
+  running: 'bg-green-100 text-green-700',
+  failed: 'bg-red-100 text-red-700',
+}
+
 const TYPE_COLORS = {
   main: 'bg-blue-100 text-blue-700',
   develop: 'bg-purple-100 text-purple-700',
@@ -97,9 +108,11 @@ export default function EnvironmentCard({ env, onAction }) {
   }
 
   const statusColor = STATUS_COLORS[env.status] ?? 'bg-gray-100 text-gray-600'
+  const lifecycleColor = LIFECYCLE_COLORS[env.lifecycle_phase] ?? 'bg-gray-100 text-gray-600'
   const typeColor = TYPE_COLORS[env.env_type] ?? 'bg-gray-100 text-gray-600'
-  const webUrl = env.urls?.web
-  const apiUrl = env.urls?.api
+  const isReady = env.status === 'running' && env.lifecycle_phase !== 'failed'
+  const webUrl = isReady ? env.urls?.web : null
+  const apiUrl = isReady ? env.urls?.api : null
   const hasPorts = env.ports && Object.keys(env.ports).length > 0
 
   return (
@@ -110,6 +123,9 @@ export default function EnvironmentCard({ env, onAction }) {
           <span className="font-semibold text-gray-800">{env.env_name}</span>
           {env.env_type && <Badge label={env.env_type} colorClass={typeColor} />}
           <Badge label={env.status} colorClass={statusColor} />
+          {env.lifecycle_phase && env.lifecycle_phase !== env.status && (
+            <Badge label={env.lifecycle_phase} colorClass={lifecycleColor} />
+          )}
           {env.deployment_mode && (
             <Badge
               label={env.deployment_mode === 'persistent' ? 'Persistent' : 'Deploy & Test'}
@@ -180,6 +196,9 @@ export default function EnvironmentCard({ env, onAction }) {
         {env.stopped_at && <span>· Stopped: {env.stopped_at}</span>}
       </div>
 
+      {env.lifecycle_error && (
+        <p className="text-xs text-red-600">{env.lifecycle_error}</p>
+      )}
       {error && <p className="text-xs text-red-600">{error}</p>}
 
       {/* Actions */}

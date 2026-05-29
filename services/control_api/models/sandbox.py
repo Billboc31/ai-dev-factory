@@ -13,6 +13,19 @@ class SandboxStatus(str, Enum):
     destroyed = "destroyed"
 
 
+class LifecyclePhase(str, Enum):
+    """Fine-grained deploy lifecycle (environments / operational runtime)."""
+
+    provisioning = "provisioning"
+    bootstrapping = "bootstrapping"
+    building = "building"
+    starting = "starting"
+    healthchecking = "healthchecking"
+    validating = "validating"
+    running = "running"
+    failed = "failed"
+
+
 class EnvironmentType(str, Enum):
     main = "main"
     develop = "develop"
@@ -67,3 +80,9 @@ class SandboxState(BaseModel):
     # When set, runtime files (.env, state.json, runtime/) live here instead of
     # {sandboxes_dir}/{id}/. Path is stored exactly as resolved on the host.
     sandbox_dir: str | None = None
+    lifecycle_phase: LifecyclePhase | None = None
+    last_step: str | None = None
+    lifecycle_error: str | None = None
+    healthcheck_status: str | None = None
+    smoke_status: str | None = None
+    lifecycle_steps: list[dict] = []

@@ -15,11 +15,15 @@ from typing import Any
 from ..models.sandbox import (
     EnvironmentMode,
     EnvironmentType,
+    LifecyclePhase,
     RefType,
     SandboxState,
+    SandboxStatus,
 )
-from .sandbox_manager import SandboxManager
+from .sandbox_manager import SandboxManager, SandboxNotFoundError
 from .sandbox_runtime_deploy import (
+    OperationalDeployResult,
+    apply_deploy_failure,
     apply_deploy_result_to_state,
     deploy_operational_runtime,
 )
@@ -144,12 +148,26 @@ def provision_environment(
         api_host=api_host,
         sandbox_path=host_sandbox,
     )
+    state = state.model_copy(
+        update={
+            "status": SandboxStatus.creating,
+            "lifecycle_phase": LifecyclePhase.provisioning,
+        }
+    )
+    mgr._write_state(state)
     sandbox_dir = mgr._storage_dir(state.id)
+
+    def _persist(updated: SandboxState) -> None:
+        nonlocal state
+        state = updated
+        mgr._write_state(state)
+
     try:
         result = deploy_operational_runtime(
             state,
             sandbox_dir=sandbox_dir,
             mode="environment",
+            persist_state=_persist,
         )
     except Exception as exc:
         _destroy_quietly(mgr, state.id)
@@ -159,6 +177,61 @@ def provision_environment(
         raise RuntimeError(
             f"environment provisioning failed: {result.error or 'operational deploy failed'}"
         )
+    started = apply_deploy_result_to_state(state, result)
+    mgr._write_state(started)
+    return started
+
+
+def redeploy_environment(mgr: SandboxManager, env_id: str) -> SandboxState:
+    """Re-run the full operational deploy lifecycle for an existing environment."""
+    try:
+        state = mgr._read_state(env_id)
+    except SandboxNotFoundError as exc:
+        raise exc
+    if state.env_name is None:
+        raise ValueError(f"not an environment sandbox: {env_id}")
+
+    mgr.stop(env_id)
+    state = mgr._read_state(env_id)
+    state = state.model_copy(
+        update={
+            "status": SandboxStatus.creating,
+            "lifecycle_phase": LifecyclePhase.provisioning,
+            "lifecycle_error": None,
+            "urls": {},
+            "supervisor_pid": None,
+        }
+    )
+    mgr._write_state(state)
+    sandbox_dir = mgr._storage_dir(env_id)
+
+    def _persist(updated: SandboxState) -> None:
+        nonlocal state
+        state = updated
+        mgr._write_state(state)
+
+    try:
+        result = deploy_operational_runtime(
+            state,
+            sandbox_dir=sandbox_dir,
+            mode="environment",
+            persist_state=_persist,
+        )
+    except Exception as exc:
+        failed = apply_deploy_failure(
+            state,
+            OperationalDeployResult(success=False, error=str(exc)),
+        )
+        mgr._write_state(failed)
+        raise RuntimeError(f"environment redeploy failed: {exc}") from exc
+
+    if not result.success:
+        failed = apply_deploy_failure(state, result)
+        mgr._write_state(failed)
+        raise RuntimeError(
+            f"environment redeploy failed: {result.error or 'operational deploy failed'}"
+        )
+
     started = apply_deploy_result_to_state(state, result)
     mgr._write_state(started)
     return started

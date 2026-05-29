@@ -651,6 +651,59 @@ def test_create_environment_supervisor_pid_from_deploy_result(tmp_path, monkeypa
     assert r.json()["status"] == "running"
 
 
+def test_environment_logs_include_lifecycle_section(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with _patch_deploy_ok():
+        r = client.post(
+            "/environments",
+            json={"env_name": "logged", "project_root": str(tmp_path / "myproject")},
+        )
+    assert r.status_code == 201, r.text
+    env_id = r.json()["id"]
+    sandbox_dir = tmp_path / "sandboxes" / env_id
+    (sandbox_dir / "run.log").write_text(
+        "--- bootstrap.sh ---\nbuild ok\n", encoding="utf-8"
+    )
+
+    logs_r = client.get(f"/environments/{env_id}/logs")
+    assert logs_r.status_code == 200, logs_r.text
+    assert "Lifecycle" in logs_r.json()["logs"]
+    assert "bootstrap.sh" in logs_r.json()["logs"]
+
+
+def test_redeploy_calls_operational_deploy_pipeline(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with _patch_deploy_ok():
+        created = client.post(
+            "/environments",
+            json={"env_name": "redep", "project_root": str(tmp_path / "myproject")},
+        )
+    env_id = created.json()["id"]
+
+    with patch(
+        "services.control_api.services.environment_provision.deploy_operational_runtime",
+        side_effect=lambda state, **kw: _deploy_ok_from_state(state, **kw),
+    ) as mock_deploy, patch(
+        "services.control_api.services.sandbox_manager.subprocess.run",
+        side_effect=_ok_compose,
+    ):
+        redeploy_r = client.post(f"/environments/{env_id}/redeploy")
+
+    assert redeploy_r.status_code == 200, redeploy_r.text
+    mock_deploy.assert_called_once()
+    assert mock_deploy.call_args.kwargs["mode"] == "environment"
+
+
 def test_create_environment_urls_from_route_metadata(tmp_path, monkeypatch):
     monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
     from fastapi.testclient import TestClient
