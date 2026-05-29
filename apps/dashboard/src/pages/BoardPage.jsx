@@ -85,10 +85,11 @@ export default function BoardPage({ projectId }) {
   const [columns, setColumns] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [degraded, setDegraded] = useState(false)
 
   const fetchBoard = useCallback(() => {
     daemonApi.getBoardData(projectId)
-      .then(res => { setColumns(res.data.columns); setError(null) })
+      .then(res => { setColumns(res.data.columns); setDegraded(res.data.degraded ?? false); setError(null) })
       .catch(err => setError(err.response?.data?.detail || err.message))
       .finally(() => setLoading(false))
   }, [projectId])
@@ -99,6 +100,11 @@ export default function BoardPage({ projectId }) {
     <div>
       <h1 className="text-2xl font-bold mb-4">Daemon Board</h1>
       <ErrorBanner message={error} onClose={() => setError(null)} />
+      {degraded && (
+        <div className="mb-4 px-4 py-2 bg-yellow-50 border border-yellow-300 rounded text-yellow-800 text-sm">
+          SQLite runtime database unavailable — showing filesystem-derived runtime state
+        </div>
+      )}
 
       {loading && !columns && <p className="text-gray-500">Loading…</p>}
 
