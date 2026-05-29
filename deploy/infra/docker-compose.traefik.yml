@@ -34,4 +34,12 @@ services:
       - ${HOST_RUNTIME_ROOT:-~/runtime/ai-dev-factory}/proxy/routes:/routes
     extra_hosts:
       - "host.docker.internal:host-gateway"
+    networks:
+      - default
+      - ai-dev-factory-runtime
     restart: unless-stopped
+
+networks:
+  ai-dev-factory-runtime:
+    name: ai-dev-factory-runtime
+    driver: bridge
