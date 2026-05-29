@@ -1,8 +1,5 @@
-Plan updated at `runs/T159/plan.md`. The two changes from the review are incorporated:
+The plan is written to `runs/T159/plan.md`. Key changes from the previous attempt:
 
-1. **Section 2** — replaced the incorrect "File rename is atomic on POSIX; function is safe for concurrent callers" with the correct statement that rename is atomic but recovery/quarantine must still be protected by a file lock (`<db_path>.recovery.lock`), with an explicit description of when to acquire and release it.
-
-2. **Acceptance criteria** — added three new verifiable conditions:
-   - Recovery/quarantine is protected by a file lock at `<db_path>.recovery.lock`.
-   - Concurrent recovery attempts cannot race through quarantine or recreate simultaneously.
-   - A test covers the race condition (two concurrent callers against a corrupt DB).
+- **Section 2** now describes the full file-lock protocol: acquire `<db_path>.recovery.lock` via `fcntl.flock` before any check or mutation, release after schema init. The old misleading "atomic rename makes this safe" statement is replaced with the correct statement that the entire recovery sequence is a critical section.
+- **Section 8** adds explicit tests for both the single-caller and concurrent-caller scenarios.
+- **Acceptance criteria** adds three new verifiable conditions: lock acquired/released correctly, concurrent calls cannot race, and a test covers the race condition.
