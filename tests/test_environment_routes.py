@@ -26,7 +26,10 @@ def _make_app(tmp_path: Path):
     (proj / ".git").mkdir()
 
     app = create_app(project_root=proj, projects_root=tmp_path)
-    app.state._sandbox_manager = SandboxManager(sandboxes_dir=tmp_path / "sandboxes")
+    app.state._sandbox_manager = SandboxManager(
+        sandboxes_dir=tmp_path / "sandboxes",
+        proxy_routes_dir=tmp_path / "proxy_routes",
+    )
     return app
 
 
@@ -163,3 +166,104 @@ def test_dashboard_action_idempotency(tmp_path, monkeypatch):
         r2 = client.post(f"/environments/{env_id}/stop")
 
     assert r2.status_code < 500, f"expected 2xx but got {r2.status_code}"
+
+
+# ── T158: custom host validation ─────────────────────────────────────────────
+
+
+def test_create_environment_with_custom_hosts(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    monkeypatch.setenv("HOST_RUNTIME_ROOT", str(tmp_path / "host-runtime"))
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        r = client.post("/environments", json={
+            "env_name": "demo",
+            "project_root": "/project",
+            "web_host": "demo.ai-dev-factory.localhost",
+            "api_host": "api.demo.ai-dev-factory.localhost",
+        })
+
+    assert r.status_code == 201, r.text
+    data = r.json()
+    assert data["web_host"] == "demo.ai-dev-factory.localhost"
+    assert data["api_host"] == "api.demo.ai-dev-factory.localhost"
+    assert data["urls"]["web"] == "http://demo.ai-dev-factory.localhost"
+    assert data["urls"]["api"] == "http://api.demo.ai-dev-factory.localhost"
+
+
+def test_create_environment_invalid_host_format(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    r = client.post("/environments", json={
+        "env_name": "bad",
+        "project_root": "/project",
+        "web_host": "my host!.localhost",
+    })
+    assert r.status_code == 422
+    assert "web_host" in r.json()["detail"]
+
+
+def test_create_environment_reserved_host(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    r = client.post("/environments", json={
+        "env_name": "bad",
+        "project_root": "/project",
+        "web_host": "traefik.ai-dev-factory.localhost",
+    })
+    assert r.status_code == 422
+    assert "web_host" in r.json()["detail"]
+
+
+def test_create_environment_host_collision(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    monkeypatch.setenv("HOST_RUNTIME_ROOT", str(tmp_path / "host-runtime"))
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=_ok_compose):
+        r1 = client.post("/environments", json={
+            "env_name": "first",
+            "project_root": "/project",
+            "web_host": "shared.ai-dev-factory.localhost",
+        })
+    assert r1.status_code == 201, r1.text
+
+    # Second environment trying to claim the same host must be rejected.
+    r2 = client.post("/environments", json={
+        "env_name": "second",
+        "project_root": "/project",
+        "web_host": "shared.ai-dev-factory.localhost",
+    })
+    assert r2.status_code == 422
+    assert "web_host" in r2.json()["detail"]
+
+
+def test_create_environment_localhost_reserved(tmp_path, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    from fastapi.testclient import TestClient
+
+    app = _make_app(tmp_path)
+    client = TestClient(app)
+
+    r = client.post("/environments", json={
+        "env_name": "bad",
+        "project_root": "/project",
+        "api_host": "localhost",
+    })
+    assert r.status_code == 422
+    assert "api_host" in r.json()["detail"]
