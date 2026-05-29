@@ -28,3 +28,15 @@
 - prev: PLAN_REVIEW_NEEDED
 - step: approve-plan
 - next: PLAN_APPROVED
+
+## 2026-05-29T13:45:00Z
+
+- prev: PLAN_APPROVED
+- step: coder
+- next: IMPLEMENTATION_REVIEW_NEEDED
+
+## 2026-05-29T13:42:53Z
+
+- prev: PLAN_APPROVED
+- step: coder
+- next: IMPLEMENTATION_REVIEW_NEEDED
