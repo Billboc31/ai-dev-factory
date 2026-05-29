@@ -45,3 +45,12 @@
 [2026-05-29T15:28:11Z] compose: skill=ai/skills/debugging.md
 [2026-05-29T15:28:11Z] compose: task (canonical prompt)
 [2026-05-29T15:28:11Z] snapshot: runtime-prompt=runs/T164/prompts/tester-attempt-1.md
+[2026-05-29T15:36:07Z] auto-run: step=tester done rc=0
+[2026-05-29T15:36:07Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-05-29T15:36:07Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-05-29T15:36:07Z] commit-checkpoint: unstaged runtime garbage: ['runs/T164/runtime.log']
+[2026-05-29T15:36:08Z] commit-checkpoint: sha=79ab09cf files=5 title='test(T164/workflow,tests): tester — update 5 file(s)'
+[2026-05-29T15:36:08Z] auto-run: auto-push triggered
+[2026-05-29T15:36:08Z] push: tolerating runtime dirty files (not blocking): ['runs/T164/runtime.log']
+[2026-05-29T15:36:08Z] push: pushing branch=ticket/T164-t164-replace-docker-compose-v2-5-style-environment
+[2026-05-29T15:36:10Z] push: done branch=ticket/T164-t164-replace-docker-compose-v2-5-style-environment
