@@ -1,7 +1,7 @@
 {
   "ticket_id": "T165",
-  "state": "PLAN_APPROVED",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T165-t165-environment-flows-must-ensure-traefik-infra-b",
   "issue_number": 181,
-  "updated_at": "2026-06-01T19:56:06Z"
+  "updated_at": "2026-06-01T20:08:16Z"
 }
