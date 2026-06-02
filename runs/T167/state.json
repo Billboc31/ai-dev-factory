@@ -1,7 +1,7 @@
 {
   "ticket_id": "T167",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T167-t167-fix-traefik-dns-service-discovery-by-enforcin",
   "issue_number": 186,
-  "updated_at": "2026-06-02T12:16:56Z"
+  "updated_at": "2026-06-02T12:23:52Z"
 }
