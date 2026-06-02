@@ -210,11 +210,51 @@ class SandboxManager:
     # --- compose helper ---
 
     def _run_compose(self, sandbox: SandboxState, *args: str) -> tuple[int, str, str]:
-        cmd = [
-            "docker", "compose",
-            "-p", sandbox.compose_project,
-            "--env-file", str(self._env_file_path(sandbox.id)),
-        ] + list(args)
+        sandbox_env_file = str(self._env_file_path(sandbox.id))
+        deploy_env = Path(sandbox.project_root) / "deploy" / ".env"
+
+        env_files: list[str] = []
+        if deploy_env.exists():
+            env_files.append(str(deploy_env))
+        env_files.append(sandbox_env_file)
+
+        cmd_base = ["docker", "compose", "-p", sandbox.compose_project]
+        for ef in env_files:
+            cmd_base += ["--env-file", ef]
+
+        logger.info(
+            "sandbox compose: sandbox=%s SANDBOX_ID=%s env_files=[%s] project=%s",
+            sandbox.id, sandbox.id, ", ".join(env_files), sandbox.compose_project,
+        )
+
+        # Pre-flight config validation before 'up' — catches alias mismatch
+        # before any container is created.
+        if args and args[0] == "up":
+            config_result = subprocess.run(
+                cmd_base + ["config"],
+                capture_output=True,
+                text=True,
+                cwd=sandbox.project_root,
+                check=False,
+            )
+            expected_alias = f"sandbox-{sandbox.id}-"
+            if expected_alias not in config_result.stdout:
+                alias_lines = "\n".join(
+                    line for line in config_result.stdout.splitlines() if "sandbox-" in line
+                )
+                logger.warning(
+                    "sandbox compose config alias mismatch: sandbox=%s expected=%s aliases:\n%s",
+                    sandbox.id, expected_alias, alias_lines or "(none)",
+                )
+                return 1, "", (
+                    f"compose config alias mismatch: expected {expected_alias}, found:\n"
+                    + (alias_lines or "(none)")
+                )
+            logger.info(
+                "sandbox compose config ok: sandbox=%s alias=%s", sandbox.id, expected_alias
+            )
+
+        cmd = cmd_base + list(args)
         result = subprocess.run(
             cmd,
             capture_output=True,

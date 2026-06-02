@@ -23,7 +23,9 @@ fi
 
 # 2. Stop Docker stack (project-scoped by working directory)
 echo "stop: stopping Docker stack..."
-if [ -f deploy/.env ]; then
+if [ -f deploy/.env ] && [ -f "${RUN_DIR}/.env.compose" ]; then
+  docker compose --env-file deploy/.env --env-file "${RUN_DIR}/.env.compose" down
+elif [ -f deploy/.env ]; then
   docker compose --env-file deploy/.env down
 else
   docker compose down

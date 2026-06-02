@@ -163,6 +163,71 @@ def test_format_environment_logs_includes_lifecycle_sections(tmp_path):
     assert "supervisor listening" in text
 
 
+# ── T169: deployer_runner compose env-file ordering and early-failure ────────
+
+
+def test_deploy_inject_flags_includes_deploy_env(tmp_path):
+    """_inject_compose_flags prepends --env-file deploy/.env before sandbox env when present."""
+    from services.control_api.services.deployer_runner import _inject_compose_flags
+
+    cwd = tmp_path / "project"
+    cwd.mkdir()
+    (cwd / "deploy").mkdir()
+    (cwd / "deploy" / ".env").write_text("")
+
+    sandbox_env = str(tmp_path / "sandbox" / ".env")
+    cmd = _inject_compose_flags("docker compose up -d api", "myproject", sandbox_env, cwd=cwd)
+
+    deploy_env_path = str(cwd / "deploy" / ".env")
+    assert deploy_env_path in cmd, f"deploy/.env must appear in command: {cmd}"
+    assert sandbox_env in cmd, f"sandbox env must appear in command: {cmd}"
+    assert cmd.index(deploy_env_path) < cmd.index(sandbox_env), (
+        f"deploy/.env must precede sandbox env: {cmd}"
+    )
+
+
+def test_deploy_fails_early_on_wrong_compose_alias(tmp_path):
+    """_do_deploy returns ok=False before any compose up when config shows wrong alias."""
+    from services.control_api.services.deployer_runner import _do_deploy
+
+    cwd = tmp_path / "project"
+    cwd.mkdir()
+    (cwd / "deploy").mkdir()
+    (cwd / "deploy" / ".env").write_text("")
+
+    deploy_yml = cwd / ".ai-dev-factory" / "deploy.yml"
+    deploy_yml.parent.mkdir(parents=True)
+    deploy_yml.write_text(
+        "version: '1'\nproject: test\ncomponents:\n  - name: api\n    type: docker\n    service: api\n"
+    )
+
+    mgr = SandboxManager(sandboxes_dir=tmp_path / "sandboxes", proxy_routes_dir=tmp_path / "routes")
+    mgr._proxy._auto_ensure_infra = False
+    sandbox = mgr.create("T001", str(cwd))
+    sandbox = sandbox.model_copy(update={"worktree_path": str(cwd)})
+
+    up_called = False
+
+    def mock_run(cmd, **kwargs):
+        nonlocal up_called
+        m = MagicMock()
+        m.returncode = 0
+        m.stderr = ""
+        if isinstance(cmd, list) and "config" in cmd:
+            m.stdout = "sandbox-default-api\nsandbox-default-web\n"
+        else:
+            if isinstance(cmd, str) and " up " in cmd:
+                up_called = True
+            m.stdout = ""
+        return m
+
+    with patch("services.control_api.services.deployer_runner.subprocess.run", side_effect=mock_run):
+        result = _do_deploy("T001", cwd, sandbox=sandbox)
+
+    assert not result.ok, "deploy must fail when compose config alias is wrong"
+    assert not up_called, "docker compose up must NOT be called after config validation failure"
+
+
 def test_deploy_runs_smoke_for_deploy_and_test_mode(tmp_path):
     mgr, state, sandbox_dir = _sample_state(tmp_path)
     state = mgr.create(
