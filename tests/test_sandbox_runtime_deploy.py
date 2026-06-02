@@ -63,7 +63,7 @@ def test_deploy_operational_runtime_success(tmp_path):
             "tools.agent_runner.run_sandbox._start_sandbox_supervisor",
             return_value=fake_proc,
         ),
-        patch("tools.agent_runner.run_sandbox._ensure_required_infra"),
+        patch("tools.agent_runner.run_sandbox._ensure_required_infra") as mock_infra,
         patch("tools.agent_runner.run_sandbox._wait_for_proxy_url", return_value=True),
         patch("tools.agent_runner.run_sandbox._run_scripts", side_effect=_scripts_ok),
         patch(
@@ -80,6 +80,7 @@ def test_deploy_operational_runtime_success(tmp_path):
     assert result.urls == registered
     assert result.supervisor_pid == 55555
     assert result.route_registered is True
+    mock_infra.assert_called_once()
 
     updated = apply_deploy_result_to_state(state, result)
     assert updated.status == SandboxStatus.running

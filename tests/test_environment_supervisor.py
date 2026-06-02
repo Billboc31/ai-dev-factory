@@ -103,6 +103,71 @@ def test_supervisor_provision_missing_host_project_root(supervisor_app, monkeypa
     assert "does not exist on host runtime" in r.json()["error"]
 
 
+def test_provision_endpoint_triggers_infra_bootstrap(
+    supervisor_app, tmp_path, monkeypatch
+):
+    """HTTP provision endpoint → deploy_operational_runtime → _ensure_required_infra."""
+    sup_main, _runtime = supervisor_app
+    host_project = tmp_path / "host-clone"
+    host_project.mkdir()
+    (host_project / ".git").mkdir()
+    scripts = host_project / ".ai-dev-factory" / "scripts"
+    scripts.mkdir(parents=True)
+    for name in ("bootstrap.sh", "build.sh", "start.sh", "healthcheck.sh"):
+        s = scripts / name
+        s.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+        s.chmod(0o755)
+
+    monkeypatch.setattr(
+        sup_main.mapper,
+        "map",
+        lambda p: str(host_project) if p == "/app/clone" else p,
+    )
+
+    routes_dir = tmp_path / "routes"
+    routes_dir.mkdir(exist_ok=True)
+    fake_proc = MagicMock()
+    fake_proc.pid = 77777
+    registered = {"web": "http://w.test", "api": "http://a.test"}
+
+    def _scripts_ok(*_args, **kwargs):
+        cb = kwargs.get("on_step_complete")
+        if cb:
+            cb("start.sh")
+        return True, None, [{"name": "healthcheck.sh", "status": "pass"}]
+
+    client = TestClient(sup_main.app)
+    with (
+        patch(
+            "services.control_api.services.sandbox_runtime_deploy.resolve_proxy_routes_dir",
+            return_value=routes_dir,
+        ),
+        patch(
+            "tools.agent_runner.run_sandbox._start_sandbox_supervisor",
+            return_value=fake_proc,
+        ),
+        patch("tools.agent_runner.run_sandbox._ensure_required_infra") as mock_infra,
+        patch("tools.agent_runner.run_sandbox._wait_for_proxy_url", return_value=True),
+        patch("tools.agent_runner.run_sandbox._run_scripts", side_effect=_scripts_ok),
+        patch(
+            "services.control_api.services.proxy_manager.ProxyManager.register",
+            return_value=registered,
+        ),
+        patch(
+            "services.control_api.services.sandbox_runtime_deploy.validate_route_file",
+            return_value=None,
+        ),
+    ):
+        r = client.post(
+            "/environments/provision",
+            json={"env_name": "demo", "project_root": "/app/clone"},
+        )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+    mock_infra.assert_called_once()
+
+
 def test_api_routes_via_supervisor_when_host_path_invisible(
     tmp_path, monkeypatch
 ):
