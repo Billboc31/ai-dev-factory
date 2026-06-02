@@ -20,7 +20,7 @@ from ..models.sandbox import (
     SandboxStatus,
 )
 from .deployer_runner import _load_deploy_profile
-from .infra_service_manager import resolve_proxy_routes_dir
+from .infra_service_manager import ensure_runtime_network, resolve_proxy_routes_dir
 from .proxy_manager import ProxyManager, build_sandbox_urls
 from .runtime_resolver import get_project_sandbox_dir
 from .undeploy_runner import run_cleanup, run_undeploy
@@ -348,6 +348,7 @@ class SandboxManager:
 
     def start(self, sandbox_id: str) -> SandboxState:
         state = self._read_state(sandbox_id)
+        ensure_runtime_network()
         supervisor_pid = self._start_sandbox_supervisor(state)
         rc, _out, err = self._run_compose(state, "up", "-d")
         if rc != 0:

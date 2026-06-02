@@ -556,3 +556,33 @@ def test_start_validates_compose_config_before_up(mgr, tmp_path):
 
     assert result.status == SandboxStatus.error
     assert not up_called, "docker compose up must NOT be called after config alias validation failure"
+
+
+# ── T170: runtime network attachment ─────────────────────────────────────────
+
+
+def test_start_calls_ensure_runtime_network_before_compose_up(mgr):
+    """ensure_runtime_network() is called before docker compose up in SandboxManager.start()."""
+    s = mgr.create("T170", "/project")
+
+    call_order: list[str] = []
+
+    def record_run(cmd, *args, **kwargs):
+        if isinstance(cmd, list) and "up" in cmd:
+            call_order.append("compose-up")
+        return _ok_compose(cmd, *args, **kwargs)
+
+    with (
+        patch(
+            "services.control_api.services.sandbox_manager.ensure_runtime_network",
+            side_effect=lambda: call_order.append("ensure-network"),
+        ),
+        patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=record_run),
+    ):
+        mgr.start(s.id)
+
+    assert "ensure-network" in call_order, "ensure_runtime_network() was not called"
+    assert "compose-up" in call_order, "docker compose up was not called"
+    assert call_order.index("ensure-network") < call_order.index("compose-up"), (
+        "ensure_runtime_network() must be called before docker compose up"
+    )
