@@ -51,3 +51,23 @@
 [2026-06-02T15:32:15Z] auto-run: step=coder done rc=1
 [2026-06-02T15:32:15Z] auto-run: runtime failure: empty_output (rc=1)
 [2026-06-02T15:32:15Z] auto-run: step=coder failed rc=1, state unchanged=PLAN_APPROVED
+[2026-06-02T15:51:22Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-02T15:51:22Z] auto-run: running step=tester
+[2026-06-02T15:51:22Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-02T15:51:22Z] prompt: generic fallback — injecting runs/T169/ticket.md
+[2026-06-02T15:51:22Z] compose: global-context=docs/ai/global-context.md
+[2026-06-02T15:51:22Z] compose: role=ai/roles/tester.md
+[2026-06-02T15:51:22Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-02T15:51:22Z] compose: skill=ai/skills/testing.md
+[2026-06-02T15:51:22Z] compose: skill=ai/skills/debugging.md
+[2026-06-02T15:51:22Z] compose: task (canonical prompt)
+[2026-06-02T15:51:22Z] snapshot: runtime-prompt=runs/T169/prompts/tester-attempt-1.md
+[2026-06-02T15:56:09Z] auto-run: step=tester done rc=0
+[2026-06-02T15:56:09Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-02T15:56:09Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-02T15:56:09Z] commit-checkpoint: unstaged runtime garbage: ['runs/T169/runtime.log']
+[2026-06-02T15:56:09Z] commit-checkpoint: sha=8eb9d135 files=4 title='test(T169/workflow): tester — update 4 file(s)'
+[2026-06-02T15:56:09Z] auto-run: auto-push triggered
+[2026-06-02T15:56:09Z] push: tolerating runtime dirty files (not blocking): ['runs/T169/runtime.log']
+[2026-06-02T15:56:09Z] push: pushing branch=ticket/T169-t169-fix-docker-compose-env-interpolation-ignoring
+[2026-06-02T15:56:11Z] push: done branch=ticket/T169-t169-fix-docker-compose-env-interpolation-ignoring
