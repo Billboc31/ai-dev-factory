@@ -1,7 +1,7 @@
 {
   "ticket_id": "T166",
-  "state": "PLAN_FIX_REQUIRED",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T166-t166-diagnose-and-fix-routed-backend-502-after-rou",
   "issue_number": 184,
-  "updated_at": "2026-06-02T08:03:41Z"
+  "updated_at": "2026-06-02T09:02:29Z"
 }
