@@ -41,8 +41,8 @@ def test_surviving_sandbox_route_still_uses_alias_backend(tmp_path):
     mgr.unregister("sandboxA", remove_route_file=True)
 
     content = (mgr.routes_dir / "sandboxB.yml").read_text()
-    assert "sandbox-sandboxB-api:8080" in content
-    assert "sandbox-sandboxB-web:80" in content
+    assert "sandbox-sandboxb-api:8080" in content
+    assert "sandbox-sandboxb-web:80" in content
 
 
 def test_cleanup_stale_leaves_active_sandbox(tmp_path):
