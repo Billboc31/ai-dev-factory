@@ -307,10 +307,15 @@ def deploy_operational_runtime(
             f"proxy: route registered sandbox={state.id} dir={routes_dir} urls={registered_urls}\n",
         )
         probe_url = registered_urls.get("api") or urls["api"]
-        if not rs._wait_for_proxy_url(probe_url, log_path):
-            _backend_diag = rs._log_proxy_backend_diagnostics(state.id, log_path)
-            return "reverse proxy route did not become reachable on host runtime"
+        proxy_reachable = rs._wait_for_proxy_url(probe_url, log_path)
         _backend_diag = rs._log_proxy_backend_diagnostics(state.id, log_path)
+        if _backend_diag.get("failure_type") == "dns_network":
+            return (
+                "DNS/network failure: backend is running but unreachable from Traefik"
+                " — check shared ingress network"
+            )
+        if not proxy_reachable:
+            return "reverse proxy route did not become reachable on host runtime"
         return None
 
     if use_worktree:

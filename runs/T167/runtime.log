@@ -21,3 +21,16 @@
 [2026-06-02T12:23:52Z] push: tolerating runtime dirty files (not blocking): ['runs/T167/runtime.log']
 [2026-06-02T12:23:52Z] push: pushing branch=ticket/T167-t167-fix-traefik-dns-service-discovery-by-enforcin
 [2026-06-02T12:23:54Z] push: done branch=ticket/T167-t167-fix-traefik-dns-service-discovery-by-enforcin
+[2026-06-02T13:06:41Z] auto-run start: state=PLAN_APPROVED
+[2026-06-02T13:06:41Z] auto-run: running step=coder
+[2026-06-02T13:06:41Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-06-02T13:06:41Z] prompt: generic fallback — injecting runs/T167/ticket.md
+[2026-06-02T13:06:41Z] compose: global-context=docs/ai/global-context.md
+[2026-06-02T13:06:41Z] compose: role=ai/roles/coder.md
+[2026-06-02T13:06:41Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-02T13:06:41Z] compose: skill=ai/skills/git-discipline.md
+[2026-06-02T13:06:41Z] compose: skill=ai/skills/code-quality.md
+[2026-06-02T13:06:41Z] compose: skill=ai/skills/refactor-safety.md
+[2026-06-02T13:06:41Z] compose: skill=ai/skills/security.md
+[2026-06-02T13:06:41Z] compose: task (canonical prompt)
+[2026-06-02T13:06:41Z] snapshot: runtime-prompt=runs/T167/prompts/coder-attempt-1.md

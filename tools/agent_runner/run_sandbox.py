@@ -1186,6 +1186,13 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
             return False
         ok = _wait_for_proxy_url(api_url, log_path)
         _proxy_diagnostics[0] = _log_proxy_backend_diagnostics(sandbox_id, log_path)
+        if _proxy_diagnostics[0].get("failure_type") == "dns_network":
+            _append_log(
+                log_path,
+                "proxy: DNS/network failure — backend is running but unreachable from Traefik"
+                " (check shared ingress network ai-dev-factory-runtime)\n",
+            )
+            return False
         return ok
 
     # Set to True in environment mode on success to skip teardown in finally.
