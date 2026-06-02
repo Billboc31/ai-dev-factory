@@ -131,6 +131,66 @@ def safe_remove_route_file(path: Path) -> None:
         pass
 
 
+def probe_backend_from_traefik_container(
+    sandbox_id: str,
+    *,
+    container_id: str | None = None,
+) -> dict[str, str]:
+    """Probe sandbox backend aliases from inside the Traefik container.
+
+    Runs ``docker exec <container> wget -qO- --timeout=5 <alias>:<port><path>``
+    for each alias and returns::
+
+        {"api": "reachable" | "failed: <reason>", "web": ...}
+
+    Returns an empty dict when Docker or the Traefik container is unavailable
+    (safe for dev/test hosts that have no Docker daemon).
+    """
+    if container_id is None:
+        from .traefik_manager import TraefikManager
+
+        container_id = TraefikManager().infra_container_id()
+    if not container_id:
+        return {}
+
+    from .proxy_network import sandbox_dns_aliases
+
+    aliases = sandbox_dns_aliases(sandbox_id)
+    probes = {
+        "api": (aliases["api"], 8080, "/health"),
+        "web": (aliases["web"], 80, ""),
+    }
+    results: dict[str, str] = {}
+    for name, (alias, port, path) in probes.items():
+        url = f"http://{alias}:{port}{path}"
+        try:
+            result = subprocess.run(
+                [
+                    "docker",
+                    "exec",
+                    container_id,
+                    "wget",
+                    "-qO-",
+                    "--timeout=5",
+                    url,
+                ],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+            if result.returncode == 0:
+                results[name] = "reachable"
+            else:
+                reason = (result.stderr or result.stdout or "non-zero exit").strip()
+                results[name] = f"failed: {reason[:200]}"
+        except FileNotFoundError:
+            return {}  # Docker not on PATH; dev/test host — same as verify_route_visible
+        except (subprocess.TimeoutExpired, OSError) as exc:
+            results[name] = f"failed: {exc}"
+    return results
+
+
 def cleanup_orphan_temp_files(routes_dir: Path) -> None:
     """Remove stale ``.*.tmp`` files left by interrupted writes."""
     for tmp in routes_dir.glob(".*.tmp"):

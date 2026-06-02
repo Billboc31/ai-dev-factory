@@ -295,20 +295,157 @@ def _wait_for_proxy_url(url: str, log_path: Path, *, timeout_s: int = 15) -> boo
     Returns False only when every attempt gets a connection-level error,
     indicating Traefik itself is unreachable (infra failure).
     Never raises.
+
+    Retries here check route/Traefik reachability only (any HTTP response = Traefik is
+    forwarding); backend readiness retries are handled in healthcheck.sh via
+    HEALTHCHECK_RETRIES/HEALTHCHECK_DELAY.
     """
     for _ in range(timeout_s):
         try:
             urllib.request.urlopen(url, timeout=2)
             _append_log(log_path, "proxy: route active (backend healthy)\n")
             return True
-        except urllib.error.HTTPError:
+        except urllib.error.HTTPError as e:
             # Any HTTP error response means Traefik forwarded the request.
-            _append_log(log_path, "proxy: route active (backend not healthy yet)\n")
+            _append_log(log_path, f"proxy: route active (backend not healthy yet, http={e.code})\n")
             return True
         except (urllib.error.URLError, OSError):
             time.sleep(1)
     _append_log(log_path, f"proxy: infra unreachable after {timeout_s}s\n")
     return False
+
+
+def _log_proxy_backend_diagnostics(sandbox_id: str, log_path: Path) -> dict:
+    """Probe backend aliases from inside Traefik; inspect api container; log results.
+
+    Returns structured diagnostics for inclusion in validation.json.
+    Never raises — all errors are logged and swallowed.
+    """
+    try:
+        from services.control_api.services.traefik_manager import TraefikManager
+        from services.control_api.services.proxy_route_files import (
+            probe_backend_from_traefik_container,
+        )
+        from services.control_api.services.proxy_network import (
+            sandbox_dns_aliases,
+            sandbox_backend_urls,
+        )
+    except ImportError:
+        return {}
+
+    backend_urls = sandbox_backend_urls(sandbox_id)
+    aliases = sandbox_dns_aliases(sandbox_id)
+
+    try:
+        traefik_cid = TraefikManager().infra_container_id()
+    except Exception:
+        traefik_cid = None
+
+    probe_results = probe_backend_from_traefik_container(sandbox_id, container_id=traefik_cid)
+
+    _append_log(
+        log_path,
+        f"proxy: backend diagnostics sandbox={sandbox_id}"
+        f" traefik_container={traefik_cid}"
+        f" aliases_api={aliases['api']}"
+        f" aliases_web={aliases['web']}\n",
+    )
+    for svc, result in probe_results.items():
+        _append_log(log_path, f"proxy: backend probe {svc}={result}\n")
+
+    # Inspect Traefik container to retrieve its network membership.
+    traefik_networks: list[str] = []
+    if traefik_cid:
+        try:
+            ti = subprocess.run(
+                ["docker", "inspect", traefik_cid],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=10,
+            )
+            if ti.returncode == 0 and ti.stdout.strip():
+                td = json.loads(ti.stdout)
+                if td:
+                    traefik_networks = list(
+                        td[0].get("NetworkSettings", {}).get("Networks", {}).keys()
+                    )
+                    _append_log(
+                        log_path,
+                        f"proxy: traefik container networks={traefik_networks}\n",
+                    )
+        except (FileNotFoundError, subprocess.TimeoutExpired, json.JSONDecodeError, OSError):
+            pass
+
+    # Inspect the API container for runtime state and network membership.
+    compose_project = normalize_compose_project_name(f"sandbox-{sandbox_id}")
+    api_container_name = f"{compose_project}-api-1"
+    api_container_info: dict = {
+        "name": api_container_name,
+        "status": "unknown",
+        "restarts": 0,
+        "health": "none",
+        "networks": [],
+    }
+    try:
+        inspect = subprocess.run(
+            ["docker", "inspect", api_container_name],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        if inspect.returncode == 0 and inspect.stdout.strip():
+            try:
+                data = json.loads(inspect.stdout)
+                if data:
+                    c = data[0]
+                    state = c.get("State", {})
+                    health = state.get("Health", {}) or {}
+                    networks = list(c.get("NetworkSettings", {}).get("Networks", {}).keys())
+                    api_container_info = {
+                        "name": api_container_name,
+                        "status": state.get("Status", "unknown"),
+                        "restarts": c.get("RestartCount", 0),
+                        "health": health.get("Status", "none"),
+                        "networks": networks,
+                    }
+                    _append_log(
+                        log_path,
+                        f"proxy: api container ({api_container_name}):"
+                        f" status={api_container_info['status']}"
+                        f" restarts={api_container_info['restarts']}"
+                        f" health={api_container_info['health']}"
+                        f" networks={networks}\n",
+                    )
+            except (json.JSONDecodeError, KeyError):
+                _append_log(log_path, f"proxy: api container ({api_container_name}): inspect parse failed\n")
+        else:
+            _append_log(log_path, f"proxy: api container ({api_container_name}): not found\n")
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+
+    # Classify the failure to distinguish DNS/network issues from crash loops.
+    api_probe = probe_results.get("api", "")
+    api_status = api_container_info["status"]
+    api_restarts = api_container_info["restarts"]
+    if api_restarts > 0 and api_status != "running":
+        failure_type = "crash_loop"
+    elif api_probe.startswith("failed:") and api_status == "running":
+        failure_type = "dns_network"
+    elif api_probe == "reachable" and api_status == "running":
+        failure_type = "backend_app"
+    else:
+        failure_type = "unknown"
+
+    return {
+        "backend_urls": backend_urls,
+        "aliases": aliases,
+        "traefik_probe": probe_results,
+        "traefik_networks": traefik_networks,
+        "api_container": api_container_info,
+        "failure_type": failure_type,
+    }
 
 
 def _unregister_proxy_route(
@@ -739,6 +876,8 @@ def _write_validation_json(
     ports: dict[str, int],
     started_at: str,
     log_path: Path,
+    *,
+    backend_diagnostics: dict | None = None,
 ) -> Path:
     """Write validation.json to sandbox_runtime_root; return the path."""
     data = {
@@ -754,6 +893,8 @@ def _write_validation_json(
         },
         "log_path": str(log_path),
     }
+    if backend_diagnostics is not None:
+        data["backend_diagnostics"] = backend_diagnostics
     out = sandbox_runtime_root / "validation.json"
     out.write_text(json.dumps(data, indent=2), encoding="utf-8")
     _append_log(log_path, f"validation.json written to {out}\n")
@@ -1030,6 +1171,8 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
     # and Traefik is attached to the environment network.
     _ensure_required_infra(log_path)
 
+    _proxy_diagnostics: list[dict] = [{}]
+
     def _after_start(script_name: str) -> bool | None:
         if script_name != "start.sh":
             return None
@@ -1041,7 +1184,9 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
         )
         if not api_url:
             return False
-        return _wait_for_proxy_url(api_url, log_path)
+        ok = _wait_for_proxy_url(api_url, log_path)
+        _proxy_diagnostics[0] = _log_proxy_backend_diagnostics(sandbox_id, log_path)
+        return ok
 
     # Set to True in environment mode on success to skip teardown in finally.
     keep_environment = False
@@ -1088,6 +1233,7 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
             healthcheck_status, smoke_status, failing_step,
             {"web": sandbox_urls["web"], "api": sandbox_urls["api"]},
             ports, started_at, log_path,
+            backend_diagnostics=_proxy_diagnostics[0] or None,
         )
 
         # If smoke tests failed and an AI exec_cmd is configured, generate a fix proposal.

@@ -39,8 +39,8 @@ unset __SB_SUPERVISOR_PORT __SB_SUPERVISOR_URL __SB_SUPERVISOR_HEALTH_URL
 unset __SB_API_URL __SB_WEB_URL
 
 TIMEOUT=30
-RETRIES=3
-DELAY=5
+RETRIES=${HEALTHCHECK_RETRIES:-6}
+DELAY=${HEALTHCHECK_DELAY:-5}
 
 PASS=0
 FAIL=0
@@ -49,16 +49,20 @@ probe() {
   local name="$1"
   local url="$2"
   local attempt=0
+  local http_code="000"
   while [ "$attempt" -lt "$RETRIES" ]; do
-    if curl -sf --max-time "$TIMEOUT" "$url" >/dev/null 2>&1; then
-      echo "PASS  $name  ($url)"
-      PASS=$((PASS + 1))
-      return 0
-    fi
+    http_code="$(curl -sS -o /dev/null -w "%{http_code}" --max-time "$TIMEOUT" "$url" 2>/dev/null || echo "000")"
+    case "$http_code" in
+      2[0-9][0-9])
+        echo "PASS  $name  ($url)"
+        PASS=$((PASS + 1))
+        return 0
+        ;;
+    esac
     attempt=$((attempt + 1))
     [ "$attempt" -lt "$RETRIES" ] && sleep "$DELAY"
   done
-  echo "FAIL  $name  ($url)  — no response after $RETRIES attempts"
+  echo "FAIL  $name  ($url)  — http=$http_code after $RETRIES attempts"
   FAIL=$((FAIL + 1))
   return 1
 }

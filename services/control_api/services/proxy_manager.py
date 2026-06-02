@@ -19,10 +19,11 @@ from collections.abc import Callable, Iterable
 from pathlib import Path
 
 from .infra_service_manager import ensure_required_infra, resolve_proxy_routes_dir
-from .proxy_network import sandbox_backend_urls
+from .proxy_network import sandbox_backend_urls, sandbox_dns_aliases
 from .proxy_route_files import (
     atomic_write_route_file,
     cleanup_orphan_temp_files,
+    probe_backend_from_traefik_container,
     route_file_path,
     safe_remove_route_file,
     validate_route_file,
@@ -153,7 +154,12 @@ class ProxyManager:
         if err:
             raise RuntimeError(err)
 
-        container_err = verify_route_visible_in_traefik_container(route_file)
+        from .traefik_manager import TraefikManager
+
+        traefik_cid = TraefikManager().infra_container_id()
+        container_err = verify_route_visible_in_traefik_container(
+            route_file, traefik_container_id=traefik_cid
+        )
         if container_err:
             if log:
                 log(f"proxy: warning: {container_err}\n")
@@ -163,6 +169,30 @@ class ProxyManager:
                 f"proxy: route file verified on host and in Traefik container: "
                 f"{route_file}\n"
             )
+
+        dns_aliases = sandbox_dns_aliases(sandbox_id)
+        diag_line = (
+            f"proxy: route registered sandbox={sandbox_id}"
+            f" slug_api={dns_aliases['api']} slug_web={dns_aliases['web']}"
+            f" file={route_file}"
+            f" backends={backends}"
+            f" traefik_container={traefik_cid}\n"
+        )
+        if log:
+            log(diag_line)
+        logger.info(diag_line.strip())
+
+        probe_results = probe_backend_from_traefik_container(
+            sandbox_id, container_id=traefik_cid
+        )
+        for svc, result in probe_results.items():
+            probe_line = f"proxy: backend probe {svc}={result} (sandbox={sandbox_id})\n"
+            if "failed" in result:
+                logger.warning(probe_line.strip())
+                if log:
+                    log(probe_line)
+            else:
+                logger.info(probe_line.strip())
 
         urls = build_sandbox_urls(sandbox_id, web_host=web_host, api_host=api_host)
         logger.info(
