@@ -1,7 +1,7 @@
 {
   "ticket_id": "T169",
-  "state": "IMPLEMENTATION_APPROVED",
+  "state": "TEST_COMPLETE",
   "branch": "ticket/T169-t169-fix-docker-compose-env-interpolation-ignoring",
   "issue_number": 190,
-  "updated_at": "2026-06-02T15:50:44Z"
+  "updated_at": "2026-06-02T15:56:09Z"
 }
