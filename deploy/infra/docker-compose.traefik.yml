@@ -41,5 +41,4 @@ services:
 
 networks:
   ai-dev-factory-runtime:
-    name: ai-dev-factory-runtime
-    driver: bridge
+    external: true
