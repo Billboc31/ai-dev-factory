@@ -14,8 +14,18 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 def _ok_compose(*args, **kwargs):
     m = MagicMock()
     m.returncode = 0
-    m.stdout = "done"
     m.stderr = ""
+    cmd = args[0] if args else []
+    if isinstance(cmd, list) and "config" in cmd:
+        try:
+            p_idx = cmd.index("-p")
+            project = cmd[p_idx + 1]
+            sid = project[len("sandbox-"):]
+            m.stdout = f"sandbox-{sid}-api\nsandbox-{sid}-web\n"
+        except (ValueError, IndexError):
+            m.stdout = ""
+    else:
+        m.stdout = "done"
     return m
 
 
