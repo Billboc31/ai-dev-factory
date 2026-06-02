@@ -239,12 +239,48 @@ def _run_healthcheck(
     return ActionResult(ok=False, message=msg, error=msg)
 
 
-def _inject_compose_flags(cmd: str, compose_project: str, env_file: str) -> str:
-    """Prepend -p / --env-file isolation flags to a docker compose command."""
+def _inject_compose_flags(
+    cmd: str, compose_project: str, env_file: str, cwd: Path | None = None
+) -> str:
+    """Prepend -p / --env-file isolation flags to a docker compose command.
+
+    When *cwd* is provided and ``deploy/.env`` exists there, that file is
+    injected first so base config is present; the sandbox-specific *env_file*
+    is injected second so its SANDBOX_ID wins.
+    """
     if not cmd.startswith("docker compose "):
         return cmd
     suffix = cmd[len("docker compose "):]
-    return f"docker compose -p {compose_project} --env-file {env_file} {suffix}"
+    flags = ["-p", compose_project]
+    if cwd is not None and (cwd / "deploy" / ".env").exists():
+        flags += ["--env-file", str(cwd / "deploy" / ".env")]
+    flags += ["--env-file", env_file]
+    return "docker compose " + " ".join(flags) + " " + suffix
+
+
+def _validate_compose_config(
+    compose_project: str, env_file: str, cwd: Path, log_path: Path, sandbox_id: str
+) -> bool:
+    """Run ``docker compose config`` and verify the expected sandbox alias is present."""
+    deploy_env = cwd / "deploy" / ".env"
+    cmd: list[str] = ["docker", "compose", "-p", compose_project]
+    if deploy_env.exists():
+        cmd += ["--env-file", str(deploy_env)]
+    cmd += ["--env-file", env_file, "config"]
+    result = subprocess.run(cmd, capture_output=True, text=True, cwd=str(cwd), check=False)
+    expected = f"sandbox-{sandbox_id}-"
+    if expected in result.stdout:
+        _append_log(log_path, f"compose config ok: alias {expected!r} found\n")
+        return True
+    alias_lines = "\n".join(
+        line for line in result.stdout.splitlines() if "sandbox-" in line
+    )
+    _append_log(
+        log_path,
+        f"compose config validation failed: expected {expected!r} not found\n"
+        f"sandbox- aliases in config:\n{alias_lines or '  (none)'}\n",
+    )
+    return False
 
 
 def _do_deploy(
@@ -277,6 +313,22 @@ def _do_deploy(
     })
     _append_log(log_path, f"\n=== deploy started {started_at} ===\n")
 
+    # Validate compose alias before starting any docker component so we fail
+    # early if SANDBOX_ID interpolation resolved to the wrong value.
+    if sandbox is not None and any(c.type == "docker" and c.service for c in profile.components):
+        _append_log(log_path, "\n--- compose config validation ---\n")
+        if not _validate_compose_config(
+            sandbox.compose_project, sandbox.env_file, cwd, log_path, sandbox.id
+        ):
+            err = f"compose config alias validation failed: expected sandbox-{sandbox.id}-*"
+            finished_at = _now_iso()
+            _write_state(state_path, {
+                "state": "failed", "pid": pid,
+                "started_at": started_at, "finished_at": finished_at,
+                "error": err, "last_step": "compose-config-validation",
+            })
+            return ActionResult(ok=False, message=err, error=err)
+
     for component in profile.components:
         _write_state(state_path, {
             "state": "running", "pid": pid,
@@ -298,7 +350,7 @@ def _do_deploy(
             return ActionResult(ok=False, message=msg, error=msg)
 
         if sandbox is not None:
-            cmd = _inject_compose_flags(cmd, sandbox.compose_project, sandbox.env_file)
+            cmd = _inject_compose_flags(cmd, sandbox.compose_project, sandbox.env_file, cwd)
 
         result = subprocess.run(
             cmd, shell=True, capture_output=True, text=True, cwd=str(cwd)

@@ -19,8 +19,20 @@ from services.control_api.services.sandbox_manager import SandboxManager, Sandbo
 def _ok_compose(*args, **kwargs):
     m = MagicMock()
     m.returncode = 0
-    m.stdout = "done"
     m.stderr = ""
+    cmd = args[0] if args else []
+    if isinstance(cmd, list) and "config" in cmd:
+        # Return a config output containing the correct sandbox alias so that
+        # _run_compose config validation passes for all existing lifecycle tests.
+        try:
+            p_idx = cmd.index("-p")
+            project = cmd[p_idx + 1]  # e.g. "sandbox-abc123def456"
+            sid = project[len("sandbox-"):]
+            m.stdout = f"sandbox-{sid}-api\nsandbox-{sid}-web\n"
+        except (ValueError, IndexError):
+            m.stdout = ""
+    else:
+        m.stdout = "done"
     return m
 
 
@@ -467,3 +479,80 @@ def test_logs_uses_helper_path_ignoring_stale_env_file(mgr):
     used_path = invoked_cmds[0][idx]
     assert used_path.startswith(str(mgr.sandboxes_dir)), "env-file must be under sandboxes_dir"
     assert "/stale" not in used_path
+
+
+# ── T169: compose env-file ordering and pre-flight alias validation ───────────
+
+
+def test_run_compose_uses_both_env_files(mgr, tmp_path):
+    """_run_compose includes deploy/.env first then sandbox .env so SANDBOX_ID wins."""
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / "deploy").mkdir()
+    (project_root / "deploy" / ".env").write_text("BASE_VAR=1\n")
+
+    s = mgr.create("T001", str(project_root))
+
+    invoked_cmds: list[list[str]] = []
+
+    def capture(cmd, *args, **kwargs):
+        if isinstance(cmd, list):
+            invoked_cmds.append(list(cmd))
+        m = MagicMock()
+        m.returncode = 0
+        m.stderr = ""
+        if isinstance(cmd, list) and "config" in cmd:
+            m.stdout = f"sandbox-{s.id}-api\nsandbox-{s.id}-web\n"
+        else:
+            m.stdout = "done"
+        return m
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=capture):
+        mgr.start(s.id)
+
+    up_cmds = [c for c in invoked_cmds if "up" in c]
+    assert up_cmds, "docker compose up must have been called"
+    up_cmd = up_cmds[0]
+
+    env_file_indices = [i for i, v in enumerate(up_cmd) if v == "--env-file"]
+    assert len(env_file_indices) == 2, f"expected 2 --env-file flags, got {len(env_file_indices)}: {up_cmd}"
+    first_env = up_cmd[env_file_indices[0] + 1]
+    second_env = up_cmd[env_file_indices[1] + 1]
+    assert str(project_root / "deploy" / ".env") == first_env, (
+        f"first --env-file must be deploy/.env, got {first_env}"
+    )
+    assert str(mgr.sandboxes_dir) in second_env, (
+        f"second --env-file must be under sandboxes_dir, got {second_env}"
+    )
+
+
+def test_start_validates_compose_config_before_up(mgr, tmp_path):
+    """start() returns error status and never calls compose up when config alias is wrong."""
+    project_root = tmp_path / "proj"
+    project_root.mkdir()
+    (project_root / "deploy").mkdir()
+    (project_root / "deploy" / ".env").write_text("")
+
+    s = mgr.create("T001", str(project_root))
+
+    up_called = False
+
+    def mock_run(cmd, *args, **kwargs):
+        nonlocal up_called
+        m = MagicMock()
+        m.returncode = 0
+        m.stderr = ""
+        if isinstance(cmd, list) and "config" in cmd:
+            m.stdout = "sandbox-default-api\nsandbox-default-web\n"
+        elif isinstance(cmd, list) and "up" in cmd:
+            up_called = True
+            m.stdout = ""
+        else:
+            m.stdout = ""
+        return m
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=mock_run):
+        result = mgr.start(s.id)
+
+    assert result.status == SandboxStatus.error
+    assert not up_called, "docker compose up must NOT be called after config alias validation failure"
