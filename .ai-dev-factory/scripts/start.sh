@@ -73,6 +73,12 @@ fi
 RUN_DIR="$PROJECT_ROOT/.ai-dev-factory/run"
 mkdir -p "$RUN_DIR"
 
+# Write runtime compose env file so SANDBOX_ID is injected deterministically
+# into compose interpolation rather than relying on shell-env inheritance.
+printf 'SANDBOX_ID=%s\n' "${SANDBOX_ID}" > "${RUN_DIR}/.env.compose"
+echo "start: compose env — SANDBOX_ID=${SANDBOX_ID:-<empty>}"
+echo "start: compose env files — deploy/.env ${RUN_DIR}/.env.compose"
+
 SUPERVISOR_PID_FILE="$RUN_DIR/supervisor.pid"
 
 # ── Supervisor ───────────────────────────────────────────────────────────────
@@ -102,7 +108,27 @@ fi
 
 echo "start: starting Docker stack..."
 if [ -f deploy/.env ]; then
-  SANDBOX_ID="$SANDBOX_ID" docker compose --env-file deploy/.env up -d
+  # Validate compose alias resolution before starting any container.
+  # Failures here mean SANDBOX_ID was not propagated to compose interpolation.
+  if [ -n "${SANDBOX_ID:-}" ]; then
+    _cfg_output=$(docker compose \
+      --env-file deploy/.env \
+      --env-file "${RUN_DIR}/.env.compose" \
+      config 2>&1) || true
+    _project_name=$(printf '%s\n' "$_cfg_output" | grep '^name:' | head -1 | cut -d' ' -f2 || true)
+    echo "start: compose config — effective project=${_project_name:-unknown}"
+    _alias_hit=$(printf '%s\n' "$_cfg_output" | grep "sandbox-${SANDBOX_ID}-" || true)
+    if [ -z "$_alias_hit" ]; then
+      echo "start: ERROR — compose config alias mismatch: expected sandbox-${SANDBOX_ID}-* but got:" >&2
+      printf '%s\n' "$_cfg_output" | grep "sandbox-" >&2 || echo "  (no sandbox- aliases in config output)" >&2
+      exit 1
+    fi
+    echo "start: compose config alias ok — sandbox-${SANDBOX_ID}-*"
+  fi
+  docker compose \
+    --env-file deploy/.env \
+    --env-file "${RUN_DIR}/.env.compose" \
+    up -d
 else
   docker compose up -d
 fi
