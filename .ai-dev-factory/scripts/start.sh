@@ -32,6 +32,7 @@ __SB_SUPERVISOR_HEALTH_URL="${AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL:-}"
 __SB_API_URL="${SANDBOX_API_URL:-}"
 __SB_WEB_URL="${SANDBOX_WEB_URL:-}"
 __SB_SUPERVISOR_ALREADY_STARTED="${AI_DEV_FACTORY_SUPERVISOR_ALREADY_STARTED:-}"
+__SB_SANDBOX_ID="${SANDBOX_ID:-}"
 
 # shellcheck source=/dev/null
 [ -f deploy/.env ] && source deploy/.env || true
@@ -50,15 +51,24 @@ AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL="${__SB_SUPERVISOR_HEALTH_URL:-${AI_DEV_FAC
 SANDBOX_API_URL="${__SB_API_URL:-${SANDBOX_API_URL:-}}"
 SANDBOX_WEB_URL="${__SB_WEB_URL:-${SANDBOX_WEB_URL:-}}"
 AI_DEV_FACTORY_SUPERVISOR_ALREADY_STARTED="${__SB_SUPERVISOR_ALREADY_STARTED:-${AI_DEV_FACTORY_SUPERVISOR_ALREADY_STARTED:-0}}"
+SANDBOX_ID="${__SB_SANDBOX_ID:-${SANDBOX_ID:-}}"
 export API_PORT WEB_PORT
 export AI_DEV_FACTORY_SUPERVISOR_PORT AI_DEV_FACTORY_SUPERVISOR_URL
 export AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL
 export SANDBOX_API_URL SANDBOX_WEB_URL
 export AI_DEV_FACTORY_SUPERVISOR_ALREADY_STARTED
+export SANDBOX_ID
 
 unset __SB_API_PORT __SB_WEB_PORT
 unset __SB_SUPERVISOR_PORT __SB_SUPERVISOR_URL __SB_SUPERVISOR_HEALTH_URL
-unset __SB_API_URL __SB_WEB_URL __SB_SUPERVISOR_ALREADY_STARTED
+unset __SB_API_URL __SB_WEB_URL __SB_SUPERVISOR_ALREADY_STARTED __SB_SANDBOX_ID
+
+# Fail fast: named environment deploys require a non-empty SANDBOX_ID so
+# docker-compose aliases (sandbox-<id>-api) match Traefik backend targets.
+if [ -n "${COMPOSE_PROJECT_NAME:-}" ] && [ -z "${SANDBOX_ID:-}" ]; then
+  echo "start: ERROR — SANDBOX_ID is not set for named environment (COMPOSE_PROJECT_NAME=${COMPOSE_PROJECT_NAME})" >&2
+  exit 1
+fi
 
 RUN_DIR="$PROJECT_ROOT/.ai-dev-factory/run"
 mkdir -p "$RUN_DIR"
@@ -92,7 +102,7 @@ fi
 
 echo "start: starting Docker stack..."
 if [ -f deploy/.env ]; then
-  docker compose --env-file deploy/.env up -d
+  SANDBOX_ID="$SANDBOX_ID" docker compose --env-file deploy/.env up -d
 else
   docker compose up -d
 fi

@@ -22,6 +22,7 @@ from pathlib import Path
 from ..models.sandbox import EnvironmentMode, LifecyclePhase, SandboxState, SandboxStatus
 from .infra_service_manager import resolve_proxy_routes_dir
 from .proxy_manager import ProxyManager, build_sandbox_urls
+from .proxy_network import sandbox_dns_aliases
 from .proxy_route_files import route_file_path, validate_route_file
 
 logger = logging.getLogger("control-api")
@@ -342,6 +343,32 @@ def deploy_operational_runtime(
             return None
         route_err = _register_proxy_routes_after_compose()
         return route_err is None
+
+    # Pre-flight: SANDBOX_ID must be non-empty and consistent with state.id.
+    # An empty or mismatched value causes docker-compose to register aliases
+    # under the wrong slug (e.g. sandbox-default-api instead of sandbox-main-api),
+    # making all Traefik backend targets unresolvable → 502.
+    sandbox_id_env = extra_env.get("SANDBOX_ID", "")
+    if not sandbox_id_env:
+        msg = (
+            f"deploy aborted: SANDBOX_ID is empty for environment '{state.id}'"
+            " — ensure SANDBOX_ID is propagated before deploying a named environment"
+        )
+        rs._append_log(log_path, f"\n{msg}\n")
+        rs._stop_sandbox_supervisor(supervisor_proc, runtime_root, log_path)
+        _persist(LifecyclePhase.failed, last_step="preflight", lifecycle_error=msg)
+        return OperationalDeployResult(success=False, error=msg, last_step="preflight")
+    if sandbox_id_env != state.id:
+        expected = sandbox_dns_aliases(state.id)
+        msg = (
+            f"deploy aborted: SANDBOX_ID mismatch —"
+            f" extra_env has '{sandbox_id_env}' but state.id is '{state.id}';"
+            f" compose aliases would target {expected} while routes point elsewhere"
+        )
+        rs._append_log(log_path, f"\n{msg}\n")
+        rs._stop_sandbox_supervisor(supervisor_proc, runtime_root, log_path)
+        _persist(LifecyclePhase.failed, last_step="preflight", lifecycle_error=msg)
+        return OperationalDeployResult(success=False, error=msg, last_step="preflight")
 
     success, script_error, steps = rs._run_scripts(
         worktree_path,
