@@ -1,0 +1,12 @@
+[2026-06-02T15:07:53Z] auto-run start: state=INIT
+[2026-06-02T15:07:53Z] auto-run: running step=planner
+[2026-06-02T15:07:53Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-02T15:07:53Z] prompt: generic fallback — injecting runs/T169/ticket.md
+[2026-06-02T15:07:53Z] compose: global-context=docs/ai/global-context.md
+[2026-06-02T15:07:53Z] compose: role=ai/roles/planner.md
+[2026-06-02T15:07:53Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-02T15:07:53Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-02T15:07:53Z] compose: skill=ai/skills/documentation.md
+[2026-06-02T15:07:53Z] compose: task (canonical prompt)
+[2026-06-02T15:07:53Z] snapshot: runtime-prompt=runs/T169/prompts/planner-attempt-1.md
+[2026-06-02T15:14:44Z] auto-run: step=planner done rc=0
