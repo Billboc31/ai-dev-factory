@@ -1,7 +1,7 @@
 {
   "ticket_id": "T170",
-  "state": "IMPLEMENTATION_APPROVED",
+  "state": "TEST_COMPLETE",
   "branch": "ticket/T170-t170-attach-api-web-services-to-shared-runtime-net",
   "issue_number": 192,
-  "updated_at": "2026-06-02T20:12:24Z"
+  "updated_at": "2026-06-02T20:22:46Z"
 }
