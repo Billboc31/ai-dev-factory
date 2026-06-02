@@ -133,6 +133,72 @@ else
   docker compose up -d
 fi
 
+# ── Runtime network attachment (compatibility fallback) ──────────────────────
+#
+# Ensures routed services (api, web) join the shared ingress network so
+# Traefik can resolve their per-sandbox aliases by DNS.
+#
+# Modern compose files declare ai-dev-factory-runtime directly and containers
+# are attached at compose-up time. This block is a safety net for older
+# branches/worktrees where the declaration may be absent.
+
+if [ -n "${SANDBOX_ID:-}" ]; then
+  _RUNTIME_NETWORK="ai-dev-factory-runtime"
+  _repaired=0
+
+  if [ -f deploy/.env ]; then
+    _compose_opts=(--env-file deploy/.env --env-file "${RUN_DIR}/.env.compose")
+  else
+    _compose_opts=(--env-file "${RUN_DIR}/.env.compose")
+  fi
+
+  for _svc in api web; do
+    _alias="sandbox-${SANDBOX_ID}-${_svc}"
+    _cid=$(docker compose "${_compose_opts[@]}" ps -q "$_svc" 2>/dev/null || true)
+    _cid=$(printf '%s' "$_cid" | tr -d '[:space:]')
+    if [ -z "$_cid" ]; then
+      echo "start: network attach — ${_svc} container not found, skipping"
+      continue
+    fi
+    _nets=$(docker inspect "$_cid" \
+      --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null || true)
+    if printf '%s\n' "$_nets" | grep -qF "$_RUNTIME_NETWORK"; then
+      echo "start: network attach — ${_svc} already on ${_RUNTIME_NETWORK}"
+    else
+      echo "start: network attach — connecting ${_svc} to ${_RUNTIME_NETWORK} (legacy compose)"
+      _conn_out=$(docker network connect \
+        --alias "$_alias" "$_RUNTIME_NETWORK" "$_cid" 2>&1) || true
+      if printf '%s\n' "$_conn_out" | grep -qiE "already exists|endpoint with name"; then
+        echo "start: network attach — ${_svc} already connected (idempotent)"
+      elif [ -n "$_conn_out" ]; then
+        echo "start: ERROR — ${_svc} connect to ${_RUNTIME_NETWORK} failed: ${_conn_out}" >&2
+        exit 1
+      else
+        echo "start: network attach — ${_svc} connected as ${_alias}"
+        _repaired=1
+      fi
+    fi
+  done
+
+  if [ "$_repaired" = "1" ]; then
+    echo "start: runtime network attachment repaired for legacy compose config"
+  fi
+
+  # Post-attach validation: confirm both services joined the runtime network.
+  for _svc in api web; do
+    _cid=$(docker compose "${_compose_opts[@]}" ps -q "$_svc" 2>/dev/null || true)
+    _cid=$(printf '%s' "$_cid" | tr -d '[:space:]')
+    [ -z "$_cid" ] && continue
+    _nets=$(docker inspect "$_cid" \
+      --format '{{range $k,$v := .NetworkSettings.Networks}}{{$k}} {{end}}' 2>/dev/null || true)
+    if ! printf '%s\n' "$_nets" | grep -qF "$_RUNTIME_NETWORK"; then
+      echo "start: ERROR — ${_svc} not attached to ${_RUNTIME_NETWORK} after connect attempt" >&2
+      echo "start:   container=${_cid} networks=[${_nets}]" >&2
+      exit 1
+    fi
+  done
+fi
+
 # ── Resolved URLs ────────────────────────────────────────────────────────────
 #
 # Announce the URLs that the human operator (and healthcheck.sh)
