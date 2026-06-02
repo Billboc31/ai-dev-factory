@@ -37,3 +37,4 @@
 [2026-06-02T08:04:46Z] compose: task (canonical prompt)
 [2026-06-02T08:04:46Z] compose: extra-context=runs/T166/fixes/context-20260602T080446Z.md
 [2026-06-02T08:04:46Z] snapshot: runtime-prompt=runs/T166/prompts/planner-attempt-2.md
+[2026-06-02T08:23:32Z] auto-run: step=planner done rc=0

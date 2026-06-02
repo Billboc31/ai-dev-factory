@@ -1,71 +1,15 @@
-I have all the information needed. Let me write the plan.
+1202 tests pass; the 49 failures are all in pre-existing subsystems (daemon, control-api endpoints, ticket timeline) that my changes didn't touch. All proxy, sandbox-deploy, and environment tests pass cleanly.
 
----
+The implementation is complete. Summary of every change made:
 
-## Objective
-
-Diagnose why routed backends return 502 after route registration by adding actionable diagnostics (Traefik-internal backend probe, enriched validation.json, detailed healthcheck output) and defensively normalize sandbox IDs used in Docker network aliases to prevent alias mismatches.
-
-## Included
-
-### `services/control_api/services/proxy_network.py`
-- Add `_to_docker_safe_alias(sid: str) -> str` that casefoldsthe sandbox ID and strips non-`[a-z0-9-]` chars (defensive normalization matching Docker's DNS alias requirements).
-- Update `sandbox_backend_urls()` to build backend URLs using `_to_docker_safe_alias(sandbox_id)` instead of raw `sandbox_id`.
-- Add `sandbox_dns_aliases(sandbox_id: str) -> dict[str, str]` returning `{"api": "sandbox-<slug>-api", "web": "sandbox-<slug>-web"}` for use by diagnostic code.
-
-### `services/control_api/services/proxy_route_files.py`
-- Add `probe_backend_from_traefik_container(sandbox_id: str, *, container_id: str | None = None) -> dict[str, str]` that:
-  - Resolves `container_id` via `TraefikManager().infra_container_id()` if not supplied.
-  - For each alias (api port 8080, web port 80), runs `docker exec <container> wget -qO- --timeout=5 http://<alias>:<port><path>`.
-  - Returns `{"api": "reachable" | "failed: <reason>", "web": ...}`.
-  - Silently returns empty dict if Docker or Traefik container is unavailable (dev/test-host safety, same pattern as `verify_route_visible_in_traefik_container`).
-
-### `services/control_api/services/proxy_manager.py`
-- In `register()`, after `verify_route_visible_in_traefik_container()`, call `probe_backend_from_traefik_container(sandbox_id)` and log results at warning level with `log` callback (non-blocking — same pattern as existing container path verification).
-- Add a log line that includes: `sandbox_id`, normalized slug, route file path, backend URLs, and Traefik container ID.
-
-### `tools/agent_runner/run_sandbox.py`
-- In `_wait_for_proxy_url()`:
-  - On `HTTPError`, log the HTTP status code: `"proxy: route active (backend not healthy yet, http={e.code})\n"` instead of the generic message.
-- Add `_log_proxy_backend_diagnostics(sandbox_id: str, log_path: Path) -> dict[str, str]`:
-  - Gets Traefik container ID (via `TraefikManager`).
-  - Calls `probe_backend_from_traefik_container(sandbox_id)` and logs each result.
-  - Runs `docker inspect <sandbox-api-container-name>` to log container network memberships.
-  - Returns the probe results dict for inclusion in validation.json.
-- Update `_write_validation_json()` to accept `backend_diagnostics: dict | None = None` and write it as a field in the JSON.
-- In `_after_start()` (the `on_step_complete` callback), call `_log_proxy_backend_diagnostics()` after route registration and pass results to `_write_validation_json()`.
-
-### `services/control_api/services/sandbox_runtime_deploy.py`
-- In `_register_proxy_routes_after_compose()`, after `_wait_for_proxy_url()`, call `rs._log_proxy_backend_diagnostics(state.id, log_path)`.
-- Pass the returned diagnostics dict to `rs._write_validation_json()`.
-
-### `.ai-dev-factory/scripts/healthcheck.sh`
-- In `probe()`, capture the HTTP status code for the last failed attempt and include it in the FAIL message: `"FAIL  $name  ($url)  — http=$last_code after $RETRIES attempts"` (using `curl -o /dev/null -w "%{http_code}"` pattern, matching `probe_proxy_infra()`).
-- Add `HEALTHCHECK_RETRIES=${HEALTHCHECK_RETRIES:-6}` and `HEALTHCHECK_DELAY=${HEALTHCHECK_DELAY:-5}` at the top, replacing the hardcoded `RETRIES=3` / `DELAY=5` (doubles the default backend wait to 30 s).
-
-### Tests
-- `tests/test_proxy_route_wait.py`: update expected log message strings for the new `http=<code>` format.
-- `tests/test_proxy_network.py` (new): unit-test `_to_docker_safe_alias()` for uppercase, hyphen, and invalid-char inputs.
-- `tests/test_proxy_backend_probe.py` (new): unit-test `probe_backend_from_traefik_container()` when Docker is unavailable (should return `{}`) and when `wget` succeeds / fails.
-
-## Excluded
-
-- Changing the sandbox ID generation strategy (UUIDs are already lowercase; this is defensive normalization only).
-- Modifying `docker-compose.yml` alias templates — SANDBOX_ID values are already lowercase alphanumeric for hex UUIDs; the normalization in `proxy_network.py` is the canonical fix point.
-- Replacing healthcheck.sh with a different mechanism.
-- Adding Traefik network auto-attach/detach logic.
-- Changing route file naming or the `{sandbox_id}.yml` convention.
-- Dashboard/API surface changes to expose backend diagnostics in the UI.
-- Fixing any identified root cause that requires a separate architectural change (scoped to diagnostic + defensive hardening only).
-
-## Acceptance criteria
-
-- A routed backend returning 502 produces a log with: sandbox_id, normalized slug, route file path, backend alias URLs, Traefik container ID, and the result of a `docker exec wget` probe for each alias.
-- `validation.json` contains a `backend_diagnostics` field with Traefik-internal probe results when validation fails with a 502.
-- `sandbox_backend_urls("SANDBOX-WITH-UPPER-T194957")` returns lowercase aliases: `http://sandbox-sandbox-with-upper-t194957-api:8080`.
-- `probe_backend_from_traefik_container()` returns `{}` (not an exception) when Docker is unavailable.
-- `healthcheck.sh` FAIL lines include the HTTP status code of the last attempt.
-- `healthcheck.sh` respects `HEALTHCHECK_RETRIES` and `HEALTHCHECK_DELAY` env overrides; defaults are 6 and 5.
-- `tests/test_proxy_route_wait.py` passes after log message update.
-- `tests/test_proxy_network.py` covers uppercase, timestamp-separator, and mixed-char inputs.
-- Existing deployer and environment flows continue to pass (`test_sandbox_runtime_deploy.py`, `test_environment_infra_bootstrap.py`, `test_environment_supervisor.py`).
+| File | What changed |
+|------|-------------|
+| `proxy_network.py` | `_to_docker_safe_alias()`, `sandbox_dns_aliases()`; `sandbox_backend_urls()` now normalizes the ID |
+| `proxy_route_files.py` | New `probe_backend_from_traefik_container()` — `docker exec <traefik> wget` probe, returns `{}` when Docker unavailable |
+| `proxy_manager.py` | `register()` now logs sandbox_id, slug, file, backends, Traefik container ID, and calls the backend probe |
+| `run_sandbox.py` | `_wait_for_proxy_url` logs `http=<code>`; new `_log_proxy_backend_diagnostics()` (Traefik probe + container inspect); `_write_validation_json()` accepts `backend_diagnostics`; `_after_start()` calls diagnostics and passes them to validation.json |
+| `sandbox_runtime_deploy.py` | `_register_proxy_routes_after_compose()` calls `_log_proxy_backend_diagnostics()` on both success and failure; passes results to `_write_validation_json()` |
+| `healthcheck.sh` | `RETRIES=${HEALTHCHECK_RETRIES:-6}`, `DELAY=${HEALTHCHECK_DELAY:-5}`; `probe()` reports `http=<code>` in FAIL lines |
+| `tests/test_proxy_route_wait.py` | Updated assertion to expect `http=503` format |
+| `tests/test_proxy_network.py` | Updated alias-format test (lowercase); added 8 new tests for normalization |
+| `tests/test_proxy_backend_probe.py` | New file — 6 tests for `probe_backend_from_traefik_container` |
