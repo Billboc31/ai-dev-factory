@@ -77,3 +77,11 @@
 [2026-06-02T09:12:54Z] compose: skill=ai/skills/debugging.md
 [2026-06-02T09:12:54Z] compose: task (canonical prompt)
 [2026-06-02T09:12:54Z] snapshot: runtime-prompt=runs/T166/prompts/tester-attempt-1.md
+[2026-06-02T09:28:57Z] auto-run: step=tester done rc=0
+[2026-06-02T09:28:57Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-02T09:28:57Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-02T09:28:57Z] commit-checkpoint: unstaged runtime garbage: ['runs/T166/runtime.log']
+[2026-06-02T09:28:57Z] commit-checkpoint: sha=6a1fd964 files=4 title='test(T166/workflow,tests): tester — update 4 file(s)'
+[2026-06-02T09:28:57Z] auto-run: auto-push triggered
+[2026-06-02T09:28:57Z] push: tolerating runtime dirty files (not blocking): ['runs/T166/runtime.log']
+[2026-06-02T09:28:57Z] push: pushing branch=ticket/T166-t166-diagnose-and-fix-routed-backend-502-after-rou
