@@ -26,7 +26,7 @@ def test_wait_returns_true_when_traefik_responds_http_error(tmp_path):
         result = run_sandbox._wait_for_proxy_url(_TEST_URL, log, timeout_s=1)
 
     assert result is True
-    assert "proxy: route active (backend not healthy yet)" in log.read_text()
+    assert "proxy: route active (backend not healthy yet, http=503)" in log.read_text()
 
 
 def test_wait_returns_true_when_backend_healthy(tmp_path):

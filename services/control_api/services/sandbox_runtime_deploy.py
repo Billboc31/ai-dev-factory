@@ -279,10 +279,11 @@ def deploy_operational_runtime(
     routes_dir = resolve_proxy_routes_dir()
     registered_urls: dict[str, str] = {}
     route_registered = False
+    _backend_diag: dict[str, str] = {}
 
     def _register_proxy_routes_after_compose() -> str | None:
         """Write route file and register sandbox backends with the proxy."""
-        nonlocal registered_urls, route_registered
+        nonlocal registered_urls, route_registered, _backend_diag
         _persist(LifecyclePhase.provisioning, last_step="routes")
         try:
             registered_urls = ProxyManager(
@@ -307,7 +308,9 @@ def deploy_operational_runtime(
         )
         probe_url = registered_urls.get("api") or urls["api"]
         if not rs._wait_for_proxy_url(probe_url, log_path):
+            _backend_diag = rs._log_proxy_backend_diagnostics(state.id, log_path)
             return "reverse proxy route did not become reachable on host runtime"
+        _backend_diag = rs._log_proxy_backend_diagnostics(state.id, log_path)
         return None
 
     if use_worktree:
@@ -371,6 +374,7 @@ def deploy_operational_runtime(
         {"api_port": state.ports["api"], "web_port": state.ports["web"]},
         state_base["started_at"],
         log_path,
+        backend_diagnostics=_backend_diag or None,
     )
 
     if persist_state:

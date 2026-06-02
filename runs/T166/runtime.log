@@ -21,3 +21,19 @@
 [2026-06-02T07:52:58Z] push: tolerating runtime dirty files (not blocking): ['runs/T166/runtime.log']
 [2026-06-02T07:52:58Z] push: pushing branch=ticket/T166-t166-diagnose-and-fix-routed-backend-502-after-rou
 [2026-06-02T07:53:00Z] push: done branch=ticket/T166-t166-diagnose-and-fix-routed-backend-502-after-rou
+[2026-06-02T08:04:46Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-06-02T08:04:46Z] auto-run: running step=planner
+[2026-06-02T08:04:46Z] auto-run: fix context: previous_output=runs/T166/plan.md
+[2026-06-02T08:04:46Z] auto-run: fix context: review=runs/T166/reviews/plan-review.md
+[2026-06-02T08:04:46Z] auto-run: fix context: fix_instructions=runs/T166/fixes/plan-fix-v1.md
+[2026-06-02T08:04:46Z] auto-run: fix context: context_file=runs/T166/fixes/context-20260602T080446Z.md
+[2026-06-02T08:04:46Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-02T08:04:46Z] prompt: generic fallback — injecting runs/T166/ticket.md
+[2026-06-02T08:04:46Z] compose: global-context=docs/ai/global-context.md
+[2026-06-02T08:04:46Z] compose: role=ai/roles/planner.md
+[2026-06-02T08:04:46Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-02T08:04:46Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-02T08:04:46Z] compose: skill=ai/skills/documentation.md
+[2026-06-02T08:04:46Z] compose: task (canonical prompt)
+[2026-06-02T08:04:46Z] compose: extra-context=runs/T166/fixes/context-20260602T080446Z.md
+[2026-06-02T08:04:46Z] snapshot: runtime-prompt=runs/T166/prompts/planner-attempt-2.md

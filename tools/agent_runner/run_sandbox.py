@@ -301,14 +301,84 @@ def _wait_for_proxy_url(url: str, log_path: Path, *, timeout_s: int = 15) -> boo
             urllib.request.urlopen(url, timeout=2)
             _append_log(log_path, "proxy: route active (backend healthy)\n")
             return True
-        except urllib.error.HTTPError:
+        except urllib.error.HTTPError as e:
             # Any HTTP error response means Traefik forwarded the request.
-            _append_log(log_path, "proxy: route active (backend not healthy yet)\n")
+            _append_log(log_path, f"proxy: route active (backend not healthy yet, http={e.code})\n")
             return True
         except (urllib.error.URLError, OSError):
             time.sleep(1)
     _append_log(log_path, f"proxy: infra unreachable after {timeout_s}s\n")
     return False
+
+
+def _log_proxy_backend_diagnostics(sandbox_id: str, log_path: Path) -> dict[str, str]:
+    """Probe backend aliases from inside Traefik; inspect api container; log results.
+
+    Returns the Traefik-internal probe results for inclusion in validation.json.
+    Never raises — all errors are logged and swallowed.
+    """
+    try:
+        from services.control_api.services.traefik_manager import TraefikManager
+        from services.control_api.services.proxy_route_files import (
+            probe_backend_from_traefik_container,
+        )
+        from services.control_api.services.proxy_network import sandbox_dns_aliases
+    except ImportError:
+        return {}
+
+    try:
+        traefik_cid = TraefikManager().infra_container_id()
+    except Exception:
+        traefik_cid = None
+
+    probe_results = probe_backend_from_traefik_container(sandbox_id, container_id=traefik_cid)
+    aliases = sandbox_dns_aliases(sandbox_id)
+
+    _append_log(
+        log_path,
+        f"proxy: backend diagnostics sandbox={sandbox_id}"
+        f" traefik_container={traefik_cid}"
+        f" aliases_api={aliases['api']}"
+        f" aliases_web={aliases['web']}\n",
+    )
+    for svc, result in probe_results.items():
+        _append_log(log_path, f"proxy: backend probe {svc}={result}\n")
+
+    # Inspect the API container for runtime state and network membership.
+    compose_project = normalize_compose_project_name(f"sandbox-{sandbox_id}")
+    api_container = f"{compose_project}-api-1"
+    try:
+        inspect = subprocess.run(
+            ["docker", "inspect", api_container],
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=10,
+        )
+        if inspect.returncode == 0 and inspect.stdout.strip():
+            try:
+                data = json.loads(inspect.stdout)
+                if data:
+                    c = data[0]
+                    state = c.get("State", {})
+                    health = state.get("Health", {}) or {}
+                    networks = list(c.get("NetworkSettings", {}).get("Networks", {}).keys())
+                    _append_log(
+                        log_path,
+                        f"proxy: api container ({api_container}):"
+                        f" status={state.get('Status', 'unknown')}"
+                        f" restarts={c.get('RestartCount', 0)}"
+                        f" health={health.get('Status', 'none')}"
+                        f" networks={networks}\n",
+                    )
+            except (json.JSONDecodeError, KeyError):
+                _append_log(log_path, f"proxy: api container ({api_container}): inspect parse failed\n")
+        else:
+            _append_log(log_path, f"proxy: api container ({api_container}): not found\n")
+    except (FileNotFoundError, subprocess.TimeoutExpired, OSError):
+        pass
+
+    return probe_results
 
 
 def _unregister_proxy_route(
@@ -739,6 +809,8 @@ def _write_validation_json(
     ports: dict[str, int],
     started_at: str,
     log_path: Path,
+    *,
+    backend_diagnostics: dict | None = None,
 ) -> Path:
     """Write validation.json to sandbox_runtime_root; return the path."""
     data = {
@@ -754,6 +826,8 @@ def _write_validation_json(
         },
         "log_path": str(log_path),
     }
+    if backend_diagnostics is not None:
+        data["backend_diagnostics"] = backend_diagnostics
     out = sandbox_runtime_root / "validation.json"
     out.write_text(json.dumps(data, indent=2), encoding="utf-8")
     _append_log(log_path, f"validation.json written to {out}\n")
@@ -1030,6 +1104,8 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
     # and Traefik is attached to the environment network.
     _ensure_required_infra(log_path)
 
+    _proxy_diagnostics: list[dict] = [{}]
+
     def _after_start(script_name: str) -> bool | None:
         if script_name != "start.sh":
             return None
@@ -1041,7 +1117,9 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
         )
         if not api_url:
             return False
-        return _wait_for_proxy_url(api_url, log_path)
+        ok = _wait_for_proxy_url(api_url, log_path)
+        _proxy_diagnostics[0] = _log_proxy_backend_diagnostics(sandbox_id, log_path)
+        return ok
 
     # Set to True in environment mode on success to skip teardown in finally.
     keep_environment = False
@@ -1088,6 +1166,7 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
             healthcheck_status, smoke_status, failing_step,
             {"web": sandbox_urls["web"], "api": sandbox_urls["api"]},
             ports, started_at, log_path,
+            backend_diagnostics=_proxy_diagnostics[0] or None,
         )
 
         # If smoke tests failed and an AI exec_cmd is configured, generate a fix proposal.
