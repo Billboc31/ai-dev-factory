@@ -32,3 +32,14 @@
 [2026-06-03T21:42:13Z] push: tolerating runtime dirty files (not blocking): ['runs/T171/runtime.log']
 [2026-06-03T21:42:13Z] push: pushing branch=ticket/T171-t171-environment-deploy-should-use-a-fresh-runtime
 [2026-06-03T21:42:25Z] auto-run: step=planner done rc=0
+[2026-06-03T21:42:27Z] planner checkpoint: committed
+[2026-06-03T21:42:27Z] planner checkpoint: pushed
+[2026-06-03T21:42:27Z] planner validation success
+[2026-06-03T21:42:27Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-03T21:42:27Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-03T21:42:27Z] commit-checkpoint: unstaged runtime garbage: ['runs/T171/runtime.log']
+[2026-06-03T21:42:27Z] commit-checkpoint: sha=e8f91f90 files=2 title='docs(T171/workflow): planner — update 2 file(s)'
+[2026-06-03T21:42:27Z] auto-run: auto-push triggered
+[2026-06-03T21:42:27Z] push: tolerating runtime dirty files (not blocking): ['runs/T171/runtime.log']
+[2026-06-03T21:42:27Z] push: pushing branch=ticket/T171-t171-environment-deploy-should-use-a-fresh-runtime
+[2026-06-03T21:42:29Z] push: done branch=ticket/T171-t171-environment-deploy-should-use-a-fresh-runtime
