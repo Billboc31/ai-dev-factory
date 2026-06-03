@@ -1,0 +1,7 @@
+{
+  "ticket_id": "T171",
+  "state": "INIT",
+  "branch": "ticket/T171-t171-environment-deploy-should-use-a-fresh-runtime",
+  "issue_number": 194,
+  "updated_at": "2026-06-03T21:40:02Z"
+}
