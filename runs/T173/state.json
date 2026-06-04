@@ -3,5 +3,7 @@
   "state": "TEST_COMPLETE",
   "branch": "ticket/T173-t173-environment-runtime-must-use-committed-projec",
   "issue_number": 198,
-  "updated_at": "2026-06-04T14:45:12Z"
+  "updated_at": "2026-06-04T14:56:35Z",
+  "pr_number": 199,
+  "pr_synced": true
 }
