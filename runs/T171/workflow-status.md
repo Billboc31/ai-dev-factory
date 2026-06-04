@@ -52,3 +52,16 @@
 - prev: IMPLEMENTATION_APPROVED
 - step: tester
 - next: TEST_COMPLETE
+
+## 2026-06-04T08:30:00Z
+
+- prev: TEST_COMPLETE
+- step: tester (re-run)
+- next: TEST_COMPLETE_FIX_REQUIRED
+- notes: 12 regressions in test_sandbox_worktree.py — create_with_worktree removed without updating tests
+
+## 2026-06-04T08:04:17Z
+
+- prev: IMPLEMENTATION_APPROVED
+- step: tester
+- next: TEST_COMPLETE
