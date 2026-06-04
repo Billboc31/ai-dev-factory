@@ -1,6 +1,7 @@
 """Unit tests for the shared operational deploy pipeline."""
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -37,6 +38,15 @@ def _sample_state(tmp_path: Path) -> tuple[SandboxManager, SandboxState, Path]:
     )
     state = mgr.create("env-1", str(proj), env_name="env-1")
     sandbox_dir = mgr._storage_dir(state.id)
+
+    # Pre-create source scripts to reflect the cloned layout used at runtime.
+    source_scripts = sandbox_dir / "source" / ".ai-dev-factory" / "scripts"
+    source_scripts.mkdir(parents=True)
+    for name in ("bootstrap.sh", "build.sh", "start.sh", "healthcheck.sh"):
+        script = source_scripts / name
+        script.write_text("#!/bin/bash\nexit 0\n", encoding="utf-8")
+        script.chmod(0o755)
+
     return mgr, state, sandbox_dir
 
 
@@ -55,6 +65,10 @@ def test_deploy_operational_runtime_success(tmp_path):
         return True, None, [{"name": "healthcheck.sh", "status": "pass"}]
 
     with (
+        patch(
+            "services.control_api.services.sandbox_runtime_deploy._clone_fresh_source",
+            return_value=(True, None, "abc1234"),
+        ),
         patch(
             "services.control_api.services.sandbox_runtime_deploy.resolve_proxy_routes_dir",
             return_value=routes_dir,
@@ -111,6 +125,10 @@ def test_deploy_operational_runtime_script_failure_cleans_up(tmp_path):
 
     routes_dir = tmp_path / "routes"
     with (
+        patch(
+            "services.control_api.services.sandbox_runtime_deploy._clone_fresh_source",
+            return_value=(True, None, "abc1234"),
+        ),
         patch(
             "services.control_api.services.sandbox_runtime_deploy.resolve_proxy_routes_dir",
             return_value=routes_dir,
@@ -348,6 +366,10 @@ def test_deploy_runs_smoke_for_deploy_and_test_mode(tmp_path):
 
     with (
         patch(
+            "services.control_api.services.sandbox_runtime_deploy._clone_fresh_source",
+            return_value=(True, None, "abc1234"),
+        ),
+        patch(
             "services.control_api.services.sandbox_runtime_deploy.resolve_proxy_routes_dir",
             return_value=routes_dir,
         ),
@@ -382,3 +404,93 @@ def test_deploy_runs_smoke_for_deploy_and_test_mode(tmp_path):
     assert result.smoke_status == "success"
     mock_smoke.assert_called_once()
     assert LifecyclePhase.validating in phases
+
+
+def test_deploy_operational_runtime_clones_even_without_ref(tmp_path):
+    """When state.ref is None, deploy still clones into sandbox_dir/source/."""
+    mgr, state, sandbox_dir = _sample_state(tmp_path)
+    assert state.ref is None
+
+    fake_proc = MagicMock()
+    fake_proc.pid = 42
+    registered = {"web": "http://w.test", "api": "http://a.test"}
+    routes_dir = tmp_path / "routes"
+
+    clone_args: list[tuple] = []
+    scripts_source: list[Path] = []
+
+    def _fake_clone(project_root, source_path, ref, log):
+        clone_args.append((project_root, source_path, ref))
+        return True, None, "abc1234"
+
+    def _scripts_ok(source, *_args, **kwargs):
+        scripts_source.append(source)
+        cb = kwargs.get("on_step_complete")
+        if cb:
+            cb("start.sh")
+        return True, None, [{"name": "healthcheck.sh", "status": "pass"}]
+
+    with (
+        patch(
+            "services.control_api.services.sandbox_runtime_deploy._clone_fresh_source",
+            side_effect=_fake_clone,
+        ),
+        patch(
+            "services.control_api.services.sandbox_runtime_deploy.resolve_proxy_routes_dir",
+            return_value=routes_dir,
+        ),
+        patch("tools.agent_runner.run_sandbox._start_sandbox_supervisor", return_value=fake_proc),
+        patch("tools.agent_runner.run_sandbox._ensure_required_infra"),
+        patch("tools.agent_runner.run_sandbox._wait_for_proxy_url", return_value=True),
+        patch("tools.agent_runner.run_sandbox._run_scripts", side_effect=_scripts_ok),
+        patch(
+            "services.control_api.services.proxy_manager.ProxyManager.register",
+            return_value=registered,
+        ),
+    ):
+        (routes_dir / f"{state.id}.yml").write_text("http:\n  routers: {}\n")
+        result = deploy_operational_runtime(state, sandbox_dir=sandbox_dir, mode="environment")
+
+    assert result.success is True
+    assert len(clone_args) == 1, "clone must be called even when state.ref is None"
+    assert clone_args[0][2] is None, "clone must receive ref=None when state.ref is None"
+    assert scripts_source[0] == sandbox_dir / "source", (
+        f"_run_scripts must receive sandbox_dir/source, got {scripts_source[0]}"
+    )
+
+
+def test_deploy_operational_runtime_path_validation_fails(tmp_path):
+    """Path validation guard returns failure if resolved source escapes sandbox_dir."""
+    mgr, state, sandbox_dir = _sample_state(tmp_path)
+    fake_proc = MagicMock()
+    fake_proc.pid = 1
+
+    # Replace source dir with a symlink pointing outside sandbox_dir.
+    source_link = sandbox_dir / "source"
+    shutil.rmtree(source_link)
+    external_dir = tmp_path / "external"
+    external_dir.mkdir()
+    source_link.symlink_to(external_dir)
+
+    scripts_called = False
+
+    def _scripts_side(*_a, **_kw):
+        nonlocal scripts_called
+        scripts_called = True
+        return True, None, []
+
+    with (
+        patch(
+            "services.control_api.services.sandbox_runtime_deploy._clone_fresh_source",
+            return_value=(True, None, "abc1234"),
+        ),
+        patch("tools.agent_runner.run_sandbox._start_sandbox_supervisor", return_value=fake_proc),
+        patch("tools.agent_runner.run_sandbox._ensure_required_infra"),
+        patch("tools.agent_runner.run_sandbox._run_scripts", side_effect=_scripts_side),
+        patch("tools.agent_runner.run_sandbox._stop_sandbox_supervisor"),
+    ):
+        result = deploy_operational_runtime(state, sandbox_dir=sandbox_dir, mode="environment")
+
+    assert result.success is False
+    assert "path validation" in (result.error or "").lower()
+    assert not scripts_called, "scripts must NOT run after path validation failure"

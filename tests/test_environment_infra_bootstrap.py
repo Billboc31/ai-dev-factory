@@ -56,6 +56,10 @@ class TestInfraBootstrappedOnProvision:
 
         with (
             patch(
+                "services.control_api.services.sandbox_runtime_deploy._clone_fresh_source",
+                return_value=(True, None, "abc1234"),
+            ),
+            patch(
                 "services.control_api.services.sandbox_runtime_deploy.resolve_proxy_routes_dir",
                 return_value=routes_dir,
             ),
@@ -95,6 +99,10 @@ class TestTraefikInitiallyStopped:
         routes_dir = tmp_path / "routes"
 
         with (
+            patch(
+                "services.control_api.services.sandbox_runtime_deploy._clone_fresh_source",
+                return_value=(True, None, "abc1234"),
+            ),
             patch(
                 "services.control_api.services.sandbox_runtime_deploy.resolve_proxy_routes_dir",
                 return_value=routes_dir,
@@ -138,6 +146,10 @@ class TestNoDuplicateBootstrap:
         routes_dir = tmp_path / "routes"
 
         with (
+            patch(
+                "services.control_api.services.sandbox_runtime_deploy._clone_fresh_source",
+                return_value=(True, None, "abc1234"),
+            ),
             patch(
                 "services.control_api.services.sandbox_runtime_deploy.resolve_proxy_routes_dir",
                 return_value=routes_dir,

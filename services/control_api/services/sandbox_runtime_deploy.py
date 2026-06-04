@@ -194,26 +194,29 @@ def _docker_logs_section(
 def _clone_fresh_source(
     project_root: Path,
     source_path: Path,
-    ref: str,
+    ref: str | None,
     log: Callable[[str], None],
 ) -> tuple[bool, str | None, str | None]:
-    """Clone project_root into source_path and checkout ref.
+    """Clone project_root into source_path; checkout ref when given.
 
     Returns (ok, error_message, commit_sha).
-    Aborts if the checked-out branch does not match ref.
+    When ref is provided, aborts if the checked-out branch does not match.
+    When ref is None, clones the default branch without a branch check.
     """
     log(f"\n--- fresh source clone ---\n")
     log(f"source: {project_root}\n")
     log(f"target: {source_path}\n")
-    log(f"ref: {ref}\n")
+    log(f"ref: {ref or '(default)'}\n")
 
     if source_path.exists():
         shutil.rmtree(source_path)
 
-    result = subprocess.run(
-        ["git", "clone", "--branch", ref, str(project_root), str(source_path)],
-        capture_output=True, text=True, check=False,
-    )
+    clone_cmd = ["git", "clone"]
+    if ref is not None:
+        clone_cmd += ["--branch", ref]
+    clone_cmd += [str(project_root), str(source_path)]
+
+    result = subprocess.run(clone_cmd, capture_output=True, text=True, check=False)
     if result.stdout:
         log(result.stdout)
     if result.stderr:
@@ -239,7 +242,7 @@ def _clone_fresh_source(
     log(f"git branch --show-current: {actual_branch}\n")
     log(f"git rev-parse --short HEAD: {commit_sha or '(unknown)'}\n")
 
-    if actual_branch != ref:
+    if ref is not None and actual_branch != ref:
         err = f"branch mismatch: expected {ref!r}, got {actual_branch!r}"
         log(f"\n{err}\n")
         return False, err, commit_sha
@@ -259,9 +262,11 @@ def deploy_operational_runtime(
 
     Pipeline progress is written to ``pipeline-state.json`` (not ``state.json``).
     Optional *persist_state* updates :class:`SandboxState` for live UI polling.
-    When ``state.ref`` is set, a fresh git clone of ``state.project_root`` is
-    created under ``sandbox_dir/source/`` and the requested branch is verified
-    before any script runs.
+    A fresh git clone of ``state.project_root`` is always created under
+    ``sandbox_dir/source/``; when ``state.ref`` is set the named branch is
+    checked out and verified, otherwise the default branch is cloned.
+    Scripts are consumed as committed in the clone — never from the host
+    ai-dev-factory checkout.
     """
     rs = _import_run_sandbox()
     sandbox_dir = sandbox_dir.resolve()
@@ -273,9 +278,7 @@ def deploy_operational_runtime(
 
     pipeline_state_path = sandbox_dir / "pipeline-state.json"
     project_root = Path(state.project_root).resolve()
-    # Use a fresh clone when a ref (branch) is specified; fall back to
-    # project_root for deployments without an explicit branch.
-    source_path = sandbox_dir / "source" if state.ref else project_root
+    source_path = sandbox_dir / "source"
 
     urls = build_sandbox_urls(
         state.id, web_host=state.web_host, api_host=state.api_host
@@ -382,23 +385,45 @@ def deploy_operational_runtime(
             return "reverse proxy route did not become reachable on host runtime"
         return None
 
-    if state.ref:
-        clone_ok, clone_err, _ = _clone_fresh_source(
-            project_root,
-            sandbox_dir / "source",
-            state.ref,
-            lambda text: rs._append_log(log_path, text),
+    clone_ok, clone_err, _ = _clone_fresh_source(
+        project_root,
+        source_path,
+        state.ref,
+        lambda text: rs._append_log(log_path, text),
+    )
+    if not clone_ok:
+        rs._stop_sandbox_supervisor(supervisor_proc, runtime_root, log_path)
+        err = clone_err or "source clone failed"
+        _persist(LifecyclePhase.failed, last_step="source-clone", lifecycle_error=err)
+        return OperationalDeployResult(
+            success=False,
+            error=err,
+            supervisor_pid=supervisor_pid,
+            last_step="source-clone",
         )
-        if not clone_ok:
-            rs._stop_sandbox_supervisor(supervisor_proc, runtime_root, log_path)
-            err = clone_err or "source clone failed"
-            _persist(LifecyclePhase.failed, last_step="source-clone", lifecycle_error=err)
-            return OperationalDeployResult(
-                success=False,
-                error=err,
-                supervisor_pid=supervisor_pid,
-                last_step="source-clone",
-            )
+
+    # Guard: source must resolve inside sandbox_dir to prevent path traversal.
+    resolved_source = source_path.resolve()
+    try:
+        resolved_source.relative_to(sandbox_dir)
+    except ValueError:
+        err = (
+            f"path validation failed: resolved source {resolved_source}"
+            f" escapes sandbox {sandbox_dir}"
+        )
+        rs._append_log(log_path, f"\n{err}\n")
+        rs._stop_sandbox_supervisor(supervisor_proc, runtime_root, log_path)
+        _persist(LifecyclePhase.failed, last_step="path-validation", lifecycle_error=err)
+        return OperationalDeployResult(
+            success=False,
+            error=err,
+            supervisor_pid=supervisor_pid,
+            last_step="path-validation",
+        )
+
+    for script_name in _SCRIPT_PHASE:
+        script_path = resolved_source / ".ai-dev-factory" / "scripts" / script_name
+        rs._append_log(log_path, f"resolved script path: {script_path}\n")
 
     def _on_step_start(script_name: str) -> None:
         phase = _SCRIPT_PHASE.get(script_name, LifecyclePhase.provisioning)

@@ -139,6 +139,10 @@ def test_provision_endpoint_triggers_infra_bootstrap(
     client = TestClient(sup_main.app)
     with (
         patch(
+            "services.control_api.services.sandbox_runtime_deploy._clone_fresh_source",
+            return_value=(True, None, "abc1234"),
+        ),
+        patch(
             "services.control_api.services.sandbox_runtime_deploy.resolve_proxy_routes_dir",
             return_value=routes_dir,
         ),

@@ -1,0 +1,77 @@
+[2026-06-04T13:58:27Z] auto-run start: state=INIT
+[2026-06-04T13:58:27Z] auto-run: running step=planner
+[2026-06-04T13:58:27Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-04T13:58:27Z] prompt: generic fallback — injecting runs/T173/ticket.md
+[2026-06-04T13:58:27Z] compose: global-context=docs/ai/global-context.md
+[2026-06-04T13:58:27Z] compose: role=ai/roles/planner.md
+[2026-06-04T13:58:27Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-04T13:58:27Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-04T13:58:27Z] compose: skill=ai/skills/documentation.md
+[2026-06-04T13:58:27Z] compose: task (canonical prompt)
+[2026-06-04T13:58:27Z] snapshot: runtime-prompt=runs/T173/prompts/planner-attempt-1.md
+[2026-06-04T13:58:47Z] auto-run start: state=INIT
+[2026-06-04T13:58:47Z] auto-run: running step=planner
+[2026-06-04T13:58:47Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-04T13:58:47Z] prompt: generic fallback — injecting runs/T173/ticket.md
+[2026-06-04T13:58:47Z] compose: global-context=docs/ai/global-context.md
+[2026-06-04T13:58:47Z] compose: role=ai/roles/planner.md
+[2026-06-04T13:58:47Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-04T13:58:47Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-04T13:58:47Z] compose: skill=ai/skills/documentation.md
+[2026-06-04T13:58:47Z] compose: task (canonical prompt)
+[2026-06-04T13:58:47Z] snapshot: runtime-prompt=runs/T173/prompts/planner-attempt-2.md
+[2026-06-04T14:02:50Z] auto-run: step=planner done rc=0
+[2026-06-04T14:02:52Z] planner checkpoint: committed
+[2026-06-04T14:02:52Z] planner checkpoint: pushed
+[2026-06-04T14:02:52Z] planner validation success
+[2026-06-04T14:02:52Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-04T14:02:52Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-04T14:02:52Z] commit-checkpoint: unstaged runtime garbage: ['runs/T173/runtime.log']
+[2026-06-04T14:02:52Z] commit-checkpoint: sha=97b9e00f files=2 title='docs(T173/workflow): planner — update 2 file(s)'
+[2026-06-04T14:02:52Z] auto-run: auto-push triggered
+[2026-06-04T14:02:53Z] push: tolerating runtime dirty files (not blocking): ['runs/T173/runtime.log']
+[2026-06-04T14:02:53Z] push: pushing branch=ticket/T173-t173-environment-runtime-must-use-committed-projec
+[2026-06-04T14:03:04Z] auto-run: step=planner done rc=0
+[2026-06-04T14:03:07Z] planner checkpoint: committed
+[2026-06-04T14:03:07Z] planner checkpoint: pushed
+[2026-06-04T14:03:07Z] planner validation success
+[2026-06-04T14:03:07Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-04T14:03:07Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-04T14:03:07Z] commit-checkpoint: unstaged runtime garbage: ['runs/T173/runtime.log']
+[2026-06-04T14:03:07Z] commit-checkpoint: sha=7bb3212b files=2 title='docs(T173/workflow): planner — update 2 file(s)'
+[2026-06-04T14:03:07Z] auto-run: auto-push triggered
+[2026-06-04T14:03:07Z] push: tolerating runtime dirty files (not blocking): ['runs/T173/runtime.log']
+[2026-06-04T14:03:07Z] push: pushing branch=ticket/T173-t173-environment-runtime-must-use-committed-projec
+[2026-06-04T14:03:10Z] push: done branch=ticket/T173-t173-environment-runtime-must-use-committed-projec
+[2026-06-04T14:05:25Z] auto-run start: state=PLAN_APPROVED
+[2026-06-04T14:05:25Z] auto-run: running step=coder
+[2026-06-04T14:05:25Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-06-04T14:05:25Z] prompt: generic fallback — injecting runs/T173/ticket.md
+[2026-06-04T14:05:25Z] compose: global-context=docs/ai/global-context.md
+[2026-06-04T14:05:25Z] compose: role=ai/roles/coder.md
+[2026-06-04T14:05:25Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-04T14:05:25Z] compose: skill=ai/skills/git-discipline.md
+[2026-06-04T14:05:25Z] compose: skill=ai/skills/code-quality.md
+[2026-06-04T14:05:25Z] compose: skill=ai/skills/refactor-safety.md
+[2026-06-04T14:05:25Z] compose: skill=ai/skills/security.md
+[2026-06-04T14:05:25Z] compose: task (canonical prompt)
+[2026-06-04T14:05:25Z] snapshot: runtime-prompt=runs/T173/prompts/coder-attempt-1.md
+[2026-06-04T14:31:55Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-04T14:31:55Z] auto-run: running step=tester
+[2026-06-04T14:31:55Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-04T14:31:55Z] prompt: generic fallback — injecting runs/T173/ticket.md
+[2026-06-04T14:31:55Z] compose: global-context=docs/ai/global-context.md
+[2026-06-04T14:31:55Z] compose: role=ai/roles/tester.md
+[2026-06-04T14:31:55Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-04T14:31:55Z] compose: skill=ai/skills/testing.md
+[2026-06-04T14:31:55Z] compose: skill=ai/skills/debugging.md
+[2026-06-04T14:31:55Z] compose: task (canonical prompt)
+[2026-06-04T14:31:55Z] snapshot: runtime-prompt=runs/T173/prompts/tester-attempt-1.md
+[2026-06-04T14:45:12Z] auto-run: step=tester done rc=0
+[2026-06-04T14:45:12Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-04T14:45:12Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-04T14:45:13Z] commit-checkpoint: unstaged runtime garbage: ['runs/T173/runtime.log']
+[2026-06-04T14:45:13Z] commit-checkpoint: sha=56553683 files=4 title='test(T173/workflow): tester — update 4 file(s)'
+[2026-06-04T14:45:13Z] auto-run: auto-push triggered
+[2026-06-04T14:45:13Z] push: tolerating runtime dirty files (not blocking): ['runs/T173/runtime.log']
+[2026-06-04T14:45:13Z] push: pushing branch=ticket/T173-t173-environment-runtime-must-use-committed-projec
