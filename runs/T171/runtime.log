@@ -54,3 +54,22 @@
 [2026-06-04T07:46:44Z] compose: skill=ai/skills/debugging.md
 [2026-06-04T07:46:44Z] compose: task (canonical prompt)
 [2026-06-04T07:46:44Z] snapshot: runtime-prompt=runs/T171/prompts/tester-attempt-1.md
+[2026-06-04T07:54:56Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-04T07:54:56Z] auto-run: running step=tester
+[2026-06-04T07:54:56Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-04T07:54:56Z] prompt: generic fallback — injecting runs/T171/ticket.md
+[2026-06-04T07:54:56Z] compose: global-context=docs/ai/global-context.md
+[2026-06-04T07:54:56Z] compose: role=ai/roles/tester.md
+[2026-06-04T07:54:56Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-04T07:54:56Z] compose: skill=ai/skills/testing.md
+[2026-06-04T07:54:56Z] compose: skill=ai/skills/debugging.md
+[2026-06-04T07:54:56Z] compose: task (canonical prompt)
+[2026-06-04T07:54:56Z] snapshot: runtime-prompt=runs/T171/prompts/tester-attempt-2.md
+[2026-06-04T07:56:09Z] auto-run: step=tester done rc=0
+[2026-06-04T07:56:09Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-04T07:56:09Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-04T07:56:09Z] commit-checkpoint: unstaged runtime garbage: ['runs/T171/runtime.log']
+[2026-06-04T07:56:10Z] commit-checkpoint: sha=d8aa1d2c files=5 title='test(T171/workflow): tester — update 5 file(s)'
+[2026-06-04T07:56:10Z] auto-run: auto-push triggered
+[2026-06-04T07:56:10Z] push: tolerating runtime dirty files (not blocking): ['runs/T171/runtime.log']
+[2026-06-04T07:56:10Z] push: pushing branch=ticket/T171-t171-environment-deploy-should-use-a-fresh-runtime
