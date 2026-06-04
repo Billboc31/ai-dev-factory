@@ -1,7 +1,7 @@
 {
   "ticket_id": "T173",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T173-t173-environment-runtime-must-use-committed-projec",
   "issue_number": 198,
-  "updated_at": "2026-06-04T13:58:21Z"
+  "updated_at": "2026-06-04T14:02:52Z"
 }
