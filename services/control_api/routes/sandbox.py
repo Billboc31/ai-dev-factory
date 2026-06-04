@@ -384,7 +384,15 @@ def cleanup_sandbox_run(sandbox_id: str) -> Response:
     if not sandbox_dir.exists():
         raise HTTPException(status_code=404, detail=f"sandbox not found: {sandbox_id}")
 
-    # Remove the git worktree first if it exists.
+    # Remove source/ directory (fresh clone) if present.
+    source_path = sandbox_dir / "source"
+    if source_path.exists():
+        try:
+            shutil.rmtree(source_path)
+        except OSError as e:
+            logger.warning("cleanup: could not remove source %s: %s", source_path, e)
+
+    # Remove legacy worktree/ directory if present (backward compat).
     worktree_path = sandbox_dir / "worktree"
     if worktree_path.exists():
         state_file = sandbox_dir / "state.json"

@@ -293,7 +293,11 @@ def _do_deploy(
         state_path = sandbox_dir / "state.json"
         log_path = sandbox_dir / "logs" / "deploy.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        cwd = Path(sandbox.worktree_path) if sandbox.worktree_path else project_root
+        cwd = (
+            Path(sandbox.source_path) if sandbox.source_path
+            else Path(sandbox.worktree_path) if sandbox.worktree_path
+            else project_root
+        )
     else:
         state_path = _state_path(project_root)
         log_path = _log_path(project_root)
@@ -430,7 +434,7 @@ def run_deploy_sandboxed(
     sandbox = None
     try:
         try:
-            sandbox = sandbox_manager.create_with_worktree(
+            sandbox = sandbox_manager.create_with_source(
                 ticket_id=project_id,
                 project_root=str(project_root),
                 branch=branch,

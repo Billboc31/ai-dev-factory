@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 import subprocess
 import sys
 from collections.abc import Callable
@@ -190,18 +191,77 @@ def _docker_logs_section(
     return f"=== Docker compose logs (debug) ===\n{body}\n"
 
 
+def _clone_fresh_source(
+    project_root: Path,
+    source_path: Path,
+    ref: str,
+    log: Callable[[str], None],
+) -> tuple[bool, str | None, str | None]:
+    """Clone project_root into source_path and checkout ref.
+
+    Returns (ok, error_message, commit_sha).
+    Aborts if the checked-out branch does not match ref.
+    """
+    log(f"\n--- fresh source clone ---\n")
+    log(f"source: {project_root}\n")
+    log(f"target: {source_path}\n")
+    log(f"ref: {ref}\n")
+
+    if source_path.exists():
+        shutil.rmtree(source_path)
+
+    result = subprocess.run(
+        ["git", "clone", "--branch", ref, str(project_root), str(source_path)],
+        capture_output=True, text=True, check=False,
+    )
+    if result.stdout:
+        log(result.stdout)
+    if result.stderr:
+        log(result.stderr)
+    if result.returncode != 0:
+        err = f"git clone failed: {result.stderr.strip()[:300]}"
+        log(f"\n{err}\n")
+        return False, err, None
+
+    branch_result = subprocess.run(
+        ["git", "branch", "--show-current"],
+        capture_output=True, text=True, check=False, cwd=str(source_path),
+    )
+    actual_branch = branch_result.stdout.strip()
+
+    commit_result = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        capture_output=True, text=True, check=False, cwd=str(source_path),
+    )
+    commit_sha = commit_result.stdout.strip() or None
+
+    log(f"pwd: {source_path}\n")
+    log(f"git branch --show-current: {actual_branch}\n")
+    log(f"git rev-parse --short HEAD: {commit_sha or '(unknown)'}\n")
+
+    if actual_branch != ref:
+        err = f"branch mismatch: expected {ref!r}, got {actual_branch!r}"
+        log(f"\n{err}\n")
+        return False, err, commit_sha
+
+    log(f"\nsource ready: branch={actual_branch} commit={commit_sha}\n")
+    return True, None, commit_sha
+
+
 def deploy_operational_runtime(
     state: SandboxState,
     *,
     sandbox_dir: Path,
     mode: str = "environment",
-    use_worktree: bool = False,
     persist_state: Callable[[SandboxState], None] | None = None,
 ) -> OperationalDeployResult:
     """Run bootstrap → start scripts, supervisor, and Traefik for *state*.
 
     Pipeline progress is written to ``pipeline-state.json`` (not ``state.json``).
     Optional *persist_state* updates :class:`SandboxState` for live UI polling.
+    When ``state.ref`` is set, a fresh git clone of ``state.project_root`` is
+    created under ``sandbox_dir/source/`` and the requested branch is verified
+    before any script runs.
     """
     rs = _import_run_sandbox()
     sandbox_dir = sandbox_dir.resolve()
@@ -213,7 +273,9 @@ def deploy_operational_runtime(
 
     pipeline_state_path = sandbox_dir / "pipeline-state.json"
     project_root = Path(state.project_root).resolve()
-    worktree_path = sandbox_dir / "worktree" if use_worktree else project_root
+    # Use a fresh clone when a ref (branch) is specified; fall back to
+    # project_root for deployments without an explicit branch.
+    source_path = sandbox_dir / "source" if state.ref else project_root
 
     urls = build_sandbox_urls(
         state.id, web_host=state.web_host, api_host=state.api_host
@@ -252,7 +314,8 @@ def deploy_operational_runtime(
         "last_step": "supervisor",
         "steps": [],
         "ports": {"api_port": state.ports["api"], "web_port": state.ports["web"]},
-        "worktree_path": str(worktree_path),
+        "worktree_path": str(source_path),  # key kept for pipeline-state readers
+        "source_path": str(source_path),
         "compose_project": state.compose_project,
         "project_root": str(project_root),
     }
@@ -319,19 +382,22 @@ def deploy_operational_runtime(
             return "reverse proxy route did not become reachable on host runtime"
         return None
 
-    if use_worktree:
-        ok, wt_error = rs._create_worktree(project_root, worktree_path, log_path)
-        if not ok:
+    if state.ref:
+        clone_ok, clone_err, _ = _clone_fresh_source(
+            project_root,
+            sandbox_dir / "source",
+            state.ref,
+            lambda text: rs._append_log(log_path, text),
+        )
+        if not clone_ok:
             rs._stop_sandbox_supervisor(supervisor_proc, runtime_root, log_path)
-            err = wt_error or "worktree creation failed"
-            _persist(LifecyclePhase.failed, last_step="worktree", lifecycle_error=err)
+            err = clone_err or "source clone failed"
+            _persist(LifecyclePhase.failed, last_step="source-clone", lifecycle_error=err)
             return OperationalDeployResult(
                 success=False,
                 error=err,
-                urls=registered_urls,
                 supervisor_pid=supervisor_pid,
-                route_registered=True,
-                last_step="worktree",
+                last_step="source-clone",
             )
 
     def _on_step_start(script_name: str) -> None:
@@ -371,7 +437,7 @@ def deploy_operational_runtime(
         return OperationalDeployResult(success=False, error=msg, last_step="preflight")
 
     success, script_error, steps = rs._run_scripts(
-        worktree_path,
+        source_path,
         pipeline_state_path,
         pipeline_state_path,
         log_path,
@@ -390,7 +456,7 @@ def deploy_operational_runtime(
     if success and _should_run_smoke(state, mode):
         _persist(LifecyclePhase.validating, last_step="smoke.sh")
         smoke_status, smoke_fail = rs._run_smoke_tests(
-            worktree_path, log_path, extra_env
+            source_path, log_path, extra_env
         )
         if smoke_fail is not None:
             success = False
@@ -420,7 +486,7 @@ def deploy_operational_runtime(
         persist_state(current[0])
 
     if not success:
-        rs._run_stop_script(worktree_path, log_path, extra_env)
+        rs._run_stop_script(source_path, log_path, extra_env)
         rs._stop_sandbox_supervisor(supervisor_proc, runtime_root, log_path)
         ProxyManager(routes_dir=routes_dir, auto_ensure_infra=False).unregister(
             state.id,

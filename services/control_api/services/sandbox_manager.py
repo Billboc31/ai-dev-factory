@@ -396,7 +396,7 @@ class SandboxManager:
     def refresh(self, sandbox_id: str) -> SandboxState:
         return self._read_state(sandbox_id)
 
-    def create_with_worktree(
+    def create_with_source(
         self,
         ticket_id: str,
         project_root: str,
@@ -404,69 +404,62 @@ class SandboxManager:
         job_type: str = "deploy",
     ) -> SandboxState:
         state = self.create(ticket_id, project_root)
-        worktree_path = self._sandbox_dir(state.id) / "worktree"
+        source_path = self._sandbox_dir(state.id) / "source"
 
         requested_ref: str | None = None
-        resolved_ref: str | None = None
         commit_sha: str | None = None
 
+        clone_cmd = ["git", "clone"]
         if branch:
             requested_ref = branch
-            remote_ref = f"origin/{branch}"
-            logger.info(
-                "sandbox worktree: fetching remote ref=%s sandbox=%s",
-                remote_ref, state.id,
-            )
-            fetch_result = subprocess.run(
-                ["git", "fetch", "origin", branch],
-                capture_output=True, text=True, cwd=project_root, check=False,
-            )
-            if fetch_result.returncode != 0:
-                self.destroy(state.id)
-                raise RuntimeError(
-                    f"git fetch origin {branch} failed: {fetch_result.stderr.strip()}"
-                )
-            rev_result = subprocess.run(
-                ["git", "rev-parse", remote_ref],
-                capture_output=True, text=True, cwd=project_root, check=False,
-            )
-            if rev_result.returncode != 0:
-                self.destroy(state.id)
-                raise RuntimeError(
-                    f"git rev-parse {remote_ref} failed: {rev_result.stderr.strip()}"
-                )
-            commit_sha = rev_result.stdout.strip()
-            resolved_ref = remote_ref
-            logger.info(
-                "sandbox worktree: resolved branch=%s sha=%s worktree=%s",
-                branch, commit_sha, worktree_path,
-            )
-            cmd = ["git", "worktree", "add", "--detach", str(worktree_path), commit_sha]
-        else:
-            cmd = ["git", "worktree", "add", "--detach", str(worktree_path)]
+            clone_cmd.extend(["--branch", branch])
+        clone_cmd.extend([project_root, str(source_path)])
 
-        result = subprocess.run(
-            cmd, capture_output=True, text=True, cwd=project_root, check=False
+        logger.info(
+            "sandbox source: cloning repo branch=%s source=%s sandbox=%s",
+            branch or "(default)", source_path, state.id,
         )
-        if result.returncode != 0:
+        clone_result = subprocess.run(
+            clone_cmd, capture_output=True, text=True, check=False,
+        )
+        if clone_result.returncode != 0:
             self.destroy(state.id)
             raise RuntimeError(
-                f"git worktree add failed: {result.stderr.strip()}"
+                f"git clone failed: {clone_result.stderr.strip()}"
             )
+
+        if branch:
+            branch_result = subprocess.run(
+                ["git", "branch", "--show-current"],
+                capture_output=True, text=True, check=False, cwd=str(source_path),
+            )
+            actual_branch = branch_result.stdout.strip()
+            if actual_branch != branch:
+                self.destroy(state.id)
+                raise RuntimeError(
+                    f"branch mismatch after clone: expected {branch!r}, got {actual_branch!r}"
+                )
+
+        commit_result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            capture_output=True, text=True, check=False, cwd=str(source_path),
+        )
+        commit_sha = commit_result.stdout.strip() or None
+
+        logger.info(
+            "sandbox source ready: %s job_type=%s branch=%s commit=%s path=%s",
+            state.id, job_type, branch, commit_sha, source_path,
+        )
         state = state.model_copy(
             update={
-                "worktree_path": str(worktree_path),
+                "source_path": str(source_path),
                 "job_type": job_type,
                 "requested_ref": requested_ref,
-                "resolved_ref": resolved_ref,
+                "resolved_ref": requested_ref,
                 "commit_sha": commit_sha,
             }
         )
         self._write_state(state)
-        logger.info(
-            "sandbox worktree created: %s job_type=%s path=%s",
-            state.id, job_type, worktree_path,
-        )
         return state
 
     def mark_completed(self, sandbox_id: str) -> SandboxState:
@@ -580,9 +573,14 @@ class SandboxManager:
         )
 
         # 2. Resolve project root for deploy profile lookup.
-        worktree = Path(state.worktree_path) if state.worktree_path else None
+        source = Path(state.source_path) if state.source_path else None
+        legacy_worktree = Path(state.worktree_path) if state.worktree_path else None
         project_root = Path(state.project_root)
-        cwd = worktree if (worktree and worktree.exists()) else project_root
+        cwd = (
+            source if (source and source.exists()) else
+            legacy_worktree if (legacy_worktree and legacy_worktree.exists()) else
+            project_root
+        )
         profile = _load_deploy_profile(cwd)
 
         runtime_root = self._runtime_root_path(sandbox_id)
@@ -599,8 +597,13 @@ class SandboxManager:
         # 4. Run cleanup hooks and remove stale pid/lock files.
         run_cleanup(profile, sandbox_dir, runtime_root, sandbox_id)
 
-        # 5. Remove worktree after services are confirmed stopped.
-        if state.worktree_path:
+        # 5. Remove source directory after services are confirmed stopped.
+        if state.source_path:
+            source_dir = Path(state.source_path)
+            if source_dir.exists():
+                shutil.rmtree(source_dir)
+        elif state.worktree_path:
+            # Legacy: remove old-style git worktrees.
             subprocess.run(
                 ["git", "worktree", "remove", "--force", state.worktree_path],
                 capture_output=True, text=True, check=False,

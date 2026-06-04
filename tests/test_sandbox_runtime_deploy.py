@@ -228,6 +228,101 @@ def test_deploy_fails_early_on_wrong_compose_alias(tmp_path):
     assert not up_called, "docker compose up must NOT be called after config validation failure"
 
 
+def test_deploy_operational_runtime_clones_fresh_source_on_ref(tmp_path):
+    """When state.ref is set, deploy_operational_runtime clones a fresh source checkout."""
+    mgr, state, sandbox_dir = _sample_state(tmp_path)
+    state = state.model_copy(update={"ref": "T171"})
+
+    fake_proc = MagicMock()
+    fake_proc.pid = 42
+    registered = {"web": "http://w.test", "api": "http://a.test"}
+    routes_dir = tmp_path / "routes"
+
+    clone_calls: list[list[str]] = []
+
+    def mock_clone(cmd, *args, **kwargs):
+        if isinstance(cmd, list) and "clone" in cmd:
+            clone_calls.append(cmd)
+            # Create the source directory so the rest of the deploy works.
+            target = Path(cmd[-1])
+            target.mkdir(parents=True, exist_ok=True)
+        m = MagicMock()
+        m.returncode = 0
+        m.stdout = "T171\n" if (isinstance(cmd, list) and "branch" in cmd) else "abc1234\n"
+        m.stderr = ""
+        return m
+
+    def _scripts_ok(*_args, **kwargs):
+        cb = kwargs.get("on_step_complete")
+        if cb:
+            cb("start.sh")
+        return True, None, [{"name": "healthcheck.sh", "status": "pass"}]
+
+    with (
+        patch(
+            "services.control_api.services.sandbox_runtime_deploy.subprocess.run",
+            side_effect=mock_clone,
+        ),
+        patch(
+            "services.control_api.services.sandbox_runtime_deploy.resolve_proxy_routes_dir",
+            return_value=routes_dir,
+        ),
+        patch("tools.agent_runner.run_sandbox._start_sandbox_supervisor", return_value=fake_proc),
+        patch("tools.agent_runner.run_sandbox._ensure_required_infra"),
+        patch("tools.agent_runner.run_sandbox._wait_for_proxy_url", return_value=True),
+        patch("tools.agent_runner.run_sandbox._run_scripts", side_effect=_scripts_ok),
+        patch(
+            "services.control_api.services.proxy_manager.ProxyManager.register",
+            return_value=registered,
+        ),
+    ):
+        (routes_dir / f"{state.id}.yml").write_text("http:\n  routers: {}\n")
+        result = deploy_operational_runtime(state, sandbox_dir=sandbox_dir, mode="environment")
+
+    assert result.success is True
+    assert clone_calls, "git clone must be called when state.ref is set"
+    assert any("T171" in str(c) for c in clone_calls), "clone must include the ref branch"
+
+
+def test_deploy_operational_runtime_aborts_on_clone_failure(tmp_path):
+    """When git clone fails, deploy_operational_runtime returns failure before running scripts."""
+    mgr, state, sandbox_dir = _sample_state(tmp_path)
+    state = state.model_copy(update={"ref": "T171"})
+
+    fake_proc = MagicMock()
+    fake_proc.pid = 1
+
+    scripts_called = False
+
+    def fail_clone(cmd, *args, **kwargs):
+        m = MagicMock()
+        m.returncode = 1 if (isinstance(cmd, list) and "clone" in cmd) else 0
+        m.stdout = ""
+        m.stderr = "fatal: repository not found"
+        return m
+
+    def _scripts_side_effect(*_a, **_kw):
+        nonlocal scripts_called
+        scripts_called = True
+        return True, None, []
+
+    with (
+        patch(
+            "services.control_api.services.sandbox_runtime_deploy.subprocess.run",
+            side_effect=fail_clone,
+        ),
+        patch("tools.agent_runner.run_sandbox._start_sandbox_supervisor", return_value=fake_proc),
+        patch("tools.agent_runner.run_sandbox._ensure_required_infra"),
+        patch("tools.agent_runner.run_sandbox._run_scripts", side_effect=_scripts_side_effect),
+        patch("tools.agent_runner.run_sandbox._stop_sandbox_supervisor"),
+    ):
+        result = deploy_operational_runtime(state, sandbox_dir=sandbox_dir, mode="environment")
+
+    assert result.success is False
+    assert "clone" in (result.error or "").lower()
+    assert not scripts_called, "scripts must NOT run when clone fails"
+
+
 def test_deploy_runs_smoke_for_deploy_and_test_mode(tmp_path):
     mgr, state, sandbox_dir = _sample_state(tmp_path)
     state = mgr.create(
