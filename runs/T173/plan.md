@@ -1,38 +1,40 @@
-Now I have a clear picture of the codebase. Let me write the plan.
+I now have a complete picture. Here is the implementation plan.
 
 ---
 
 ## Objective
 
-Guarantee that environment deployments exclusively run scripts committed under `.ai-dev-factory/scripts/` in the cloned source branch, and never silently fall back to host/global paths. Two targeted gaps must be closed: (1) `deploy_operational_runtime()` must reject deployments without a `ref` rather than falling back to `project_root`; (2) `_run_scripts()` must assert that every resolved script path stays within the declared source directory before executing.
+Make environment deploy always execute committed scripts from a fresh clone of the selected branch (`<sandbox_dir>/source/.ai-dev-factory/scripts/`), never from the host ai-dev-factory checkout. Add a path validation guard that fails immediately if the resolved script root escapes the environment source directory.
 
 ## Included
 
 **`services/control_api/services/sandbox_runtime_deploy.py`**
 
-- In `deploy_operational_runtime()`, replace the implicit `project_root` fallback (line 278: `source_path = sandbox_dir / "source" if state.ref else project_root`) with an explicit fail-fast guard: when `mode == "environment"` and `state.ref` is empty/None, abort immediately with a clear error — e.g. `"environment deploy requires a ref (branch); refusing to run scripts from project_root"`. For non-environment modes (e.g. `"validation"`), the existing fallback to `project_root` is acceptable and must be kept.
+- `deploy_operational_runtime` (line 278): Remove the conditional `sandbox_dir / "source" if state.ref else project_root`. Always set `source_path = sandbox_dir / "source"`.
+- `_clone_fresh_source` (line 194): Change `ref: str` → `ref: str | None`. When `ref` is `None`, omit `--branch` from the `git clone` command so the default branch is cloned. Remove the branch-mismatch check when `ref` is `None`.
+- `deploy_operational_runtime` (lines 385–401): Change `if state.ref:` clone block to always clone (unconditionally call `_clone_fresh_source`; pass `ref=state.ref` which may be `None`).
+- Add a path validation guard immediately after the clone and before `_run_scripts`: resolve `source_path` and assert it is a subpath of `sandbox_dir`; log `resolved script path: <source_path>/.ai-dev-factory/scripts/<script>.sh` for each required script; fail with a clear error message if any resolved path escapes `sandbox_dir`.
 
-**`tools/agent_runner/run_sandbox.py`**
+**`tests/test_sandbox_runtime_deploy.py`**
 
-- In `_run_scripts()`, immediately after the existing `resolved script path` log line (line 688), add a path boundary assertion: resolve both `source_dir` (`worktree_path.resolve()`) and `script_path.resolve()`, then verify `script_path.resolve().is_relative_to(source_dir)`. If the check fails → return `(False, "resolved script path escapes source directory: <path>", steps)` without executing the script. This is a defence-in-depth guard; it catches any future regression where a script name or path component could escape the source tree.
-
-**`runs/T173/prompts/plan.md`** (new file)
-
-- Write this plan to that path as the versioned plan artefact.
+- Add test: when `state.ref` is `None`, `deploy_operational_runtime` still clones into `sandbox_dir/source/` and `_run_scripts` receives `sandbox_dir/source` as `worktree_path`.
+- Add test: path validation guard fails immediately (returns `OperationalDeployResult(success=False)`) if the resolved script root escapes `sandbox_dir`.
+- Update the existing `_sample_state` helper or add a variant that creates scripts inside `sandbox_dir/source/.ai-dev-factory/scripts/` to reflect the new clone-based source path.
 
 ## Excluded
 
-- The supervisor bug (`main.py:658,799` calling the non-existent `create_with_worktree()`) — that affects analysis/scripts jobs, not environment deploy; it is a separate ticket.
-- `run_sandbox.py`'s `_do_sandbox()` validation-sandbox path — it already creates an isolated worktree from the project repo; it is not the environment deploy code path.
-- Script generation (`run_scripts.py`) — scripts are generated once and committed; this ticket explicitly forbids regenerating during deploy.
-- Docker Compose, network, port, or proxy configuration — unrelated to script path resolution.
-- `SandboxState` model changes — `state.ref` already exists and is populated by callers.
+- `deployer_runner.py` — uses `deploy.yml`-based component deploy, a separate flow not covered by this ticket.
+- `run_sandbox.py` worktree-based validation flow — only used for `validation` mode; the `resolved script path:` log already exists there (line 688); no changes needed.
+- Script generation (`run_scripts.py`) — scripts are already committed; generation is out of scope.
+- UI / dashboard changes.
+- Removing `state.ref` from the data model or changing the environment creation API schema.
 
 ## Acceptance criteria
 
-- Deploying an environment with a valid `ref` (e.g. `T170`) clones the branch and logs `resolved script path: <sandbox_dir>/source/.ai-dev-factory/scripts/<script>.sh` for every script before it runs.
-- Deploying an environment with `state.ref = None` or `state.ref = ""` fails immediately with a message containing `"environment deploy requires a ref"` — no script is executed.
-- If any resolved script path does not resolve to a path under `<sandbox_dir>/source/`, deploy fails immediately with a message containing `"resolved script path escapes source directory"`.
-- If a required script (e.g. `bootstrap.sh`) is absent from the cloned branch, deploy fails clearly with `"required script missing"` (existing behaviour, verified unchanged).
-- Two concurrent environment deploys on different branches each resolve and execute their own committed scripts independently — confirmed by log inspection.
-- Non-environment deploy modes (e.g. `mode="validation"`) are unaffected; they continue to use `project_root` when `state.ref` is absent.
+- `deploy_operational_runtime` always sets `source_path = sandbox_dir / "source"` regardless of whether `state.ref` is set.
+- Deploying with an explicit branch (`state.ref = "T170"`) clones that branch into `sandbox_dir/source/` and runs scripts from `sandbox_dir/source/.ai-dev-factory/scripts/`.
+- Deploying without a branch (`state.ref = None`) clones HEAD into `sandbox_dir/source/` and runs scripts from `sandbox_dir/source/.ai-dev-factory/scripts/`.
+- Log contains `resolved script path: <sandbox_dir>/source/.ai-dev-factory/scripts/<script>.sh` for each script before execution.
+- If the path validation guard detects that `source_path` resolves outside `sandbox_dir`, `deploy_operational_runtime` returns `success=False` with a clear error and no script is executed.
+- Existing test suite passes without modification beyond the new/updated tests described above.
+- Host ai-dev-factory scripts (i.e., paths in `_REPO_ROOT / ".ai-dev-factory/scripts/"`) are never passed to `_run_scripts` during an environment deploy.
