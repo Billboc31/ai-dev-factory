@@ -1,7 +1,7 @@
 {
   "ticket_id": "T174",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T174-t174-redesign-environment-creation-popup-with-proj",
   "issue_number": 200,
-  "updated_at": "2026-06-04T15:11:43Z"
+  "updated_at": "2026-06-04T15:13:51Z"
 }
