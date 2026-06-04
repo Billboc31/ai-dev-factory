@@ -62,6 +62,7 @@ class SandboxState(BaseModel):
     sandbox_runtime_root: str = ""
     supervisor_pid: int | None = None
     worktree_path: str | None = None
+    source_path: str | None = None
     job_type: str | None = None
     completed_at: str | None = None
     urls: dict[str, str] = {}

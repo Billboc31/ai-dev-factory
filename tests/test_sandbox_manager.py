@@ -349,8 +349,35 @@ def test_runtime_process_terminated_before_file_removal(mgr):
     assert order.index("kill") < order.index("rmtree"), "SIGTERM must happen before rmtree"
 
 
-def test_worktree_removed_after_undeploy(mgr):
-    """git worktree remove is called after undeploy, and the sandbox dir is gone."""
+def test_source_removed_after_undeploy(mgr, tmp_path):
+    """source/ directory is removed with shutil.rmtree after undeploy (not git worktree remove)."""
+    s = mgr.create("T001", "/project")
+
+    # Create a real source directory under the sandbox dir so destroy can rmtree it.
+    sandbox_dir = mgr.sandboxes_dir / s.id
+    source_dir = sandbox_dir / "source"
+    source_dir.mkdir(parents=True, exist_ok=True)
+
+    state = mgr.status(s.id)
+    mgr._write_state(state.model_copy(update={"source_path": str(source_dir)}))
+
+    rmtree_calls: list[str] = []
+    real_rmtree = shutil.rmtree
+
+    def record_rmtree(path, *a, **kw):
+        rmtree_calls.append(str(path))
+        real_rmtree(path, *a, **kw)
+
+    with patch("services.control_api.services.undeploy_runner.subprocess.run", side_effect=_ok_compose):
+        with patch("services.control_api.services.sandbox_manager.shutil.rmtree", side_effect=record_rmtree):
+            mgr.destroy(s.id)
+
+    assert not (mgr.sandboxes_dir / s.id).exists()
+    assert any(str(source_dir) in p for p in rmtree_calls), "source dir must be removed via rmtree"
+
+
+def test_legacy_worktree_removed_after_undeploy(mgr):
+    """Legacy worktree_path still triggers git worktree remove when source_path is absent."""
     s = mgr.create("T001", "/project")
     worktree_calls: list[list[str]] = []
 
@@ -363,7 +390,6 @@ def test_worktree_removed_after_undeploy(mgr):
         m.stderr = ""
         return m
 
-    # Patch a worktree_path into the state so destroy tries to remove it.
     state = mgr.status(s.id)
     mgr._write_state(state.model_copy(update={"worktree_path": "/tmp/fake_worktree"}))
 
@@ -375,7 +401,7 @@ def test_worktree_removed_after_undeploy(mgr):
             mgr.destroy(s.id)
 
     assert not (mgr.sandboxes_dir / s.id).exists()
-    assert any("worktree" in cmd for cmd in worktree_calls), "worktree remove must be called"
+    assert any("worktree" in cmd for cmd in worktree_calls), "worktree remove must be called for legacy state"
 
 
 def test_cleanup_idempotency(mgr):
@@ -586,3 +612,63 @@ def test_start_calls_ensure_runtime_network_before_compose_up(mgr):
     assert call_order.index("ensure-network") < call_order.index("compose-up"), (
         "ensure_runtime_network() must be called before docker compose up"
     )
+
+
+# ── T171: fresh source clone instead of git worktree ─────────────────────────
+
+
+def test_create_with_source_uses_clone(mgr, tmp_path):
+    """create_with_source clones the repo (not git worktree add) and sets source_path."""
+    git_cmds: list[list[str]] = []
+
+    def mock_subprocess(cmd, *args, **kwargs):
+        if isinstance(cmd, list):
+            git_cmds.append(cmd)
+        m = MagicMock()
+        m.returncode = 0
+        m.stdout = "T171\n" if "branch" in cmd else "abc1234\n"
+        m.stderr = ""
+        return m
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=mock_subprocess):
+        state = mgr.create_with_source("T171", "/project/repo", branch="T171")
+
+    clone_calls = [c for c in git_cmds if "clone" in c]
+    worktree_calls = [c for c in git_cmds if "worktree" in c]
+    assert clone_calls, "git clone must be called"
+    assert not worktree_calls, "git worktree must NOT be called"
+    assert state.source_path is not None
+    assert "source" in state.source_path
+    assert state.requested_ref == "T171"
+    assert state.commit_sha == "abc1234"
+
+
+def test_create_with_source_aborts_on_clone_failure(mgr):
+    """create_with_source raises RuntimeError and destroys sandbox when clone fails."""
+    def fail_clone(cmd, *args, **kwargs):
+        m = MagicMock()
+        m.returncode = 1 if isinstance(cmd, list) and "clone" in cmd else 0
+        m.stdout = ""
+        m.stderr = "repository not found"
+        return m
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=fail_clone):
+        with pytest.raises(RuntimeError, match="git clone failed"):
+            mgr.create_with_source("T171", "/project/repo", branch="T171")
+
+
+def test_create_with_source_aborts_on_branch_mismatch(mgr):
+    """create_with_source raises RuntimeError when checked-out branch does not match requested."""
+    def mock_wrong_branch(cmd, *args, **kwargs):
+        m = MagicMock()
+        m.returncode = 0
+        m.stderr = ""
+        if isinstance(cmd, list) and "branch" in cmd:
+            m.stdout = "main\n"  # wrong branch
+        else:
+            m.stdout = "deadbeef\n"
+        return m
+
+    with patch("services.control_api.services.sandbox_manager.subprocess.run", side_effect=mock_wrong_branch):
+        with pytest.raises(RuntimeError, match="branch mismatch"):
+            mgr.create_with_source("T171", "/project/repo", branch="T171")
