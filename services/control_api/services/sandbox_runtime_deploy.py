@@ -262,9 +262,11 @@ def deploy_operational_runtime(
 
     Pipeline progress is written to ``pipeline-state.json`` (not ``state.json``).
     Optional *persist_state* updates :class:`SandboxState` for live UI polling.
-    When ``state.ref`` is set, a fresh git clone of ``state.project_root`` is
-    created under ``sandbox_dir/source/`` and the requested branch is verified
-    before any script runs.
+    A fresh git clone of ``state.project_root`` is always created under
+    ``sandbox_dir/source/``; when ``state.ref`` is set the named branch is
+    checked out and verified, otherwise the default branch is cloned.
+    Scripts are consumed as committed in the clone — never from the host
+    ai-dev-factory checkout.
     """
     rs = _import_run_sandbox()
     sandbox_dir = sandbox_dir.resolve()
