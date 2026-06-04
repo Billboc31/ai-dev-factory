@@ -73,3 +73,11 @@
 [2026-06-04T07:56:10Z] auto-run: auto-push triggered
 [2026-06-04T07:56:10Z] push: tolerating runtime dirty files (not blocking): ['runs/T171/runtime.log']
 [2026-06-04T07:56:10Z] push: pushing branch=ticket/T171-t171-environment-deploy-should-use-a-fresh-runtime
+[2026-06-04T08:04:17Z] auto-run: step=tester done rc=0
+[2026-06-04T08:04:17Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-04T08:04:17Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-04T08:04:17Z] commit-checkpoint: unstaged runtime garbage: ['runs/T171/runtime.log']
+[2026-06-04T08:04:17Z] commit-checkpoint: sha=49646ad9 files=3 title='test(T171/workflow): tester — update 3 file(s)'
+[2026-06-04T08:04:17Z] auto-run: auto-push triggered
+[2026-06-04T08:04:17Z] push: tolerating runtime dirty files (not blocking): ['runs/T171/runtime.log']
+[2026-06-04T08:04:17Z] push: pushing branch=ticket/T171-t171-environment-deploy-should-use-a-fresh-runtime
