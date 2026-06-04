@@ -1,7 +1,7 @@
 {
   "ticket_id": "T171",
-  "state": "IMPLEMENTATION_APPROVED",
+  "state": "TEST_COMPLETE",
   "branch": "ticket/T171-t171-environment-deploy-should-use-a-fresh-runtime",
   "issue_number": 194,
-  "updated_at": "2026-06-04T07:46:07Z"
+  "updated_at": "2026-06-04T07:56:09Z"
 }
