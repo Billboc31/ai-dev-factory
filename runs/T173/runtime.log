@@ -67,3 +67,11 @@
 [2026-06-04T14:31:55Z] compose: skill=ai/skills/debugging.md
 [2026-06-04T14:31:55Z] compose: task (canonical prompt)
 [2026-06-04T14:31:55Z] snapshot: runtime-prompt=runs/T173/prompts/tester-attempt-1.md
+[2026-06-04T14:45:12Z] auto-run: step=tester done rc=0
+[2026-06-04T14:45:12Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-04T14:45:12Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-04T14:45:13Z] commit-checkpoint: unstaged runtime garbage: ['runs/T173/runtime.log']
+[2026-06-04T14:45:13Z] commit-checkpoint: sha=56553683 files=4 title='test(T173/workflow): tester — update 4 file(s)'
+[2026-06-04T14:45:13Z] auto-run: auto-push triggered
+[2026-06-04T14:45:13Z] push: tolerating runtime dirty files (not blocking): ['runs/T173/runtime.log']
+[2026-06-04T14:45:13Z] push: pushing branch=ticket/T173-t173-environment-runtime-must-use-committed-projec
