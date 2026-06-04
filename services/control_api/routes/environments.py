@@ -56,7 +56,8 @@ def _get_manager(request: Request) -> SandboxManager:
 
 class CreateEnvironmentRequest(BaseModel):
     env_name: str
-    project_root: str
+    project_root: str | None = None
+    project_id: str | None = None
     ref: str | None = None
     ref_type: RefType | None = None
     env_type: EnvironmentType | None = None
@@ -80,15 +81,30 @@ def _validate_hosts_api_only(body: CreateEnvironmentRequest) -> None:
             raise HTTPException(status_code=422, detail=f"{field}: {err}")
 
 
+def _resolve_project_root(request: Request, body: CreateEnvironmentRequest) -> str:
+    if body.project_root:
+        return body.project_root
+    if body.project_id:
+        registry = getattr(request.app.state, "project_registry", None)
+        if registry is not None:
+            root = registry.resolve(body.project_id)
+            if root is not None:
+                return str(root)
+    raise HTTPException(status_code=400, detail="project context missing")
+
+
 @router.post("", response_model=SandboxState, status_code=201)
 def create_environment(body: CreateEnvironmentRequest, request: Request) -> SandboxState:
     logger.info("api: POST /environments env_name=%s ref=%s", body.env_name, body.ref)
     _validate_hosts_api_only(body)
+    resolved_project_root = _resolve_project_root(request, body)
 
     if _use_supervisor():
+        payload = body.model_dump(mode="json")
+        payload["project_root"] = resolved_project_root
         try:
             return environment_runner.provision_environment(
-                body.model_dump(mode="json"),
+                payload,
                 _supervisor_url(),
             )
         except ProvisionError as exc:
@@ -99,7 +115,8 @@ def create_environment(body: CreateEnvironmentRequest, request: Request) -> Sand
         started = provision_environment(
             mgr,
             env_name=body.env_name,
-            project_root=body.project_root,
+            project_root=resolved_project_root,
+            project_id=body.project_id,
             map_fn=lambda p: p,
             ref=body.ref,
             ref_type=body.ref_type,

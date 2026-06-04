@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import * as api from '../api/environments'
+import * as projectsApi from '../api/projects'
 
 const ENV_TYPES = ['main', 'develop', 'integration', 'preview', 'sandbox', 'feature', 'custom']
 const REF_TYPES = ['branch', 'tag', 'commit', 'pr_ref']
@@ -13,7 +14,29 @@ function slugify(name) {
     .slice(0, 50)
 }
 
-export default function CreateEnvironmentModal({ onClose, onCreated }) {
+function extractTicketId(branch) {
+  const m = branch.match(/^ticket\/(T\d+)/i)
+  return m ? m[1].toLowerCase() : null
+}
+
+function buildNameSuggestions(branch, recentNames) {
+  const seen = new Set()
+  const result = []
+  function add(s) {
+    if (s && !seen.has(s)) { seen.add(s); result.push(s) }
+  }
+  add('main')
+  if (branch) {
+    const ticketId = extractTicketId(branch)
+    if (ticketId) add(ticketId)
+    const sanitized = slugify(branch)
+    if (sanitized) add(sanitized)
+  }
+  recentNames.forEach(add)
+  return result
+}
+
+export default function CreateEnvironmentModal({ onClose, onCreated, projectId }) {
   const [form, setForm] = useState({
     env_name: '',
     project_root: '',
@@ -29,6 +52,34 @@ export default function CreateEnvironmentModal({ onClose, onCreated }) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState(null)
   const [fieldErrors, setFieldErrors] = useState({})
+
+  // Project context state
+  const [branches, setBranches] = useState([])
+  const [recentNames, setRecentNames] = useState([])
+  const [showAdvancedRef, setShowAdvancedRef] = useState(false)
+
+  useEffect(() => {
+    if (!projectId) return
+    projectsApi.listBranches(projectId)
+      .then(res => {
+        const list = res.data || []
+        setBranches(list)
+        if (list.length > 0) {
+          setForm(prev => ({ ...prev, ref: prev.ref || list[0], ref_type: 'branch' }))
+        }
+      })
+      .catch(() => {})
+  }, [projectId])
+
+  useEffect(() => {
+    if (!projectId) return
+    api.listEnvironments()
+      .then(res => {
+        const names = (res.data || []).map(e => e.env_name).filter(Boolean).slice(0, 3)
+        setRecentNames(names)
+      })
+      .catch(() => {})
+  }, [projectId])
 
   function set(field) {
     return (e) => setForm((prev) => ({ ...prev, [field]: e.target.value }))
@@ -53,22 +104,47 @@ export default function CreateEnvironmentModal({ onClose, onCreated }) {
     }
   }
 
+  function handleRefChange(e) {
+    const ref = e.target.value
+    // Infer ref_type as branch when selecting from the branch list
+    const isBranch = !showAdvancedRef && branches.includes(ref)
+    setForm((prev) => ({
+      ...prev,
+      ref,
+      ref_type: isBranch ? 'branch' : prev.ref_type,
+    }))
+  }
+
   async function submit(e) {
     e.preventDefault()
     setError(null)
     setFieldErrors({})
     setBusy(true)
     try {
-      const payload = {
-        env_name: form.env_name,
-        project_root: form.project_root,
-        sandbox_path: form.sandbox_path || null,
-        ref: form.ref || null,
-        ref_type: form.ref ? form.ref_type : null,
-        env_type: form.env_type || null,
-        deployment_mode: form.deployment_mode || null,
-        web_host: form.web_host || null,
-        api_host: form.api_host || null,
+      let payload
+      if (projectId) {
+        payload = {
+          env_name: form.env_name,
+          project_id: projectId,
+          ref: form.ref || null,
+          ref_type: form.ref ? form.ref_type : null,
+          env_type: form.env_type || null,
+          deployment_mode: form.deployment_mode || null,
+          web_host: form.web_host || null,
+          api_host: form.api_host || null,
+        }
+      } else {
+        payload = {
+          env_name: form.env_name,
+          project_root: form.project_root,
+          sandbox_path: form.sandbox_path || null,
+          ref: form.ref || null,
+          ref_type: form.ref ? form.ref_type : null,
+          env_type: form.env_type || null,
+          deployment_mode: form.deployment_mode || null,
+          web_host: form.web_host || null,
+          api_host: form.api_host || null,
+        }
       }
       await api.createEnvironment(payload)
       onCreated()
@@ -91,6 +167,8 @@ export default function CreateEnvironmentModal({ onClose, onCreated }) {
     }
   }
 
+  const nameSuggestions = buildNameSuggestions(form.ref, recentNames)
+
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg shadow-xl w-full max-w-lg p-6 max-h-[90vh] overflow-y-auto">
@@ -104,59 +182,104 @@ export default function CreateEnvironmentModal({ onClose, onCreated }) {
             <span className="font-medium">Environment Name *</span>
             <input
               required
+              list={projectId ? 'env-name-suggestions' : undefined}
               value={form.env_name}
               onChange={handleEnvNameChange}
               placeholder="e.g. Demo Client"
               className="border rounded px-2 py-1.5 text-sm"
             />
+            {projectId && (
+              <datalist id="env-name-suggestions">
+                {nameSuggestions.map((s) => <option key={s} value={s} />)}
+              </datalist>
+            )}
           </label>
 
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium">Project Root *</span>
-            <input
-              required
-              value={form.project_root}
-              onChange={set('project_root')}
-              placeholder="/path/to/project"
-              className="border rounded px-2 py-1.5 text-sm font-mono"
-            />
-          </label>
+          {projectId ? (
+            <div className="flex flex-col gap-1 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="font-medium">Branch</span>
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedRef((v) => !v)}
+                  className="text-xs text-blue-600 hover:underline"
+                >
+                  {showAdvancedRef ? 'Simple' : 'Advanced (tag/commit/PR)'}
+                </button>
+              </div>
+              {showAdvancedRef ? (
+                <div className="flex gap-2">
+                  <input
+                    value={form.ref}
+                    onChange={set('ref')}
+                    placeholder="e.g. v1.2.3 or abc1234"
+                    className="border rounded px-2 py-1.5 text-sm font-mono flex-1"
+                  />
+                  <select value={form.ref_type} onChange={set('ref_type')} className="border rounded px-2 py-1.5 text-sm">
+                    {REF_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+              ) : (
+                <input
+                  list="branch-list"
+                  value={form.ref}
+                  onChange={handleRefChange}
+                  placeholder="Select or type a branch"
+                  className="border rounded px-2 py-1.5 text-sm font-mono"
+                />
+              )}
+              {!showAdvancedRef && (
+                <datalist id="branch-list">
+                  {branches.map((b) => <option key={b} value={b} />)}
+                </datalist>
+              )}
+            </div>
+          ) : (
+            <>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium">Project Root *</span>
+                <input
+                  required
+                  value={form.project_root}
+                  onChange={set('project_root')}
+                  placeholder="/path/to/project"
+                  className="border rounded px-2 py-1.5 text-sm font-mono"
+                />
+              </label>
 
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium">Sandbox Directory</span>
-            <input
-              value={form.sandbox_path}
-              onChange={set('sandbox_path')}
-              placeholder="e.g. ~/sandboxes/demo (created automatically if missing)"
-              className="border rounded px-2 py-1.5 text-sm font-mono"
-            />
-          </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium">Sandbox Directory</span>
+                <input
+                  value={form.sandbox_path}
+                  onChange={set('sandbox_path')}
+                  placeholder="e.g. ~/sandboxes/demo (created automatically if missing)"
+                  className="border rounded px-2 py-1.5 text-sm font-mono"
+                />
+              </label>
 
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium">Ref (branch / tag / commit / PR ref)</span>
-            <input
-              value={form.ref}
-              onChange={set('ref')}
-              placeholder="e.g. feature/my-branch or abc1234"
-              className="border rounded px-2 py-1.5 text-sm font-mono"
-            />
-          </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium">Ref (branch / tag / commit / PR ref)</span>
+                <input
+                  value={form.ref}
+                  onChange={set('ref')}
+                  placeholder="e.g. feature/my-branch or abc1234"
+                  className="border rounded px-2 py-1.5 text-sm font-mono"
+                />
+              </label>
 
-          <label className="flex flex-col gap-1 text-sm">
-            <span className="font-medium">Ref Type</span>
-            <select value={form.ref_type} onChange={set('ref_type')} className="border rounded px-2 py-1.5 text-sm">
-              {REF_TYPES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
-          </label>
+              <label className="flex flex-col gap-1 text-sm">
+                <span className="font-medium">Ref Type</span>
+                <select value={form.ref_type} onChange={set('ref_type')} className="border rounded px-2 py-1.5 text-sm">
+                  {REF_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </label>
+            </>
+          )}
 
           <label className="flex flex-col gap-1 text-sm">
             <span className="font-medium">Environment Type</span>
             <select value={form.env_type} onChange={set('env_type')} className="border rounded px-2 py-1.5 text-sm">
-              {ENV_TYPES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
+              {ENV_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
             </select>
           </label>
 
