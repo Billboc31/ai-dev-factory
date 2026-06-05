@@ -1272,12 +1272,15 @@ def _environment_mgr_unavailable():
 
 @app.post("/environments/provision")
 def environments_provision(body: EnvironmentProvisionRequest):
+    from pathlib import Path
+
     from fastapi.responses import JSONResponse
 
     from services.control_api.services.environment_provision import (
         provision_environment_from_body,
     )
 
+<<<<<<< ticket/T178-t178-supervisor-runtime-root-override-fix-not-appl
     logger.info(
         "supervisor: provision request env_name=%s project_root=%s runtime_root=%s force_source_refresh=%s",
         body.env_name,
@@ -1294,6 +1297,14 @@ def environments_provision(body: EnvironmentProvisionRequest):
             return JSONResponse(
                 status_code=422,
                 content={"ok": False, "error": "runtime_root must be an absolute path without '..'"},
+=======
+    if body.runtime_root is not None:
+        rt = Path(body.runtime_root)
+        if not rt.is_absolute() or any(part == ".." for part in rt.parts):
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error": "runtime_root: must be an absolute path without '..'"},
+>>>>>>> main
             )
 
     if _sandbox_manager is None:
