@@ -21,3 +21,14 @@
 [2026-06-05T10:06:16Z] push: tolerating runtime dirty files (not blocking): ['runs/T177/runtime.log']
 [2026-06-05T10:06:16Z] push: pushing branch=ticket/T177-t177-fix-environment-runtime-root-override-propaga
 [2026-06-05T10:06:19Z] push: done branch=ticket/T177-t177-fix-environment-runtime-root-override-propaga
+[2026-06-05T10:17:44Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-05T10:17:44Z] auto-run: running step=tester
+[2026-06-05T10:17:44Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-05T10:17:44Z] prompt: generic fallback — injecting runs/T177/ticket.md
+[2026-06-05T10:17:44Z] compose: global-context=docs/ai/global-context.md
+[2026-06-05T10:17:44Z] compose: role=ai/roles/tester.md
+[2026-06-05T10:17:44Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-05T10:17:44Z] compose: skill=ai/skills/testing.md
+[2026-06-05T10:17:44Z] compose: skill=ai/skills/debugging.md
+[2026-06-05T10:17:44Z] compose: task (canonical prompt)
+[2026-06-05T10:17:44Z] snapshot: runtime-prompt=runs/T177/prompts/tester-attempt-1.md
