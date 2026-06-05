@@ -257,6 +257,28 @@ export default function CreateEnvironmentModal({ onClose, onCreated, projectId }
                 />
               </label>
 
+              <div className="bg-blue-50 border border-blue-100 rounded p-3 text-xs">
+                <p className="font-semibold text-blue-700 mb-1.5 uppercase tracking-wide">Runtime target</p>
+                <div className="space-y-0.5 font-mono text-blue-900">
+                  <div>
+                    <span className="text-blue-600 not-font-mono font-medium">Sandbox path: </span>
+                    {form.sandbox_path || <span className="text-blue-400 italic">(auto-assigned)</span>}
+                  </div>
+                  <div>
+                    <span className="text-blue-600 not-font-mono font-medium">Runtime root: </span>
+                    {form.sandbox_path
+                      ? `${form.sandbox_path}/runtime`
+                      : <span className="text-blue-400 italic">(auto-assigned)</span>}
+                  </div>
+                  <div>
+                    <span className="text-blue-600 not-font-mono font-medium">Source clone: </span>
+                    {form.sandbox_path
+                      ? `${form.sandbox_path}/source`
+                      : <span className="text-blue-400 italic">(auto-assigned)</span>}
+                  </div>
+                </div>
+              </div>
+
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium">Ref (branch / tag / commit / PR ref)</span>
                 <input

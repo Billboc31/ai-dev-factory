@@ -280,6 +280,12 @@ def deploy_operational_runtime(
     project_root = Path(state.project_root).resolve()
     source_path = sandbox_dir / "source"
 
+    if not source_path.is_relative_to(sandbox_dir):
+        raise RuntimeError(
+            f"runtime mismatch: source_path {source_path} is not inside sandbox_dir {sandbox_dir} — "
+            f"project_root={state.project_root}"
+        )
+
     urls = build_sandbox_urls(
         state.id, web_host=state.web_host, api_host=state.api_host
     )
@@ -323,6 +329,18 @@ def deploy_operational_runtime(
         "project_root": str(project_root),
     }
     rs._append_log(log_path, f"\n=== operational deploy {state.id} mode={mode} ===\n")
+    script_source = source_path / ".ai-dev-factory" / "scripts"
+    rs._append_log(log_path, (
+        f"runtime_root={runtime_root}\n"
+        f"sandbox_root={sandbox_dir}\n"
+        f"source_path={source_path}\n"
+        f"project_root={project_root}\n"
+        f"script_source={script_source}\n"
+    ))
+    logger.info(
+        "deploy %s: runtime_root=%s sandbox_root=%s source_path=%s project_root=%s script_source=%s",
+        state.id, runtime_root, sandbox_dir, source_path, project_root, script_source,
+    )
     _persist(LifecyclePhase.provisioning, last_step="supervisor")
 
     supervisor_proc = rs._start_sandbox_supervisor(

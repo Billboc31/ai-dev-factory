@@ -1,7 +1,7 @@
 {
   "ticket_id": "T175",
-  "state": "PLAN_APPROVED",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T175-t175-environment-creation-ui-must-expose-and-valid",
   "issue_number": 202,
-  "updated_at": "2026-06-05T07:37:46Z"
+  "updated_at": "2026-06-05T07:43:05Z"
 }
