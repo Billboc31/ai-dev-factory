@@ -22,3 +22,9 @@
 - prev: INIT
 - step: planner
 - next: PLAN_REVIEW_NEEDED
+
+## 2026-06-05T10:13:09Z
+
+- prev: PLAN_REVIEW_NEEDED
+- step: approve-plan
+- next: PLAN_APPROVED
