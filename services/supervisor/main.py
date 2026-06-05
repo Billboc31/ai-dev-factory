@@ -1257,6 +1257,8 @@ class EnvironmentProvisionRequest(BaseModel):
     web_host: str | None = None
     api_host: str | None = None
     sandbox_path: str | None = None
+    runtime_root: str | None = None
+    force_source_refresh: bool = False
 
 
 def _environment_mgr_unavailable():
@@ -1270,11 +1272,21 @@ def _environment_mgr_unavailable():
 
 @app.post("/environments/provision")
 def environments_provision(body: EnvironmentProvisionRequest):
+    from pathlib import Path
+
     from fastapi.responses import JSONResponse
 
     from services.control_api.services.environment_provision import (
         provision_environment_from_body,
     )
+
+    if body.runtime_root is not None:
+        rt = Path(body.runtime_root)
+        if not rt.is_absolute() or any(part == ".." for part in rt.parts):
+            return JSONResponse(
+                status_code=400,
+                content={"ok": False, "error": "runtime_root: must be an absolute path without '..'"},
+            )
 
     if _sandbox_manager is None:
         return _environment_mgr_unavailable()
