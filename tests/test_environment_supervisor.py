@@ -292,3 +292,72 @@ def test_api_routes_via_supervisor_when_host_path_invisible(
     assert r.json()["id"] == fake_state.id
     assert captured["url"] == "http://host.docker.internal:8090"
     assert not Path(container_path).exists()
+
+
+def test_supervisor_provision_forwards_runtime_root(
+    supervisor_app, tmp_path, monkeypatch
+):
+    """runtime_root set in the request body must reach deploy_operational_runtime via state."""
+    sup_main, _runtime = supervisor_app
+    host_project = tmp_path / "host-clone"
+    host_project.mkdir()
+    custom_runtime_root = tmp_path / "custom-runtime"
+
+    monkeypatch.setattr(
+        sup_main.mapper,
+        "map",
+        lambda p: str(host_project) if p == "/app/clone" else p,
+    )
+
+    client = TestClient(sup_main.app)
+    captured_state: dict = {}
+
+    with patch(
+        "services.control_api.services.environment_provision.deploy_operational_runtime",
+    ) as mock_deploy:
+        from services.control_api.services.sandbox_runtime_deploy import (
+            OperationalDeployResult,
+        )
+        from services.control_api.services.proxy_manager import build_sandbox_urls
+
+        def _ok(state, **kw):
+            captured_state["runtime_root"] = state.runtime_root
+            return OperationalDeployResult(
+                success=True,
+                urls=build_sandbox_urls(state.id),
+                supervisor_pid=424242,
+                route_registered=True,
+            )
+
+        mock_deploy.side_effect = _ok
+        r = client.post(
+            "/environments/provision",
+            json={
+                "env_name": "demo",
+                "project_root": "/app/clone",
+                "runtime_root": str(custom_runtime_root),
+            },
+        )
+
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+    assert captured_state["runtime_root"] == str(custom_runtime_root)
+
+
+def test_supervisor_provision_rejects_relative_runtime_root(
+    supervisor_app,
+):
+    """runtime_root must be an absolute path — relative paths return HTTP 422."""
+    sup_main, _runtime = supervisor_app
+    client = TestClient(sup_main.app)
+
+    r = client.post(
+        "/environments/provision",
+        json={
+            "env_name": "demo",
+            "project_root": "/app/clone",
+            "runtime_root": "relative/path",
+        },
+    )
+    assert r.status_code == 422, r.text
+    assert "runtime_root" in r.json()["error"]

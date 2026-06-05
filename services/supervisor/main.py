@@ -1280,12 +1280,31 @@ def environments_provision(body: EnvironmentProvisionRequest):
         provision_environment_from_body,
     )
 
+<<<<<<< ticket/T178-t178-supervisor-runtime-root-override-fix-not-appl
+    logger.info(
+        "supervisor: provision request env_name=%s project_root=%s runtime_root=%s force_source_refresh=%s",
+        body.env_name,
+        body.project_root,
+        "<set>" if body.runtime_root else None,
+        body.force_source_refresh,
+    )
+
+    if body.runtime_root is not None:
+        from pathlib import Path as _Path
+
+        rr = body.runtime_root
+        if not rr.startswith("/") or ".." in _Path(rr).parts:
+            return JSONResponse(
+                status_code=422,
+                content={"ok": False, "error": "runtime_root must be an absolute path without '..'"},
+=======
     if body.runtime_root is not None:
         rt = Path(body.runtime_root)
         if not rt.is_absolute() or any(part == ".." for part in rt.parts):
             return JSONResponse(
                 status_code=400,
                 content={"ok": False, "error": "runtime_root: must be an absolute path without '..'"},
+>>>>>>> main
             )
 
     if _sandbox_manager is None:
