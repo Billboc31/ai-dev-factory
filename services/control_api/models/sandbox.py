@@ -87,3 +87,6 @@ class SandboxState(BaseModel):
     healthcheck_status: str | None = None
     smoke_status: str | None = None
     lifecycle_steps: list[dict] = []
+    runtime_root: str | None = None
+    effective_runtime_root: str | None = None
+    force_source_refresh: bool = False

@@ -47,6 +47,8 @@ export default function CreateEnvironmentModal({ onClose, onCreated, projectId }
     deployment_mode: 'deploy_and_test',
     web_host: '',
     api_host: '',
+    runtime_root: '',
+    force_source_refresh: false,
   })
   const [hostManual, setHostManual] = useState({ web_host: false, api_host: false })
   const [busy, setBusy] = useState(false)
@@ -57,6 +59,7 @@ export default function CreateEnvironmentModal({ onClose, onCreated, projectId }
   const [branches, setBranches] = useState([])
   const [recentNames, setRecentNames] = useState([])
   const [showAdvancedRef, setShowAdvancedRef] = useState(false)
+  const [showAdvancedRuntime, setShowAdvancedRuntime] = useState(false)
 
   useEffect(() => {
     if (!projectId) return
@@ -132,6 +135,8 @@ export default function CreateEnvironmentModal({ onClose, onCreated, projectId }
           deployment_mode: form.deployment_mode || null,
           web_host: form.web_host || null,
           api_host: form.api_host || null,
+          runtime_root: form.runtime_root || null,
+          force_source_refresh: form.force_source_refresh || false,
         }
       } else {
         payload = {
@@ -144,6 +149,8 @@ export default function CreateEnvironmentModal({ onClose, onCreated, projectId }
           deployment_mode: form.deployment_mode || null,
           web_host: form.web_host || null,
           api_host: form.api_host || null,
+          runtime_root: form.runtime_root || null,
+          force_source_refresh: form.force_source_refresh || false,
         }
       }
       await api.createEnvironment(payload)
@@ -241,15 +248,21 @@ export default function CreateEnvironmentModal({ onClose, onCreated, projectId }
                 <div className="space-y-0.5 font-mono text-blue-900">
                   <div>
                     <span className="text-blue-600 font-sans font-medium">Sandbox path: </span>
-                    <span className="text-blue-400 italic">(auto-assigned)</span>
+                    {form.runtime_root
+                      ? <>{form.runtime_root}/<span className="text-blue-400 italic">&lt;id&gt;</span>/</>
+                      : <span className="text-blue-400 italic">(auto-assigned)</span>}
                   </div>
                   <div>
                     <span className="text-blue-600 font-sans font-medium">Runtime root: </span>
-                    <span className="text-blue-400 italic">(auto-assigned)</span>
+                    {form.runtime_root
+                      ? <>{form.runtime_root}/<span className="text-blue-400 italic">&lt;id&gt;</span>/runtime</>
+                      : <span className="text-blue-400 italic">(auto-assigned)</span>}
                   </div>
                   <div>
                     <span className="text-blue-600 font-sans font-medium">Source clone: </span>
-                    <span className="text-blue-400 italic">(auto-assigned)</span>
+                    {form.runtime_root
+                      ? <>{form.runtime_root}/<span className="text-blue-400 italic">&lt;id&gt;</span>/source</>
+                      : <span className="text-blue-400 italic">(auto-assigned)</span>}
                   </div>
                 </div>
               </div>
@@ -346,6 +359,40 @@ export default function CreateEnvironmentModal({ onClose, onCreated, projectId }
               Persistent Environment
             </label>
           </fieldset>
+
+          <div className="border-t pt-3">
+            <button
+              type="button"
+              onClick={() => setShowAdvancedRuntime(v => !v)}
+              className="flex items-center gap-1 text-xs text-gray-500 hover:text-gray-700 mb-2"
+            >
+              <span>{showAdvancedRuntime ? '▾' : '▸'}</span>
+              Advanced runtime options
+            </button>
+            {showAdvancedRuntime && (
+              <div className="mb-3 flex flex-col gap-2 bg-gray-50 p-3 rounded border text-sm">
+                <label className="flex flex-col gap-1">
+                  <span className="font-medium text-gray-700">Runtime Root Override</span>
+                  <input
+                    value={form.runtime_root}
+                    onChange={set('runtime_root')}
+                    placeholder="/path/to/custom/runtime (leave blank for auto)"
+                    className="border rounded px-2 py-1.5 text-sm font-mono"
+                  />
+                  <span className="text-xs text-gray-400">Absolute path. Sandbox directory will be created inside this root.</span>
+                </label>
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.force_source_refresh}
+                    onChange={e => setForm(prev => ({ ...prev, force_source_refresh: e.target.checked }))}
+                  />
+                  <span>Force source clone refresh</span>
+                  <span className="text-xs text-gray-400">(reclone even if source is present)</span>
+                </label>
+              </div>
+            )}
+          </div>
 
           <div className="border-t pt-3">
             <p className="text-xs font-semibold text-gray-600 mb-2 uppercase tracking-wide">Traefik URLs</p>
