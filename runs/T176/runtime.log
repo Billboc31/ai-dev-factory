@@ -10,3 +10,14 @@
 [2026-06-05T08:07:40Z] compose: task (canonical prompt)
 [2026-06-05T08:07:40Z] snapshot: runtime-prompt=runs/T176/prompts/planner-attempt-1.md
 [2026-06-05T08:10:46Z] auto-run: step=planner done rc=0
+[2026-06-05T08:10:48Z] planner checkpoint: committed
+[2026-06-05T08:10:48Z] planner checkpoint: pushed
+[2026-06-05T08:10:48Z] planner validation success
+[2026-06-05T08:10:48Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-05T08:10:48Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-05T08:10:49Z] commit-checkpoint: unstaged runtime garbage: ['runs/T176/runtime.log']
+[2026-06-05T08:10:49Z] commit-checkpoint: sha=47a20e47 files=2 title='docs(T176/workflow): planner — update 2 file(s)'
+[2026-06-05T08:10:49Z] auto-run: auto-push triggered
+[2026-06-05T08:10:49Z] push: tolerating runtime dirty files (not blocking): ['runs/T176/runtime.log']
+[2026-06-05T08:10:49Z] push: pushing branch=ticket/T176-t176-redeploy-must-rehydrate-missing-sandbox-sourc
+[2026-06-05T08:10:51Z] push: done branch=ticket/T176-t176-redeploy-must-rehydrate-missing-sandbox-sourc
