@@ -1,7 +1,7 @@
 {
   "ticket_id": "T176",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_APPROVED",
   "branch": "ticket/T176-t176-redeploy-must-rehydrate-missing-sandbox-sourc",
   "issue_number": 204,
-  "updated_at": "2026-06-05T08:39:31Z"
+  "updated_at": "2026-06-05T09:16:35Z"
 }
