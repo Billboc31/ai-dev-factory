@@ -1,7 +1,7 @@
 {
   "ticket_id": "T178",
-  "state": "PLAN_APPROVED",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T178-t178-supervisor-runtime-root-override-fix-not-appl",
   "issue_number": 207,
-  "updated_at": "2026-06-05T13:00:51Z"
+  "updated_at": "2026-06-05T13:03:34Z"
 }
