@@ -21,3 +21,20 @@
 [2026-06-05T08:10:49Z] push: tolerating runtime dirty files (not blocking): ['runs/T176/runtime.log']
 [2026-06-05T08:10:49Z] push: pushing branch=ticket/T176-t176-redeploy-must-rehydrate-missing-sandbox-sourc
 [2026-06-05T08:10:51Z] push: done branch=ticket/T176-t176-redeploy-must-rehydrate-missing-sandbox-sourc
+[2026-06-05T08:33:26Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-06-05T08:33:26Z] auto-run: running step=planner
+[2026-06-05T08:33:26Z] auto-run: fix context: previous_output=runs/T176/plan.md
+[2026-06-05T08:33:26Z] auto-run: fix context: review=runs/T176/reviews/plan-review.md
+[2026-06-05T08:33:26Z] auto-run: fix context: fix_instructions=runs/T176/fixes/plan-fix-runtime-root-override.md
+[2026-06-05T08:33:26Z] auto-run: fix context: context_file=runs/T176/fixes/context-20260605T083326Z.md
+[2026-06-05T08:33:26Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-05T08:33:26Z] prompt: generic fallback — injecting runs/T176/ticket.md
+[2026-06-05T08:33:26Z] compose: global-context=docs/ai/global-context.md
+[2026-06-05T08:33:26Z] compose: role=ai/roles/planner.md
+[2026-06-05T08:33:26Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-05T08:33:26Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-05T08:33:26Z] compose: skill=ai/skills/documentation.md
+[2026-06-05T08:33:26Z] compose: task (canonical prompt)
+[2026-06-05T08:33:26Z] compose: extra-context=runs/T176/fixes/context-20260605T083326Z.md
+[2026-06-05T08:33:26Z] snapshot: runtime-prompt=runs/T176/prompts/planner-attempt-2.md
+[2026-06-05T08:35:37Z] auto-run: step=planner done rc=0
