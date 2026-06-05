@@ -168,6 +168,8 @@ def provision_environment(
     web_host: str | None = None,
     api_host: str | None = None,
     sandbox_path: str | None = None,
+    runtime_root: str | None = None,
+    force_source_refresh: bool = False,
 ) -> SandboxState:
     """Create and start an environment on the host filesystem."""
     host_project, host_sandbox = map_environment_paths(
@@ -204,6 +206,8 @@ def provision_environment(
         update={
             "status": SandboxStatus.creating,
             "lifecycle_phase": LifecyclePhase.provisioning,
+            "runtime_root": runtime_root,
+            "force_source_refresh": force_source_refresh,
         }
     )
     mgr._write_state(state)
@@ -312,6 +316,8 @@ def provision_environment_from_body(
         web_host=body.get("web_host"),
         api_host=body.get("api_host"),
         sandbox_path=body.get("sandbox_path"),
+        runtime_root=body.get("runtime_root"),
+        force_source_refresh=body.get("force_source_refresh", False),
     )
 
 

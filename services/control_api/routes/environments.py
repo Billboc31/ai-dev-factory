@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
@@ -65,6 +66,8 @@ class CreateEnvironmentRequest(BaseModel):
     web_host: str | None = None
     api_host: str | None = None
     sandbox_path: str | None = None
+    runtime_root: str | None = None
+    force_source_refresh: bool = False
 
 
 class EnvironmentLogsResponse(BaseModel):
@@ -99,6 +102,14 @@ def create_environment(body: CreateEnvironmentRequest, request: Request) -> Sand
     _validate_hosts_api_only(body)
     resolved_project_root = _resolve_project_root(request, body)
 
+    if body.runtime_root is not None:
+        rt = Path(body.runtime_root)
+        if not rt.is_absolute() or any(part == ".." for part in rt.parts):
+            raise HTTPException(
+                status_code=400,
+                detail="runtime_root: must be an absolute path without '..'",
+            )
+
     if _use_supervisor():
         payload = body.model_dump(mode="json")
         payload["project_root"] = resolved_project_root
@@ -125,6 +136,8 @@ def create_environment(body: CreateEnvironmentRequest, request: Request) -> Sand
             web_host=body.web_host,
             api_host=body.api_host,
             sandbox_path=body.sandbox_path,
+            runtime_root=body.runtime_root,
+            force_source_refresh=body.force_source_refresh,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

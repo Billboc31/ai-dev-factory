@@ -251,6 +251,72 @@ def _clone_fresh_source(
     return True, None, commit_sha
 
 
+def _is_source_clone_valid(source_path: Path) -> bool:
+    """Return True if the source clone is present and minimally usable."""
+    return (
+        source_path.is_dir()
+        and (source_path / ".git").exists()
+        and (source_path / ".ai-dev-factory" / "scripts").is_dir()
+    )
+
+
+def _rehydrate_source_clone(
+    state: SandboxState,
+    source_path: Path,
+    project_root: Path,
+    log_fn: Callable[[str], None],
+) -> tuple[bool, str | None, str | None]:
+    """Log rehydration diagnostics, then perform a fresh clone.
+
+    Returns (ok, error_message, commit_sha).
+    """
+    log_fn(
+        f"source clone missing or invalid\n"
+        f"rehydrating sandbox source clone\n"
+        f"repo={project_root}\n"
+        f"branch={state.ref or '(default)'}\n"
+        f"source_path={source_path}\n"
+    )
+    ok, err, sha = _clone_fresh_source(project_root, source_path, state.ref, log_fn)
+    if ok:
+        log_fn("sandbox source clone restored successfully\n")
+    return ok, err, sha
+
+
+def _resolve_runtime_root(
+    state: SandboxState,
+    sandbox_dir: Path,
+) -> tuple[Path, str]:
+    """Return (effective_sandbox_dir, runtime_root_source).
+
+    When state.runtime_root is set, derives sandbox_dir from the override and
+    validates path safety. Returns "override" as source; otherwise "auto".
+    """
+    if not state.runtime_root:
+        return sandbox_dir, "auto"
+
+    rt = Path(state.runtime_root)
+    if not rt.is_absolute():
+        raise ValueError(
+            f"runtime_root must be an absolute path: {state.runtime_root!r}"
+        )
+    if any(part == ".." for part in rt.parts):
+        raise ValueError(
+            f"runtime_root must not contain '..': {state.runtime_root!r}"
+        )
+
+    new_sandbox_dir = (rt / state.id).resolve()
+    try:
+        new_sandbox_dir.relative_to(rt.resolve())
+    except ValueError:
+        raise ValueError(
+            f"derived sandbox_dir {new_sandbox_dir} does not descend from "
+            f"runtime_root {rt}"
+        )
+    new_sandbox_dir.mkdir(parents=True, exist_ok=True)
+    return new_sandbox_dir, "override"
+
+
 def deploy_operational_runtime(
     state: SandboxState,
     *,
@@ -269,7 +335,7 @@ def deploy_operational_runtime(
     ai-dev-factory checkout.
     """
     rs = _import_run_sandbox()
-    sandbox_dir = sandbox_dir.resolve()
+    sandbox_dir, runtime_root_source = _resolve_runtime_root(state, sandbox_dir.resolve())
     log_path = sandbox_dir / "run.log"
     runtime_root = sandbox_dir / "runtime"
     runtime_root.mkdir(parents=True, exist_ok=True)
@@ -323,24 +389,23 @@ def deploy_operational_runtime(
         "project_root": str(project_root),
     }
     rs._append_log(log_path, f"\n=== operational deploy {state.id} mode={mode} ===\n")
-    script_source = source_path / ".ai-dev-factory" / "scripts"
-    if not script_source.is_dir():
-        raise RuntimeError(
-            f"runtime mismatch: scripts directory not found at {script_source} — "
-            f"sandbox source clone missing or not initialized"
-        )
     rs._append_log(log_path, (
         f"runtime_root={runtime_root}\n"
+        f"runtime_root_source={runtime_root_source}\n"
         f"sandbox_root={sandbox_dir}\n"
         f"source_path={source_path}\n"
         f"project_root={project_root}\n"
-        f"script_source={script_source}\n"
     ))
     logger.info(
-        "deploy %s: runtime_root=%s sandbox_root=%s source_path=%s project_root=%s script_source=%s",
-        state.id, runtime_root, sandbox_dir, source_path, project_root, script_source,
+        "deploy %s: runtime_root=%s runtime_root_source=%s sandbox_root=%s source_path=%s project_root=%s",
+        state.id, runtime_root, runtime_root_source, sandbox_dir, source_path, project_root,
     )
     _persist(LifecyclePhase.provisioning, last_step="supervisor")
+    current[0] = current[0].model_copy(
+        update={"effective_runtime_root": str(sandbox_dir.parent)}
+    )
+    if persist_state is not None:
+        persist_state(current[0])
 
     supervisor_proc = rs._start_sandbox_supervisor(
         state.supervisor_port, runtime_root, log_path
@@ -402,12 +467,23 @@ def deploy_operational_runtime(
             return "reverse proxy route did not become reachable on host runtime"
         return None
 
-    clone_ok, clone_err, _ = _clone_fresh_source(
-        project_root,
-        source_path,
-        state.ref,
-        lambda text: rs._append_log(log_path, text),
+    needs_rehydration = (
+        not _is_source_clone_valid(source_path) or current[0].force_source_refresh
     )
+    if needs_rehydration:
+        clone_ok, clone_err, _ = _rehydrate_source_clone(
+            current[0],
+            source_path,
+            project_root,
+            lambda text: rs._append_log(log_path, text),
+        )
+    else:
+        clone_ok, clone_err, _ = _clone_fresh_source(
+            project_root,
+            source_path,
+            current[0].ref,
+            lambda text: rs._append_log(log_path, text),
+        )
     if not clone_ok:
         rs._stop_sandbox_supervisor(supervisor_proc, runtime_root, log_path)
         err = clone_err or "source clone failed"
