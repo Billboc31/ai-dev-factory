@@ -3,5 +3,7 @@
   "state": "TEST_COMPLETE",
   "branch": "ticket/T177-t177-fix-environment-runtime-root-override-propaga",
   "issue_number": 206,
-  "updated_at": "2026-06-05T10:29:58Z"
+  "updated_at": "2026-06-05T12:55:07Z",
+  "pr_number": 208,
+  "pr_synced": true
 }
