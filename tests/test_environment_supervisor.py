@@ -172,6 +172,70 @@ def test_provision_endpoint_triggers_infra_bootstrap(
     mock_infra.assert_called_once()
 
 
+def test_provision_runtime_root_override_propagates(
+    supervisor_app, tmp_path, monkeypatch
+):
+    """A valid runtime_root override reaches SandboxState and deploy call."""
+    sup_main, _runtime = supervisor_app
+    host_project = tmp_path / "host-clone"
+    host_project.mkdir()
+    custom_runtime = tmp_path / "my-runtime"
+
+    monkeypatch.setattr(
+        sup_main.mapper,
+        "map",
+        lambda p: str(host_project) if p == "/app/clone" else p,
+    )
+
+    client = TestClient(sup_main.app)
+    with patch(
+        "services.control_api.services.environment_provision.deploy_operational_runtime",
+    ) as mock_deploy:
+        from services.control_api.services.sandbox_runtime_deploy import (
+            OperationalDeployResult,
+        )
+        from services.control_api.services.proxy_manager import build_sandbox_urls
+
+        captured_state = {}
+
+        def _ok(state, **kw):
+            captured_state["runtime_root"] = state.runtime_root
+            return OperationalDeployResult(
+                success=True,
+                urls=build_sandbox_urls(state.id),
+                supervisor_pid=424242,
+                route_registered=True,
+            )
+
+        mock_deploy.side_effect = _ok
+        r = client.post(
+            "/environments/provision",
+            json={
+                "env_name": "demo",
+                "project_root": "/app/clone",
+                "runtime_root": str(custom_runtime),
+            },
+        )
+    assert r.status_code == 200, r.text
+    assert r.json()["ok"] is True
+    assert r.json()["state"]["runtime_root"] == str(custom_runtime)
+    assert captured_state["runtime_root"] == str(custom_runtime)
+
+
+def test_provision_invalid_runtime_root_returns_400(supervisor_app, monkeypatch):
+    """Relative or traversal runtime_root values are rejected with 400."""
+    sup_main, _runtime = supervisor_app
+    client = TestClient(sup_main.app)
+
+    for bad_path in ("relative/path", "/a/../b"):
+        r = client.post(
+            "/environments/provision",
+            json={"env_name": "demo", "project_root": "/app/clone", "runtime_root": bad_path},
+        )
+        assert r.status_code == 400, f"expected 400 for {bad_path!r}, got {r.status_code}"
+        assert "runtime_root" in r.json()["error"]
+
+
 def test_api_routes_via_supervisor_when_host_path_invisible(
     tmp_path, monkeypatch
 ):
