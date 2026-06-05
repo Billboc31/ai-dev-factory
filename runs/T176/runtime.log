@@ -66,3 +66,14 @@
 [2026-06-05T08:39:31Z] push: tolerating runtime dirty files (not blocking): ['runs/T176/runtime.log']
 [2026-06-05T08:39:31Z] push: pushing branch=ticket/T176-t176-redeploy-must-rehydrate-missing-sandbox-sourc
 [2026-06-05T08:39:33Z] push: done branch=ticket/T176-t176-redeploy-must-rehydrate-missing-sandbox-sourc
+[2026-06-05T09:30:36Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-05T09:30:36Z] auto-run: running step=tester
+[2026-06-05T09:30:36Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-05T09:30:36Z] prompt: generic fallback — injecting runs/T176/ticket.md
+[2026-06-05T09:30:36Z] compose: global-context=docs/ai/global-context.md
+[2026-06-05T09:30:36Z] compose: role=ai/roles/tester.md
+[2026-06-05T09:30:36Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-05T09:30:36Z] compose: skill=ai/skills/testing.md
+[2026-06-05T09:30:36Z] compose: skill=ai/skills/debugging.md
+[2026-06-05T09:30:36Z] compose: task (canonical prompt)
+[2026-06-05T09:30:36Z] snapshot: runtime-prompt=runs/T176/prompts/tester-attempt-1.md
