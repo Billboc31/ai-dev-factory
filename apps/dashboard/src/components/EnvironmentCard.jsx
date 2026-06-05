@@ -95,6 +95,7 @@ function copyToClipboard(text) {
 export default function EnvironmentCard({ env, onAction }) {
   const [showLogs, setShowLogs] = useState(false)
   const [showDebug, setShowDebug] = useState(false)
+  const [showRuntimePaths, setShowRuntimePaths] = useState(false)
   const [error, setError] = useState(null)
 
   async function handle(action) {
@@ -229,6 +230,26 @@ export default function EnvironmentCard({ env, onAction }) {
               {Object.entries(env.ports).map(([k, v]) => (
                 <div key={k}>{k}: {v}</div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Runtime paths — collapsed by default */}
+      {(env.project_root || env.sandbox_runtime_root || env.sandbox_dir || env.source_path) && (
+        <div>
+          <button
+            onClick={() => setShowRuntimePaths((v) => !v)}
+            className="text-xs text-gray-400 hover:text-gray-600"
+          >
+            {showRuntimePaths ? '▾' : '▸'} Runtime paths
+          </button>
+          {showRuntimePaths && (
+            <div className="mt-1 bg-gray-50 rounded p-2 text-xs font-mono text-gray-500 space-y-0.5">
+              {env.project_root && <div><span className="text-gray-600">project_root:</span> {env.project_root}</div>}
+              {env.sandbox_runtime_root && <div><span className="text-gray-600">runtime_root:</span> {env.sandbox_runtime_root}</div>}
+              {env.sandbox_dir && <div><span className="text-gray-600">sandbox_dir:</span> {env.sandbox_dir}</div>}
+              {env.source_path && <div><span className="text-gray-600">source_path:</span> {env.source_path}</div>}
             </div>
           )}
         </div>

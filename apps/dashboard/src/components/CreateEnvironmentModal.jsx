@@ -196,44 +196,64 @@ export default function CreateEnvironmentModal({ onClose, onCreated, projectId }
           </label>
 
           {projectId ? (
-            <div className="flex flex-col gap-1 text-sm">
-              <div className="flex items-center justify-between">
-                <span className="font-medium">Branch</span>
-                <button
-                  type="button"
-                  onClick={() => setShowAdvancedRef((v) => !v)}
-                  className="text-xs text-blue-600 hover:underline"
-                >
-                  {showAdvancedRef ? 'Simple' : 'Advanced (tag/commit/PR)'}
-                </button>
-              </div>
-              {showAdvancedRef ? (
-                <div className="flex gap-2">
-                  <input
-                    value={form.ref}
-                    onChange={set('ref')}
-                    placeholder="e.g. v1.2.3 or abc1234"
-                    className="border rounded px-2 py-1.5 text-sm font-mono flex-1"
-                  />
-                  <select value={form.ref_type} onChange={set('ref_type')} className="border rounded px-2 py-1.5 text-sm">
-                    {REF_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                  </select>
+            <>
+              <div className="flex flex-col gap-1 text-sm">
+                <div className="flex items-center justify-between">
+                  <span className="font-medium">Branch</span>
+                  <button
+                    type="button"
+                    onClick={() => setShowAdvancedRef((v) => !v)}
+                    className="text-xs text-blue-600 hover:underline"
+                  >
+                    {showAdvancedRef ? 'Simple' : 'Advanced (tag/commit/PR)'}
+                  </button>
                 </div>
-              ) : (
-                <input
-                  list="branch-list"
-                  value={form.ref}
-                  onChange={handleRefChange}
-                  placeholder="Select or type a branch"
-                  className="border rounded px-2 py-1.5 text-sm font-mono"
-                />
-              )}
-              {!showAdvancedRef && (
-                <datalist id="branch-list">
-                  {branches.map((b) => <option key={b} value={b} />)}
-                </datalist>
-              )}
-            </div>
+                {showAdvancedRef ? (
+                  <div className="flex gap-2">
+                    <input
+                      value={form.ref}
+                      onChange={set('ref')}
+                      placeholder="e.g. v1.2.3 or abc1234"
+                      className="border rounded px-2 py-1.5 text-sm font-mono flex-1"
+                    />
+                    <select value={form.ref_type} onChange={set('ref_type')} className="border rounded px-2 py-1.5 text-sm">
+                      {REF_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                    </select>
+                  </div>
+                ) : (
+                  <input
+                    list="branch-list"
+                    value={form.ref}
+                    onChange={handleRefChange}
+                    placeholder="Select or type a branch"
+                    className="border rounded px-2 py-1.5 text-sm font-mono"
+                  />
+                )}
+                {!showAdvancedRef && (
+                  <datalist id="branch-list">
+                    {branches.map((b) => <option key={b} value={b} />)}
+                  </datalist>
+                )}
+              </div>
+
+              <div className="bg-blue-50 border border-blue-100 rounded p-3 text-xs">
+                <p className="font-semibold text-blue-700 mb-1.5 uppercase tracking-wide">Runtime target</p>
+                <div className="space-y-0.5 font-mono text-blue-900">
+                  <div>
+                    <span className="text-blue-600 font-sans font-medium">Sandbox path: </span>
+                    <span className="text-blue-400 italic">(auto-assigned)</span>
+                  </div>
+                  <div>
+                    <span className="text-blue-600 font-sans font-medium">Runtime root: </span>
+                    <span className="text-blue-400 italic">(auto-assigned)</span>
+                  </div>
+                  <div>
+                    <span className="text-blue-600 font-sans font-medium">Source clone: </span>
+                    <span className="text-blue-400 italic">(auto-assigned)</span>
+                  </div>
+                </div>
+              </div>
+            </>
           ) : (
             <>
               <label className="flex flex-col gap-1 text-sm">
@@ -256,6 +276,28 @@ export default function CreateEnvironmentModal({ onClose, onCreated, projectId }
                   className="border rounded px-2 py-1.5 text-sm font-mono"
                 />
               </label>
+
+              <div className="bg-blue-50 border border-blue-100 rounded p-3 text-xs">
+                <p className="font-semibold text-blue-700 mb-1.5 uppercase tracking-wide">Runtime target</p>
+                <div className="space-y-0.5 font-mono text-blue-900">
+                  <div>
+                    <span className="text-blue-600 font-sans font-medium">Sandbox path: </span>
+                    {form.sandbox_path || <span className="text-blue-400 italic">(auto-assigned)</span>}
+                  </div>
+                  <div>
+                    <span className="text-blue-600 font-sans font-medium">Runtime root: </span>
+                    {form.sandbox_path
+                      ? `${form.sandbox_path}/runtime`
+                      : <span className="text-blue-400 italic">(auto-assigned)</span>}
+                  </div>
+                  <div>
+                    <span className="text-blue-600 font-sans font-medium">Source clone: </span>
+                    {form.sandbox_path
+                      ? `${form.sandbox_path}/source`
+                      : <span className="text-blue-400 italic">(auto-assigned)</span>}
+                  </div>
+                </div>
+              </div>
 
               <label className="flex flex-col gap-1 text-sm">
                 <span className="font-medium">Ref (branch / tag / commit / PR ref)</span>

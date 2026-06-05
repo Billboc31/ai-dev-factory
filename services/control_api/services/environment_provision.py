@@ -90,6 +90,36 @@ def validate_project_root_on_host(host_project_root: str) -> None:
         )
 
 
+def _validate_runtime_consistency(
+    host_project: str,
+    host_sandbox: str | None,
+) -> None:
+    """Fail early when runtime paths would be ambiguous or overlapping."""
+    if host_sandbox is None:
+        return
+    project = Path(host_project).resolve()
+    sandbox = Path(host_sandbox).resolve()
+    if project == sandbox:
+        raise ValueError(
+            f"runtime mismatch: project_root and sandbox_path resolve to the same path: {project} — "
+            "sandbox would overwrite the live project checkout"
+        )
+    if sandbox.is_relative_to(project):
+        raise ValueError(
+            f"runtime mismatch: sandbox_path {sandbox} is inside project_root {project} — "
+            "sandbox runtime files would be created inside the source repository"
+        )
+    if project.is_relative_to(sandbox):
+        raise ValueError(
+            f"runtime mismatch: project_root {project} is inside sandbox_path {sandbox} — "
+            "deploy scripts would be sourced from within the sandbox root"
+        )
+    if not sandbox.parent.exists():
+        raise ValueError(
+            f"runtime mismatch: sandbox_path parent directory does not exist: {sandbox.parent}"
+        )
+
+
 def _get_repo_url(project_root: str) -> str:
     try:
         result = subprocess.run(
@@ -144,16 +174,18 @@ def provision_environment(
         project_root, sandbox_path, map_fn
     )
     validate_project_root_on_host(host_project)
+    _validate_runtime_consistency(host_project, host_sandbox)
     _validate_traefik_hosts(web_host, api_host, mgr._proxy.routes_dir)
 
     repo_url = _get_repo_url(host_project)
     logger.info(
-        "project_id=%s repo_url=%s branch=%s environment=%s runtime_root=%s",
+        "project_id=%s repo_url=%s branch=%s environment=%s project_root=%s sandbox_path=%s",
         project_id or "(unset)",
         repo_url,
         ref or "(default)",
         env_name,
         host_project,
+        host_sandbox or "(default)",
     )
 
     state = mgr.create(
