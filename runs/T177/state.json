@@ -1,7 +1,7 @@
 {
   "ticket_id": "T177",
-  "state": "IMPLEMENTATION_REVIEW_NEEDED",
+  "state": "IMPLEMENTATION_APPROVED",
   "branch": "ticket/T177-t177-fix-environment-runtime-root-override-propaga",
   "issue_number": 206,
-  "updated_at": "2026-06-05T10:14:50Z"
+  "updated_at": "2026-06-05T10:17:08Z"
 }
