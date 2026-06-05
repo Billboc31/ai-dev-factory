@@ -47,3 +47,11 @@
 [2026-06-05T10:23:07Z] auto-run: step=tester done rc=1
 [2026-06-05T10:23:07Z] auto-run: runtime failure: empty_output (rc=1)
 [2026-06-05T10:23:07Z] auto-run: step=tester failed rc=1, state unchanged=IMPLEMENTATION_APPROVED
+[2026-06-05T10:29:58Z] auto-run: step=tester done rc=0
+[2026-06-05T10:29:58Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-05T10:29:58Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-05T10:29:58Z] commit-checkpoint: unstaged runtime garbage: ['runs/T177/runtime.log']
+[2026-06-05T10:29:58Z] commit-checkpoint: sha=fde69eaa files=4 title='test(T177/workflow): tester — update 4 file(s)'
+[2026-06-05T10:29:58Z] auto-run: auto-push triggered
+[2026-06-05T10:29:58Z] push: tolerating runtime dirty files (not blocking): ['runs/T177/runtime.log']
+[2026-06-05T10:29:58Z] push: pushing branch=ticket/T177-t177-fix-environment-runtime-root-override-propaga
