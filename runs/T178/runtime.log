@@ -10,3 +10,14 @@
 [2026-06-05T12:55:13Z] compose: task (canonical prompt)
 [2026-06-05T12:55:13Z] snapshot: runtime-prompt=runs/T178/prompts/planner-attempt-1.md
 [2026-06-05T12:57:52Z] auto-run: step=planner done rc=0
+[2026-06-05T12:57:54Z] planner checkpoint: committed
+[2026-06-05T12:57:54Z] planner checkpoint: pushed
+[2026-06-05T12:57:54Z] planner validation success
+[2026-06-05T12:57:54Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-05T12:57:54Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-05T12:57:54Z] commit-checkpoint: unstaged runtime garbage: ['runs/T178/runtime.log']
+[2026-06-05T12:57:54Z] commit-checkpoint: sha=84965104 files=2 title='docs(T178/workflow): planner — update 2 file(s)'
+[2026-06-05T12:57:54Z] auto-run: auto-push triggered
+[2026-06-05T12:57:54Z] push: tolerating runtime dirty files (not blocking): ['runs/T178/runtime.log']
+[2026-06-05T12:57:54Z] push: pushing branch=ticket/T178-t178-supervisor-runtime-root-override-fix-not-appl
+[2026-06-05T12:57:56Z] push: done branch=ticket/T178-t178-supervisor-runtime-root-override-fix-not-appl
