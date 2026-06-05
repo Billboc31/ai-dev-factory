@@ -1,17 +1,19 @@
-The corrected plan is written to `runs/T176/plan.md`. Here is a summary of what changed and why:
+The plan is written to `runs/T176/plan.md`. Here is what it contains:
 
-**Root cause of the rejection:** The previous plan accepted `runtime_root` in the API request but explicitly excluded wiring it to any backend behavior — making the UI field a no-op that misleads users.
+## Objective
+Self-healing redeploy (source clone rehydration) + fully wired `runtime_root` override end-to-end.
 
-**Key changes in the fix:**
+## Included — 4 files, concrete changes
 
-1. **`SandboxState`** now gains three fields: `runtime_root` (user input), `effective_runtime_root` (resolved at deploy time), and `force_source_refresh`.
+| File | What changes |
+|---|---|
+| `models/sandbox.py` | `SandboxState` gains `runtime_root`, `effective_runtime_root`, `force_source_refresh` |
+| `routes/environments.py` | `CreateEnvironmentRequest` gets `runtime_root` + `force_source_refresh`; API boundary validates absolute path, rejects `..` with 400 |
+| `sandbox_runtime_deploy.py` | `_is_source_clone_valid`, `_rehydrate_source_clone` (with all 3 required log lines); `_resolve_runtime_root` that validates ownership, derives `sandbox_dir` from override, persists `effective_runtime_root`, logs `runtime_root_source=auto|override` |
+| `CreateEnvironmentModal.jsx` | Advanced section (collapsed by default) with `runtime_root` text input + `force_source_refresh` checkbox; live sandbox destination preview |
 
-2. **`_resolve_runtime_root()`** added to `sandbox_runtime_deploy.py` — selects between the user override and auto-detected default, validates path safety (absolute, no `..`, within allowed roots, sandbox_dir descends from it), and returns `(path, "auto"|"override")`.
+## Excluded
+Automated tests, per-existing-environment UI for refresh, sandbox root / source path overrides (follow-up), changes to `_validate_runtime_consistency`.
 
-3. **`deploy_operational_runtime()`** calls `_resolve_runtime_root` early, logs `runtime_root=… runtime_root_source=…`, derives `sandbox_dir` from the effective root when the user supplied one, and persists `effective_runtime_root` back to state.
-
-4. **API boundary validation** rejects non-absolute or path-traversal `runtime_root` values with a `400` before they reach the service layer.
-
-5. **UI live preview** updates the displayed sandbox destination as the user types in the `runtime_root` field.
-
-The source-clone rehydration logic (`_is_source_clone_valid`, `_rehydrate_source_clone`) is unchanged from the prior attempt.
+## Acceptance criteria
+13 verifiable conditions covering rehydration, logging, `force_source_refresh`, runtime root override behavior, API validation, persistence, and UI.
