@@ -5,7 +5,7 @@ import EnvironmentCard from '../components/EnvironmentCard'
 import CreateEnvironmentModal from '../components/CreateEnvironmentModal'
 import ErrorBanner from '../components/ErrorBanner'
 
-export default function EnvironmentsPage() {
+export default function EnvironmentsPage({ projectId }) {
   const [environments, setEnvironments] = useState([])
   const [error, setError] = useState(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -50,6 +50,7 @@ export default function EnvironmentsPage() {
         <CreateEnvironmentModal
           onClose={() => setShowCreate(false)}
           onCreated={load}
+          projectId={projectId}
         />
       )}
     </div>

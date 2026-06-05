@@ -68,7 +68,7 @@ export default function App() {
                 <Route path="/mapper-activity" element={<IssueMapperActivityPage projectId={activeProject} />} />
                 <Route path="/deployer" element={<DeployerPage projectId={activeProject} />} />
                 <Route path="/sandboxes" element={<SandboxPanel />} />
-                <Route path="/environments" element={<EnvironmentsPage />} />
+                <Route path="/environments" element={<EnvironmentsPage projectId={activeProject} />} />
                 <Route path="/auto-fix" element={<AutoFixPanel projectId={activeProject} />} />
                 <Route path="/runtime-dashboard" element={<RuntimeDashboardPage />} />
               </Routes>

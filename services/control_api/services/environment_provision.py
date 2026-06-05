@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+import subprocess
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -89,6 +90,21 @@ def validate_project_root_on_host(host_project_root: str) -> None:
         )
 
 
+def _get_repo_url(project_root: str) -> str:
+    try:
+        result = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        url = result.stdout.strip()
+        return url if url else project_root
+    except Exception:
+        return project_root
+
+
 def _validate_traefik_hosts(
     web_host: str | None,
     api_host: str | None,
@@ -114,6 +130,7 @@ def provision_environment(
     env_name: str,
     project_root: str,
     map_fn: Callable[[str], str],
+    project_id: str | None = None,
     ref: str | None = None,
     ref_type: RefType | None = None,
     env_type: EnvironmentType | None = None,
@@ -129,11 +146,14 @@ def provision_environment(
     validate_project_root_on_host(host_project)
     _validate_traefik_hosts(web_host, api_host, mgr._proxy.routes_dir)
 
+    repo_url = _get_repo_url(host_project)
     logger.info(
-        "environment provision: env_name=%s project_root(host)=%s sandbox_path(host)=%s",
+        "project_id=%s repo_url=%s branch=%s environment=%s runtime_root=%s",
+        project_id or "(unset)",
+        repo_url,
+        ref or "(default)",
         env_name,
         host_project,
-        host_sandbox,
     )
 
     state = mgr.create(
@@ -251,6 +271,7 @@ def provision_environment_from_body(
         mgr,
         env_name=body["env_name"],
         project_root=body["project_root"],
+        project_id=body.get("project_id"),
         map_fn=map_fn,
         ref=body.get("ref"),
         ref_type=body.get("ref_type"),
