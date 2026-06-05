@@ -1,0 +1,92 @@
+Now I have enough information to write the full review.
+
+---
+
+# PR Review — T175
+
+## Résumé
+
+Implémentation de 4 fichiers modifiés (2 backend, 2 frontend) pour exposer et valider les cibles de déploiement runtime dans le flux de création d'environnement. Le périmètre correspond globalement au plan. La validation backend est solide. Trois problèmes significatifs ont été trouvés.
+
+## Vérifications effectuées
+
+- Lecture du diff complet des 4 fichiers modifiés contre `main`
+- Vérification de la sérialisation API (`SandboxState`, `routes/environments.py`) pour confirmer la disponibilité des champs runtime dans la réponse
+- Lecture du composant `CreateEnvironmentModal.jsx` pour comprendre les deux branches de rendu (project-ID vs. manual entry)
+- Vérification de la logique du guard dans `sandbox_runtime_deploy.py` (construction de `source_path`)
+- Vérification de la validité de la classe CSS `not-font-mono`
+- Vérification des critères d'acceptation du ticket vs. implémentation
+
+## Points validés
+
+- **`_validate_runtime_consistency()` est correcte et exhaustive** : détecte `project == sandbox`, `sandbox` imbriqué dans `project`, `project` imbriqué dans `sandbox`, et parent dir manquant. Chaque cas lève un `ValueError` avec un message diagnostique explicite. Intégrée au bon endroit dans `provision_environment()`.
+
+- **Logging fix dans `environment_provision.py`** : le label `runtime_root=` a été corrigé en `project_root=` et `sandbox_path=` a été ajouté. Conforme au plan et au ticket.
+
+- **5-line path header dans `sandbox_runtime_deploy.py`** : écrit dans `run.log` et `logger.info` avant le bootstrap, avec les 5 champs requis par le ticket : `runtime_root`, `sandbox_root`, `source_path`, `project_root`, `script_source`. 
+
+- **`EnvironmentCard.jsx` — Runtime paths section** : implémentation correcte en collapsible, même pattern que la section Debug existante. Les 4 champs (`project_root`, `sandbox_runtime_root`, `sandbox_dir`, `source_path`) sont déjà présents dans `SandboxState` et sérialisés nativement — aucune modification de sérialisation n'était nécessaire.
+
+- **Gestion HTTP 422** : `ValueError` issu de `_validate_runtime_consistency` est bien capturé et retourné en 422 dans `routes/environments.py` (ligne 129-130).
+
+## Problèmes détectés
+
+### P1 — Guard mort dans `sandbox_runtime_deploy.py` (lignes 283-287)
+
+```python
+source_path = sandbox_dir / "source"  # toujours sous sandbox_dir par construction
+if not source_path.is_relative_to(sandbox_dir):  # ← ne peut jamais être True
+    raise RuntimeError(...)
+```
+
+`source_path` est construit directement comme `sandbox_dir / "source"` à la ligne précédente. Il sera toujours relative à `sandbox_dir`. La condition sera toujours `False`, le `RuntimeError` ne peut jamais être levé. Ce guard est du dead code qui simule une protection sans en fournir réellement une. Il induit en erreur les futurs mainteneurs.
+
+**Impact** : Le ticket exige "Sandbox deploy always uses scripts from sandbox source clone" et "No hidden fallback to another runtime root". Ce guard ne protège pas contre cela — il est tautologiquement vrai.
+
+**Correction attendue** : soit supprimer le guard (inutile), soit déplacer la protection vers une assertion utile, par exemple vérifier que `script_source` (`.ai-dev-factory/scripts`) existe réellement avant d'exécuter les scripts.
+
+---
+
+### P2 — Bloc "Runtime target" absent du flux project-ID
+
+Dans `CreateEnvironmentModal.jsx`, le bloc "Runtime target" est rendu uniquement dans le `else` de `!projectId` (branch manual entry, lignes 238+). Quand `projectId` est fourni (cas nominal d'utilisation depuis le panel projets), le bloc n'apparaît pas.
+
+Le ticket est explicite :
+
+> "The environment creation popup and deployment flow must: clearly expose the deployment/runtime target"
+
+Il n'y a aucune restriction au flux sans project-ID. Dans le flux avec project-ID, le `sandbox_path` est auto-assigné, ce qui rend le déploiement encore plus opaque pour l'utilisateur — c'est précisément le cas où afficher "auto-assigned" est utile.
+
+**Correction attendue** : ajouter le bloc (avec `(auto-assigned)` pour tous les champs) également dans la branche project-ID, idéalement après le sélecteur de branche. Ou extraire le bloc en composant et l'inclure dans les deux branches.
+
+---
+
+### P3 — Classe CSS invalide `not-font-mono` (lignes 264, 268, 274)
+
+```jsx
+<span className="text-blue-600 not-font-mono font-medium">Sandbox path: </span>
+```
+
+`not-font-mono` n'est pas une classe Tailwind valide. Tailwind ne dispose pas d'un préfixe `not-` pour annuler des utilities. L'intent est probablement d'exclure ces `<span>` du `font-mono` appliqué sur le `<div>` parent. La classe correcte serait `font-sans`.
+
+**Impact** : actuellement aucun effet visuel (la classe est ignorée par le moteur CSS). Les labels héritent du `font-mono` du parent — les titres "Sandbox path:", "Runtime root:", "Source clone:" s'affichent en monospace alors qu'ils devraient probablement être en sans-serif.
+
+**Correction** : remplacer `not-font-mono` par `font-sans` sur les 3 spans.
+
+## Risques éventuels
+
+- **`script_source` loggué mais non validé** : le champ `script_source` est calculé comme `source_path / ".ai-dev-factory" / "scripts"` et inclus dans le log, mais aucune vérification d'existence n'est faite. Si les scripts ne sont pas présents à cet emplacement dans le sandbox source clone, le déploiement échouera plus tard avec un message d'erreur moins clair. Accepté dans le plan comme exclu (pas d'E2E), mais à surveiller.
+
+## Décision
+
+- REQUEST_CHANGES
+
+## Actions demandées
+
+1. **[Bloquant] Supprimer ou corriger le guard mort** dans `sandbox_runtime_deploy.py` (lignes 283-287). Si une protection est souhaitée, vérifier l'existence effective de `script_source` (`.ai-dev-factory/scripts`).
+
+2. **[Bloquant] Ajouter le bloc "Runtime target" dans le flux project-ID** de `CreateEnvironmentModal.jsx`. Le cas nominal (création depuis le panel projets) doit aussi montrer la cible de déploiement, même si tous les champs affichent "(auto-assigned)".
+
+3. **[Mineur] Corriger `not-font-mono` → `font-sans`** sur les 3 spans labels dans `CreateEnvironmentModal.jsx`.
+
+IMPLEMENTATION_FIX_REQUIRED
