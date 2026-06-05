@@ -52,3 +52,16 @@
 - prev: IMPLEMENTATION_REVIEW_NEEDED
 - step: review
 - next: IMPLEMENTATION_APPROVED
+
+## 2026-06-05T08:00:00Z
+
+- prev: IMPLEMENTATION_APPROVED
+- step: tester
+- next: IMPLEMENTATION_FIX_REQUIRED
+- reason: 3 test regressions — sandbox parent-directory check too strict (breaks 2 tests), script source check fails in mocked bootstrap test (1 test)
+
+## 2026-06-05T07:58:13Z
+
+- prev: IMPLEMENTATION_APPROVED
+- step: tester
+- next: TEST_COMPLETE
