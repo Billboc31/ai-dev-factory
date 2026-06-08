@@ -347,7 +347,7 @@ def test_supervisor_provision_forwards_runtime_root(
 def test_supervisor_provision_rejects_relative_runtime_root(
     supervisor_app,
 ):
-    """runtime_root must be an absolute path — relative paths return HTTP 422."""
+    """runtime_root must be an absolute path — relative paths return HTTP 400."""
     sup_main, _runtime = supervisor_app
     client = TestClient(sup_main.app)
 
@@ -359,5 +359,57 @@ def test_supervisor_provision_rejects_relative_runtime_root(
             "runtime_root": "relative/path",
         },
     )
-    assert r.status_code == 422, r.text
+    assert r.status_code == 400, r.text
     assert "runtime_root" in r.json()["error"]
+
+
+def test_supervisor_provision_logs_runtime_root_override(
+    supervisor_app, tmp_path, monkeypatch, caplog
+):
+    """Diagnostic log marks runtime_root as set when an override is provided."""
+    import logging
+
+    sup_main, _runtime = supervisor_app
+    host_project = tmp_path / "host-clone"
+    host_project.mkdir()
+    custom_runtime = tmp_path / "custom-runtime"
+
+    monkeypatch.setattr(
+        sup_main.mapper,
+        "map",
+        lambda p: str(host_project) if p == "/app/clone" else p,
+    )
+
+    client = TestClient(sup_main.app)
+    with (
+        caplog.at_level(logging.INFO, logger="supervisor"),
+        patch(
+            "services.control_api.services.environment_provision.deploy_operational_runtime",
+        ) as mock_deploy,
+    ):
+        from services.control_api.services.sandbox_runtime_deploy import (
+            OperationalDeployResult,
+        )
+        from services.control_api.services.proxy_manager import build_sandbox_urls
+
+        mock_deploy.return_value = OperationalDeployResult(
+            success=True,
+            urls=build_sandbox_urls("abc123"),
+            supervisor_pid=424242,
+            route_registered=True,
+        )
+        r = client.post(
+            "/environments/provision",
+            json={
+                "env_name": "demo",
+                "project_root": "/app/clone",
+                "runtime_root": str(custom_runtime),
+            },
+        )
+
+    assert r.status_code == 200, r.text
+    assert any(
+        "runtime_root=<set>" in record.message
+        for record in caplog.records
+        if "supervisor: provision request" in record.message
+    )
