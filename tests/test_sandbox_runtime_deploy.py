@@ -102,6 +102,61 @@ def test_deploy_operational_runtime_success(tmp_path):
     assert updated.supervisor_pid == 55555
 
 
+def test_deploy_operational_runtime_runtime_root_override(tmp_path):
+    """runtime_root override relocates sandbox dir and logs runtime_root_source=override."""
+    mgr, state, sandbox_dir = _sample_state(tmp_path)
+    custom_rt = tmp_path / "custom-runtime"
+    state = state.model_copy(update={"runtime_root": str(custom_rt)})
+    fake_proc = MagicMock()
+    fake_proc.pid = 55555
+    registered = {"web": "http://w.test", "api": "http://a.test"}
+    routes_dir = tmp_path / "routes"
+    captured_runtime: dict = {}
+
+    def _capture_supervisor(_port, runtime_root, _log_path):
+        captured_runtime["path"] = Path(runtime_root)
+        return fake_proc
+
+    def _scripts_ok(*_args, **kwargs):
+        cb = kwargs.get("on_step_complete")
+        if cb:
+            cb("start.sh")
+        return True, None, [{"name": "healthcheck.sh", "status": "pass"}]
+
+    with (
+        patch(
+            "services.control_api.services.sandbox_runtime_deploy._clone_fresh_source",
+            return_value=(True, None, "abc1234"),
+        ),
+        patch(
+            "services.control_api.services.sandbox_runtime_deploy.resolve_proxy_routes_dir",
+            return_value=routes_dir,
+        ),
+        patch(
+            "tools.agent_runner.run_sandbox._start_sandbox_supervisor",
+            side_effect=_capture_supervisor,
+        ),
+        patch("tools.agent_runner.run_sandbox._ensure_required_infra"),
+        patch("tools.agent_runner.run_sandbox._wait_for_proxy_url", return_value=True),
+        patch("tools.agent_runner.run_sandbox._run_scripts", side_effect=_scripts_ok),
+        patch(
+            "services.control_api.services.proxy_manager.ProxyManager.register",
+            return_value=registered,
+        ),
+    ):
+        (routes_dir / f"{state.id}.yml").write_text("http:\n  routers: {}\n")
+        result = deploy_operational_runtime(
+            state, sandbox_dir=sandbox_dir, mode="environment"
+        )
+
+    expected_sandbox = (custom_rt / state.id).resolve()
+    assert result.success is True
+    assert captured_runtime["path"] == expected_sandbox / "runtime"
+    log_text = (expected_sandbox / "run.log").read_text(encoding="utf-8")
+    assert "runtime_root_source=override" in log_text
+    assert f"sandbox_root={expected_sandbox}" in log_text
+
+
 def test_deploy_operational_runtime_supervisor_failure(tmp_path):
     _, state, sandbox_dir = _sample_state(tmp_path)
 
