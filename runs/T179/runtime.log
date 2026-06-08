@@ -10,3 +10,14 @@
 [2026-06-08T18:49:09Z] compose: task (canonical prompt)
 [2026-06-08T18:49:09Z] snapshot: runtime-prompt=runs/T179/prompts/planner-attempt-1.md
 [2026-06-08T18:52:37Z] auto-run: step=planner done rc=0
+[2026-06-08T18:52:39Z] planner checkpoint: committed
+[2026-06-08T18:52:39Z] planner checkpoint: pushed
+[2026-06-08T18:52:39Z] planner validation success
+[2026-06-08T18:52:39Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-08T18:52:39Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-08T18:52:40Z] commit-checkpoint: unstaged runtime garbage: ['runs/T179/runtime.log']
+[2026-06-08T18:52:40Z] commit-checkpoint: sha=8c49cfcd files=2 title='docs(T179/workflow): planner — update 2 file(s)'
+[2026-06-08T18:52:40Z] auto-run: auto-push triggered
+[2026-06-08T18:52:40Z] push: tolerating runtime dirty files (not blocking): ['runs/T179/runtime.log']
+[2026-06-08T18:52:40Z] push: pushing branch=ticket/T179-t179-environment-logs-ui-must-expose-full-lifecycl
+[2026-06-08T18:52:42Z] push: done branch=ticket/T179-t179-environment-logs-ui-must-expose-full-lifecycl
