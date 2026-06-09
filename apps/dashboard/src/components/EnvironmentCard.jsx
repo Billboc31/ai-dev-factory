@@ -57,32 +57,108 @@ function ActionButton({ label, onClick, disabled }) {
   )
 }
 
-function LogsModal({ envId, onClose }) {
+const STEP_STATUS_ICON = { ok: '✓', pass: '✓', fail: '✗', failed: '✗' }
+const STEP_STATUS_COLOR = {
+  ok: 'text-green-400', pass: 'text-green-400',
+  fail: 'text-red-400', failed: 'text-red-400',
+}
+
+function downloadText(text, filename) {
+  const blob = new Blob([text], { type: 'text/plain' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function LogsModal({ env, onClose }) {
   const [logs, setLogs] = useState('')
   const [loading, setLoading] = useState(true)
+  const [tab, setTab] = useState('summary')
 
   useEffect(() => {
-    api.getEnvironmentLogs(envId)
+    api.getEnvironmentLogs(env.id)
       .then(r => setLogs(r.data.logs || '(no logs)'))
       .catch(() => setLogs('(failed to fetch logs)'))
       .finally(() => setLoading(false))
-  }, [envId])
+  }, [env.id])
+
+  const steps = env.lifecycle_steps || []
 
   return (
     <div className="fixed inset-0 flex justify-end z-50">
       <div className="bg-black/40 flex-1" onClick={onClose} aria-hidden="true" />
       <div className="bg-gray-900 w-1/2 flex flex-col shadow-2xl">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
-          <span className="text-sm font-semibold text-gray-200">Logs — {envId}</span>
+          <span className="text-sm font-semibold text-gray-200">Logs — {env.id}</span>
           <button className="text-gray-400 hover:text-white text-lg leading-none" onClick={onClose}>×</button>
         </div>
-        <div className="flex-1 overflow-y-auto p-4">
-          {loading ? (
-            <p className="text-gray-500 text-xs">Loading…</p>
-          ) : (
-            <pre className="text-xs text-green-300 whitespace-pre-wrap">{logs}</pre>
-          )}
+        <div className="flex border-b border-gray-700 px-4">
+          {['summary', 'full'].map(t => (
+            <button
+              key={t}
+              onClick={() => setTab(t)}
+              className={`px-3 py-2 text-xs capitalize ${tab === t ? 'text-white border-b-2 border-blue-400' : 'text-gray-400 hover:text-gray-200'}`}
+            >
+              {t === 'full' ? 'Full Logs' : 'Summary'}
+            </button>
+          ))}
         </div>
+        {tab === 'summary' ? (
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {steps.length > 0 ? (
+              <div className="space-y-1.5">
+                {steps.map((step, i) => (
+                  <div key={i} className="flex items-center gap-2 text-xs">
+                    <span className={STEP_STATUS_COLOR[step.status] || 'text-yellow-400'}>
+                      {STEP_STATUS_ICON[step.status] || '○'}
+                    </span>
+                    <span className="text-gray-300">{step.name}</span>
+                    {step.duration_s !== undefined && (
+                      <span className="text-gray-500">{Number(step.duration_s).toFixed(1)}s</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-gray-500 text-xs">No step data available.</p>
+            )}
+            {env.lifecycle_error && (
+              <div className="bg-red-900/30 rounded p-2">
+                <p className="text-xs text-red-400 font-medium">Error</p>
+                <p className="text-xs text-red-300 mt-1 whitespace-pre-wrap">{env.lifecycle_error}</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="flex flex-col flex-1 min-h-0">
+            <div className="flex items-center gap-2 px-4 py-2 border-b border-gray-700">
+              <button
+                onClick={() => navigator.clipboard?.writeText(logs).catch(() => {})}
+                disabled={loading}
+                className="px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:opacity-50"
+              >
+                Copy logs
+              </button>
+              <button
+                onClick={() => downloadText(logs, `${env.id}.log`)}
+                disabled={loading}
+                className="px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300 disabled:opacity-50"
+              >
+                Download logs
+              </button>
+            </div>
+            <div className="flex-1 overflow-y-auto p-4">
+              {loading ? (
+                <p className="text-gray-500 text-xs">Loading…</p>
+              ) : (
+                <pre className="text-xs text-green-300 whitespace-pre-wrap">{logs}</pre>
+              )}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -248,6 +324,7 @@ export default function EnvironmentCard({ env, onAction }) {
             <div className="mt-1 bg-gray-50 rounded p-2 text-xs font-mono text-gray-500 space-y-0.5">
               {env.project_root && <div><span className="text-gray-600">project_root:</span> {env.project_root}</div>}
               {env.sandbox_runtime_root && <div><span className="text-gray-600">runtime_root:</span> {env.sandbox_runtime_root}</div>}
+              {env.sandbox_runtime_root && <div><span className="text-gray-600">runtime_root_source:</span> {env.runtime_root ? 'override' : 'auto'}</div>}
               {env.sandbox_dir && <div><span className="text-gray-600">sandbox_dir:</span> {env.sandbox_dir}</div>}
               {env.source_path && <div><span className="text-gray-600">source_path:</span> {env.source_path}</div>}
             </div>
@@ -255,7 +332,7 @@ export default function EnvironmentCard({ env, onAction }) {
         </div>
       )}
 
-      {showLogs && <LogsModal envId={env.id} onClose={() => setShowLogs(false)} />}
+      {showLogs && <LogsModal env={env} onClose={() => setShowLogs(false)} />}
     </div>
   )
 }

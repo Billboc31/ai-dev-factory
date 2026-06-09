@@ -35,6 +35,16 @@ export default function LogViewerDrawer({ sandboxId, onClose }) {
   // key=sandboxId restarts polling when a different sandbox is opened
   usePolling(fetchLogs, 2000, sandboxId)
 
+  function downloadLogs() {
+    const blob = new Blob([content], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${sandboxId}.log`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
   return (
     <div className="fixed inset-0 flex justify-end z-50">
       <div
@@ -45,12 +55,30 @@ export default function LogViewerDrawer({ sandboxId, onClose }) {
       <div className="bg-gray-900 w-1/2 flex flex-col shadow-2xl">
         <div className="flex items-center justify-between px-4 py-3 border-b border-gray-700">
           <span className="text-sm font-semibold text-gray-200">Logs — {sandboxId}</span>
-          <button
-            className="text-gray-400 hover:text-white text-lg leading-none"
-            onClick={onClose}
-          >
-            ×
-          </button>
+          <div className="flex items-center gap-2">
+            {content && (
+              <>
+                <button
+                  onClick={() => navigator.clipboard?.writeText(content).catch(() => {})}
+                  className="px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300"
+                >
+                  Copy
+                </button>
+                <button
+                  onClick={downloadLogs}
+                  className="px-2 py-1 text-xs rounded bg-gray-700 hover:bg-gray-600 text-gray-300"
+                >
+                  Download
+                </button>
+              </>
+            )}
+            <button
+              className="text-gray-400 hover:text-white text-lg leading-none"
+              onClick={onClose}
+            >
+              ×
+            </button>
+          </div>
         </div>
         <div ref={containerRef} className="flex-1 overflow-y-auto p-4">
           {content ? (

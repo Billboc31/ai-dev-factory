@@ -100,6 +100,10 @@ class SandboxRunSummary(BaseModel):
     worktree_path: str | None = None
     compose_project: str | None = None
     runtime_root: str | None = None
+    sandbox_root: str | None = None
+    source_path: str | None = None
+    project_root: str | None = None
+    runtime_root_source: str | None = None
     uptime_seconds: float | None = None
     urls: dict[str, str] = {}
     ref: str | None = None
@@ -189,6 +193,8 @@ def _parse_sandbox_state(state_path: Path) -> SandboxRunSummary | None:
     except (OSError, json.JSONDecodeError):
         pass
 
+    runtime_root_val = raw.get("sandbox_runtime_root") or None
+    runtime_root_override = raw.get("runtime_root") or None
     return SandboxRunSummary(
         id=sandbox_id,
         project_id=str(project_id),
@@ -198,7 +204,11 @@ def _parse_sandbox_state(state_path: Path) -> SandboxRunSummary | None:
         ports=raw.get("ports") or {},
         worktree_path=raw.get("worktree_path"),
         compose_project=raw.get("compose_project"),
-        runtime_root=raw.get("sandbox_runtime_root") or None,
+        runtime_root=runtime_root_val,
+        sandbox_root=raw.get("sandbox_dir") or None,
+        source_path=raw.get("source_path") or None,
+        project_root=raw.get("project_root") or None,
+        runtime_root_source="override" if runtime_root_override else "auto",
         uptime_seconds=uptime_seconds,
         urls=urls,
         ref=raw.get("ref") or raw.get("branch") or raw.get("commit"),
