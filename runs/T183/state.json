@@ -1,7 +1,7 @@
 {
   "ticket_id": "T183",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T183-t183-auto-register-current-ai-dev-factory-project",
   "issue_number": 219,
-  "updated_at": "2026-06-09T16:48:10Z"
+  "updated_at": "2026-06-09T16:51:20Z"
 }
