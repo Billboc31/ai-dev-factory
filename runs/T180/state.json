@@ -1,7 +1,7 @@
 {
   "ticket_id": "T180",
-  "state": "PLAN_APPROVED",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T180-t180-healthcheck-failure-logs-must-prioritize-acti",
   "issue_number": 212,
-  "updated_at": "2026-06-09T09:50:41Z"
+  "updated_at": "2026-06-09T10:05:59Z"
 }
