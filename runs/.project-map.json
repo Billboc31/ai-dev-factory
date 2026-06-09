@@ -1,0 +1,87 @@
+{
+  "generated_at": "2026-05-19T11:43:00Z",
+  "tickets": [
+    {
+      "ticket_id": null,
+      "issue_number": 1,
+      "title": "T001 \u2014 Auditer ai-dev-team et extraire le socle g\u00e9n\u00e9rique ai-dev-factory",
+      "status": "not_ingested",
+      "depends_on": [],
+      "depends_on_issues": [],
+      "blocks": [],
+      "ambiguities": []
+    },
+    {
+      "ticket_id": null,
+      "issue_number": 49,
+      "title": "T107 \u2014 Project guardian regression agent",
+      "status": "not_ingested",
+      "depends_on": [],
+      "depends_on_issues": [],
+      "blocks": [],
+      "ambiguities": []
+    },
+    {
+      "ticket_id": null,
+      "issue_number": 51,
+      "title": "T108 \u2014 Multi-project onboarding and project registry",
+      "status": "not_ingested",
+      "depends_on": [],
+      "depends_on_issues": [],
+      "blocks": [],
+      "ambiguities": []
+    },
+    {
+      "ticket_id": null,
+      "issue_number": 54,
+      "title": "T109 \u2014 Atomic runtime checkpoint and worktree-safe commit/push lifecycle",
+      "status": "not_ingested",
+      "depends_on": [],
+      "depends_on_issues": [],
+      "blocks": [],
+      "ambiguities": []
+    },
+    {
+      "ticket_id": null,
+      "issue_number": 56,
+      "title": "T110 \u2014 Responsive dashboard UX and stable live log scrolling",
+      "status": "not_ingested",
+      "depends_on": [],
+      "depends_on_issues": [],
+      "blocks": [],
+      "ambiguities": []
+    },
+    {
+      "ticket_id": null,
+      "issue_number": 60,
+      "title": "T112 \u2014 Runtime health endpoint and safe daemon validation flow",
+      "status": "not_ingested",
+      "depends_on": [],
+      "depends_on_issues": [],
+      "blocks": [],
+      "ambiguities": []
+    },
+    {
+      "ticket_id": null,
+      "issue_number": 66,
+      "title": "T115 \u2014 Package ai-dev-factory as installable Docker Compose runtime",
+      "status": "not_ingested",
+      "depends_on": [],
+      "depends_on_issues": [],
+      "blocks": [],
+      "ambiguities": []
+    }
+  ],
+  "parallelizable_groups": [],
+  "next_recommended": null,
+  "cycles": [],
+  "summary": {
+    "total": 7,
+    "done": 0,
+    "running": 0,
+    "waiting_human": 0,
+    "runnable": 0,
+    "blocked": 0,
+    "not_ingested": 7
+  }
+}

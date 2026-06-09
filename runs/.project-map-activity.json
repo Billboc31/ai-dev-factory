@@ -1,0 +1,21 @@
+[
+  {
+    "timestamp": "2026-05-19T11:43:00Z",
+    "total_issues": 7,
+    "runnable": [],
+    "blocked": [],
+    "parallelizable_groups": [],
+    "next_recommended": null,
+    "cycles": [],
+    "ambiguities": [],
+    "summary": {
+      "total": 7,
+      "done": 0,
+      "running": 0,
+      "waiting_human": 0,
+      "runnable": 0,
+      "blocked": 0,
+      "not_ingested": 7
+    }
+  }
+]
