@@ -585,7 +585,7 @@ def deploy_operational_runtime(
         _persist(LifecyclePhase.failed, last_step="preflight", lifecycle_error=msg)
         return OperationalDeployResult(success=False, error=msg, last_step="preflight")
 
-    success, script_error, steps = rs._run_scripts(
+    success, script_error, steps, _hc_diag = rs._run_scripts(
         source_path,
         pipeline_state_path,
         pipeline_state_path,
@@ -622,6 +622,7 @@ def deploy_operational_runtime(
         state_base["started_at"],
         log_path,
         backend_diagnostics=_backend_diag or None,
+        healthcheck_diagnostics=_hc_diag,
     )
 
     if persist_state:

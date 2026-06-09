@@ -163,6 +163,7 @@ export default function RuntimeDashboardPage() {
       {logSandboxId && (
         <LogViewerDrawer
           sandboxId={logSandboxId}
+          failingStep={sandboxRuns.find(r => r.id === logSandboxId)?.failing_step}
           onClose={handleCloseLogs}
         />
       )}

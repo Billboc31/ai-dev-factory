@@ -60,6 +60,7 @@ import fcntl
 import json
 import logging
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -126,6 +127,46 @@ _SCRIPT_TIMEOUT_SECONDS = int(
 )
 _GIT_PRUNE_TIMEOUT_SECONDS = 30
 _GIT_REMOVE_TIMEOUT_SECONDS = 30
+
+# ── Healthcheck output parsing ────────────────────────────────────────────────
+
+_HC_PROBE_RE = re.compile(r'^(PASS|FAIL)\s+(\S+)\s+\(([^)]+)\)(.*)$')
+_HC_SUMMARY_RE = re.compile(r'^healthcheck:\s+(\d+)\s+passed,\s+(\d+)\s+failed')
+_HC_HTTP_CODE_RE = re.compile(r'http=(\S+)')
+
+
+def _parse_healthcheck_output(stdout: str, stderr: str, exit_code: int) -> dict:
+    probes: list[dict] = []
+    passed_count = 0
+    failed_count = 0
+
+    for line in stdout.splitlines():
+        m = _HC_PROBE_RE.match(line.rstrip())
+        if m:
+            result_str, name, url, tail = m.group(1), m.group(2), m.group(3), m.group(4)
+            note = re.sub(r'^\s*[—–\-]+\s*', '', tail).strip()
+            hm = _HC_HTTP_CODE_RE.search(tail)
+            http_code: str | None = hm.group(1) if hm else None
+            probes.append({
+                "name": name,
+                "url": url,
+                "result": "pass" if result_str == "PASS" else "fail",
+                "http_code": http_code,
+                "note": note,
+            })
+            continue
+        sm = _HC_SUMMARY_RE.match(line.rstrip())
+        if sm:
+            passed_count = int(sm.group(1))
+            failed_count = int(sm.group(2))
+
+    return {
+        "probes": probes,
+        "passed": passed_count,
+        "failed": failed_count,
+        "exit_code": exit_code,
+        "raw_stderr": stderr or "",
+    }
 
 
 # ── Path resolution ──────────────────────────────────────────────────────────
@@ -671,8 +712,9 @@ def _run_scripts(
     extra_env: dict | None = None,
     on_step_start: Callable[[str], None] | None = None,
     on_step_complete: Callable[[str], bool | None] | None = None,
-) -> tuple[bool, str | None, list[dict]]:
+) -> tuple[bool, str | None, list[dict], dict | None]:
     steps: list[dict] = []
+    healthcheck_diagnostics: dict | None = None
     scripts_dir_abs = worktree_path / _SCRIPTS_DIR
 
     _append_log(
@@ -699,7 +741,7 @@ def _run_scripts(
             _write_state(state_path, latest_state_path, {
                 **state_base, "last_step": script_name, "steps": steps,
             })
-            return False, error, steps
+            return False, error, steps, healthcheck_diagnostics
 
         step_started = _now_iso()
         if on_step_start is not None:
@@ -733,12 +775,20 @@ def _run_scripts(
             }
             steps.append(step)
             _append_log(log_path, f"{script_name} timed out\n")
-            return False, f"{script_name} timed out", steps
+            return False, f"{script_name} timed out", steps, healthcheck_diagnostics
 
         if result.stdout:
             _append_log(log_path, result.stdout)
         if result.stderr:
             _append_log(log_path, result.stderr)
+
+        if script_name == "healthcheck.sh":
+            try:
+                healthcheck_diagnostics = _parse_healthcheck_output(
+                    result.stdout or "", result.stderr or "", result.returncode
+                )
+            except Exception:  # noqa: BLE001
+                pass
 
         step = {
             "name": script_name,
@@ -753,14 +803,14 @@ def _run_scripts(
         })
 
         if result.returncode != 0:
-            return False, f"{script_name} failed (exit {result.returncode})", steps
+            return False, f"{script_name} failed (exit {result.returncode})", steps, healthcheck_diagnostics
 
         if on_step_complete is not None:
             cont = on_step_complete(script_name)
             if cont is False:
-                return False, "post-start hook failed", steps
+                return False, "post-start hook failed", steps, healthcheck_diagnostics
 
-    return True, None, steps
+    return True, None, steps, healthcheck_diagnostics
 
 
 # ── Stop script ─────────────────────────────────────────────────────────────
@@ -878,6 +928,7 @@ def _write_validation_json(
     log_path: Path,
     *,
     backend_diagnostics: dict | None = None,
+    healthcheck_diagnostics: dict | None = None,
 ) -> Path:
     """Write validation.json to sandbox_runtime_root; return the path."""
     data = {
@@ -895,6 +946,8 @@ def _write_validation_json(
     }
     if backend_diagnostics is not None:
         data["backend_diagnostics"] = backend_diagnostics
+    if healthcheck_diagnostics is not None:
+        data["healthcheck_diagnostics"] = healthcheck_diagnostics
     out = sandbox_runtime_root / "validation.json"
     out.write_text(json.dumps(data, indent=2), encoding="utf-8")
     _append_log(log_path, f"validation.json written to {out}\n")
@@ -1210,7 +1263,7 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
             })
             return 1
 
-        success, error, steps = _run_scripts(
+        success, error, steps, healthcheck_diagnostics = _run_scripts(
             worktree_path, state_path, latest_state_path, log_path, state_base,
             extra_env=extra_env,
             on_step_complete=_after_start,
@@ -1241,6 +1294,7 @@ def _do_sandbox(project_id: str, project_root: Path, sandbox_id: str, mode: str 
             {"web": sandbox_urls["web"], "api": sandbox_urls["api"]},
             ports, started_at, log_path,
             backend_diagnostics=_proxy_diagnostics[0] or None,
+            healthcheck_diagnostics=healthcheck_diagnostics,
         )
 
         # If smoke tests failed and an AI exec_cmd is configured, generate a fix proposal.

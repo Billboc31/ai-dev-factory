@@ -5,6 +5,8 @@ const client = axios.create({ baseURL: '/api' })
 export const listSandboxRuns = () => client.get('/runtime-dashboard/sandbox-runs')
 export const getSandboxLogs = (id, offset = 0) =>
   client.get(`/runtime-dashboard/sandbox-runs/${id}/logs`, { params: { offset } })
+export const getSandboxDiagnostics = (id) =>
+  client.get(`/runtime-dashboard/sandbox-runs/${id}/diagnostics`)
 export const deleteSandboxRun = (id) => client.delete(`/runtime-dashboard/sandbox-runs/${id}`)
 export const stopSandboxRun = (id) => client.post(`/runtime-dashboard/sandbox-runs/${id}/stop`)
 

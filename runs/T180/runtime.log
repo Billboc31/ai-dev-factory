@@ -21,3 +21,16 @@
 [2026-06-09T09:45:39Z] push: tolerating runtime dirty files (not blocking): ['runs/T180/runtime.log']
 [2026-06-09T09:45:39Z] push: pushing branch=ticket/T180-t180-healthcheck-failure-logs-must-prioritize-acti
 [2026-06-09T09:45:41Z] push: done branch=ticket/T180-t180-healthcheck-failure-logs-must-prioritize-acti
+[2026-06-09T09:50:49Z] auto-run start: state=PLAN_APPROVED
+[2026-06-09T09:50:49Z] auto-run: running step=coder
+[2026-06-09T09:50:49Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-06-09T09:50:49Z] prompt: generic fallback — injecting runs/T180/ticket.md
+[2026-06-09T09:50:49Z] compose: global-context=docs/ai/global-context.md
+[2026-06-09T09:50:49Z] compose: role=ai/roles/coder.md
+[2026-06-09T09:50:49Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-09T09:50:49Z] compose: skill=ai/skills/git-discipline.md
+[2026-06-09T09:50:49Z] compose: skill=ai/skills/code-quality.md
+[2026-06-09T09:50:49Z] compose: skill=ai/skills/refactor-safety.md
+[2026-06-09T09:50:49Z] compose: skill=ai/skills/security.md
+[2026-06-09T09:50:49Z] compose: task (canonical prompt)
+[2026-06-09T09:50:49Z] snapshot: runtime-prompt=runs/T180/prompts/coder-attempt-1.md
