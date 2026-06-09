@@ -1,7 +1,7 @@
 {
   "ticket_id": "T179",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_APPROVED",
   "branch": "ticket/T179-t179-environment-logs-ui-must-expose-full-lifecycl",
   "issue_number": 210,
-  "updated_at": "2026-06-08T18:52:39Z"
+  "updated_at": "2026-06-09T07:40:04Z"
 }
