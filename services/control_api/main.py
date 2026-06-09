@@ -67,14 +67,24 @@ def create_app(
     app.state.worktrees_dir = worktrees_dir or resolve_worktrees_dir(_root)
     app.state.db_path = _runtime_db.get_db_path()
 
+    _runtime_root_env = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    _runtime_root: Path | None = Path(_runtime_root_env).expanduser().resolve() if _runtime_root_env else None
+    app.state.runtime_root = _runtime_root
+
     _pr = projects_root or (
         Path(os.environ["AI_DEV_FACTORY_PROJECTS_ROOT"]).expanduser().resolve()
         if os.environ.get("AI_DEV_FACTORY_PROJECTS_ROOT")
         else None
     )
-    app.state.project_registry = (
-        ProjectRegistry(projects_root=_pr) if _pr else ProjectRegistry.from_single_root(_root)
-    )
+    # Prefer explicit parameters, then workspace file (runtime-configured mode), then single-root.
+    # Only use load_from_workspace_file when no explicit project_root was provided — that is the
+    # "Docker / systemd with AI_DEV_FACTORY_RUNTIME_ROOT" deployment mode.
+    if _pr is not None:
+        app.state.project_registry = ProjectRegistry(projects_root=_pr)
+    elif project_root is None and _runtime_root is not None:
+        app.state.project_registry = ProjectRegistry.load_from_workspace_file(_runtime_root)
+    else:
+        app.state.project_registry = ProjectRegistry.from_single_root(_root)
 
     app.add_middleware(
         CORSMiddleware,

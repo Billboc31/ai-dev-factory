@@ -1443,6 +1443,251 @@ def environments_logs(env_id: str):
         )
 
 
+# ── per-project daemon endpoints ─────────────────────────────────────────────
+#
+# Each imported project gets its own isolated daemon.  Global daemon state
+# (_daemon_state, _daemon_proc, _pid_path()) is untouched by these endpoints.
+
+_project_daemon_states: dict[str, DaemonState] = {}
+_project_daemon_procs: dict[str, subprocess.Popen] = {}
+_project_daemon_exec_cmds: dict[str, str] = {}
+
+
+def _project_runtime_root(project_id: str) -> Path:
+    rr = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    base = Path(rr) if rr else _project_root() / ".ai-dev-factory"
+    return base / "projects" / project_id
+
+
+def _project_runs_dir(project_id: str) -> Path:
+    return _project_runtime_root(project_id) / "runs"
+
+
+def _project_logs_dir(project_id: str) -> Path:
+    return _project_runtime_root(project_id) / "logs"
+
+
+def _project_state_dir(project_id: str) -> Path:
+    return _project_runtime_root(project_id) / "state"
+
+
+def _project_worktrees_dir(project_id: str) -> Path:
+    return _project_runtime_root(project_id) / "worktrees"
+
+
+def _project_pid_path(project_id: str) -> Path:
+    return _project_runs_dir(project_id) / _PID_FILENAME
+
+
+def _project_log_path(project_id: str) -> Path:
+    return _project_logs_dir(project_id) / _LOG_FILENAME
+
+
+def _read_project_pid_file(project_id: str) -> dict | None:
+    path = _project_pid_path(project_id)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _write_project_pid_file(project_id: str, pid: int, started_at: str, exec_cmd: str, restart_policy: str) -> None:
+    path = _project_pid_path(project_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"pid": pid, "started_at": started_at, "exec_cmd": exec_cmd, "restart_policy": restart_policy}),
+        encoding="utf-8",
+    )
+
+
+def _remove_project_pid_file(project_id: str) -> None:
+    try:
+        _project_pid_path(project_id).unlink()
+    except OSError:
+        pass
+
+
+def _lookup_project_root_from_control_api(project_id: str) -> str | None:
+    """Query the control API workspace registry for a project's root path.
+
+    Returns None when the control API is unreachable or the project is not registered.
+    """
+    import urllib.request
+
+    control_api_url = os.environ.get("AI_DEV_FACTORY_CONTROL_API_URL", "http://127.0.0.1:8080")
+    try:
+        with urllib.request.urlopen(f"{control_api_url}/projects", timeout=3) as resp:
+            data = json.loads(resp.read().decode())
+        for proj in data:
+            if isinstance(proj, dict) and proj.get("name") == project_id:
+                return proj.get("root")
+    except Exception:
+        pass
+    return None
+
+
+class ProjectDaemonStartRequest(BaseModel):
+    exec_cmd: str = "claude --dangerously-skip-permissions"
+    restart_policy: str = "no-restart"
+
+
+@app.post("/projects/{project_id}/daemon/start")
+def project_daemon_start(project_id: str, body: ProjectDaemonStartRequest = None):  # noqa: B008
+    from fastapi.responses import JSONResponse
+
+    if body is None:
+        body = ProjectDaemonStartRequest()
+
+    project_root_str = _lookup_project_root_from_control_api(project_id)
+    if project_root_str is None:
+        return JSONResponse(
+            status_code=404,
+            content={"ok": False, "error": f"project not registered in workspace: {project_id!r}"},
+        )
+
+    project_root = Path(project_root_str)
+    project_runtime_root = _project_runtime_root(project_id)
+    runs_dir = _project_runs_dir(project_id)
+    logs_dir = _project_logs_dir(project_id)
+    state_dir = _project_state_dir(project_id)
+    worktrees_dir = _project_worktrees_dir(project_id)
+    daemon_pid_path = _project_pid_path(project_id)
+
+    logger.info(
+        "supervisor: project daemon start project_id=%s project_root=%s"
+        " project_runtime_root=%s runs_dir=%s logs_dir=%s state_dir=%s"
+        " worktrees_dir=%s daemon_pid_path=%s",
+        project_id, project_root, project_runtime_root,
+        runs_dir, logs_dir, state_dir, worktrees_dir, daemon_pid_path,
+    )
+
+    state = _project_daemon_states.setdefault(project_id, DaemonState())
+    pid = state.pid
+    if pid is not None and _is_alive(pid):
+        return {"ok": False, "pid": pid, "error": "already_running"}
+
+    state.restart_policy = body.restart_policy
+    _project_daemon_exec_cmds[project_id] = body.exec_cmd
+
+    started_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    log = _project_log_path(project_id)
+
+    cmd = [
+        sys.executable,
+        str(_run_daemon_path()),
+        "--exec-cmd", body.exec_cmd,
+        "--poll-issues",
+        "--issue-label", "ai-ready",
+        "--auto-commit",
+        "--auto-push",
+        "--auto-include-code",
+        "--worktrees-dir", str(worktrees_dir),
+    ]
+    try:
+        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        with open(log, "a", encoding="utf-8") as log_fh:
+            log_fh.write(
+                f"[{started_at}] supervisor spawning project daemon\n"
+                f"  project_id={project_id}\n"
+                f"  project_root={project_root}\n"
+                f"  project_runtime_root={project_runtime_root}\n"
+                f"  runs_dir={runs_dir}\n"
+                f"  logs_dir={logs_dir}\n"
+                f"  state_dir={state_dir}\n"
+                f"  worktrees_dir={worktrees_dir}\n"
+                f"  daemon_pid_path={daemon_pid_path}\n"
+                f"  command={' '.join(cmd)}\n"
+            )
+            log_fh.flush()
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(project_root),
+                stdout=log_fh,
+                stderr=log_fh,
+                start_new_session=True,
+                env=env,
+            )
+        _project_daemon_procs[project_id] = proc
+        _write_project_pid_file(project_id, proc.pid, started_at, body.exec_cmd, body.restart_policy)
+        state.pid = proc.pid
+        state.started_at = started_at
+        state.exit_unexpected = False
+        logger.info("supervisor: project daemon started project_id=%s pid=%d", project_id, proc.pid)
+        return {"ok": True, "pid": proc.pid}
+    except OSError as exc:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+
+
+@app.get("/projects/{project_id}/daemon/status")
+def project_daemon_status(project_id: str):
+    state = _project_daemon_states.get(project_id)
+    if state is None:
+        data = _read_project_pid_file(project_id)
+        if data is not None:
+            pid = data.get("pid")
+            if isinstance(pid, int) and _is_alive(pid):
+                state = _project_daemon_states.setdefault(project_id, DaemonState())
+                state.pid = pid
+                state.started_at = data.get("started_at")
+                state.restart_policy = data.get("restart_policy", "no-restart")
+            else:
+                _remove_project_pid_file(project_id)
+
+    if state is None:
+        return {"running": False, "pid": None, "project_id": project_id}
+
+    pid = state.pid
+    running = pid is not None and _is_alive(pid)
+    if not running and pid is not None:
+        _remove_project_pid_file(project_id)
+        state.pid = None
+
+    return {
+        "running": running,
+        "pid": state.pid,
+        "project_id": project_id,
+        "started_at": state.started_at,
+        "last_exit_code": state.last_exit_code,
+        "last_exit_time": state.last_exit_time,
+        "last_error": state.last_error,
+        "exit_unexpected": state.exit_unexpected,
+        "restart_count": state.restart_count,
+        "restart_policy": state.restart_policy,
+    }
+
+
+@app.post("/projects/{project_id}/daemon/stop")
+def project_daemon_stop(project_id: str):
+    from fastapi.responses import JSONResponse
+
+    state = _project_daemon_states.get(project_id)
+    pid = state.pid if state is not None else None
+
+    if pid is None:
+        data = _read_project_pid_file(project_id)
+        if data:
+            pid = data.get("pid")
+
+    if pid is None or not _is_alive(pid):
+        _remove_project_pid_file(project_id)
+        return JSONResponse(status_code=400, content={"ok": False, "error": "not_running"})
+
+    try:
+        os.kill(pid, signal.SIGTERM)
+        _remove_project_pid_file(project_id)
+        if state is not None:
+            state.pid = None
+            state.started_at = None
+        _project_daemon_procs.pop(project_id, None)
+        logger.info("supervisor: project daemon stopped project_id=%s pid=%d", project_id, pid)
+        return {"ok": True}
+    except OSError as exc:
+        return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
+
+
 # ── auto-fix proposal endpoints ───────────────────────────────────────────────
 #
 # Architecture:

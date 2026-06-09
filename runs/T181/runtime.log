@@ -49,3 +49,16 @@
 [2026-06-09T13:56:57Z] push: tolerating runtime dirty files (not blocking): ['runs/T181/runtime.log']
 [2026-06-09T13:56:57Z] push: pushing branch=ticket/T181-t181-add-existing-project-bootstrap-and-per-projec
 [2026-06-09T13:56:59Z] push: done branch=ticket/T181-t181-add-existing-project-bootstrap-and-per-projec
+[2026-06-09T14:12:35Z] auto-run start: state=PLAN_APPROVED
+[2026-06-09T14:12:35Z] auto-run: running step=coder
+[2026-06-09T14:12:35Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-06-09T14:12:35Z] prompt: generic fallback — injecting runs/T181/ticket.md
+[2026-06-09T14:12:35Z] compose: global-context=docs/ai/global-context.md
+[2026-06-09T14:12:35Z] compose: role=ai/roles/coder.md
+[2026-06-09T14:12:35Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-09T14:12:35Z] compose: skill=ai/skills/git-discipline.md
+[2026-06-09T14:12:35Z] compose: skill=ai/skills/code-quality.md
+[2026-06-09T14:12:35Z] compose: skill=ai/skills/refactor-safety.md
+[2026-06-09T14:12:35Z] compose: skill=ai/skills/security.md
+[2026-06-09T14:12:35Z] compose: task (canonical prompt)
+[2026-06-09T14:12:35Z] snapshot: runtime-prompt=runs/T181/prompts/coder-attempt-1.md
