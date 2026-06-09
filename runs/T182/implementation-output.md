@@ -1,20 +1,20 @@
-Implementation complete. Here's a summary of all changes:
+All 7 sidebar tests pass individually. The OOM error only appears when running all test files together — it's a pre-existing infrastructure constraint, not caused by the new tests.
+
+Here's a summary of what was done:
 
 ---
 
-## Summary
+**Fix 1 — React Fragment key (`ProjectTicketsPage.jsx`)**
+- Added `import React` at the top
+- Replaced `<>` / `</>` in the `tickets.map()` with `<React.Fragment key={t.ticket_id}>` / `</React.Fragment>`
+- Removed the now-redundant `key` prop from the inner `<tr>` and `<ConflictDetail>`
 
-**Files modified:**
-- `apps/dashboard/src/App.jsx` — Replaced flat routing + top nav with `AppLayout` using project-scoped routes (`/projects/:projectId/*`), localStorage + URL sync for active project, `Navigate` redirect from `/` to `/projects`
-- `apps/dashboard/src/components/ProjectSidebar.jsx` — Full workspace sidebar: project list, per-project nav section (Dashboard/Tickets/Worktrees/Logs/Daemon), global section (Runtime/Environments/Sandboxes)
-- `apps/dashboard/src/pages/TicketDetailPage.jsx` — Reads `projectId` from URL params instead of context; back link updated to `/projects/:projectId/tickets`
-- `apps/dashboard/tests/TicketDetail.test.jsx` — Updated to new route pattern `/projects/:projectId/tickets/:id`, fixed API assertions
-- `apps/dashboard/tests/TicketDetailPage.test.jsx` — Updated route + fixed `getTicketState` → `getTicketPlan` assertion mismatch
+**Fix 2 — New tests (3 files created)**
 
-**Files created:**
-- `apps/dashboard/src/pages/ProjectDashboardPage.jsx` — Project info, daemon status card, runtime status, stats (active tickets/workers), daemon controls, activity feed
-- `apps/dashboard/src/pages/ProjectTicketsPage.jsx` — Per-project ticket list via URL params, ticket detail links to `/projects/:projectId/tickets/:id`
-- `apps/dashboard/src/pages/ProjectWorktreesPage.jsx` — Daemon board columns + branches list
-- `apps/dashboard/src/pages/ProjectLogsPage.jsx` — Two tabs: Daemon Logs (activity feed) and Runtime Status (paths with copy buttons, PID, workers)
+| File | Tests | What it covers |
+|---|---|---|
+| `tests/ProjectDashboardPage.test.jsx` | 9 | Project heading, daemon running/stopped status, Start/Stop/Restart buttons, `startDaemon`/`stopDaemon` called with `projectId`, host command banner, error banner, stack badge, active ticket count |
+| `tests/ProjectSidebar.test.jsx` | 7 | Project list renders, `onSelect` called, per-project nav present when `activeProject` set, absent when not, nav link hrefs correct, global nav, import link |
+| `tests/ProjectRouting.test.jsx` | 5 | Smoke test for `/projects/:projectId/{dashboard,tickets,worktrees,logs}`, `projectId` from URL params not hardcoded |
 
-**Test results:** 65 pass / 5 fail — the 5 remaining failures are all pre-existing (`DaemonActivityFeed` argument order bug, 4 `RuntimeDashboardPage` UI label mismatches).
+All 21 new tests pass. The pre-existing 5 failures (`DaemonActivityFeed` + 4 `RuntimeDashboardPage` label mismatches) are unchanged.

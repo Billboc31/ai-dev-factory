@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import React, { useCallback, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { listTickets, markConflictFailed } from '../api/tickets'
 import ErrorBanner from '../components/ErrorBanner'
@@ -128,8 +128,8 @@ export default function ProjectTicketsPage() {
           </thead>
           <tbody>
             {tickets.map(t => (
-              <>
-                <tr key={t.ticket_id} className="border-t border-gray-100 hover:bg-gray-50">
+              <React.Fragment key={t.ticket_id}>
+                <tr className="border-t border-gray-100 hover:bg-gray-50">
                   <td className="p-3">
                     <Link
                       to={`/projects/${projectId}/tickets/${t.ticket_id}`}
@@ -158,13 +158,12 @@ export default function ProjectTicketsPage() {
                 </tr>
                 {CONFLICT_STATES.has(t.state) && (
                   <ConflictDetail
-                    key={`${t.ticket_id}-conflict`}
                     ticket={t}
                     projectId={projectId}
                     onRefresh={fetchTickets}
                   />
                 )}
-              </>
+              </React.Fragment>
             ))}
             {tickets.length === 0 && (
               <tr>
