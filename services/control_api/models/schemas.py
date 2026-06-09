@@ -104,6 +104,24 @@ class ProjectInfo(BaseModel):
     name: str
     root: str
     tickets_count: int
+    runtime_root: str | None = None
+    stack: str | None = None
+
+
+class ProjectImportRequest(BaseModel):
+    project_root: str
+    project_id: str
+
+
+class BootstrapResult(BaseModel):
+    project_id: str
+    project_root: str
+    runtime_root: str
+    stack: str
+    runs_dir: str
+    logs_dir: str
+    state_dir: str
+    worktrees_dir: str
 
 
 class ProviderStatus(BaseModel):

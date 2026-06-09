@@ -9,36 +9,71 @@ from pathlib import Path
 _WORKERS_JSON = "workers.json"
 
 
-def resolve_runs_dir(project_root: Path) -> Path:
-    """Return the runs/ directory: RUNTIME_ROOT/runs if set, else project_root/runs."""
+def resolve_runs_dir(project_root: Path, project_id: str | None = None) -> Path:
+    """Return the runs/ directory.
+
+    When *project_id* is given, returns the project-specific path under
+    ``{RUNTIME_ROOT}/projects/{project_id}/runs``.  Otherwise falls back to the
+    global ``{RUNTIME_ROOT}/runs`` or ``project_root/runs``.
+    """
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if project_id and runtime_root:
+        return Path(runtime_root) / "projects" / project_id / "runs"
     if runtime_root:
         return Path(runtime_root) / "runs"
     return project_root / "runs"
 
 
-def resolve_worktrees_dir(project_root: Path) -> Path:
-    """Return the worktrees/ directory: RUNTIME_ROOT/worktrees if set, else sibling convention."""
+def resolve_worktrees_dir(project_root: Path, project_id: str | None = None) -> Path:
+    """Return the worktrees/ directory.
+
+    When *project_id* is given, returns the project-specific path under
+    ``{RUNTIME_ROOT}/projects/{project_id}/worktrees``.
+    """
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if project_id and runtime_root:
+        return Path(runtime_root) / "projects" / project_id / "worktrees"
     if runtime_root:
         return Path(runtime_root) / "worktrees"
     return project_root.parent / (project_root.name + "-worktrees")
 
 
-def resolve_state_dir(project_root: Path) -> Path:
-    """Return the state/ directory: RUNTIME_ROOT/state if set, else project_root/runs (legacy fallback)."""
+def resolve_state_dir(project_root: Path, project_id: str | None = None) -> Path:
+    """Return the state/ directory.
+
+    When *project_id* is given, returns the project-specific path under
+    ``{RUNTIME_ROOT}/projects/{project_id}/state``.
+    """
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if project_id and runtime_root:
+        return Path(runtime_root) / "projects" / project_id / "state"
     if runtime_root:
         return Path(runtime_root) / "state"
     return project_root / "runs"
 
 
-def resolve_logs_dir(project_root: Path) -> Path:
-    """Return the logs/ directory: RUNTIME_ROOT/logs if set, else project_root/logs."""
+def resolve_logs_dir(project_root: Path, project_id: str | None = None) -> Path:
+    """Return the logs/ directory.
+
+    When *project_id* is given, returns the project-specific path under
+    ``{RUNTIME_ROOT}/projects/{project_id}/logs``.
+    """
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if project_id and runtime_root:
+        return Path(runtime_root) / "projects" / project_id / "logs"
     if runtime_root:
         return Path(runtime_root) / "logs"
     return project_root / "logs"
+
+
+def resolve_project_runtime_root(project_id: str, runtime_root: Path) -> Path:
+    """Return the per-project runtime root, validated for path containment.
+
+    Delegates to ``assert_contained`` so callers get the same safety guarantee as
+    the bootstrap service.
+    """
+    from .project_id import assert_contained
+    return assert_contained(runtime_root, project_id)
 
 
 def get_sandbox_root() -> Path:

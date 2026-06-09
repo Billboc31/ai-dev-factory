@@ -12,6 +12,8 @@ import AutoFixPanel from './components/AutoFixPanel'
 import ProjectSidebar from './components/ProjectSidebar'
 import RuntimeDashboardPage from './pages/RuntimeDashboardPage'
 import EnvironmentsPage from './pages/EnvironmentsPage'
+import ProjectsPage from './pages/ProjectsPage'
+import ImportProjectPage from './pages/ImportProjectPage'
 import useProjects from './hooks/useProjects'
 
 export const ActiveProjectContext = createContext(null)
@@ -23,6 +25,7 @@ function Nav({ activeProject }) {
   return (
     <nav className="bg-gray-900 text-white px-6 py-3 flex items-center gap-6">
       <span className="font-bold text-lg mr-2">{activeProject}</span>
+      <NavLink to="/projects" className={linkClass}>Projects</NavLink>
       <NavLink to="/" className={linkClass} end>Tickets</NavLink>
       <NavLink to="/daemon" className={linkClass}>Daemon</NavLink>
       <NavLink to="/board" className={linkClass}>Board</NavLink>
@@ -71,6 +74,8 @@ export default function App() {
                 <Route path="/environments" element={<EnvironmentsPage projectId={activeProject} />} />
                 <Route path="/auto-fix" element={<AutoFixPanel projectId={activeProject} />} />
                 <Route path="/runtime-dashboard" element={<RuntimeDashboardPage />} />
+                <Route path="/projects" element={<ProjectsPage />} />
+                <Route path="/import-project" element={<ImportProjectPage />} />
               </Routes>
             </ActiveProjectContext.Provider>
           </main>
