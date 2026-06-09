@@ -192,8 +192,32 @@ function EnvironmentCard({ run, onOpenLogs, onStopRequest, onDeleteRequest, onRe
         )}
         {run.runtime_root && (
           <div className="truncate">
-            <span className="font-medium">runtime:</span>{' '}
+            <span className="font-medium">runtime_root:</span>{' '}
             <span className="font-mono">{run.runtime_root}</span>
+          </div>
+        )}
+        {run.runtime_root_source && (
+          <div>
+            <span className="font-medium">runtime_source:</span>{' '}
+            <span className="font-mono">{run.runtime_root_source}</span>
+          </div>
+        )}
+        {run.sandbox_root && (
+          <div className="truncate col-span-2">
+            <span className="font-medium">sandbox_root:</span>{' '}
+            <span className="font-mono">{run.sandbox_root}</span>
+          </div>
+        )}
+        {run.source_path && (
+          <div className="truncate col-span-2">
+            <span className="font-medium">source_path:</span>{' '}
+            <span className="font-mono">{run.source_path}</span>
+          </div>
+        )}
+        {run.project_root && (
+          <div className="truncate col-span-2">
+            <span className="font-medium">project_root:</span>{' '}
+            <span className="font-mono">{run.project_root}</span>
           </div>
         )}
         {run.worktree_path && (

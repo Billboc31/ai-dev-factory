@@ -107,6 +107,37 @@ def format_environment_logs(
     sandbox_dir = sandbox_dir.resolve()
     sections: list[str] = []
 
+    # Structured diagnostics block — always first so it's visible without scrolling.
+    diag_lines = ["=== RUNTIME DIAGNOSTICS ==="]
+    if state.project_root:
+        diag_lines.append(f"project_root:         {state.project_root}")
+    sandbox_root = state.sandbox_dir or str(sandbox_dir)
+    diag_lines.append(f"sandbox_root:         {sandbox_root}")
+    if state.sandbox_runtime_root:
+        diag_lines.append(f"runtime_root:         {state.sandbox_runtime_root}")
+    runtime_root_source = "override" if state.runtime_root else "auto"
+    diag_lines.append(f"runtime_root_source:  {runtime_root_source}")
+    if state.source_path:
+        diag_lines.append(f"source_path:          {state.source_path}")
+
+    validation_path = sandbox_dir / "runtime" / "validation.json"
+    if validation_path.exists():
+        try:
+            v = json.loads(validation_path.read_text(encoding="utf-8", errors="replace"))
+            diag_lines.append(f"healthcheck_status:   {v.get('healthcheck_status', 'unknown')}")
+            diag_lines.append(f"smoke_status:         {v.get('smoke_status', 'unknown')}")
+            if v.get("failing_step"):
+                diag_lines.append(f"failing_step:         {v['failing_step']}")
+            bd = v.get("backend_diagnostics") or {}
+            if bd:
+                diag_lines.append("--- proxy diagnostics ---")
+                for k, val in bd.items():
+                    diag_lines.append(f"  {k}: {val}")
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    sections.append("\n".join(diag_lines))
+
     run_log = sandbox_dir / "run.log"
     if run_log.exists():
         sections.append(
