@@ -38,11 +38,11 @@ const MOCK_TIMELINE = {
   ]
 }
 
-function renderPage(id = 'T028') {
+function renderPage(id = 'T028', projectId = 'test-project') {
   return render(
-    <MemoryRouter initialEntries={[`/tickets/${id}`]}>
+    <MemoryRouter initialEntries={[`/projects/${projectId}/tickets/${id}`]}>
       <Routes>
-        <Route path="/tickets/:id" element={<TicketDetailPage />} />
+        <Route path="/projects/:projectId/tickets/:id" element={<TicketDetailPage />} />
       </Routes>
     </MemoryRouter>
   )
@@ -89,7 +89,7 @@ describe('TicketDetailPage', () => {
     const btn = await screen.findByRole('button', { name: /approve plan/i })
     await userEvent.click(btn)
 
-    expect(ticketsApi.approvePlan).toHaveBeenCalledWith('T028')
+    expect(ticketsApi.approvePlan).toHaveBeenCalledWith('T028', 'test-project')
     expect(await screen.findByText('Plan approved')).toBeInTheDocument()
   })
 
@@ -103,13 +103,11 @@ describe('TicketDetailPage', () => {
     expect(await screen.findByText('Step failed')).toBeInTheDocument()
   })
 
-  it('loads and displays state.json in the overview tab', async () => {
-    ticketsApi.getTicketState.mockResolvedValue({ data: MOCK_STATE })
+  it('loads and displays timeline data in the overview tab', async () => {
     renderPage()
     const overviewTab = await screen.findByRole('button', { name: /overview/i })
     await userEvent.click(overviewTab)
-    expect(ticketsApi.getTicketState).toHaveBeenCalledWith('T028')
-    expect(await screen.findByText(/"step"/)).toBeInTheDocument()
+    expect(ticketsApi.getTicketTimeline).toHaveBeenCalledWith('T028', 'test-project')
   })
 
   it('loads and displays artifacts when artifacts tab is clicked', async () => {
@@ -117,13 +115,13 @@ describe('TicketDetailPage', () => {
     renderPage()
     const artifactsTab = await screen.findByRole('button', { name: /artifacts/i })
     await userEvent.click(artifactsTab)
-    expect(ticketsApi.getTicketArtifacts).toHaveBeenCalledWith('T028')
+    expect(ticketsApi.getTicketArtifacts).toHaveBeenCalledWith('T028', 'test-project')
     expect(await screen.findByText(/plan\.md/)).toBeInTheDocument()
   })
 
-  it('has a back link to the tickets list', async () => {
+  it('has a back link to the project tickets list', async () => {
     renderPage()
     const link = await screen.findByRole('link', { name: /back to tickets/i })
-    expect(link).toHaveAttribute('href', '/')
+    expect(link).toHaveAttribute('href', '/projects/test-project/tickets')
   })
 })
