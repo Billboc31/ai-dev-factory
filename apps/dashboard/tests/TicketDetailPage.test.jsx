@@ -34,11 +34,11 @@ const MOCK_TIMELINE = {
   ]
 }
 
-function renderPage(id = 'T028') {
+function renderPage(id = 'T028', projectId = 'test-project') {
   return render(
-    <MemoryRouter initialEntries={[`/tickets/${id}`]}>
+    <MemoryRouter initialEntries={[`/projects/${projectId}/tickets/${id}`]}>
       <Routes>
-        <Route path="/tickets/:id" element={<TicketDetailPage />} />
+        <Route path="/projects/:projectId/tickets/:id" element={<TicketDetailPage />} />
       </Routes>
     </MemoryRouter>
   )
@@ -54,6 +54,7 @@ describe('TicketDetailPage — runtime state change', () => {
     ticketsApi.getTicketState.mockResolvedValue({ data: MOCK_STATE })
     ticketsApi.getTicketLogs.mockResolvedValue({ data: 'line 1\nline 2' })
     ticketsApi.getTicketTimeline.mockResolvedValue({ data: MOCK_TIMELINE })
+    ticketsApi.getTicketPlan.mockResolvedValue({ data: '# Plan content' })
   })
 
   it('invalidates tab content when ticket state changes', async () => {
@@ -87,18 +88,18 @@ describe('TicketDetailPage — runtime state change', () => {
     await act(async () => { simulatePoll() })
     expect(await screen.findByText('PLAN_APPROVED')).toBeInTheDocument()
 
-    // Switch to overview tab (a stable tab, unlike logs/timeline)
-    await userEvent.click(screen.getByRole('button', { name: /overview/i }))
-    await waitFor(() => expect(ticketsApi.getTicketState).toHaveBeenCalled())
-    const callsBefore = ticketsApi.getTicketState.mock.calls.length
+    // Switch to plan tab (a stable tab, unlike logs/timeline/overview)
+    await userEvent.click(screen.getByRole('button', { name: /^plan$/i }))
+    await waitFor(() => expect(ticketsApi.getTicketPlan).toHaveBeenCalled())
+    const callsBefore = ticketsApi.getTicketPlan.mock.calls.length
 
-    // Second poll — same state, on overview tab
+    // Second poll — same state, on plan tab
     await act(async () => { simulatePoll() })
     await waitFor(() => expect(ticketsApi.getTicket).toHaveBeenCalledTimes(2))
     await act(async () => {}) // flush any trailing effects
 
-    // tabContent preserved — overview not re-fetched
-    expect(ticketsApi.getTicketState.mock.calls.length).toBe(callsBefore)
+    // tabContent preserved — plan not re-fetched
+    expect(ticketsApi.getTicketPlan.mock.calls.length).toBe(callsBefore)
   })
 
   it('re-fetches logs on each poll when logs tab is active', async () => {

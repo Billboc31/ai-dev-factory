@@ -1,6 +1,5 @@
 import { useState, useEffect, createContext } from 'react'
-import { BrowserRouter, Routes, Route, NavLink } from 'react-router-dom'
-import TicketsPage from './pages/TicketsPage'
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, useParams } from 'react-router-dom'
 import TicketDetailPage from './pages/TicketDetailPage'
 import DaemonPage from './pages/DaemonPage'
 import BoardPage from './pages/BoardPage'
@@ -14,73 +13,91 @@ import RuntimeDashboardPage from './pages/RuntimeDashboardPage'
 import EnvironmentsPage from './pages/EnvironmentsPage'
 import ProjectsPage from './pages/ProjectsPage'
 import ImportProjectPage from './pages/ImportProjectPage'
+import ProjectDashboardPage from './pages/ProjectDashboardPage'
+import ProjectTicketsPage from './pages/ProjectTicketsPage'
+import ProjectWorktreesPage from './pages/ProjectWorktreesPage'
+import ProjectLogsPage from './pages/ProjectLogsPage'
 import useProjects from './hooks/useProjects'
 
 export const ActiveProjectContext = createContext(null)
 
-function Nav({ activeProject }) {
-  const linkClass = ({ isActive }) =>
-    isActive ? 'text-blue-300 font-medium' : 'text-gray-300 hover:text-white'
+function ProjectDaemonPage() {
+  const { projectId } = useParams()
+  return <DaemonPage projectId={projectId} />
+}
+
+function AppLayout() {
+  const { projects } = useProjects()
+  const location = useLocation()
+  const navigate = useNavigate()
+  const [activeProject, setActiveProject] = useState(
+    () => localStorage.getItem('activeProject') || null
+  )
+
+  useEffect(() => {
+    const match = location.pathname.match(/^\/projects\/([^/]+)/)
+    if (match) {
+      const urlProjectId = match[1]
+      if (urlProjectId !== activeProject) {
+        setActiveProject(urlProjectId)
+        localStorage.setItem('activeProject', urlProjectId)
+      }
+    }
+  }, [location.pathname]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (projects.length > 0 && !activeProject) {
+      const first = projects[0].name
+      setActiveProject(first)
+      localStorage.setItem('activeProject', first)
+    }
+  }, [projects]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const handleSelectProject = (projectId) => {
+    setActiveProject(projectId)
+    localStorage.setItem('activeProject', projectId)
+    navigate(`/projects/${projectId}/dashboard`)
+  }
 
   return (
-    <nav className="bg-gray-900 text-white px-6 py-3 flex items-center gap-6">
-      <span className="font-bold text-lg mr-2">{activeProject}</span>
-      <NavLink to="/projects" className={linkClass}>Projects</NavLink>
-      <NavLink to="/" className={linkClass} end>Tickets</NavLink>
-      <NavLink to="/daemon" className={linkClass}>Daemon</NavLink>
-      <NavLink to="/board" className={linkClass}>Board</NavLink>
-      <NavLink to="/project-map" className={linkClass}>Project Map</NavLink>
-      <NavLink to="/mapper-activity" className={linkClass}>Mapper Activity</NavLink>
-      <NavLink to="/deployer" className={linkClass}>Deployer</NavLink>
-      <NavLink to="/sandboxes" className={linkClass}>Sandboxes</NavLink>
-      <NavLink to="/environments" className={linkClass}>Environments</NavLink>
-      <NavLink to="/auto-fix" className={linkClass}>Auto-Fix</NavLink>
-      <NavLink to="/runtime-dashboard" className={linkClass}>Runtime</NavLink>
-    </nav>
+    <div className="min-h-screen bg-gray-50 flex">
+      <ProjectSidebar
+        projects={projects}
+        activeProject={activeProject}
+        onSelect={handleSelectProject}
+      />
+      <main className="flex-1 p-6 overflow-auto">
+        <ActiveProjectContext.Provider value={activeProject}>
+          <Routes>
+            <Route path="/" element={<Navigate to="/projects" replace />} />
+            <Route path="/projects" element={<ProjectsPage />} />
+            <Route path="/import-project" element={<ImportProjectPage />} />
+            <Route path="/projects/:projectId/dashboard" element={<ProjectDashboardPage />} />
+            <Route path="/projects/:projectId/tickets" element={<ProjectTicketsPage />} />
+            <Route path="/projects/:projectId/tickets/:id" element={<TicketDetailPage />} />
+            <Route path="/projects/:projectId/worktrees" element={<ProjectWorktreesPage />} />
+            <Route path="/projects/:projectId/logs" element={<ProjectLogsPage />} />
+            <Route path="/projects/:projectId/daemon" element={<ProjectDaemonPage />} />
+            {/* Legacy routes not yet migrated to project-scoped URLs */}
+            <Route path="/project-map" element={<ProjectMapPage projectId={activeProject} />} />
+            <Route path="/mapper-activity" element={<IssueMapperActivityPage projectId={activeProject} />} />
+            <Route path="/deployer" element={<DeployerPage projectId={activeProject} />} />
+            <Route path="/sandboxes" element={<SandboxPanel />} />
+            <Route path="/environments" element={<EnvironmentsPage projectId={activeProject} />} />
+            <Route path="/auto-fix" element={<AutoFixPanel projectId={activeProject} />} />
+            <Route path="/runtime-dashboard" element={<RuntimeDashboardPage />} />
+            <Route path="/board" element={<BoardPage projectId={activeProject} />} />
+          </Routes>
+        </ActiveProjectContext.Provider>
+      </main>
+    </div>
   )
 }
 
 export default function App() {
-  const { projects } = useProjects()
-  const [activeProject, setActiveProject] = useState(null)
-
-  useEffect(() => {
-    if (projects.length > 0 && activeProject === null) {
-      setActiveProject(projects[0].name)
-    }
-  }, [projects]) // eslint-disable-line react-hooks/exhaustive-deps
-
   return (
     <BrowserRouter>
-      <div className="min-h-screen bg-gray-50">
-        <Nav activeProject={activeProject ?? 'ai-dev-factory'} />
-        <div className="flex">
-          <ProjectSidebar
-            projects={projects}
-            activeProject={activeProject}
-            onSelect={setActiveProject}
-          />
-          <main className="p-6 flex-1">
-            <ActiveProjectContext.Provider value={activeProject}>
-              <Routes>
-                <Route path="/" element={<TicketsPage projectId={activeProject} />} />
-                <Route path="/tickets/:id" element={<TicketDetailPage />} />
-                <Route path="/daemon" element={<DaemonPage projectId={activeProject} />} />
-                <Route path="/board" element={<BoardPage projectId={activeProject} />} />
-                <Route path="/project-map" element={<ProjectMapPage projectId={activeProject} />} />
-                <Route path="/mapper-activity" element={<IssueMapperActivityPage projectId={activeProject} />} />
-                <Route path="/deployer" element={<DeployerPage projectId={activeProject} />} />
-                <Route path="/sandboxes" element={<SandboxPanel />} />
-                <Route path="/environments" element={<EnvironmentsPage projectId={activeProject} />} />
-                <Route path="/auto-fix" element={<AutoFixPanel projectId={activeProject} />} />
-                <Route path="/runtime-dashboard" element={<RuntimeDashboardPage />} />
-                <Route path="/projects" element={<ProjectsPage />} />
-                <Route path="/import-project" element={<ImportProjectPage />} />
-              </Routes>
-            </ActiveProjectContext.Provider>
-          </main>
-        </div>
-      </div>
+      <AppLayout />
     </BrowserRouter>
   )
 }

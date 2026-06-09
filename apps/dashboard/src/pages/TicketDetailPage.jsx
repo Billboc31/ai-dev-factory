@@ -1,7 +1,6 @@
-import { useCallback, useContext, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import * as api from '../api/tickets'
-import { ActiveProjectContext } from '../App'
 import ActionButton from '../components/ActionButton'
 import AuditLog from '../components/AuditLog'
 import ErrorBanner from '../components/ErrorBanner'
@@ -169,8 +168,7 @@ function OverviewTab({ timeline }) {
 }
 
 export default function TicketDetailPage() {
-  const { id } = useParams()
-  const projectId = useContext(ActiveProjectContext)
+  const { id, projectId } = useParams()
   const [ticket, setTicket] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -241,7 +239,7 @@ export default function TicketDetailPage() {
   if (!ticket && error) {
     return (
       <div>
-        <Link to="/" className="text-blue-600 hover:underline text-sm">← Back</Link>
+        <Link to={`/projects/${projectId}/tickets`} className="text-blue-600 hover:underline text-sm">← Back</Link>
         <div className="mt-4"><ErrorBanner message={error} /></div>
       </div>
     )
@@ -249,7 +247,7 @@ export default function TicketDetailPage() {
 
   return (
     <div className="max-w-4xl">
-      <Link to="/" className="text-blue-600 hover:underline text-sm">← Back to Tickets</Link>
+      <Link to={`/projects/${projectId}/tickets`} className="text-blue-600 hover:underline text-sm">← Back to Tickets</Link>
 
       <div className="mt-4 mb-6 flex items-center gap-3">
         <h1 className="text-2xl font-bold font-mono">{id}</h1>
