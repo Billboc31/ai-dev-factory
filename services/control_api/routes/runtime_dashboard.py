@@ -144,6 +144,11 @@ class OverviewResponse(BaseModel):
     sandboxes: list[SandboxRunSummary]
 
 
+class DiagnosticsResponse(BaseModel):
+    healthcheck_diagnostics: dict | None = None
+    backend_diagnostics: dict | None = None
+
+
 # ── sandbox run parsing ───────────────────────────────────────────────────────
 
 def _parse_sandbox_state(state_path: Path) -> SandboxRunSummary | None:
@@ -274,6 +279,27 @@ def get_sandbox_run_logs(
         return LogResponse(content=tail, next_offset=offset + len(tail))
     except OSError:
         return LogResponse(content="", next_offset=offset)
+
+
+@router.get("/sandbox-runs/{sandbox_id}/diagnostics", response_model=DiagnosticsResponse)
+def get_sandbox_diagnostics(sandbox_id: str, request: Request) -> DiagnosticsResponse:
+    if not re.fullmatch(r"[a-zA-Z0-9_\-]+", sandbox_id):
+        raise HTTPException(status_code=400, detail="invalid sandbox_id")
+    root = _get_sandboxes_dir(request)
+    sandbox_dir = root / sandbox_id
+    if not sandbox_dir.exists():
+        raise HTTPException(status_code=404, detail=f"sandbox not found: {sandbox_id}")
+    validation_path = sandbox_dir / "validation.json"
+    if not validation_path.exists():
+        return DiagnosticsResponse()
+    try:
+        v = json.loads(validation_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return DiagnosticsResponse()
+    return DiagnosticsResponse(
+        healthcheck_diagnostics=v.get("healthcheck_diagnostics"),
+        backend_diagnostics=v.get("backend_diagnostics"),
+    )
 
 
 @router.delete("/sandbox-runs/{sandbox_id}", status_code=204)

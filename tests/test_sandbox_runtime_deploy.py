@@ -62,7 +62,7 @@ def test_deploy_operational_runtime_success(tmp_path):
         cb = kwargs.get("on_step_complete")
         if cb:
             cb("start.sh")
-        return True, None, [{"name": "healthcheck.sh", "status": "pass"}]
+        return True, None, [{"name": "healthcheck.sh", "status": "pass"}], None
 
     with (
         patch(
@@ -121,7 +121,7 @@ def test_deploy_operational_runtime_runtime_root_override(tmp_path):
         cb = kwargs.get("on_step_complete")
         if cb:
             cb("start.sh")
-        return True, None, [{"name": "healthcheck.sh", "status": "pass"}]
+        return True, None, [{"name": "healthcheck.sh", "status": "pass"}], None
 
     with (
         patch(
@@ -196,7 +196,7 @@ def test_deploy_operational_runtime_script_failure_cleans_up(tmp_path):
         patch("tools.agent_runner.run_sandbox._wait_for_proxy_url", return_value=True),
         patch(
             "tools.agent_runner.run_sandbox._run_scripts",
-            return_value=(False, "bootstrap failed", []),
+            return_value=(False, "bootstrap failed", [], None),
         ),
         patch("tools.agent_runner.run_sandbox._run_stop_script"),
         patch("tools.agent_runner.run_sandbox._stop_sandbox_supervisor"),
@@ -329,7 +329,7 @@ def test_deploy_operational_runtime_clones_fresh_source_on_ref(tmp_path):
         cb = kwargs.get("on_step_complete")
         if cb:
             cb("start.sh")
-        return True, None, [{"name": "healthcheck.sh", "status": "pass"}]
+        return True, None, [{"name": "healthcheck.sh", "status": "pass"}], None
 
     with (
         patch(
@@ -377,7 +377,7 @@ def test_deploy_operational_runtime_aborts_on_clone_failure(tmp_path):
     def _scripts_side_effect(*_a, **_kw):
         nonlocal scripts_called
         scripts_called = True
-        return True, None, []
+        return True, None, [], None
 
     with (
         patch(
@@ -436,7 +436,7 @@ def test_deploy_runs_smoke_for_deploy_and_test_mode(tmp_path):
         patch("tools.agent_runner.run_sandbox._wait_for_proxy_url", return_value=True),
         patch(
             "tools.agent_runner.run_sandbox._run_scripts",
-            return_value=(True, None, [{"name": "healthcheck.sh", "status": "success"}]),
+            return_value=(True, None, [{"name": "healthcheck.sh", "status": "success"}], None),
         ),
         patch(
             "tools.agent_runner.run_sandbox._run_smoke_tests",
@@ -483,7 +483,7 @@ def test_deploy_operational_runtime_clones_even_without_ref(tmp_path):
         cb = kwargs.get("on_step_complete")
         if cb:
             cb("start.sh")
-        return True, None, [{"name": "healthcheck.sh", "status": "pass"}]
+        return True, None, [{"name": "healthcheck.sh", "status": "pass"}], None
 
     with (
         patch(
@@ -532,7 +532,7 @@ def test_deploy_operational_runtime_path_validation_fails(tmp_path):
     def _scripts_side(*_a, **_kw):
         nonlocal scripts_called
         scripts_called = True
-        return True, None, []
+        return True, None, [], None
 
     with (
         patch(
