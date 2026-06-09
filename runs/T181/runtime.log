@@ -73,3 +73,12 @@
 [2026-06-09T14:42:38Z] compose: skill=ai/skills/debugging.md
 [2026-06-09T14:42:38Z] compose: task (canonical prompt)
 [2026-06-09T14:42:38Z] snapshot: runtime-prompt=runs/T181/prompts/tester-attempt-1.md
+[2026-06-09T15:01:20Z] auto-run: step=tester done rc=0
+[2026-06-09T15:01:20Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-09T15:01:20Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-09T15:01:20Z] commit-checkpoint: unstaged runtime garbage: ['runs/T181/runtime.log']
+[2026-06-09T15:01:21Z] commit-checkpoint: sha=e077d1a2 files=4 title='test(T181/workflow): tester — update 4 file(s)'
+[2026-06-09T15:01:21Z] auto-run: auto-push triggered
+[2026-06-09T15:01:21Z] push: tolerating runtime dirty files (not blocking): ['runs/T181/runtime.log']
+[2026-06-09T15:01:21Z] push: pushing branch=ticket/T181-t181-add-existing-project-bootstrap-and-per-projec
+[2026-06-09T15:01:23Z] push: done branch=ticket/T181-t181-add-existing-project-bootstrap-and-per-projec
