@@ -13,7 +13,85 @@ function ProbeBadge({ result }) {
   )
 }
 
-function HealthcheckDiagnostics({ diagnostics, loaded }) {
+const FAILURE_TYPE_LABELS = {
+  crash_loop: 'Crash loop',
+  dns_network: 'DNS / network',
+  backend_app: 'Backend app error',
+  unknown: 'Unknown',
+}
+
+function BackendDiagnostics({ bd }) {
+  if (!bd) return null
+  const { failure_type, backend_urls = {}, traefik_probe = {}, api_container, traefik_networks = [] } = bd
+  const urlEntries = Object.entries(backend_urls)
+  const probeEntries = Object.entries(traefik_probe)
+  return (
+    <div className="mt-3 space-y-3">
+      {failure_type && (
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-gray-400">Failure type:</span>
+          <span className="text-xs font-semibold text-orange-400">
+            {FAILURE_TYPE_LABELS[failure_type] ?? failure_type}
+          </span>
+        </div>
+      )}
+      {urlEntries.length > 0 && (
+        <div>
+          <p className="text-xs text-gray-500 mb-1">Backend URLs</p>
+          <table className="w-full text-xs">
+            <tbody>
+              {urlEntries.map(([svc, url]) => (
+                <tr key={svc}>
+                  <td className="py-0.5 pr-3 font-mono text-gray-400 w-12">{svc}</td>
+                  <td className="py-0.5 font-mono text-gray-300 break-all">{url}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {probeEntries.length > 0 && (
+        <div>
+          <p className="text-xs text-gray-500 mb-1">Traefik probe</p>
+          <table className="w-full text-xs">
+            <tbody>
+              {probeEntries.map(([svc, status]) => (
+                <tr key={svc}>
+                  <td className="py-0.5 pr-3 font-mono text-gray-400 w-12">{svc}</td>
+                  <td className={`py-0.5 font-mono ${status === 'reachable' ? 'text-green-400' : 'text-red-400'}`}>
+                    {status}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {api_container && (
+        <div>
+          <p className="text-xs text-gray-500 mb-1">API container</p>
+          <div className="flex flex-wrap gap-3 text-xs">
+            <span className={`font-mono ${api_container.status === 'running' ? 'text-green-400' : 'text-red-400'}`}>
+              {api_container.status}
+            </span>
+            <span className="text-gray-400">restarts: {api_container.restarts}</span>
+            {api_container.health !== 'none' && (
+              <span className="text-gray-400">health: {api_container.health}</span>
+            )}
+          </div>
+        </div>
+      )}
+      {traefik_networks.length > 0 && (
+        <div>
+          <p className="text-xs text-gray-500 mb-1">Traefik networks</p>
+          <p className="text-xs font-mono text-gray-300">{traefik_networks.join(', ')}</p>
+        </div>
+      )}
+    </div>
+  )
+}
+
+function HealthcheckDiagnostics({ diagnostics, backendDiagnostics, loaded }) {
   if (!loaded) {
     return (
       <div className="border-b border-gray-700 pb-4 mb-4">
@@ -21,8 +99,8 @@ function HealthcheckDiagnostics({ diagnostics, loaded }) {
       </div>
     )
   }
-  if (!diagnostics) return null
-  const { probes = [], passed, failed, exit_code, raw_stderr } = diagnostics
+  if (!diagnostics && !backendDiagnostics) return null
+  const { probes = [], passed, failed, exit_code, raw_stderr } = diagnostics || {}
   return (
     <div className="border-b border-gray-700 pb-4 mb-4">
       <h3 className="text-xs font-semibold text-yellow-400 uppercase mb-3">Failure details</h3>
@@ -54,17 +132,20 @@ function HealthcheckDiagnostics({ diagnostics, loaded }) {
       ) : (
         <p className="text-xs text-gray-500">No probe data captured.</p>
       )}
-      <div className="mt-2 flex gap-4 text-xs">
-        <span className="text-green-400">{passed} passed</span>
-        <span className="text-red-400">{failed} failed</span>
-        <span className="text-gray-400">exit {exit_code}</span>
-      </div>
+      {diagnostics && (
+        <div className="mt-2 flex gap-4 text-xs">
+          <span className="text-green-400">{passed} passed</span>
+          <span className="text-red-400">{failed} failed</span>
+          <span className="text-gray-400">exit {exit_code}</span>
+        </div>
+      )}
       {raw_stderr && (
         <details className="mt-2">
           <summary className="text-xs text-gray-400 cursor-pointer select-none">stderr</summary>
           <pre className="text-xs text-orange-300 whitespace-pre-wrap mt-1">{raw_stderr}</pre>
         </details>
       )}
+      <BackendDiagnostics bd={backendDiagnostics} />
     </div>
   )
 }
@@ -72,6 +153,7 @@ function HealthcheckDiagnostics({ diagnostics, loaded }) {
 export default function LogViewerDrawer({ sandboxId, failingStep, onClose }) {
   const [content, setContent] = useState('')
   const [diagnostics, setDiagnostics] = useState(null)
+  const [backendDiagnostics, setBackendDiagnostics] = useState(null)
   const [diagLoaded, setDiagLoaded] = useState(false)
   const offsetRef = useRef(0)
   const containerRef = useRef(null)
@@ -80,6 +162,7 @@ export default function LogViewerDrawer({ sandboxId, failingStep, onClose }) {
   useEffect(() => {
     setContent('')
     setDiagnostics(null)
+    setBackendDiagnostics(null)
     setDiagLoaded(false)
     offsetRef.current = 0
   }, [sandboxId])
@@ -89,6 +172,7 @@ export default function LogViewerDrawer({ sandboxId, failingStep, onClose }) {
     api.getSandboxDiagnostics(sandboxId)
       .then(res => {
         setDiagnostics(res.data.healthcheck_diagnostics)
+        setBackendDiagnostics(res.data.backend_diagnostics)
         setDiagLoaded(true)
       })
       .catch(() => {
@@ -166,7 +250,7 @@ export default function LogViewerDrawer({ sandboxId, failingStep, onClose }) {
         </div>
         <div ref={containerRef} className="flex-1 overflow-y-auto p-4">
           {isHealthcheckFailure && (
-            <HealthcheckDiagnostics diagnostics={diagnostics} loaded={diagLoaded} />
+            <HealthcheckDiagnostics diagnostics={diagnostics} backendDiagnostics={backendDiagnostics} loaded={diagLoaded} />
           )}
           {content ? (
             <pre className="text-xs text-green-300 whitespace-pre-wrap">{content}</pre>
