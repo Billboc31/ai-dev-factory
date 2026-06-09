@@ -8,11 +8,13 @@ cd "$PROJECT_ROOT"
 
 [ -f deploy/.env ] && source deploy/.env || true
 
-echo "build: building Docker images..."
-if [ -f deploy/.env ]; then
-  docker compose --env-file deploy/.env build
-else
-  docker compose build
-fi
+COMPOSE_PROJECT="${PROJECT_NAME:-ai-dev-factory}"
+
+echo "build: building Docker images for project '$COMPOSE_PROJECT'"
+
+_COMPOSE_ARGS=("--project-name" "$COMPOSE_PROJECT")
+[ -f deploy/.env ] && _COMPOSE_ARGS+=("--env-file" "deploy/.env")
+
+docker compose "${_COMPOSE_ARGS[@]}" build --parallel
 
 echo "build: done"
