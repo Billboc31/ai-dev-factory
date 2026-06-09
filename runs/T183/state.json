@@ -1,7 +1,7 @@
 {
   "ticket_id": "T183",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T183-t183-fix-manual-deployment-healthcheck-failure-pro",
   "issue_number": 183,
-  "updated_at": "2026-06-09T17:00:26Z"
+  "updated_at": "2026-06-09T17:10:58Z"
 }
