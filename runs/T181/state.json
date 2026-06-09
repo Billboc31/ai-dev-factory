@@ -1,7 +1,7 @@
 {
   "ticket_id": "T181",
-  "state": "PLAN_APPROVED",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T181-t181-add-existing-project-bootstrap-and-per-projec",
   "issue_number": 215,
-  "updated_at": "2026-06-09T14:12:08Z"
+  "updated_at": "2026-06-09T14:36:27Z"
 }
