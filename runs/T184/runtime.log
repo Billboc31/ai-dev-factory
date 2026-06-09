@@ -10,3 +10,14 @@
 [2026-06-09T17:02:20Z] compose: task (canonical prompt)
 [2026-06-09T17:02:20Z] snapshot: runtime-prompt=runs/T184/prompts/planner-attempt-1.md
 [2026-06-09T17:05:23Z] auto-run: step=planner done rc=0
+[2026-06-09T17:05:25Z] planner checkpoint: committed
+[2026-06-09T17:05:25Z] planner checkpoint: pushed
+[2026-06-09T17:05:25Z] planner validation success
+[2026-06-09T17:05:25Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-09T17:05:25Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-09T17:05:25Z] commit-checkpoint: unstaged runtime garbage: ['runs/T184/runtime.log']
+[2026-06-09T17:05:25Z] commit-checkpoint: sha=307624c6 files=2 title='docs(T184/workflow): planner — update 2 file(s)'
+[2026-06-09T17:05:25Z] auto-run: auto-push triggered
+[2026-06-09T17:05:25Z] push: tolerating runtime dirty files (not blocking): ['runs/T184/runtime.log']
+[2026-06-09T17:05:25Z] push: pushing branch=ticket/T184-t184-auto-register-current-ai-dev-factory-project
+[2026-06-09T17:05:28Z] push: done branch=ticket/T184-t184-auto-register-current-ai-dev-factory-project
