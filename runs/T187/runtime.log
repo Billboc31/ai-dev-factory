@@ -32,3 +32,14 @@
 [2026-06-12T13:44:53Z] push: tolerating runtime dirty files (not blocking): ['runs/T187/runtime.log']
 [2026-06-12T13:44:53Z] push: pushing branch=ticket/T187-t187-restore-ticket-board-workflow-with-status-col
 [2026-06-12T13:45:08Z] auto-run: step=planner done rc=0
+[2026-06-12T13:45:10Z] planner checkpoint: committed
+[2026-06-12T13:45:10Z] planner checkpoint: pushed
+[2026-06-12T13:45:10Z] planner validation success
+[2026-06-12T13:45:10Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-12T13:45:10Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-12T13:45:10Z] commit-checkpoint: unstaged runtime garbage: ['runs/T187/runtime.log']
+[2026-06-12T13:45:10Z] commit-checkpoint: sha=3c40c889 files=2 title='docs(T187/workflow): planner — update 2 file(s)'
+[2026-06-12T13:45:10Z] auto-run: auto-push triggered
+[2026-06-12T13:45:10Z] push: tolerating runtime dirty files (not blocking): ['runs/T187/runtime.log']
+[2026-06-12T13:45:10Z] push: pushing branch=ticket/T187-t187-restore-ticket-board-workflow-with-status-col
+[2026-06-12T13:45:12Z] push: done branch=ticket/T187-t187-restore-ticket-board-workflow-with-status-col
