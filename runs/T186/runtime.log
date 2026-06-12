@@ -21,3 +21,17 @@
 [2026-06-12T12:23:00Z] push: tolerating runtime dirty files (not blocking): ['runs/T186/runtime.log']
 [2026-06-12T12:23:00Z] push: pushing branch=ticket/T186-t186-auto-register-current-ai-dev-factory-project
 [2026-06-12T12:23:02Z] push: done branch=ticket/T186-t186-auto-register-current-ai-dev-factory-project
+[2026-06-12T12:33:13Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-06-12T12:33:13Z] auto-run: running step=review
+[2026-06-12T12:33:13Z] auto-run: review decision context: context_file=runs/T186/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-06-12T12:33:13Z] prompt: resolved=prompts/generic/review.md source=generic
+[2026-06-12T12:33:13Z] prompt: generic fallback — injecting runs/T186/ticket.md
+[2026-06-12T12:33:13Z] compose: global-context=docs/ai/global-context.md
+[2026-06-12T12:33:13Z] compose: role=ai/roles/reviewer.md
+[2026-06-12T12:33:13Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-12T12:33:13Z] compose: skill=ai/skills/code-quality.md
+[2026-06-12T12:33:13Z] compose: skill=ai/skills/refactor-safety.md
+[2026-06-12T12:33:13Z] compose: skill=ai/skills/security.md
+[2026-06-12T12:33:13Z] compose: task (canonical prompt)
+[2026-06-12T12:33:13Z] compose: extra-context=runs/T186/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-06-12T12:33:13Z] snapshot: runtime-prompt=runs/T186/prompts/review-attempt-1.md
