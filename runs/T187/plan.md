@@ -1,70 +1,70 @@
-I have enough context to write the plan.
-
----
+Now I have enough to write a precise plan.
 
 ## Objective
 
-Rework `ProjectTicketsPage` into a 4-column board (Queued / Running / Waiting human / Done) derived from ticket state, and add a lightweight side-panel preview that opens when a ticket card is clicked, exposing metadata and navigation links.
+Replace the table view in `ProjectTicketsPage.jsx` with a 4-column Kanban board (Queued / Running / Waiting Human / Done), add a slide-in ticket preview drawer triggered by card click, and centralize status-to-column mapping in a dedicated utility.
 
 ## Included
 
-**Frontend — new file**
-- `apps/dashboard/src/constants/ticketColumns.js`: single source of truth mapping every known ticket state to one of four column IDs (`queued`, `running`, `waiting_human`, `done`). Unknown states fall back to `queued`. Exports the four column definitions (id, label, color tokens).
+**New file — `apps/dashboard/src/lib/ticketColumns.js`**
+- Export a `COLUMN_DEFS` array (4 entries: queued, running, waiting_human, done) with id, label, and color tokens.
+- Export a `STATE_TO_COLUMN` map assigning every known state string to one of the 4 column ids:
+  - queued: `QUEUED`, `READY`, `PLANNED`, `PLAN_FIX_REQUIRED`, `IMPLEMENTATION_FIX_REQUIRED`
+  - running: `RUNNING`, `IMPLEMENTING`, `TESTING`, `REVIEWING`, `PLAN_APPROVED`, `IMPLEMENTATION_APPROVED`, `CONFLICT_RESOLVING`
+  - waiting_human: `PLAN_REVIEW_NEEDED`, `IMPLEMENTATION_REVIEW_NEEDED`, `CONFLICT_RESOLUTION_NEEDED`, `CONFLICT_RESOLVED_REVIEW_NEEDED`
+  - done: `TEST_COMPLETE`, `COMPLETE`, `COMPLETED`, `MERGED`, `ARCHIVED`, `FAILED`, `CONFLICT_RESOLUTION_FAILED`
+- Export a helper `columnForState(state)` that returns the column id (fallback: `queued`).
 
-**Frontend — new component**
-- `apps/dashboard/src/components/TicketPreviewPanel.jsx`: slide-over / fixed right-panel showing:
-  - ticket_id, state badge
-  - branch (mono)
-  - worktree path (placeholder label if absent from data)
-  - last_log (latest activity line)
-  - last error (from `retry_info` or `conflict_status`)
-  - GitHub issue link if `issue_number` is set
-  - PR link if `pr_number` is available (see backend below)
-  - "Open ticket page" internal link
-  - Close button (Escape key + click-outside also close)
+**New file — `apps/dashboard/src/components/TicketPreviewPanel.jsx`**
+- Slide-in drawer fixed to the right side, toggled by a `ticket` prop (null = closed).
+- Displays from the `TicketSummary` object available from the list endpoint:
+  - ticket id, current state (color-coded badge), branch
+  - issue number (linked to GitHub issue URL using project's GitHub repo, if available)
+  - latest activity (`updated_at` formatted) and last log line (`last_log`)
+  - last error: fetched from `GET /projects/:projectId/tickets/:id/timeline` when the drawer opens, showing `last_error` from `TimelineResponse`; loading spinner while fetching
+  - linked PR: placeholder row "PR — see ticket detail" with link to ticket detail page (PR number not in list API; avoid a separate fetch here)
+  - worktree path: not available in list API — show placeholder "Open worktree (not yet available)"
+- Navigation buttons in the drawer footer:
+  - "Open ticket" → `/projects/:projectId/tickets/:id`
+  - "Open GitHub issue" → external link (only rendered when `issue_number` is set)
+  - "Open PR" → link to ticket detail page PR tab (placeholder until PR number is in list API)
+- Close button (×) and click-outside-to-close behavior.
 
-**Frontend — modify `ProjectTicketsPage.jsx`**
-- Replace the flat table with a horizontal 4-column board layout (flex row, overflow-x scroll).
-- Each column renders a header (label + item count) and a vertical stack of ticket cards.
-- Ticket card shows: ticket_id, state badge, branch, last_log truncated. Cards that are in `waiting_human` get an `ACTION NEEDED` ring.
-- Clicking any card opens `TicketPreviewPanel` for that ticket (no navigation change).
-- Existing `ConflictDetail` expansion is removed from the table; conflict info moves into the preview panel.
-- Polling interval and error handling remain unchanged (5 s, `usePolling`).
+**Modified file — `apps/dashboard/src/pages/ProjectTicketsPage.jsx`**
+- Remove the HTML `<table>` rendering entirely.
+- Import `COLUMN_DEFS`, `columnForState` from `ticketColumns.js`.
+- After polling, bucket each ticket into its column using `columnForState(ticket.state)`.
+- Render a horizontal 4-column grid (CSS flex row, each column flex-shrink-0 with a fixed width and scroll); preserve auto-polling every 5 s.
+- Each ticket card shows: ticket id (non-navigating, clicking opens preview), state badge, branch, last_log truncated.
+- `waiting_human` column cards get a visual highlight (ring or bold border) to surface human-gate tickets.
+- Clicking any card sets `previewTicket` state → renders `<TicketPreviewPanel>`.
+- Remove `ConflictDetail` table row (conflict info moves to preview drawer via the timeline fetch).
+- Keep `ErrorBanner` and polling logic unchanged.
 
-**Backend — `services/control_api/models/schemas.py`**
-- Add `title: str | None = None` and `pr_number: int | None = None` to `TicketSummary`.
-
-**Backend — ticket list endpoint**
-- Populate `title` from ticket storage if available (e.g., stored issue title or derived from ticket metadata). If the storage does not carry a title, leave `null`; the frontend falls back to `ticket_id`.
-- Populate `pr_number` from ticket state (PR number field, if stored). Leave `null` if absent; the frontend omits the PR link.
-
-**State-to-column mapping (implemented in `ticketColumns.js`)**
-
-| Column | States |
-|--------|--------|
-| `queued` | `INIT`, `PLAN_APPROVED`, `IMPLEMENTATION_APPROVED`, `PLAN_FIX_REQUIRED`, `IMPLEMENTATION_FIX_REQUIRED`, and any unrecognized state |
-| `running` | `RUNNING`, `CONFLICT_RESOLVING` |
-| `waiting_human` | `PLAN_REVIEW_NEEDED`, `IMPLEMENTATION_REVIEW_NEEDED`, `CONFLICT_RESOLUTION_NEEDED`, `CONFLICT_RESOLVED_REVIEW_NEEDED` |
-| `done` | `TEST_COMPLETE`, `COMPLETE`, `FAILED`, `CONFLICT_RESOLUTION_FAILED` |
+**No changes to:**
+- `BoardPage.jsx` (separate global board, orthogonal scope)
+- `TicketDetailPage.jsx` (detail pages remain intact)
+- Any backend service, API schema, or routing
 
 ## Excluded
 
-- Changes to `BoardPage.jsx` (daemon board) — that page and its backend service remain untouched.
-- Changes to `TicketDetailPage.jsx` — full detail pages continue to work as-is.
-- Changes to the global `TicketsPage.jsx` (non-project-scoped view).
-- Redesign of workspace, multi-project, or deployment/runtime UI.
-- Worktree path integration beyond a static placeholder in the preview panel.
-- Adding review-action buttons (approve/reject) inside the preview panel.
-- Any new backend field beyond `title` and `pr_number` on `TicketSummary`.
+- Adding title field to the list API or `TicketSummary` schema (title is not in the current list endpoint; workaround uses ticket id + state).
+- Surfacing the PR number in the preview without an extra API call (deferred — add to list API in a follow-up).
+- Worktree path integration (placeholder UI only, wiring deferred).
+- Modifying `BoardPage.jsx` or the daemon-board API path.
+- Any changes to deployment, runtime, or test infrastructure.
+- Dark-mode or mobile-responsive layout beyond the existing Tailwind baseline.
 
 ## Acceptance criteria
 
-- `ProjectTicketsPage` renders exactly four columns: Queued, Running, Waiting human, Done.
-- Every ticket appears in exactly one column determined by `ticketColumns.js`.
-- Tickets in `waiting_human` column are visually distinct (ring or accent color).
-- Clicking a ticket card opens `TicketPreviewPanel` without navigating away from the board.
-- Preview panel shows: ticket_id, state, branch, last activity, last error, GitHub issue link (when `issue_number` present), PR link (when `pr_number` present), and an "Open ticket page" link.
-- Pressing Escape or clicking outside the panel closes it.
-- Existing routes `/projects/:projectId/tickets/:id` still load `TicketDetailPage` correctly.
-- Multi-project navigation (switching projects) still works; board refreshes for the new project.
-- No regression on the daemon board (`/board` or `/projects/:id/daemon`).
+- `ProjectTicketsPage.jsx` renders exactly 4 columns: Queued, Running, Waiting Human, Done.
+- Every ticket state maps to exactly one column via `columnForState`; unknown states fall into Queued.
+- Tickets in the `waiting_human` column are visually distinct (highlighted border/ring) without extra user action.
+- Clicking a ticket card opens the preview drawer without navigating away from the board.
+- The preview drawer shows: ticket id, state badge, branch, last log, formatted timestamp, and — after the timeline fetch resolves — last error (or "none").
+- "Open ticket" link in the drawer navigates to the existing `TicketDetailPage`.
+- "Open GitHub issue" link is visible and correct when `issue_number` is set; absent when not.
+- Closing the drawer (× button or outside click) returns to the board with no navigation.
+- `TicketDetailPage` is still reachable and fully functional.
+- The board polls every 5 s; the preview drawer refreshes its timeline data when reopened.
+- `STATE_TO_COLUMN` and `COLUMN_DEFS` are the single source of truth — `ProjectTicketsPage` and `TicketPreviewPanel` import from `ticketColumns.js`, not from local constants.
