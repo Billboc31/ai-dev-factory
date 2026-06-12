@@ -1,7 +1,7 @@
 {
   "ticket_id": "T187",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_APPROVED",
   "branch": "ticket/T187-t187-restore-ticket-board-workflow-with-status-col",
   "issue_number": 224,
-  "updated_at": "2026-06-12T13:45:10Z"
+  "updated_at": "2026-06-12T13:48:14Z"
 }
