@@ -1,5 +1,6 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { getProject } from '../api/projects'
 import { listTickets } from '../api/tickets'
 import ErrorBanner from '../components/ErrorBanner'
 import TicketPreviewPanel from '../components/TicketPreviewPanel'
@@ -13,6 +14,13 @@ export default function ProjectTicketsPage() {
   const [error, setError] = useState(null)
   const [lastUpdated, setLastUpdated] = useState(null)
   const [previewTicket, setPreviewTicket] = useState(null)
+  const [githubRepo, setGithubRepo] = useState(null)
+
+  useEffect(() => {
+    getProject(projectId).then(res => {
+      if (res.data?.github_repo) setGithubRepo(res.data.github_repo)
+    }).catch(() => {})
+  }, [projectId])
 
   const fetchTickets = useCallback(() => {
     listTickets(projectId)
@@ -79,6 +87,7 @@ export default function ProjectTicketsPage() {
       <TicketPreviewPanel
         ticket={previewTicket}
         projectId={projectId}
+        githubRepo={githubRepo}
         onClose={() => setPreviewTicket(null)}
       />
     </div>

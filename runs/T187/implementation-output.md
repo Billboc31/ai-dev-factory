@@ -1,24 +1,11 @@
-Clean build. Implementation is complete.
+Everything looks correct. Here's a summary of the 4 files changed to fix the blocking issue:
 
----
+**`services/control_api/models/schemas.py`** — Added `github_repo: str | None = None` to `ProjectInfo`.
 
-**Summary of changes:**
+**`services/control_api/routes/projects.py`** — Added `_read_github_repo()` that parses `--issue-repo` from `.ai-dev-factory/deploy.yml` via regex, and wires it into `list_projects` alongside the existing `stack` enrichment.
 
-**New: `apps/dashboard/src/lib/ticketColumns.js`**
-- `COLUMN_DEFS` — 4-column definitions with id, label, and Tailwind color tokens
-- `STATE_TO_COLUMN` — maps every known state string to one of 4 column ids (unknown states fall back to `queued`)
-- `columnForState(state)` — single-call helper
-- `STATE_BADGE_COLORS` + `stateBadgeClass(state)` — centralized badge color logic (moved from the old page local constant)
+**`apps/dashboard/src/api/projects.js`** — Added `getProject(projectId)` that calls `listProjects()` and filters by name, returning the matching project or `null`.
 
-**New: `apps/dashboard/src/components/TicketPreviewPanel.jsx`**
-- Slide-in drawer (fixed right, `z-50`) with backdrop
-- Shows: ticket id, state badge, branch, issue number, last activity timestamp, last log, last error (fetched via `getTicketTimeline` on open)
-- Navigation footer: "Open ticket" (Link), "Open GitHub issue" (rendered only when `issue_number` + optional `githubRepo` prop are both set), "Open PR (see ticket detail)"
-- Close via `×` button or click-outside
+**`apps/dashboard/src/pages/ProjectTicketsPage.jsx`** — Added a `useEffect` that fetches project metadata on mount and stores `github_repo` in local state; passes it as `githubRepo` prop to `TicketPreviewPanel`.
 
-**Modified: `apps/dashboard/src/pages/ProjectTicketsPage.jsx`**
-- Table replaced with 4-column flex-row Kanban board
-- Each ticket is a clickable `TicketCard` button — no direct navigation, opens `TicketPreviewPanel` instead
-- `waiting_human` column cards have `ring-2 ring-orange-400` highlight
-- Preserves 5 s polling, `ErrorBanner`, and `usePolling` logic unchanged
-- All local `STATE_COLORS` / `stateBadgeClass` constants removed; imported from `ticketColumns.js`
+With these changes, `TicketPreviewPanel` will receive `githubRepo` (e.g. `Billboc31/ai-dev-factory`) and correctly render the GitHub issue hyperlink and "Open GitHub issue" button for any ticket that has an `issue_number`.
