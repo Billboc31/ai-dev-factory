@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import logging
+import os
 import subprocess
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
@@ -15,6 +17,22 @@ from ..services.project_id import validate_project_id
 logger = logging.getLogger("control-api")
 
 router = APIRouter(prefix="/projects", tags=["projects"])
+
+
+def _supervisor_validate_path(project_root: str) -> dict:
+    """Call supervisor POST /projects/validate-path. Returns the response dict.
+
+    Raises HTTPException on network failure so callers get a clean 503.
+    """
+    url = os.environ.get("AI_DEV_FACTORY_SUPERVISOR_URL", "http://host.docker.internal:8090").rstrip("/")
+    try:
+        with httpx.Client(timeout=10.0) as client:
+            resp = client.post(f"{url}/projects/validate-path", json={"project_root": project_root})
+        return resp.json()
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="supervisor unreachable — cannot validate host path")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=503, detail="supervisor timed out during path validation")
 
 
 def _list_branches(project_root: str) -> list[str]:
@@ -114,15 +132,27 @@ def import_project(body: ProjectImportRequest, request: Request):
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
-    project_root = Path(body.project_root).expanduser().resolve()
-    if not project_root.exists():
-        raise HTTPException(status_code=422, detail=f"path does not exist: {project_root}")
+    validated = _supervisor_validate_path(body.project_root)
+    if "error" in validated:
+        _error_map = {
+            "path_not_found": f"path does not exist: {validated.get('detail', body.project_root)}",
+            "not_a_directory": f"path is not a directory: {validated.get('detail', body.project_root)}",
+            "permission_denied": f"permission denied: {validated.get('detail', body.project_root)}",
+        }
+        detail = _error_map.get(validated["error"], validated.get("detail", validated["error"]))
+        raise HTTPException(status_code=422, detail=detail)
+
+    if not validated.get("is_git_repo"):
+        raise HTTPException(
+            status_code=422,
+            detail=f"not a git repository: {validated.get('resolved_path', body.project_root)}",
+        )
 
     registry = request.app.state.project_registry
 
     try:
         result = bootstrap(
-            project_root=project_root,
+            project_root=validated["resolved_path"],
             project_id=body.project_id,
             runtime_root=runtime_root,
             registry=registry,
