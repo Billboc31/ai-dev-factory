@@ -89,3 +89,54 @@ def bootstrap(
         state_dir=str(state_dir),
         worktrees_dir=str(worktrees_dir),
     )
+
+
+def auto_bootstrap(
+    project_root: Path,
+    project_id: str,
+    runtime_root: Path | None,
+    registry,
+) -> None:
+    """Idempotent startup registration for the current AI Dev Factory repo.
+
+    Unlike ``bootstrap()``, this function:
+    - Never raises if the project is already registered (idempotent).
+    - Accepts ``.git`` as a file (worktree) or directory (normal clone).
+    - Skips dir creation and project.yml when *runtime_root* is ``None``.
+    - Logs a warning and returns without raising on an invalid project ID.
+    """
+    from .project_id import assert_contained, validate_project_id
+    from .stack_detector import detect_stack
+
+    try:
+        validate_project_id(project_id)
+    except ValueError:
+        logger.warning("auto_bootstrap: invalid project_id %r — skipping", project_id)
+        return
+
+    project_root = project_root.resolve()
+
+    if runtime_root is not None:
+        project_runtime_root = assert_contained(runtime_root, project_id)
+
+        for subdir in ("runs", "logs", "state", "worktrees"):
+            (project_runtime_root / subdir).mkdir(parents=True, exist_ok=True)
+
+        logger.info(
+            "auto_bootstrap: project_id=%s project_root=%s runtime_root=%s",
+            project_id, project_root, project_runtime_root,
+        )
+
+        ai_dev_dir = project_root / _AI_DEV_FACTORY_DIR
+        project_yml = ai_dev_dir / _PROJECT_YML_FILENAME
+        if not project_yml.exists():
+            ai_dev_dir.mkdir(exist_ok=True)
+            stack = detect_stack(project_root)
+            bootstrapped_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            project_yml.write_text(
+                f"name: {project_id}\nstack: {stack}\nbootstrapped_at: {bootstrapped_at}\n",
+                encoding="utf-8",
+            )
+            logger.info("auto_bootstrap: wrote %s", project_yml)
+
+    registry.ensure_registered(project_id, project_root)

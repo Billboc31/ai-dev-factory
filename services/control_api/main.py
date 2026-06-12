@@ -86,10 +86,16 @@ def create_app(
     else:
         app.state.project_registry = ProjectRegistry.from_single_root(_root)
 
-    # Always ensure the AI Dev Factory repo itself appears as a managed project.
-    # .git can be a file (worktree) or a directory (normal clone) — .exists() covers both.
-    if (_root / ".git").exists():
-        app.state.project_registry.ensure_registered(_root.name, _root)
+    # Always ensure the AI Dev Factory repo itself appears as a fully bootstrapped project.
+    # resolve_git_root handles worktrees (.git file) and normal clones (.git dir).
+    from .services.git_root import resolve_git_root
+    from .services.project_bootstrap import auto_bootstrap
+    from .services.project_id import normalize_project_id
+
+    _git_root = resolve_git_root(_root)
+    if (_git_root / ".git").exists():
+        _self_id = normalize_project_id(_git_root.name)
+        auto_bootstrap(_git_root, _self_id, _runtime_root, app.state.project_registry)
 
     app.add_middleware(
         CORSMiddleware,
