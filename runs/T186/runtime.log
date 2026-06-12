@@ -46,3 +46,11 @@
 [2026-06-12T12:48:28Z] compose: skill=ai/skills/debugging.md
 [2026-06-12T12:48:28Z] compose: task (canonical prompt)
 [2026-06-12T12:48:28Z] snapshot: runtime-prompt=runs/T186/prompts/tester-attempt-1.md
+[2026-06-12T13:23:57Z] auto-run: step=tester done rc=0
+[2026-06-12T13:23:57Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-12T13:23:57Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-12T13:23:57Z] commit-checkpoint: unstaged runtime garbage: ['runs/T186/runtime.log']
+[2026-06-12T13:23:57Z] commit-checkpoint: sha=8df1b843 files=4 title='test(T186/workflow): tester — update 4 file(s)'
+[2026-06-12T13:23:57Z] auto-run: auto-push triggered
+[2026-06-12T13:23:57Z] push: tolerating runtime dirty files (not blocking): ['runs/T186/runtime.log']
+[2026-06-12T13:23:57Z] push: pushing branch=ticket/T186-t186-auto-register-current-ai-dev-factory-project
