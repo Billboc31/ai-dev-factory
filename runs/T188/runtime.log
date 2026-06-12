@@ -10,3 +10,14 @@
 [2026-06-12T15:05:25Z] compose: task (canonical prompt)
 [2026-06-12T15:05:25Z] snapshot: runtime-prompt=runs/T188/prompts/planner-attempt-1.md
 [2026-06-12T15:07:40Z] auto-run: step=planner done rc=0
+[2026-06-12T15:07:42Z] planner checkpoint: committed
+[2026-06-12T15:07:42Z] planner checkpoint: pushed
+[2026-06-12T15:07:42Z] planner validation success
+[2026-06-12T15:07:42Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-12T15:07:42Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-12T15:07:42Z] commit-checkpoint: unstaged runtime garbage: ['runs/T188/runtime.log']
+[2026-06-12T15:07:42Z] commit-checkpoint: sha=d804b0e8 files=2 title='docs(T188/workflow): planner — update 2 file(s)'
+[2026-06-12T15:07:42Z] auto-run: auto-push triggered
+[2026-06-12T15:07:42Z] push: tolerating runtime dirty files (not blocking): ['runs/T188/runtime.log']
+[2026-06-12T15:07:42Z] push: pushing branch=ticket/T188-t188-route-all-host-filesystem-project-import-and
+[2026-06-12T15:07:44Z] push: done branch=ticket/T188-t188-route-all-host-filesystem-project-import-and
