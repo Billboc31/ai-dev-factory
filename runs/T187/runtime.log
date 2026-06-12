@@ -1,0 +1,64 @@
+[2026-06-12T13:41:58Z] auto-run start: state=INIT
+[2026-06-12T13:41:58Z] auto-run: running step=planner
+[2026-06-12T13:41:58Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-12T13:41:58Z] prompt: generic fallback — injecting runs/T187/ticket.md
+[2026-06-12T13:41:58Z] compose: global-context=docs/ai/global-context.md
+[2026-06-12T13:41:58Z] compose: role=ai/roles/planner.md
+[2026-06-12T13:41:58Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-12T13:41:58Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-12T13:41:58Z] compose: skill=ai/skills/documentation.md
+[2026-06-12T13:41:58Z] compose: task (canonical prompt)
+[2026-06-12T13:41:58Z] snapshot: runtime-prompt=runs/T187/prompts/planner-attempt-1.md
+[2026-06-12T13:42:46Z] auto-run start: state=INIT
+[2026-06-12T13:42:46Z] auto-run: running step=planner
+[2026-06-12T13:42:46Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-12T13:42:46Z] prompt: generic fallback — injecting runs/T187/ticket.md
+[2026-06-12T13:42:46Z] compose: global-context=docs/ai/global-context.md
+[2026-06-12T13:42:46Z] compose: role=ai/roles/planner.md
+[2026-06-12T13:42:46Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-12T13:42:46Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-12T13:42:46Z] compose: skill=ai/skills/documentation.md
+[2026-06-12T13:42:46Z] compose: task (canonical prompt)
+[2026-06-12T13:42:46Z] snapshot: runtime-prompt=runs/T187/prompts/planner-attempt-2.md
+[2026-06-12T13:44:51Z] auto-run: step=planner done rc=0
+[2026-06-12T13:44:53Z] planner checkpoint: committed
+[2026-06-12T13:44:53Z] planner checkpoint: pushed
+[2026-06-12T13:44:53Z] planner validation success
+[2026-06-12T13:44:53Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-12T13:44:53Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-12T13:44:53Z] commit-checkpoint: unstaged runtime garbage: ['runs/T187/runtime.log']
+[2026-06-12T13:44:53Z] commit-checkpoint: sha=bc7b68a8 files=2 title='docs(T187/workflow): planner — update 2 file(s)'
+[2026-06-12T13:44:53Z] auto-run: auto-push triggered
+[2026-06-12T13:44:53Z] push: tolerating runtime dirty files (not blocking): ['runs/T187/runtime.log']
+[2026-06-12T13:44:53Z] push: pushing branch=ticket/T187-t187-restore-ticket-board-workflow-with-status-col
+[2026-06-12T13:45:08Z] auto-run: step=planner done rc=0
+[2026-06-12T13:45:10Z] planner checkpoint: committed
+[2026-06-12T13:45:10Z] planner checkpoint: pushed
+[2026-06-12T13:45:10Z] planner validation success
+[2026-06-12T13:45:10Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-12T13:45:10Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-12T13:45:10Z] commit-checkpoint: unstaged runtime garbage: ['runs/T187/runtime.log']
+[2026-06-12T13:45:10Z] commit-checkpoint: sha=3c40c889 files=2 title='docs(T187/workflow): planner — update 2 file(s)'
+[2026-06-12T13:45:10Z] auto-run: auto-push triggered
+[2026-06-12T13:45:10Z] push: tolerating runtime dirty files (not blocking): ['runs/T187/runtime.log']
+[2026-06-12T13:45:10Z] push: pushing branch=ticket/T187-t187-restore-ticket-board-workflow-with-status-col
+[2026-06-12T13:45:12Z] push: done branch=ticket/T187-t187-restore-ticket-board-workflow-with-status-col
+[2026-06-12T14:55:56Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-12T14:55:56Z] auto-run: running step=tester
+[2026-06-12T14:55:56Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-12T14:55:56Z] prompt: generic fallback — injecting runs/T187/ticket.md
+[2026-06-12T14:55:56Z] compose: global-context=docs/ai/global-context.md
+[2026-06-12T14:55:56Z] compose: role=ai/roles/tester.md
+[2026-06-12T14:55:56Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-12T14:55:56Z] compose: skill=ai/skills/testing.md
+[2026-06-12T14:55:56Z] compose: skill=ai/skills/debugging.md
+[2026-06-12T14:55:56Z] compose: task (canonical prompt)
+[2026-06-12T14:55:56Z] snapshot: runtime-prompt=runs/T187/prompts/tester-attempt-4.md
+[2026-06-12T14:58:03Z] auto-run: step=tester done rc=0
+[2026-06-12T14:58:03Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-12T14:58:03Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-12T14:58:03Z] commit-checkpoint: unstaged runtime garbage: ['runs/T187/runtime.log']
+[2026-06-12T14:58:03Z] commit-checkpoint: sha=abe6e8a5 files=7 title='test(T187/dashboard,workflow): tester — update 7 file(s)'
+[2026-06-12T14:58:03Z] auto-run: auto-push triggered
+[2026-06-12T14:58:03Z] push: tolerating runtime dirty files (not blocking): ['runs/T187/runtime.log']
+[2026-06-12T14:58:03Z] push: pushing branch=ticket/T187-t187-restore-ticket-board-workflow-with-status-col

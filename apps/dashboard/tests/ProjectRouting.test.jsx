@@ -41,6 +41,7 @@ describe('Project-scoped routing smoke tests', () => {
     daemonApi.getRuntimeStatus.mockResolvedValue({ data: { daemon_online: false, workers: [], runtime_root: '', daemon_log: '', supervisor_log: '', socket_path: '', pid_file: '' } })
     ticketsApi.listTickets.mockResolvedValue({ data: [] })
     projectsApi.listBranches.mockResolvedValue({ data: [] })
+    projectsApi.getProject.mockResolvedValue({ data: {} })
   })
 
   it('/projects/:projectId/dashboard renders the project dashboard', async () => {

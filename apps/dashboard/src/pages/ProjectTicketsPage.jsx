@@ -1,95 +1,11 @@
-import React, { useCallback, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
-import { listTickets, markConflictFailed } from '../api/tickets'
+import { useCallback, useEffect, useState } from 'react'
+import { useParams } from 'react-router-dom'
+import { getProject } from '../api/projects'
+import { listTickets } from '../api/tickets'
 import ErrorBanner from '../components/ErrorBanner'
+import TicketPreviewPanel from '../components/TicketPreviewPanel'
 import usePolling from '../hooks/usePolling'
-
-const STATE_COLORS = {
-  COMPLETE: 'bg-green-100 text-green-800',
-  TEST_COMPLETE: 'bg-green-100 text-green-800',
-  PLAN_REVIEW_NEEDED: 'bg-orange-100 text-orange-800 ring-1 ring-orange-300',
-  IMPLEMENTATION_REVIEW_NEEDED: 'bg-orange-100 text-orange-800 ring-1 ring-orange-300',
-  PLAN_FIX_REQUIRED: 'bg-orange-50 text-orange-700',
-  IMPLEMENTATION_FIX_REQUIRED: 'bg-orange-50 text-orange-700',
-  PLAN_APPROVED: 'bg-blue-100 text-blue-800',
-  IMPLEMENTATION_APPROVED: 'bg-blue-100 text-blue-800',
-  RUNNING: 'bg-yellow-100 text-yellow-800',
-  FAILED: 'bg-red-100 text-red-800',
-  CONFLICT_RESOLUTION_NEEDED: 'bg-red-100 text-red-800',
-  CONFLICT_RESOLVING: 'bg-yellow-100 text-yellow-800',
-  CONFLICT_RESOLVED_REVIEW_NEEDED: 'bg-blue-100 text-blue-800',
-  CONFLICT_RESOLUTION_FAILED: 'bg-red-200 text-red-900',
-}
-
-const CONFLICT_STATES = new Set([
-  'CONFLICT_RESOLUTION_NEEDED',
-  'CONFLICT_RESOLVING',
-  'CONFLICT_RESOLVED_REVIEW_NEEDED',
-  'CONFLICT_RESOLUTION_FAILED',
-])
-
-const REVIEW_NEEDED_STATES = new Set([
-  'PLAN_REVIEW_NEEDED',
-  'IMPLEMENTATION_REVIEW_NEEDED',
-])
-
-function stateBadgeClass(state) {
-  if (STATE_COLORS[state]) return STATE_COLORS[state]
-  const match = Object.entries(STATE_COLORS).find(([k]) => state?.includes(k))
-  return match ? match[1] : 'bg-gray-100 text-gray-700'
-}
-
-function ConflictDetail({ ticket, projectId, onRefresh }) {
-  const [busy, setBusy] = useState(false)
-  const [err, setErr] = useState(null)
-
-  const handleMarkFailed = () => {
-    setBusy(true)
-    setErr(null)
-    markConflictFailed(ticket.ticket_id, projectId)
-      .then(() => onRefresh())
-      .catch(e => setErr(e.response?.data?.detail || e.message))
-      .finally(() => setBusy(false))
-  }
-
-  return (
-    <tr>
-      <td colSpan={5} className="px-4 pb-3 pt-0 bg-red-50 border-t-0">
-        <div className="rounded border border-red-200 bg-white p-3 text-sm space-y-2">
-          {err && <p className="text-red-600 text-xs">{err}</p>}
-          <div className="flex flex-wrap gap-4 text-xs text-gray-600">
-            {ticket.conflict_detected_at && (
-              <span>Detected: {new Date(ticket.conflict_detected_at).toLocaleString()}</span>
-            )}
-            {ticket.pre_conflict_state && (
-              <span>Was: <span className="font-mono">{ticket.pre_conflict_state}</span></span>
-            )}
-          </div>
-          {ticket.conflicted_files && ticket.conflicted_files.length > 0 && (
-            <div>
-              <p className="text-xs font-medium text-gray-700 mb-1">PR files involved:</p>
-              <ul className="list-disc list-inside space-y-0.5">
-                {ticket.conflicted_files.map(f => (
-                  <li key={f} className="font-mono text-xs text-gray-600">{f}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          <p className="text-xs text-yellow-700 font-medium">Manual resolution required before workflow can resume.</p>
-          {ticket.state === 'CONFLICT_RESOLUTION_NEEDED' && (
-            <button
-              onClick={handleMarkFailed}
-              disabled={busy}
-              className="px-3 py-1 text-xs bg-red-600 text-white rounded hover:bg-red-700 disabled:opacity-50"
-            >
-              {busy ? 'Marking…' : 'Mark as Failed'}
-            </button>
-          )}
-        </div>
-      </td>
-    </tr>
-  )
-}
+import { COLUMN_DEFS, columnForState, stateBadgeClass } from '../lib/ticketColumns'
 
 export default function ProjectTicketsPage() {
   const { projectId } = useParams()
@@ -97,6 +13,14 @@ export default function ProjectTicketsPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [lastUpdated, setLastUpdated] = useState(null)
+  const [previewTicket, setPreviewTicket] = useState(null)
+  const [githubRepo, setGithubRepo] = useState(null)
+
+  useEffect(() => {
+    getProject(projectId).then(res => {
+      if (res.data?.github_repo) setGithubRepo(res.data.github_repo)
+    }).catch(() => {})
+  }, [projectId])
 
   const fetchTickets = useCallback(() => {
     listTickets(projectId)
@@ -113,8 +37,13 @@ export default function ProjectTicketsPage() {
 
   if (loading) return <p className="text-gray-500">Loading tickets…</p>
 
+  const columns = Object.fromEntries(COLUMN_DEFS.map(c => [c.id, []]))
+  for (const t of tickets) {
+    columns[columnForState(t.state)].push(t)
+  }
+
   return (
-    <div>
+    <div className="flex flex-col h-full">
       <div className="flex items-baseline gap-3 mb-4">
         <h1 className="text-2xl font-bold">Tickets</h1>
         {lastUpdated && (
@@ -124,69 +53,67 @@ export default function ProjectTicketsPage() {
         )}
       </div>
       <ErrorBanner message={error} onClose={() => setError(null)} />
-      <div className="bg-white rounded shadow border border-gray-200 overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-gray-100 text-left text-gray-600">
-              <th className="p-3 font-medium">ID</th>
-              <th className="p-3 font-medium">State</th>
-              <th className="p-3 font-medium">Branch</th>
-              <th className="p-3 font-medium">Last Update</th>
-              <th className="p-3 font-medium">Last Log</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tickets.map(t => (
-              <React.Fragment key={t.ticket_id}>
-                <tr className="border-t border-gray-100 hover:bg-gray-50">
-                  <td className="p-3">
-                    <Link
-                      to={`/projects/${projectId}/tickets/${t.ticket_id}`}
-                      className="text-blue-600 hover:underline font-mono font-medium"
-                    >
-                      {t.ticket_id}
-                    </Link>
-                  </td>
-                  <td className="p-3">
-                    <span className={`px-2 py-0.5 rounded text-xs font-medium ${stateBadgeClass(t.state)}`}>
-                      {t.state || '—'}
-                    </span>
-                    {REVIEW_NEEDED_STATES.has(t.state) && (
-                      <span className="ml-2 px-2 py-0.5 rounded text-xs font-bold bg-orange-500 text-white">
-                        ACTION NEEDED
-                      </span>
-                    )}
-                    {CONFLICT_STATES.has(t.state) && (
-                      <span className="ml-2 px-2 py-0.5 rounded text-xs font-bold bg-red-600 text-white">
-                        CONFLICT
-                      </span>
-                    )}
-                  </td>
-                  <td className="p-3 font-mono text-xs text-gray-500">{t.branch || '—'}</td>
-                  <td className="p-3 text-gray-500 text-xs">
-                    {t.updated_at ? new Date(t.updated_at).toLocaleString() : '—'}
-                  </td>
-                  <td className="p-3 text-gray-500 text-xs max-w-xs truncate" title={t.last_log || ''}>
-                    {t.last_log || '—'}
-                  </td>
-                </tr>
-                {CONFLICT_STATES.has(t.state) && (
-                  <ConflictDetail
+
+      <div className="flex gap-4 overflow-x-auto flex-1 min-h-0">
+        {COLUMN_DEFS.map(col => (
+          <div
+            key={col.id}
+            className={`flex-shrink-0 w-64 rounded-lg border ${col.color} flex flex-col`}
+          >
+            <div className="px-3 py-2 border-b border-inherit flex items-center justify-between">
+              <span className="font-semibold text-sm text-gray-700">{col.label}</span>
+              <span className="text-xs text-gray-500 bg-white/60 rounded-full px-1.5 py-0.5">
+                {columns[col.id].length}
+              </span>
+            </div>
+            <div className="flex-1 overflow-y-auto p-2 space-y-2">
+              {columns[col.id].length === 0 ? (
+                <p className="text-xs text-gray-400 text-center py-4">Empty</p>
+              ) : (
+                columns[col.id].map(t => (
+                  <TicketCard
+                    key={t.ticket_id}
                     ticket={t}
-                    projectId={projectId}
-                    onRefresh={fetchTickets}
+                    isWaitingHuman={col.id === 'waiting_human'}
+                    onClick={() => setPreviewTicket(t)}
                   />
-                )}
-              </React.Fragment>
-            ))}
-            {tickets.length === 0 && (
-              <tr>
-                <td colSpan={5} className="p-6 text-center text-gray-400">No tickets found</td>
-              </tr>
-            )}
-          </tbody>
-        </table>
+                ))
+              )}
+            </div>
+          </div>
+        ))}
       </div>
+
+      <TicketPreviewPanel
+        ticket={previewTicket}
+        projectId={projectId}
+        githubRepo={githubRepo}
+        onClose={() => setPreviewTicket(null)}
+      />
     </div>
+  )
+}
+
+function TicketCard({ ticket, isWaitingHuman, onClick }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left rounded border bg-white p-3 shadow-sm hover:shadow-md transition-shadow space-y-1.5 ${
+        isWaitingHuman ? 'ring-2 ring-orange-400 border-orange-300' : 'border-gray-200'
+      }`}
+    >
+      <div className="flex items-center justify-between gap-1">
+        <span className="font-mono font-semibold text-xs text-gray-800">{ticket.ticket_id}</span>
+        <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${stateBadgeClass(ticket.state)}`}>
+          {ticket.state || '—'}
+        </span>
+      </div>
+      {ticket.branch && (
+        <p className="font-mono text-xs text-gray-400 truncate">{ticket.branch}</p>
+      )}
+      {ticket.last_log && (
+        <p className="text-xs text-gray-500 truncate" title={ticket.last_log}>{ticket.last_log}</p>
+      )}
+    </button>
   )
 }

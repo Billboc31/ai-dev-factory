@@ -64,13 +64,16 @@ def list_projects(request: Request) -> list[ProjectInfo]:
         enriched: list[ProjectInfo] = []
         for p in projects:
             project_runtime_root_path = runtime_root / "projects" / p.name
-            stack = _read_stack(Path(p.root))
+            project_root_path = Path(p.root)
+            stack = _read_stack(project_root_path)
+            github_repo = _read_github_repo(project_root_path)
             enriched.append(ProjectInfo(
                 name=p.name,
                 root=p.root,
                 tickets_count=p.tickets_count,
                 runtime_root=str(project_runtime_root_path) if project_runtime_root_path.is_dir() else None,
                 stack=stack,
+                github_repo=github_repo,
             ))
         return enriched
 
@@ -85,6 +88,15 @@ def _read_stack(project_root: Path) -> str | None:
         if line.startswith("stack:"):
             return line.split(":", 1)[1].strip()
     return None
+
+
+def _read_github_repo(project_root: Path) -> str | None:
+    import re
+    deploy_yml = project_root / ".ai-dev-factory" / "deploy.yml"
+    if not deploy_yml.exists():
+        return None
+    m = re.search(r'--issue-repo\s+(\S+)', deploy_yml.read_text(encoding="utf-8"))
+    return m.group(1) if m else None
 
 
 @router.post("/import", response_model=BootstrapResult)

@@ -106,6 +106,7 @@ class ProjectInfo(BaseModel):
     tickets_count: int
     runtime_root: str | None = None
     stack: str | None = None
+    github_repo: str | None = None
 
 
 class ProjectImportRequest(BaseModel):
