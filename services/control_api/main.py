@@ -86,6 +86,11 @@ def create_app(
     else:
         app.state.project_registry = ProjectRegistry.from_single_root(_root)
 
+    # Always ensure the AI Dev Factory repo itself appears as a managed project.
+    # .git can be a file (worktree) or a directory (normal clone) — .exists() covers both.
+    if (_root / ".git").exists():
+        app.state.project_registry.ensure_registered(_root.name, _root)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

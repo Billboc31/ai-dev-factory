@@ -80,6 +80,20 @@ class ProjectRegistry:
         except OSError:
             logger.exception("project_registry: failed to persist %s", self._workspace_file)
 
+    def ensure_registered(self, project_id: str, root: Path) -> bool:
+        """Register *project_id* → *root* only if not already present.
+
+        Returns True if a new entry was added, False if it already existed.
+        Persists to workspace.json when a workspace file is configured.
+        """
+        for entry in self._entries:
+            if entry.id == project_id:
+                return False
+        self._entries.append(ProjectEntry(id=project_id, root=root))
+        self._persist()
+        logger.info("project_registry: auto-registered project_id=%s root=%s", project_id, root)
+        return True
+
     def register(self, project_id: str, root: Path) -> None:
         """Add *project_id* → *root* to the registry.
 

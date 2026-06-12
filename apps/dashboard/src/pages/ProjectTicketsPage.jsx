@@ -7,6 +7,10 @@ import usePolling from '../hooks/usePolling'
 const STATE_COLORS = {
   COMPLETE: 'bg-green-100 text-green-800',
   TEST_COMPLETE: 'bg-green-100 text-green-800',
+  PLAN_REVIEW_NEEDED: 'bg-orange-100 text-orange-800 ring-1 ring-orange-300',
+  IMPLEMENTATION_REVIEW_NEEDED: 'bg-orange-100 text-orange-800 ring-1 ring-orange-300',
+  PLAN_FIX_REQUIRED: 'bg-orange-50 text-orange-700',
+  IMPLEMENTATION_FIX_REQUIRED: 'bg-orange-50 text-orange-700',
   PLAN_APPROVED: 'bg-blue-100 text-blue-800',
   IMPLEMENTATION_APPROVED: 'bg-blue-100 text-blue-800',
   RUNNING: 'bg-yellow-100 text-yellow-800',
@@ -22,6 +26,11 @@ const CONFLICT_STATES = new Set([
   'CONFLICT_RESOLVING',
   'CONFLICT_RESOLVED_REVIEW_NEEDED',
   'CONFLICT_RESOLUTION_FAILED',
+])
+
+const REVIEW_NEEDED_STATES = new Set([
+  'PLAN_REVIEW_NEEDED',
+  'IMPLEMENTATION_REVIEW_NEEDED',
 ])
 
 function stateBadgeClass(state) {
@@ -142,6 +151,11 @@ export default function ProjectTicketsPage() {
                     <span className={`px-2 py-0.5 rounded text-xs font-medium ${stateBadgeClass(t.state)}`}>
                       {t.state || '—'}
                     </span>
+                    {REVIEW_NEEDED_STATES.has(t.state) && (
+                      <span className="ml-2 px-2 py-0.5 rounded text-xs font-bold bg-orange-500 text-white">
+                        ACTION NEEDED
+                      </span>
+                    )}
                     {CONFLICT_STATES.has(t.state) && (
                       <span className="ml-2 px-2 py-0.5 rounded text-xs font-bold bg-red-600 text-white">
                         CONFLICT

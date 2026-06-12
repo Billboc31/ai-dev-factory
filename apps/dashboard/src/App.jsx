@@ -1,4 +1,4 @@
-import { useState, useEffect, createContext } from 'react'
+import { useState, useEffect, createContext, useContext } from 'react'
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useLocation, useParams } from 'react-router-dom'
 import TicketDetailPage from './pages/TicketDetailPage'
 import DaemonPage from './pages/DaemonPage'
@@ -20,6 +20,14 @@ import ProjectLogsPage from './pages/ProjectLogsPage'
 import useProjects from './hooks/useProjects'
 
 export const ActiveProjectContext = createContext(null)
+
+function SmartHomeRedirect() {
+  const activeProject = useContext(ActiveProjectContext)
+  if (activeProject) {
+    return <Navigate to={`/projects/${activeProject}/tickets`} replace />
+  }
+  return <Navigate to="/projects" replace />
+}
 
 function ProjectDaemonPage() {
   const { projectId } = useParams()
@@ -56,7 +64,7 @@ function AppLayout() {
   const handleSelectProject = (projectId) => {
     setActiveProject(projectId)
     localStorage.setItem('activeProject', projectId)
-    navigate(`/projects/${projectId}/dashboard`)
+    navigate(`/projects/${projectId}/tickets`)
   }
 
   return (
@@ -69,7 +77,7 @@ function AppLayout() {
       <main className="flex-1 p-6 overflow-auto">
         <ActiveProjectContext.Provider value={activeProject}>
           <Routes>
-            <Route path="/" element={<Navigate to="/projects" replace />} />
+            <Route path="/" element={<SmartHomeRedirect />} />
             <Route path="/projects" element={<ProjectsPage />} />
             <Route path="/import-project" element={<ImportProjectPage />} />
             <Route path="/projects/:projectId/dashboard" element={<ProjectDashboardPage />} />

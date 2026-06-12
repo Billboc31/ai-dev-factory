@@ -1,8 +1,8 @@
 import { NavLink } from 'react-router-dom'
 
 const PROJECT_NAV = [
-  { label: 'Dashboard', path: 'dashboard' },
   { label: 'Tickets', path: 'tickets' },
+  { label: 'Dashboard', path: 'dashboard' },
   { label: 'Worktrees', path: 'worktrees' },
   { label: 'Logs', path: 'logs' },
   { label: 'Daemon', path: 'daemon' },

@@ -127,17 +127,144 @@ def test_healthcheck_probes_use_supervisor_health_url():
     ), "healthcheck.sh supervisor probe must use ${AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL}"
 
 
+def test_healthcheck_defines_probe_proxy_infra():
+    text = _HEALTHCHECK_SH.read_text(encoding="utf-8")
+    assert "probe_proxy_infra()" in text
+    assert "PROXY_INFRA_FAIL" in text
+    assert "%{http_code}" in text
+    assert 'probe_proxy_infra "${SANDBOX_API_URL}"' in text
+
+
+def test_healthcheck_proxy_infra_does_not_use_curl_fail_flag():
+    """proxy-infra must not use curl -f; 404 from Traefik is a PASS."""
+    text = _HEALTHCHECK_SH.read_text(encoding="utf-8")
+    # Extract probe_proxy_infra body only.
+    start = text.index("probe_proxy_infra()")
+    end = text.index("# Prefer sandbox pretty URLs")
+    block = text[start:end]
+    assert "curl -sf" not in block
+    assert "curl -sS" in block or "curl -s" in block
+
+
+def test_healthcheck_app_probes_still_use_curl_sf():
+    """api/web/supervisor remain strict 2xx checks."""
+    text = _HEALTHCHECK_SH.read_text(encoding="utf-8")
+    assert 'probe "api"' in text
+    assert "curl -sf" in text.split("probe_proxy_infra()")[0] or \
+        "curl -sf" in text  # probe() defined before proxy block
+    # probe() function uses -sf
+    probe_fn = text[text.index("probe()"):text.index("probe_proxy_infra()")]
+    assert "curl -sf" in probe_fn
+
+
+def _run_healthcheck_with_fake_curl(
+    tmp_path: Path,
+    fake_curl_body: str,
+    extra_env: dict[str, str],
+) -> subprocess.CompletedProcess:
+    fake_curl = tmp_path / "curl"
+    fake_curl.write_text(fake_curl_body, encoding="utf-8")
+    fake_curl.chmod(0o755)
+    env = {
+        **os.environ,
+        "PATH": f"{tmp_path}:{os.environ.get('PATH', '')}",
+        "RETRIES": "1",
+        "DELAY": "0",
+        **extra_env,
+    }
+    return subprocess.run(
+        ["bash", str(_HEALTHCHECK_SH)],
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=30,
+        cwd=str(_REPO_ROOT),
+    )
+
+
+def test_proxy_infra_passes_on_http_404(tmp_path):
+    """404 from Traefik proves routing; must not fail proxy-infra."""
+    fake = """#!/bin/sh
+url=""
+for a in "$@"; do
+  case "$a" in
+    http://*) url="$a" ;;
+  esac
+done
+if echo "$@" | grep -q '%{http_code}'; then
+  case "$url" in
+    *sandbox-test*) echo "404" ;;
+    */health) echo "200" ;;
+    *sandbox-web*) echo "200" ;;
+    *8099*) echo "200" ;;
+    *) echo "000" ;;
+  esac
+  exit 0
+fi
+exit 0
+"""
+    result = _run_healthcheck_with_fake_curl(
+        tmp_path,
+        fake,
+        {
+            "SANDBOX_API_URL": "http://api.sandbox-test.ai-dev-factory.localhost",
+            "SANDBOX_WEB_URL": "http://sandbox-test.ai-dev-factory.localhost",
+            "AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL": "http://127.0.0.1:8099",
+        },
+    )
+    out = result.stdout + result.stderr
+    assert "PASS  proxy-infra" in out, out
+    assert "HTTP 404" in out, out
+    assert "PROXY_INFRA_FAIL" not in out, out
+    assert "PASS  api" in out
+    assert "PASS  web" in out
+    assert result.returncode == 0
+
+
+def test_proxy_infra_fails_on_transport_error(tmp_path):
+    fake = """#!/bin/sh
+if echo "$@" | grep -q '%{http_code}'; then
+  echo "000"
+  exit 0
+fi
+exit 0
+"""
+    result = _run_healthcheck_with_fake_curl(
+        tmp_path,
+        fake,
+        {
+            "SANDBOX_API_URL": "http://api.sandbox-test.ai-dev-factory.localhost",
+            "SANDBOX_WEB_URL": "http://sandbox-test.ai-dev-factory.localhost",
+            "AI_DEV_FACTORY_SUPERVISOR_HEALTH_URL": "http://127.0.0.1:8099",
+        },
+    )
+    out = result.stdout + result.stderr
+    assert "FAIL  proxy-infra" in out
+    assert "PROXY_INFRA_FAIL" in out
+    assert result.returncode != 0
+
+
+def test_proxy_infra_skipped_without_sandbox_api_url(tmp_path):
+    """Main runtime: no pretty URL → no proxy-infra line."""
+    fake = """#!/bin/sh
+exit 0
+"""
+    result = _run_healthcheck_with_fake_curl(tmp_path, fake, {})
+    out = result.stdout + result.stderr
+    assert "proxy-infra" not in out
+
+
 def test_healthcheck_prefers_sandbox_urls_over_direct_ports():
     """When ``SANDBOX_API_URL`` is set, the api probe must use it;
     otherwise the probe falls back to direct ``localhost:${API_PORT}``."""
     text = _HEALTHCHECK_SH.read_text(encoding="utf-8")
-    # Branch present for api
-    assert re.search(r'if\s*\[\s*-n\s*"\$SANDBOX_API_URL"\s*\]', text), text
+    # Branch present for api / web (:- default so empty env does not inherit deploy/.env)
+    assert 'if [ -n "${SANDBOX_API_URL:-}" ]' in text
+    assert 'if [ -n "${SANDBOX_WEB_URL:-}" ]' in text
     # Both forms appear (preferred + fallback)
     assert "${SANDBOX_API_URL}/health" in text
     assert "http://localhost:${API_PORT}/health" in text
     # Same for web
-    assert re.search(r'if\s*\[\s*-n\s*"\$SANDBOX_WEB_URL"\s*\]', text)
     assert "${SANDBOX_WEB_URL}" in text
     assert "http://localhost:${WEB_PORT}" in text
 

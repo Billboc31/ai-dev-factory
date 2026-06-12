@@ -94,6 +94,36 @@ probe_proxy_infra() {
   return 1
 }
 
+# Reverse-proxy route activation — NOT backend health.
+#
+# Traefik may return 404/502/etc. when the route exists but the root
+# path has no handler, or the upstream is still booting. That still
+# proves routing is active (contrast with connection refused / DNS
+# failure / timeout). Application health stays on probe() below:
+#   * api  → ${SANDBOX_API_URL}/health  (must be 2xx)
+#   * web  → ${SANDBOX_WEB_URL}         (must be 2xx)
+probe_proxy_infra() {
+  local url="$1"
+  local attempt=0
+  local code=""
+  while [ "$attempt" -lt "$RETRIES" ]; do
+    code="$(curl -sS -o /dev/null -w "%{http_code}" --max-time "$TIMEOUT" "$url" 2>/dev/null || true)"
+    # Any HTTP status from Traefik counts (200, 301, 404, 502, …).
+    # curl writes "000" (or empty) on transport failures only.
+    if [ -n "$code" ] && [ "$code" != "000" ]; then
+      echo "PASS  proxy-infra  ($url) HTTP ${code}"
+      PASS=$((PASS + 1))
+      return 0
+    fi
+    attempt=$((attempt + 1))
+    [ "$attempt" -lt "$RETRIES" ] && sleep "$DELAY"
+  done
+  echo "FAIL  proxy-infra  ($url)  — no HTTP response from reverse proxy after $RETRIES attempts"
+  echo "PROXY_INFRA_FAIL"
+  FAIL=$((FAIL + 1))
+  return 1
+}
+
 # Prefer sandbox pretty URLs when set. These are the URLs users see
 # in the dashboard and resolve via Traefik, so probing them validates
 # the FULL deploy path (compose → containers → proxy routes →
@@ -107,7 +137,7 @@ if [ -n "$SANDBOX_API_URL" ]; then
 else
   probe "api" "http://localhost:${API_PORT}/health" || true
 fi
-if [ -n "$SANDBOX_WEB_URL" ]; then
+if [ -n "${SANDBOX_WEB_URL:-}" ]; then
   probe "web" "${SANDBOX_WEB_URL}" || true
 else
   probe "web" "http://localhost:${WEB_PORT}" || true

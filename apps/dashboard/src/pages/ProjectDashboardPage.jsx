@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { Link, useParams } from 'react-router-dom'
 import { getDaemonStatus, startDaemon, stopDaemon, restartDaemon, getBoardData } from '../api/daemon'
 import { listProjects, importProject } from '../api/projects'
 import { listTickets } from '../api/tickets'
@@ -58,12 +58,42 @@ function StatCard({ value, label }) {
   )
 }
 
+const REVIEW_NEEDED_STATES = new Set(['PLAN_REVIEW_NEEDED', 'IMPLEMENTATION_REVIEW_NEEDED'])
+const TEST_COMPLETE_STATE = 'TEST_COMPLETE'
+
+function AttentionTicketRow({ ticket, projectId }) {
+  const isReview = REVIEW_NEEDED_STATES.has(ticket.state)
+  const isDone = ticket.state === TEST_COMPLETE_STATE
+  return (
+    <div className={`flex items-center justify-between px-3 py-2 rounded border text-sm ${
+      isDone ? 'border-green-200 bg-green-50' :
+      isReview ? 'border-orange-200 bg-orange-50' :
+      'border-gray-200 bg-white'
+    }`}>
+      <Link
+        to={`/projects/${projectId}/tickets/${ticket.ticket_id}`}
+        className="font-mono font-medium text-blue-600 hover:underline"
+      >
+        {ticket.ticket_id}
+      </Link>
+      <span className={`px-2 py-0.5 rounded text-xs font-semibold ${
+        isDone ? 'bg-green-100 text-green-800' :
+        isReview ? 'bg-orange-100 text-orange-800' :
+        'bg-gray-100 text-gray-700'
+      }`}>
+        {ticket.state}
+      </span>
+    </div>
+  )
+}
+
 export default function ProjectDashboardPage() {
   const { projectId } = useParams()
   const [project, setProject] = useState(null)
   const [daemonStatus, setDaemonStatus] = useState(null)
   const [activeTicketCount, setActiveTicketCount] = useState(null)
   const [activeWorkerCount, setActiveWorkerCount] = useState(null)
+  const [attentionTickets, setAttentionTickets] = useState([])
   const [error, setError] = useState(null)
   const [hostCommand, setHostCommand] = useState(null)
 
@@ -86,8 +116,13 @@ export default function ProjectDashboardPage() {
   const fetchCounts = useCallback(() => {
     listTickets(projectId)
       .then(res => {
-        const active = res.data.filter(t => !['COMPLETE', 'FAILED'].includes(t.state)).length
+        const tickets = res.data
+        const active = tickets.filter(t => !['COMPLETE', 'FAILED'].includes(t.state)).length
         setActiveTicketCount(active)
+        const attention = tickets.filter(t =>
+          REVIEW_NEEDED_STATES.has(t.state) || t.state === TEST_COMPLETE_STATE
+        )
+        setAttentionTickets(attention)
       })
       .catch(() => {})
     getBoardData(projectId)
@@ -100,7 +135,7 @@ export default function ProjectDashboardPage() {
 
   usePolling(fetchProject, 30000, projectId)
   usePolling(fetchDaemon, 10000, projectId)
-  usePolling(fetchCounts, 30000, projectId)
+  usePolling(fetchCounts, 10000, projectId)
 
   const handleRescan = () => {
     if (!project) return
@@ -193,8 +228,35 @@ export default function ProjectDashboardPage() {
         </div>
       </div>
 
+      {attentionTickets.length > 0 && (
+        <div>
+          <div className="flex items-baseline justify-between mb-2">
+            <h2 className="text-lg font-semibold">Tickets Needing Attention</h2>
+            <Link
+              to={`/projects/${projectId}/tickets`}
+              className="text-sm text-blue-600 hover:underline"
+            >
+              View all tickets →
+            </Link>
+          </div>
+          <div className="space-y-1.5">
+            {attentionTickets.map(t => (
+              <AttentionTicketRow key={t.ticket_id} ticket={t} projectId={projectId} />
+            ))}
+          </div>
+        </div>
+      )}
+
       <div>
-        <h2 className="text-lg font-semibold mb-2">Recent Activity</h2>
+        <div className="flex items-baseline justify-between mb-2">
+          <h2 className="text-lg font-semibold">Recent Activity</h2>
+          <Link
+            to={`/projects/${projectId}/tickets`}
+            className="text-sm text-blue-600 hover:underline"
+          >
+            View all tickets →
+          </Link>
+        </div>
         <DaemonActivityFeed projectId={projectId} />
       </div>
     </div>

@@ -155,6 +155,23 @@ C3. Detect sandbox mode with `[ -n "${SANDBOX_ID:-}" ]` when you need
     to log the active sandbox, but the resolution code above MUST be
     the SAME in both modes — never branch the script on sandbox
     presence.
+
+C4. **Proxy route vs application health** (sandbox pretty URLs only):
+
+    When `SANDBOX_API_URL` is set, `healthcheck.sh` MUST include a
+    `proxy-infra` probe that validates Traefik routing is active —
+    NOT that the backend application returns 2xx on `/`.
+
+    * Use `curl -sS -o /dev/null -w "%{http_code}"` (no `-f` flag).
+    * ANY HTTP status code from Traefik counts as PASS (200, 301, 404,
+      502, 503, …).
+    * Only transport failures count as FAIL (connection refused,
+      timeout, DNS failure → empty/`000` http_code). On FAIL emit
+      `PROXY_INFRA_FAIL` on its own line.
+    * Probe `${SANDBOX_API_URL}` (host root), NOT `/health`.
+    * Keep `probe "api" "${SANDBOX_API_URL}/health"` and
+      `probe "web" "${SANDBOX_WEB_URL}"` unchanged — those remain the
+      authoritative application health checks (curl `-sf`, 2xx only).
 """
 
 _INSTRUCTIONS_TEMPLATE = (
