@@ -10,3 +10,14 @@
 [2026-06-15T20:37:22Z] compose: task (canonical prompt)
 [2026-06-15T20:37:22Z] snapshot: runtime-prompt=runs/T189/prompts/planner-attempt-1.md
 [2026-06-15T20:40:19Z] auto-run: step=planner done rc=0
+[2026-06-15T20:40:21Z] planner checkpoint: committed
+[2026-06-15T20:40:21Z] planner checkpoint: pushed
+[2026-06-15T20:40:21Z] planner validation success
+[2026-06-15T20:40:21Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-15T20:40:21Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-15T20:40:22Z] commit-checkpoint: unstaged runtime garbage: ['runs/T189/runtime.log']
+[2026-06-15T20:40:22Z] commit-checkpoint: sha=da4b1a96 files=2 title='docs(T189/workflow): planner — update 2 file(s)'
+[2026-06-15T20:40:22Z] auto-run: auto-push triggered
+[2026-06-15T20:40:22Z] push: tolerating runtime dirty files (not blocking): ['runs/T189/runtime.log']
+[2026-06-15T20:40:22Z] push: pushing branch=ticket/T189-t189-project-bootstrap-must-create-a-dedicated-run
+[2026-06-15T20:40:24Z] push: done branch=ticket/T189-t189-project-bootstrap-must-create-a-dedicated-run
