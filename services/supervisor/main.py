@@ -1443,6 +1443,153 @@ def environments_logs(env_id: str):
         )
 
 
+# ── Project host-filesystem endpoints (T188) ──────────────────────────────────
+#
+# Filesystem validation and bootstrap operations are delegated here by the
+# Control API so that host paths (e.g. /Users/…) remain accessible when the
+# Control API runs inside Docker.
+
+
+def _detect_stack_for_path(project_root: Path) -> str:
+    checks = [
+        ("python", ["pyproject.toml", "requirements.txt", "setup.py", "setup.cfg"]),
+        ("node", ["package.json"]),
+        ("go", ["go.mod"]),
+        ("rust", ["Cargo.toml"]),
+    ]
+    for stack, markers in checks:
+        if any((project_root / m).exists() for m in markers):
+            return stack
+    return "unknown"
+
+
+class ValidatePathRequest(BaseModel):
+    project_root: str
+
+
+class ProjectBootstrapHostRequest(BaseModel):
+    project_root: str
+    project_id: str
+    runtime_root: str
+
+
+@app.post("/projects/validate-path")
+def validate_project_path(body: ValidatePathRequest):
+    from fastapi.responses import JSONResponse
+
+    try:
+        p = Path(body.project_root).expanduser().resolve()
+    except (OSError, PermissionError) as exc:
+        return JSONResponse(
+            status_code=422,
+            content={"error": "permission_denied", "detail": str(exc)},
+        )
+
+    if not p.exists():
+        return JSONResponse(
+            status_code=422,
+            content={"error": "path_not_found", "detail": str(p)},
+        )
+    if not p.is_dir():
+        return JSONResponse(
+            status_code=422,
+            content={"error": "not_a_directory", "detail": str(p)},
+        )
+
+    git_check = p / ".git"
+    is_git_repo = git_check.exists()
+
+    return {
+        "resolved_path": str(p),
+        "is_dir": True,
+        "is_git_repo": is_git_repo,
+        "git_root": str(p) if is_git_repo else None,
+    }
+
+
+@app.post("/projects/bootstrap")
+def bootstrap_project_host(body: ProjectBootstrapHostRequest):
+    from fastapi.responses import JSONResponse
+
+    try:
+        project_root = Path(body.project_root).expanduser().resolve()
+    except (OSError, PermissionError) as exc:
+        return JSONResponse(
+            status_code=422,
+            content={"error": "permission_denied", "detail": str(exc)},
+        )
+
+    if not project_root.exists():
+        return JSONResponse(
+            status_code=422,
+            content={"error": "path_not_found", "detail": str(project_root)},
+        )
+    if not project_root.is_dir():
+        return JSONResponse(
+            status_code=422,
+            content={"error": "not_a_directory", "detail": str(project_root)},
+        )
+
+    git_check = project_root / ".git"
+    if not git_check.exists():
+        return JSONResponse(
+            status_code=422,
+            content={"error": "git_not_found", "detail": str(project_root)},
+        )
+
+    stack = _detect_stack_for_path(project_root)
+
+    runtime_root = Path(body.runtime_root)
+    project_runtime_root = runtime_root / "projects" / body.project_id
+    runs_dir = project_runtime_root / "runs"
+    logs_dir = project_runtime_root / "logs"
+    state_dir = project_runtime_root / "state"
+    worktrees_dir = project_runtime_root / "worktrees"
+
+    try:
+        for d in (runs_dir, logs_dir, state_dir, worktrees_dir):
+            d.mkdir(parents=True, exist_ok=True)
+    except PermissionError as exc:
+        return JSONResponse(
+            status_code=422,
+            content={"error": "permission_denied", "detail": str(exc)},
+        )
+
+    ai_dev_dir = project_root / ".ai-dev-factory"
+    project_yml = ai_dev_dir / "project.yml"
+    if not project_yml.exists():
+        try:
+            ai_dev_dir.mkdir(exist_ok=True)
+            bootstrapped_at = datetime.datetime.now(datetime.timezone.utc).strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            project_yml.write_text(
+                f"name: {body.project_id}\nstack: {stack}\nbootstrapped_at: {bootstrapped_at}\n",
+                encoding="utf-8",
+            )
+        except PermissionError as exc:
+            return JSONResponse(
+                status_code=422,
+                content={"error": "permission_denied", "detail": str(exc)},
+            )
+
+    logger.info(
+        "supervisor: bootstrap project_id=%s project_root=%s runtime=%s stack=%s",
+        body.project_id, project_root, project_runtime_root, stack,
+    )
+
+    return {
+        "project_id": body.project_id,
+        "project_root": str(project_root),
+        "runtime_root": str(project_runtime_root),
+        "stack": stack,
+        "runs_dir": str(runs_dir),
+        "logs_dir": str(logs_dir),
+        "state_dir": str(state_dir),
+        "worktrees_dir": str(worktrees_dir),
+    }
+
+
 # ── per-project daemon endpoints ─────────────────────────────────────────────
 #
 # Each imported project gets its own isolated daemon.  Global daemon state

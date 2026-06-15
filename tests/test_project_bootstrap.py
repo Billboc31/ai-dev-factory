@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -13,39 +14,62 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from services.control_api.services.project_bootstrap import bootstrap
 from services.control_api.services.project_registry import ProjectRegistry
 
-
-def _make_git_repo(path: Path) -> Path:
-    path.mkdir(parents=True, exist_ok=True)
-    (path / ".git").mkdir()
-    return path
+_MODULE = "services.control_api.services.project_bootstrap._call_supervisor"
 
 
-class _EmptyReader:
-    def list_tickets(self, root):
-        return []
+def _registry(tmp_path: Path) -> ProjectRegistry:
+    return ProjectRegistry(_entries=[], _workspace_file=tmp_path / "workspace.json")
 
 
-# ── bootstrap happy path ──────────────────────────────────────────────────────
+def _mock_bootstrap_response(project_id: str, project_root: str, runtime_root: str) -> dict:
+    base = f"{runtime_root}/projects/{project_id}"
+    return {
+        "project_id": project_id,
+        "project_root": project_root,
+        "runtime_root": base,
+        "stack": "python",
+        "runs_dir": f"{base}/runs",
+        "logs_dir": f"{base}/logs",
+        "state_dir": f"{base}/state",
+        "worktrees_dir": f"{base}/worktrees",
+    }
 
-def test_bootstrap_creates_runtime_directories(tmp_path):
-    project_root = _make_git_repo(tmp_path / "my-project")
+
+# ── happy path ────────────────────────────────────────────────────────────────
+
+def test_bootstrap_returns_correct_project_id(tmp_path):
+    root = str(tmp_path / "my-project")
     runtime_root = tmp_path / "runtime"
-    registry = ProjectRegistry(_entries=[], _workspace_file=runtime_root / "workspace.json")
+    resp = _mock_bootstrap_response("my-project", root, str(runtime_root))
 
-    result = bootstrap(project_root, "my-project", runtime_root, registry)
+    with patch(_MODULE, return_value=(resp, None)):
+        result = bootstrap(root, "my-project", runtime_root, _registry(tmp_path))
 
-    assert Path(result.runs_dir).is_dir()
-    assert Path(result.logs_dir).is_dir()
-    assert Path(result.state_dir).is_dir()
-    assert Path(result.worktrees_dir).is_dir()
+    assert result.project_id == "my-project"
+
+
+def test_bootstrap_returns_paths_from_supervisor(tmp_path):
+    root = str(tmp_path / "my-project")
+    runtime_root = tmp_path / "runtime"
+    resp = _mock_bootstrap_response("my-project", root, str(runtime_root))
+
+    with patch(_MODULE, return_value=(resp, None)):
+        result = bootstrap(root, "my-project", runtime_root, _registry(tmp_path))
+
+    expected_base = str(runtime_root / "projects" / "my-project")
+    assert result.runs_dir == f"{expected_base}/runs"
+    assert result.logs_dir == f"{expected_base}/logs"
+    assert result.state_dir == f"{expected_base}/state"
+    assert result.worktrees_dir == f"{expected_base}/worktrees"
 
 
 def test_bootstrap_runtime_dirs_are_under_project_runtime_root(tmp_path):
-    project_root = _make_git_repo(tmp_path / "my-project")
+    root = str(tmp_path / "my-project")
     runtime_root = tmp_path / "runtime"
-    registry = ProjectRegistry(_entries=[], _workspace_file=runtime_root / "workspace.json")
+    resp = _mock_bootstrap_response("my-project", root, str(runtime_root))
 
-    result = bootstrap(project_root, "my-project", runtime_root, registry)
+    with patch(_MODULE, return_value=(resp, None)):
+        result = bootstrap(root, "my-project", runtime_root, _registry(tmp_path))
 
     expected_prefix = str(runtime_root / "projects" / "my-project")
     assert result.runs_dir.startswith(expected_prefix)
@@ -54,110 +78,97 @@ def test_bootstrap_runtime_dirs_are_under_project_runtime_root(tmp_path):
     assert result.worktrees_dir.startswith(expected_prefix)
 
 
-def test_bootstrap_writes_project_yml(tmp_path):
-    project_root = _make_git_repo(tmp_path / "my-project")
-    runtime_root = tmp_path / "runtime"
-    registry = ProjectRegistry(_entries=[], _workspace_file=runtime_root / "workspace.json")
-
-    bootstrap(project_root, "my-project", runtime_root, registry)
-
-    yml = project_root / ".ai-dev-factory" / "project.yml"
-    assert yml.exists()
-    content = yml.read_text(encoding="utf-8")
-    assert "name: my-project" in content
-    assert "bootstrapped_at:" in content
-
-
-def test_bootstrap_does_not_overwrite_existing_project_yml(tmp_path):
-    project_root = _make_git_repo(tmp_path / "my-project")
-    ai_dir = project_root / ".ai-dev-factory"
-    ai_dir.mkdir()
-    (ai_dir / "project.yml").write_text("name: original\n", encoding="utf-8")
-
-    runtime_root = tmp_path / "runtime"
-    registry = ProjectRegistry(_entries=[], _workspace_file=runtime_root / "workspace.json")
-
-    bootstrap(project_root, "my-project", runtime_root, registry)
-
-    content = (ai_dir / "project.yml").read_text(encoding="utf-8")
-    assert content == "name: original\n"
-
-
 def test_bootstrap_registers_project(tmp_path):
-    project_root = _make_git_repo(tmp_path / "my-project")
+    root = str(tmp_path / "my-project")
     runtime_root = tmp_path / "runtime"
-    registry = ProjectRegistry(_entries=[], _workspace_file=runtime_root / "workspace.json")
+    resp = _mock_bootstrap_response("my-project", root, str(runtime_root))
+    registry = _registry(tmp_path)
 
-    bootstrap(project_root, "my-project", runtime_root, registry)
+    with patch(_MODULE, return_value=(resp, None)):
+        bootstrap(root, "my-project", runtime_root, registry)
 
-    assert registry.resolve("my-project") == project_root.resolve()
+    assert registry.resolve("my-project") == Path(root)
 
 
 def test_bootstrap_persists_workspace_json(tmp_path):
-    project_root = _make_git_repo(tmp_path / "my-project")
+    root = str(tmp_path / "my-project")
     runtime_root = tmp_path / "runtime"
-    workspace_file = runtime_root / "workspace.json"
+    workspace_file = tmp_path / "workspace.json"
+    resp = _mock_bootstrap_response("my-project", root, str(runtime_root))
     registry = ProjectRegistry(_entries=[], _workspace_file=workspace_file)
 
-    bootstrap(project_root, "my-project", runtime_root, registry)
+    with patch(_MODULE, return_value=(resp, None)):
+        bootstrap(root, "my-project", runtime_root, registry)
 
     assert workspace_file.exists()
     data = json.loads(workspace_file.read_text(encoding="utf-8"))
     assert "my-project" in data
 
 
-def test_bootstrap_returns_correct_project_id(tmp_path):
-    project_root = _make_git_repo(tmp_path / "my-project")
+def test_bootstrap_calls_supervisor_with_correct_args(tmp_path):
+    root = str(tmp_path / "my-project")
     runtime_root = tmp_path / "runtime"
-    registry = ProjectRegistry(_entries=[], _workspace_file=runtime_root / "workspace.json")
+    resp = _mock_bootstrap_response("my-project", root, str(runtime_root))
 
-    result = bootstrap(project_root, "my-project", runtime_root, registry)
+    with patch(_MODULE, return_value=(resp, None)) as mock_sv:
+        bootstrap(root, "my-project", runtime_root, _registry(tmp_path))
 
-    assert result.project_id == "my-project"
+    mock_sv.assert_called_once_with("POST", "/projects/bootstrap", {
+        "project_root": root,
+        "project_id": "my-project",
+        "runtime_root": str(runtime_root),
+    })
 
 
-# ── bootstrap error cases ─────────────────────────────────────────────────────
-
-def test_bootstrap_raises_on_non_git_path(tmp_path):
-    not_a_repo = tmp_path / "not-a-repo"
-    not_a_repo.mkdir()
-    runtime_root = tmp_path / "runtime"
-    registry = ProjectRegistry(_entries=[], _workspace_file=runtime_root / "workspace.json")
-
-    with pytest.raises(ValueError, match="not a git repository"):
-        bootstrap(not_a_repo, "not-a-repo", runtime_root, registry)
-
+# ── error cases ───────────────────────────────────────────────────────────────
 
 def test_bootstrap_raises_on_invalid_project_id(tmp_path):
-    project_root = _make_git_repo(tmp_path / "my-project")
     runtime_root = tmp_path / "runtime"
-    registry = ProjectRegistry(_entries=[], _workspace_file=runtime_root / "workspace.json")
-
     with pytest.raises(ValueError):
-        bootstrap(project_root, "my/invalid", runtime_root, registry)
+        bootstrap(str(tmp_path / "my-project"), "my/invalid", runtime_root, _registry(tmp_path))
 
 
 def test_bootstrap_raises_on_duplicate_project_id(tmp_path):
-    project_root = _make_git_repo(tmp_path / "my-project")
+    root = str(tmp_path / "my-project")
     runtime_root = tmp_path / "runtime"
-    registry = ProjectRegistry(_entries=[], _workspace_file=runtime_root / "workspace.json")
+    resp = _mock_bootstrap_response("my-project", root, str(runtime_root))
+    registry = _registry(tmp_path)
 
-    bootstrap(project_root, "my-project", runtime_root, registry)
+    with patch(_MODULE, return_value=(resp, None)):
+        bootstrap(root, "my-project", runtime_root, registry)
 
-    with pytest.raises(ValueError, match="already registered"):
-        bootstrap(project_root, "my-project", runtime_root, registry)
+    with patch(_MODULE, return_value=(resp, None)):
+        with pytest.raises(ValueError, match="already registered"):
+            bootstrap(root, "my-project", runtime_root, registry)
 
 
-# ── containment assertion in bootstrap ───────────────────────────────────────
+def test_bootstrap_raises_on_supervisor_unreachable(tmp_path):
+    runtime_root = tmp_path / "runtime"
+    with patch(_MODULE, return_value=(None, "supervisor_unreachable")):
+        with pytest.raises(RuntimeError, match="supervisor unreachable"):
+            bootstrap(str(tmp_path / "my-project"), "my-project", runtime_root, _registry(tmp_path))
+
+
+def test_bootstrap_raises_on_non_git_path(tmp_path):
+    runtime_root = tmp_path / "runtime"
+    err_resp = {"error": "git_not_found", "detail": str(tmp_path / "my-project")}
+    with patch(_MODULE, return_value=(err_resp, None)):
+        with pytest.raises(ValueError, match="not a git repository"):
+            bootstrap(str(tmp_path / "my-project"), "my-project", runtime_root, _registry(tmp_path))
+
+
+def test_bootstrap_raises_on_path_not_found(tmp_path):
+    runtime_root = tmp_path / "runtime"
+    err_resp = {"error": "path_not_found", "detail": str(tmp_path / "missing")}
+    with patch(_MODULE, return_value=(err_resp, None)):
+        with pytest.raises(ValueError, match="path does not exist"):
+            bootstrap(str(tmp_path / "missing"), "my-project", runtime_root, _registry(tmp_path))
+
+
+# ── path-traversal guard ──────────────────────────────────────────────────────
 
 def test_bootstrap_runtime_root_cannot_escape_projects_dir(tmp_path):
-    """The bootstrap service must never produce a runtime root outside {runtime_root}/projects/."""
-    project_root = _make_git_repo(tmp_path / "my-project")
+    """assert_contained() must reject project_ids that would escape the projects dir."""
     runtime_root = tmp_path / "runtime"
-    registry = ProjectRegistry(_entries=[], _workspace_file=runtime_root / "workspace.json")
-
-    result = bootstrap(project_root, "my-project", runtime_root, registry)
-
-    # Runtime root must be nested inside {runtime_root}/projects/
-    expected_prefix = str((runtime_root / "projects").resolve())
-    assert result.runtime_root.startswith(expected_prefix)
+    with pytest.raises(ValueError):
+        bootstrap(str(tmp_path / "my-project"), "..", runtime_root, _registry(tmp_path))

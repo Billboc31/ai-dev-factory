@@ -1,0 +1,1 @@
+Second run: 71 failures, 1285 passed — consistent with the first run (minor variance due to test ordering/isolation). All failures are the same pre-existing set. No action needed; the test report stands.

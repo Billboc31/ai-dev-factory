@@ -2,15 +2,14 @@
 
 from __future__ import annotations
 
-import datetime
 import logging
+import os
 from dataclasses import dataclass
 from pathlib import Path
 
-logger = logging.getLogger("control-api")
+import httpx
 
-_PROJECT_YML_FILENAME = "project.yml"
-_AI_DEV_FACTORY_DIR = ".ai-dev-factory"
+logger = logging.getLogger("control-api")
 
 
 @dataclass
@@ -25,69 +24,87 @@ class BootstrapResult:
     worktrees_dir: str
 
 
+def _supervisor_url() -> str:
+    url = os.environ.get("AI_DEV_FACTORY_SUPERVISOR_URL", "http://host.docker.internal:8090")
+    return url.rstrip("/")
+
+
+def _call_supervisor(
+    method: str,
+    path: str,
+    json_body: dict | None = None,
+    timeout: float = 30.0,
+) -> tuple[dict | None, str | None]:
+    """Call the supervisor API. Returns (data, error_code)."""
+    url = _supervisor_url()
+    full_url = f"{url}{path}"
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            if method == "GET":
+                resp = client.get(full_url)
+            else:
+                resp = client.post(full_url, json=json_body or {})
+        return resp.json(), None
+    except httpx.ConnectError:
+        return None, "supervisor_unreachable"
+    except httpx.TimeoutException:
+        return None, "supervisor_unreachable"
+
+
 def bootstrap(
-    project_root: Path,
+    project_root: str | Path,
     project_id: str,
     runtime_root: Path,
     registry,
 ) -> BootstrapResult:
-    """Bootstrap *project_root* as an isolated ai-dev-factory project.
+    """Bootstrap project_root as an isolated ai-dev-factory project via supervisor.
 
-    Steps:
-    1. Validate project_id and assert path containment.
-    2. Verify project_root is a git repository.
-    3. Create per-project runtime directory tree.
-    4. Write .ai-dev-factory/project.yml into the repo (if absent).
-    5. Register the project in the workspace registry.
-    6. Return BootstrapResult with all resolved paths.
+    Delegates all host filesystem operations to the supervisor so the Control
+    API can run in Docker without direct access to host paths.
     """
     from .project_id import assert_contained, validate_project_id
-    from .stack_detector import detect_stack
 
     validate_project_id(project_id)
-    project_runtime_root = assert_contained(runtime_root, project_id)
+    assert_contained(runtime_root, project_id)
 
-    project_root = project_root.resolve()
-    if not (project_root / ".git").is_dir():
-        raise ValueError(f"project_root is not a git repository: {project_root}")
+    data, err = _call_supervisor("POST", "/projects/bootstrap", {
+        "project_root": str(project_root),
+        "project_id": project_id,
+        "runtime_root": str(runtime_root),
+    })
 
-    runs_dir = project_runtime_root / "runs"
-    logs_dir = project_runtime_root / "logs"
-    state_dir = project_runtime_root / "state"
-    worktrees_dir = project_runtime_root / "worktrees"
+    if err:
+        raise RuntimeError(f"supervisor unreachable: {err}")
 
-    for d in (runs_dir, logs_dir, state_dir, worktrees_dir):
-        d.mkdir(parents=True, exist_ok=True)
+    if "error" in data:
+        error_code = data["error"]
+        detail = data.get("detail", error_code)
+        if error_code == "path_not_found":
+            raise ValueError(f"path does not exist: {detail}")
+        if error_code == "not_a_directory":
+            raise ValueError(f"path is not a directory: {detail}")
+        if error_code == "git_not_found":
+            raise ValueError(f"project_root is not a git repository: {detail}")
+        if error_code == "permission_denied":
+            raise ValueError(f"permission denied: {detail}")
+        raise RuntimeError(f"bootstrap failed: {detail}")
 
     logger.info(
-        "bootstrap: project_id=%s project_root=%s project_runtime_root=%s",
-        project_id, project_root, project_runtime_root,
+        "bootstrap: project_id=%s project_root=%s runtime=%s",
+        data["project_id"], data["project_root"], data["runtime_root"],
     )
 
-    stack = detect_stack(project_root)
-
-    ai_dev_dir = project_root / _AI_DEV_FACTORY_DIR
-    project_yml = ai_dev_dir / _PROJECT_YML_FILENAME
-    if not project_yml.exists():
-        ai_dev_dir.mkdir(exist_ok=True)
-        bootstrapped_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        project_yml.write_text(
-            f"name: {project_id}\nstack: {stack}\nbootstrapped_at: {bootstrapped_at}\n",
-            encoding="utf-8",
-        )
-        logger.info("bootstrap: wrote %s", project_yml)
-
-    registry.register(project_id, project_root)
+    registry.register(project_id, Path(data["project_root"]))
 
     return BootstrapResult(
-        project_id=project_id,
-        project_root=str(project_root),
-        runtime_root=str(project_runtime_root),
-        stack=stack,
-        runs_dir=str(runs_dir),
-        logs_dir=str(logs_dir),
-        state_dir=str(state_dir),
-        worktrees_dir=str(worktrees_dir),
+        project_id=data["project_id"],
+        project_root=data["project_root"],
+        runtime_root=data["runtime_root"],
+        stack=data["stack"],
+        runs_dir=data["runs_dir"],
+        logs_dir=data["logs_dir"],
+        state_dir=data["state_dir"],
+        worktrees_dir=data["worktrees_dir"],
     )
 
 
@@ -99,14 +116,12 @@ def auto_bootstrap(
 ) -> None:
     """Idempotent startup registration for the current AI Dev Factory repo.
 
-    Unlike ``bootstrap()``, this function:
-    - Never raises if the project is already registered (idempotent).
-    - Accepts ``.git`` as a file (worktree) or directory (normal clone).
-    - Skips dir creation and project.yml when *runtime_root* is ``None``.
-    - Logs a warning and returns without raising on an invalid project ID.
+    Unlike bootstrap(), this function:
+    - Never raises (logs warnings instead).
+    - Accepts runtime_root=None to skip bootstrap and just register.
+    - Uses ensure_registered (idempotent) instead of register.
     """
-    from .project_id import assert_contained, validate_project_id
-    from .stack_detector import detect_stack
+    from .project_id import validate_project_id
 
     try:
         validate_project_id(project_id)
@@ -114,29 +129,29 @@ def auto_bootstrap(
         logger.warning("auto_bootstrap: invalid project_id %r — skipping", project_id)
         return
 
-    project_root = project_root.resolve()
-
     if runtime_root is not None:
-        project_runtime_root = assert_contained(runtime_root, project_id)
+        data, err = _call_supervisor("POST", "/projects/bootstrap", {
+            "project_root": str(project_root),
+            "project_id": project_id,
+            "runtime_root": str(runtime_root),
+        })
 
-        for subdir in ("runs", "logs", "state", "worktrees"):
-            (project_runtime_root / subdir).mkdir(parents=True, exist_ok=True)
-
-        logger.info(
-            "auto_bootstrap: project_id=%s project_root=%s runtime_root=%s",
-            project_id, project_root, project_runtime_root,
-        )
-
-        ai_dev_dir = project_root / _AI_DEV_FACTORY_DIR
-        project_yml = ai_dev_dir / _PROJECT_YML_FILENAME
-        if not project_yml.exists():
-            ai_dev_dir.mkdir(exist_ok=True)
-            stack = detect_stack(project_root)
-            bootstrapped_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-            project_yml.write_text(
-                f"name: {project_id}\nstack: {stack}\nbootstrapped_at: {bootstrapped_at}\n",
-                encoding="utf-8",
+        if err:
+            logger.warning(
+                "auto_bootstrap: supervisor unreachable (%s) — registering without bootstrap",
+                err,
             )
-            logger.info("auto_bootstrap: wrote %s", project_yml)
+        elif "error" in data:
+            logger.warning(
+                "auto_bootstrap: supervisor returned error %s — registering without bootstrap",
+                data["error"],
+            )
+        else:
+            logger.info(
+                "auto_bootstrap: project_id=%s project_root=%s runtime_root=%s",
+                project_id, data["project_root"], data["runtime_root"],
+            )
+            registry.ensure_registered(project_id, Path(data["project_root"]))
+            return
 
-    registry.ensure_registered(project_id, project_root)
+    registry.ensure_registered(project_id, Path(str(project_root)))
