@@ -1,7 +1,7 @@
 {
   "ticket_id": "T189",
-  "state": "PLAN_APPROVED",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T189-t189-project-bootstrap-must-create-a-dedicated-run",
   "issue_number": 229,
-  "updated_at": "2026-06-15T20:47:31Z"
+  "updated_at": "2026-06-15T21:09:36Z"
 }
