@@ -18,15 +18,17 @@
 
 ## Test suite
 
+**T189-specific tests** (4 files, 60 tests):
 ```
 60 passed in 0.26s
 ```
 
-All 60 tests pass. Files covered:
 - `tests/test_project_bootstrap.py` (13 tests)
 - `tests/test_auto_bootstrap.py` (7 tests)
 - `tests/test_project_id.py` (19 tests)
 - `tests/test_supervisor_projects.py` (11 tests)
+
+**Full suite** (1370 tests): 74 failed, 1296 passed. All 74 failures are in `tests/test_ticket_timeline.py` and `tests/test_sandbox_worktree.py`, neither of which is touched by T189 (`git diff main --name-only tests/` shows only the 4 T189 files). These failures pre-exist on the branch and are unrelated to this ticket.
 
 ---
 
