@@ -1539,15 +1539,15 @@ def bootstrap_project_host(body: ProjectBootstrapHostRequest):
 
     stack = _detect_stack_for_path(project_root)
 
-    runtime_root = Path(body.runtime_root)
-    project_runtime_root = runtime_root / "projects" / body.project_id
+    project_runtime_root = _runtime_base_root() / body.project_id
     runs_dir = project_runtime_root / "runs"
     logs_dir = project_runtime_root / "logs"
     state_dir = project_runtime_root / "state"
     worktrees_dir = project_runtime_root / "worktrees"
+    clones_dir = project_runtime_root / "clones"
 
     try:
-        for d in (runs_dir, logs_dir, state_dir, worktrees_dir):
+        for d in (runs_dir, logs_dir, state_dir, worktrees_dir, clones_dir):
             d.mkdir(parents=True, exist_ok=True)
     except PermissionError as exc:
         return JSONResponse(
@@ -1587,6 +1587,7 @@ def bootstrap_project_host(body: ProjectBootstrapHostRequest):
         "logs_dir": str(logs_dir),
         "state_dir": str(state_dir),
         "worktrees_dir": str(worktrees_dir),
+        "clones_dir": str(clones_dir),
     }
 
 
@@ -1600,10 +1601,25 @@ _project_daemon_procs: dict[str, subprocess.Popen] = {}
 _project_daemon_exec_cmds: dict[str, str] = {}
 
 
-def _project_runtime_root(project_id: str) -> Path:
+def _runtime_base_root() -> Path:
+    """Return the base directory that holds one sub-directory per managed project.
+
+    Resolution order:
+      1. ``RUNTIME_BASE_ROOT`` env var (explicit override, e.g. ~/runtime)
+      2. Parent of ``AI_DEV_FACTORY_RUNTIME_ROOT`` (e.g. ~/runtime/ai-dev-factory → ~/runtime)
+      3. ~/runtime as final fallback
+    """
+    raw = os.environ.get("RUNTIME_BASE_ROOT")
+    if raw:
+        return Path(raw).expanduser().resolve()
     rr = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
-    base = Path(rr) if rr else _project_root() / ".ai-dev-factory"
-    return base / "projects" / project_id
+    if rr:
+        return Path(rr).expanduser().resolve().parent
+    return Path.home() / "runtime"
+
+
+def _project_runtime_root(project_id: str) -> Path:
+    return _runtime_base_root() / project_id
 
 
 def _project_runs_dir(project_id: str) -> Path:

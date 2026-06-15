@@ -65,7 +65,6 @@ def _list_branches(project_root: str) -> list[str]:
 def list_projects(request: Request) -> list[ProjectInfo]:
     """Return all registered projects with runtime_root and stack fields."""
     registry = request.app.state.project_registry
-    runtime_root: Path | None = getattr(request.app.state, "runtime_root", None)
 
     try:
         import runtime_db as _runtime_db
@@ -78,10 +77,11 @@ def list_projects(request: Request) -> list[ProjectInfo]:
 
     projects = registry.list_projects(artifact_reader)
 
-    if runtime_root is not None:
+    runtime_base_root: Path | None = getattr(request.app.state, "runtime_base_root", None)
+    if runtime_base_root is not None:
         enriched: list[ProjectInfo] = []
         for p in projects:
-            project_runtime_root_path = runtime_root / "projects" / p.name
+            project_runtime_root_path = runtime_base_root / p.name
             project_root_path = Path(p.root)
             stack = _read_stack(project_root_path)
             github_repo = _read_github_repo(project_root_path)
@@ -120,11 +120,11 @@ def _read_github_repo(project_root: Path) -> str | None:
 @router.post("/import", response_model=BootstrapResult)
 def import_project(body: ProjectImportRequest, request: Request):
     """Bootstrap an existing git repository as an ai-dev-factory project."""
-    runtime_root: Path | None = getattr(request.app.state, "runtime_root", None)
-    if runtime_root is None:
+    runtime_base_root: Path | None = getattr(request.app.state, "runtime_base_root", None)
+    if runtime_base_root is None:
         raise HTTPException(
             status_code=503,
-            detail="runtime_root is not configured — set AI_DEV_FACTORY_RUNTIME_ROOT",
+            detail="runtime_base_root is not configured — set RUNTIME_BASE_ROOT or AI_DEV_FACTORY_RUNTIME_ROOT",
         )
 
     try:
@@ -154,7 +154,7 @@ def import_project(body: ProjectImportRequest, request: Request):
         result = bootstrap(
             project_root=validated["resolved_path"],
             project_id=body.project_id,
-            runtime_root=runtime_root,
+            runtime_base_root=runtime_base_root,
             registry=registry,
         )
     except ValueError as exc:
