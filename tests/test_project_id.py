@@ -122,7 +122,7 @@ def test_validate_rejects_too_long():
 
 def test_assert_contained_returns_correct_path(tmp_path):
     result = assert_contained(tmp_path, "my-project")
-    assert result == (tmp_path / "projects" / "my-project").resolve()
+    assert result == (tmp_path / "my-project").resolve()
 
 
 def test_assert_contained_raises_on_invalid_id(tmp_path):
@@ -139,5 +139,5 @@ def test_assert_contained_different_ids_produce_different_paths(tmp_path):
     p1 = assert_contained(tmp_path, "project-a")
     p2 = assert_contained(tmp_path, "project-b")
     assert p1 != p2
-    assert str(p1).startswith(str(tmp_path / "projects"))
-    assert str(p2).startswith(str(tmp_path / "projects"))
+    assert str(p1).startswith(str(tmp_path))
+    assert str(p2).startswith(str(tmp_path))

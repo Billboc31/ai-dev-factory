@@ -159,19 +159,23 @@ def test_bootstrap_returns_correct_project_id(tmp_path, client):
     assert resp.json()["project_id"] == "my-project"
 
 
-def test_bootstrap_runtime_dirs_under_projects_subdir(tmp_path, client):
+def test_bootstrap_runtime_dirs_under_runtime_base_root(tmp_path, monkeypatch, client):
+    """Dirs must live under RUNTIME_BASE_ROOT/<project_id>, not under .../projects/."""
+    runtime_base_root = tmp_path / "runtime"
+    monkeypatch.setenv("RUNTIME_BASE_ROOT", str(runtime_base_root))
     repo = _make_git_repo(tmp_path / "my-project")
-    runtime_root = tmp_path / "runtime"
 
     resp = client.post("/projects/bootstrap", json={
         "project_root": str(repo),
         "project_id": "my-project",
-        "runtime_root": str(runtime_root),
+        "runtime_root": str(runtime_base_root),  # ignored by supervisor; kept for compat
     })
     data = resp.json()
-    expected_prefix = str(runtime_root / "projects" / "my-project")
+    expected_prefix = str(runtime_base_root / "my-project")
     assert data["runs_dir"].startswith(expected_prefix)
     assert data["logs_dir"].startswith(expected_prefix)
+    assert data["clones_dir"].startswith(expected_prefix)
+    assert "projects" not in data["runs_dir"]
 
 
 def test_bootstrap_missing_path_returns_error(tmp_path, client):

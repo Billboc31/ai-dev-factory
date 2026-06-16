@@ -71,6 +71,15 @@ def create_app(
     _runtime_root: Path | None = Path(_runtime_root_env).expanduser().resolve() if _runtime_root_env else None
     app.state.runtime_root = _runtime_root
 
+    _runtime_base_root_env = os.environ.get("RUNTIME_BASE_ROOT")
+    if _runtime_base_root_env:
+        _runtime_base_root: Path = Path(_runtime_base_root_env).expanduser().resolve()
+    elif _runtime_root is not None:
+        _runtime_base_root = _runtime_root.parent
+    else:
+        _runtime_base_root = Path.home() / "runtime"
+    app.state.runtime_base_root = _runtime_base_root
+
     _pr = projects_root or (
         Path(os.environ["AI_DEV_FACTORY_PROJECTS_ROOT"]).expanduser().resolve()
         if os.environ.get("AI_DEV_FACTORY_PROJECTS_ROOT")
@@ -95,7 +104,7 @@ def create_app(
     _git_root = resolve_git_root(_root)
     if (_git_root / ".git").exists():
         _self_id = normalize_project_id(_git_root.name)
-        auto_bootstrap(_git_root, _self_id, _runtime_root, app.state.project_registry)
+        auto_bootstrap(_git_root, _self_id, _runtime_base_root, app.state.project_registry)
 
     app.add_middleware(
         CORSMiddleware,

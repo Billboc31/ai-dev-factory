@@ -33,8 +33,8 @@ def _empty_registry(workspace_file: Path | None = None) -> ProjectRegistry:
     return ProjectRegistry(_entries=[], _workspace_file=workspace_file)
 
 
-def _mock_response(project_id: str, project_root: Path, runtime_root: Path) -> dict:
-    base = str(runtime_root / "projects" / project_id)
+def _mock_response(project_id: str, project_root: Path, runtime_base_root: Path) -> dict:
+    base = str(runtime_base_root / project_id)
     return {
         "project_id": project_id,
         "project_root": str(project_root),
@@ -44,6 +44,7 @@ def _mock_response(project_id: str, project_root: Path, runtime_root: Path) -> d
         "logs_dir": f"{base}/logs",
         "state_dir": f"{base}/state",
         "worktrees_dir": f"{base}/worktrees",
+        "clones_dir": f"{base}/clones",
     }
 
 
@@ -51,28 +52,28 @@ def _mock_response(project_id: str, project_root: Path, runtime_root: Path) -> d
 
 def test_auto_bootstrap_calls_supervisor_when_runtime_root_given(tmp_path):
     project_root = _make_git_repo(tmp_path / "ai-dev-factory")
-    runtime_root = tmp_path / "runtime"
-    registry = _empty_registry(runtime_root / "workspace.json")
-    resp = _mock_response("ai-dev-factory", project_root, runtime_root)
+    runtime_base_root = tmp_path / "runtime"
+    registry = _empty_registry(runtime_base_root / "workspace.json")
+    resp = _mock_response("ai-dev-factory", project_root, runtime_base_root)
 
     with patch(_MODULE, return_value=(resp, None)) as mock_sv:
-        auto_bootstrap(project_root, "ai-dev-factory", runtime_root, registry)
+        auto_bootstrap(project_root, "ai-dev-factory", runtime_base_root, registry)
 
     mock_sv.assert_called_once_with("POST", "/projects/bootstrap", {
         "project_root": str(project_root),
         "project_id": "ai-dev-factory",
-        "runtime_root": str(runtime_root),
+        "runtime_root": str(runtime_base_root),
     })
 
 
 def test_auto_bootstrap_registers_project(tmp_path):
     project_root = _make_git_repo(tmp_path / "ai-dev-factory")
-    runtime_root = tmp_path / "runtime"
-    registry = _empty_registry(runtime_root / "workspace.json")
-    resp = _mock_response("ai-dev-factory", project_root, runtime_root)
+    runtime_base_root = tmp_path / "runtime"
+    registry = _empty_registry(runtime_base_root / "workspace.json")
+    resp = _mock_response("ai-dev-factory", project_root, runtime_base_root)
 
     with patch(_MODULE, return_value=(resp, None)):
-        auto_bootstrap(project_root, "ai-dev-factory", runtime_root, registry)
+        auto_bootstrap(project_root, "ai-dev-factory", runtime_base_root, registry)
 
     assert registry.resolve("ai-dev-factory") == project_root
 
@@ -81,15 +82,15 @@ def test_auto_bootstrap_registers_project(tmp_path):
 
 def test_auto_bootstrap_is_idempotent(tmp_path):
     project_root = _make_git_repo(tmp_path / "ai-dev-factory")
-    runtime_root = tmp_path / "runtime"
-    registry = _empty_registry(runtime_root / "workspace.json")
-    resp = _mock_response("ai-dev-factory", project_root, runtime_root)
+    runtime_base_root = tmp_path / "runtime"
+    registry = _empty_registry(runtime_base_root / "workspace.json")
+    resp = _mock_response("ai-dev-factory", project_root, runtime_base_root)
 
     with patch(_MODULE, return_value=(resp, None)):
-        auto_bootstrap(project_root, "ai-dev-factory", runtime_root, registry)
+        auto_bootstrap(project_root, "ai-dev-factory", runtime_base_root, registry)
 
     with patch(_MODULE, return_value=(resp, None)):
-        auto_bootstrap(project_root, "ai-dev-factory", runtime_root, registry)
+        auto_bootstrap(project_root, "ai-dev-factory", runtime_base_root, registry)
 
     assert registry.resolve("ai-dev-factory") == project_root
 
@@ -124,12 +125,12 @@ def test_auto_bootstrap_supervisor_unreachable_still_registers(tmp_path, caplog)
     import logging
 
     project_root = _make_git_repo(tmp_path / "ai-dev-factory")
-    runtime_root = tmp_path / "runtime"
-    registry = _empty_registry(runtime_root / "workspace.json")
+    runtime_base_root = tmp_path / "runtime"
+    registry = _empty_registry(runtime_base_root / "workspace.json")
 
     with caplog.at_level(logging.WARNING, logger="control-api"):
         with patch(_MODULE, return_value=(None, "supervisor_unreachable")):
-            auto_bootstrap(project_root, "ai-dev-factory", runtime_root, registry)
+            auto_bootstrap(project_root, "ai-dev-factory", runtime_base_root, registry)
 
     assert any("supervisor" in r.message for r in caplog.records)
     assert registry.resolve("ai-dev-factory") == project_root

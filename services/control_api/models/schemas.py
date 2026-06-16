@@ -123,6 +123,7 @@ class BootstrapResult(BaseModel):
     logs_dir: str
     state_dir: str
     worktrees_dir: str
+    clones_dir: str = ""
 
 
 class ProviderStatus(BaseModel):
