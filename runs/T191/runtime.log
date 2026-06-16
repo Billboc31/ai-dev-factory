@@ -10,3 +10,14 @@
 [2026-06-16T13:32:05Z] compose: task (canonical prompt)
 [2026-06-16T13:32:05Z] snapshot: runtime-prompt=runs/T191/prompts/planner-attempt-1.md
 [2026-06-16T13:35:38Z] auto-run: step=planner done rc=0
+[2026-06-16T13:35:41Z] planner checkpoint: committed
+[2026-06-16T13:35:41Z] planner checkpoint: pushed
+[2026-06-16T13:35:41Z] planner validation success
+[2026-06-16T13:35:41Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-16T13:35:41Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-16T13:35:41Z] commit-checkpoint: unstaged runtime garbage: ['runs/T191/runtime.log']
+[2026-06-16T13:35:41Z] commit-checkpoint: sha=d7a01aac files=2 title='docs(T191/workflow): planner — update 2 file(s)'
+[2026-06-16T13:35:41Z] auto-run: auto-push triggered
+[2026-06-16T13:35:41Z] push: tolerating runtime dirty files (not blocking): ['runs/T191/runtime.log']
+[2026-06-16T13:35:41Z] push: pushing branch=ticket/T191-t191-fix-runtime-base-root-initialization-causing
+[2026-06-16T13:35:43Z] push: done branch=ticket/T191-t191-fix-runtime-base-root-initialization-causing
