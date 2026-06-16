@@ -22,6 +22,7 @@ def _registry(tmp_path: Path) -> ProjectRegistry:
 
 
 def _mock_bootstrap_response(project_id: str, project_root: str, runtime_base_root: str) -> dict:
+    # Supervisor now returns <runtime_base_root>/<project_id>, no /projects/ segment.
     base = f"{runtime_base_root}/{project_id}"
     return {
         "project_id": project_id,
@@ -78,7 +79,7 @@ def test_bootstrap_runtime_dirs_are_under_project_runtime_root(tmp_path):
     assert result.logs_dir.startswith(expected_prefix)
     assert result.state_dir.startswith(expected_prefix)
     assert result.worktrees_dir.startswith(expected_prefix)
-    assert result.clones_dir.startswith(expected_prefix)
+    assert "projects" not in result.runs_dir
 
 
 def test_bootstrap_registers_project(tmp_path):
@@ -91,6 +92,22 @@ def test_bootstrap_registers_project(tmp_path):
         bootstrap(root, "my-project", runtime_base_root, registry)
 
     assert registry.resolve("my-project") == Path(root)
+
+
+def test_bootstrap_persists_project_runtime_root(tmp_path):
+    root = str(tmp_path / "my-project")
+    runtime_base_root = tmp_path / "runtime"
+    workspace_file = tmp_path / "workspace.json"
+    resp = _mock_bootstrap_response("my-project", root, str(runtime_base_root))
+    registry = ProjectRegistry(_entries=[], _workspace_file=workspace_file)
+
+    with patch(_MODULE, return_value=(resp, None)):
+        bootstrap(root, "my-project", runtime_base_root, registry)
+
+    assert workspace_file.exists()
+    data = json.loads(workspace_file.read_text(encoding="utf-8"))
+    assert "my-project" in data
+    assert data["my-project"]["project_runtime_root"] == str(runtime_base_root / "my-project")
 
 
 def test_bootstrap_persists_workspace_json(tmp_path):
@@ -168,30 +185,18 @@ def test_bootstrap_raises_on_path_not_found(tmp_path):
             bootstrap(str(tmp_path / "missing"), "my-project", runtime_base_root, _registry(tmp_path))
 
 
+def test_bootstrap_raises_value_error_on_not_writable_runtime_base(tmp_path):
+    runtime_base_root = tmp_path / "runtime"
+    err_resp = {"error": "runtime_base_root_not_writable", "detail": str(runtime_base_root)}
+    with patch(_MODULE, return_value=(err_resp, None)):
+        with pytest.raises(ValueError, match="runtime base root is not writable"):
+            bootstrap(str(tmp_path / "my-project"), "my-project", runtime_base_root, _registry(tmp_path))
+
+
 # ── path-traversal guard ──────────────────────────────────────────────────────
 
-def test_bootstrap_runtime_root_cannot_escape_projects_dir(tmp_path):
-    """assert_contained() must reject project_ids that would escape the runtime base root."""
+def test_bootstrap_runtime_root_cannot_escape(tmp_path):
+    """assert_contained() must reject project_ids that would escape the workspace directory."""
     runtime_base_root = tmp_path / "runtime"
     with pytest.raises(ValueError):
         bootstrap(str(tmp_path / "my-project"), "..", runtime_base_root, _registry(tmp_path))
-
-
-def test_bootstrap_sibling_isolation(tmp_path):
-    """Two projects import under the same runtime_base_root as siblings, not nested."""
-    root_a = str(tmp_path / "project-a")
-    root_b = str(tmp_path / "project-b")
-    runtime_base_root = tmp_path / "runtime"
-    resp_a = _mock_bootstrap_response("project-a", root_a, str(runtime_base_root))
-    resp_b = _mock_bootstrap_response("project-b", root_b, str(runtime_base_root))
-    registry = _registry(tmp_path)
-
-    with patch(_MODULE, return_value=(resp_a, None)):
-        result_a = bootstrap(root_a, "project-a", runtime_base_root, registry)
-    with patch(_MODULE, return_value=(resp_b, None)):
-        result_b = bootstrap(root_b, "project-b", runtime_base_root, registry)
-
-    assert result_a.runtime_root == str(runtime_base_root / "project-a")
-    assert result_b.runtime_root == str(runtime_base_root / "project-b")
-    assert not result_a.runtime_root.startswith(result_b.runtime_root)
-    assert not result_b.runtime_root.startswith(result_a.runtime_root)

@@ -81,7 +81,13 @@ def list_projects(request: Request) -> list[ProjectInfo]:
     if runtime_base_root is not None:
         enriched: list[ProjectInfo] = []
         for p in projects:
-            project_runtime_root_path = runtime_base_root / p.name
+            # Prefer the persisted project_runtime_root from the registry so
+            # the path stays stable even if env vars change after first import.
+            persisted = registry.resolve_runtime_root(p.name)
+            if persisted is not None:
+                project_runtime_root_path = persisted
+            else:
+                project_runtime_root_path = runtime_root / p.name
             project_root_path = Path(p.root)
             stack = _read_stack(project_root_path)
             github_repo = _read_github_repo(project_root_path)

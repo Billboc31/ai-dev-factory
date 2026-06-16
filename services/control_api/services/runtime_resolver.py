@@ -9,66 +9,83 @@ from pathlib import Path
 _WORKERS_JSON = "workers.json"
 
 
-def resolve_runs_dir(project_root: Path, project_id: str | None = None) -> Path:
+def resolve_runs_dir(
+    project_root: Path,
+    project_id: str | None = None,
+    project_runtime_root: Path | None = None,
+) -> Path:
     """Return the runs/ directory.
 
-    When *project_id* is given, returns the project-specific path under
-    ``{RUNTIME_BASE_ROOT}/{project_id}/runs``.  Otherwise falls back to the
-    global ``{AI_DEV_FACTORY_RUNTIME_ROOT}/runs`` or ``project_root/runs``.
+    When *project_runtime_root* is given (persisted from bootstrap), returns
+    ``{project_runtime_root}/runs`` directly — no env-var recomputation.
+    Otherwise falls back to the global ``{RUNTIME_ROOT}/runs`` or
+    ``project_root/runs``.
     """
-    if project_id:
-        runtime_base_root = os.environ.get("RUNTIME_BASE_ROOT")
-        if runtime_base_root:
-            return Path(runtime_base_root).expanduser() / project_id / "runs"
+    if project_runtime_root is not None:
+        return project_runtime_root / "runs"
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if project_id and runtime_root:
+        return Path(runtime_root) / project_id / "runs"
     if runtime_root:
         return Path(runtime_root) / "runs"
     return project_root / "runs"
 
 
-def resolve_worktrees_dir(project_root: Path, project_id: str | None = None) -> Path:
+def resolve_worktrees_dir(
+    project_root: Path,
+    project_id: str | None = None,
+    project_runtime_root: Path | None = None,
+) -> Path:
     """Return the worktrees/ directory.
 
-    When *project_id* is given, returns the project-specific path under
-    ``{RUNTIME_BASE_ROOT}/{project_id}/worktrees``.
+    When *project_runtime_root* is given (persisted from bootstrap), returns
+    ``{project_runtime_root}/worktrees`` directly.
     """
-    if project_id:
-        runtime_base_root = os.environ.get("RUNTIME_BASE_ROOT")
-        if runtime_base_root:
-            return Path(runtime_base_root).expanduser() / project_id / "worktrees"
+    if project_runtime_root is not None:
+        return project_runtime_root / "worktrees"
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if project_id and runtime_root:
+        return Path(runtime_root) / project_id / "worktrees"
     if runtime_root:
         return Path(runtime_root) / "worktrees"
     return project_root.parent / (project_root.name + "-worktrees")
 
 
-def resolve_state_dir(project_root: Path, project_id: str | None = None) -> Path:
+def resolve_state_dir(
+    project_root: Path,
+    project_id: str | None = None,
+    project_runtime_root: Path | None = None,
+) -> Path:
     """Return the state/ directory.
 
-    When *project_id* is given, returns the project-specific path under
-    ``{RUNTIME_BASE_ROOT}/{project_id}/state``.
+    When *project_runtime_root* is given (persisted from bootstrap), returns
+    ``{project_runtime_root}/state`` directly.
     """
-    if project_id:
-        runtime_base_root = os.environ.get("RUNTIME_BASE_ROOT")
-        if runtime_base_root:
-            return Path(runtime_base_root).expanduser() / project_id / "state"
+    if project_runtime_root is not None:
+        return project_runtime_root / "state"
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if project_id and runtime_root:
+        return Path(runtime_root) / project_id / "state"
     if runtime_root:
         return Path(runtime_root) / "state"
     return project_root / "runs"
 
 
-def resolve_logs_dir(project_root: Path, project_id: str | None = None) -> Path:
+def resolve_logs_dir(
+    project_root: Path,
+    project_id: str | None = None,
+    project_runtime_root: Path | None = None,
+) -> Path:
     """Return the logs/ directory.
 
-    When *project_id* is given, returns the project-specific path under
-    ``{RUNTIME_BASE_ROOT}/{project_id}/logs``.
+    When *project_runtime_root* is given (persisted from bootstrap), returns
+    ``{project_runtime_root}/logs`` directly.
     """
-    if project_id:
-        runtime_base_root = os.environ.get("RUNTIME_BASE_ROOT")
-        if runtime_base_root:
-            return Path(runtime_base_root).expanduser() / project_id / "logs"
+    if project_runtime_root is not None:
+        return project_runtime_root / "logs"
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if project_id and runtime_root:
+        return Path(runtime_root) / project_id / "logs"
     if runtime_root:
         return Path(runtime_root) / "logs"
     return project_root / "logs"
