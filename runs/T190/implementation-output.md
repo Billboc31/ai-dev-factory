@@ -1,7 +1,6 @@
-T190 implementation is complete. Summary:
+All 14 tests pass (13 pre-existing + 1 new).
 
-**What was done:** Fixed the supervisor `bootstrap_project_host()` to use `RUNTIME_BASE_ROOT` env var (falling back to parent of `AI_DEV_FACTORY_RUNTIME_ROOT` → `~/runtime`) instead of the hardcoded `/runtime/projects/` path that caused `Read-only file system` errors on macOS/Linux hosts.
+**Summary of changes:**
 
-**Test results:** 81 T190-specific tests pass, 28 additional tests for modified route/resolver files pass. 72 pre-existing failures are unrelated to T190 — confirmed by `git diff main --name-only` showing none of those test files were modified.
-
-**State:** `PLAN_APPROVED` → `TEST_COMPLETE` — committed in `77d215b5`.
+- `services/control_api/services/project_bootstrap.py`: Added `runtime_base_root_not_writable` → `ValueError` mapping before the generic `RuntimeError` fallthrough. This ensures the control_api routes' `ValueError` handler catches it and returns 422 instead of 500.
+- `tests/test_project_bootstrap.py`: Added `test_bootstrap_raises_value_error_on_not_writable_runtime_base` to verify the new branch raises `ValueError` with the correct message.

@@ -183,6 +183,14 @@ def test_bootstrap_raises_on_path_not_found(tmp_path):
             bootstrap(str(tmp_path / "missing"), "my-project", runtime_base_root, _registry(tmp_path))
 
 
+def test_bootstrap_raises_value_error_on_not_writable_runtime_base(tmp_path):
+    runtime_base_root = tmp_path / "runtime"
+    err_resp = {"error": "runtime_base_root_not_writable", "detail": str(runtime_base_root)}
+    with patch(_MODULE, return_value=(err_resp, None)):
+        with pytest.raises(ValueError, match="runtime base root is not writable"):
+            bootstrap(str(tmp_path / "my-project"), "my-project", runtime_base_root, _registry(tmp_path))
+
+
 # ── path-traversal guard ──────────────────────────────────────────────────────
 
 def test_bootstrap_runtime_root_cannot_escape(tmp_path):

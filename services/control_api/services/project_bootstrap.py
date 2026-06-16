@@ -87,6 +87,8 @@ def bootstrap(
             raise ValueError(f"project_root is not a git repository: {detail}")
         if error_code == "permission_denied":
             raise ValueError(f"permission denied: {detail}")
+        if error_code == "runtime_base_root_not_writable":
+            raise ValueError(f"runtime base root is not writable: {detail}")
         raise RuntimeError(f"bootstrap failed: {detail}")
 
     logger.info(
