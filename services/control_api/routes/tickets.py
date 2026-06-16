@@ -9,7 +9,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import PlainTextResponse
 
-from ..dependencies import resolve_project
+from ..dependencies import resolve_project, resolve_project_runtime_root
 from ..models.schemas import ActionResult, AuditEvent, TicketSummary, TimelineResponse
 from ..services import artifact_reader, subprocess_runner
 from ..services.runtime_resolver import resolve_ticket_run_dir, resolve_runs_dir, resolve_worktrees_dir
@@ -230,13 +230,18 @@ def archive(ticket_id: str, request: Request) -> ActionResult:
 
 # ── conflict endpoints ────────────────────────────────────────────────────────
 
-def _mark_conflict_failed(project_root: Path, ticket_id: str, worktrees_dir: Path | None) -> ActionResult:
+def _mark_conflict_failed(
+    project_root: Path,
+    ticket_id: str,
+    worktrees_dir: Path | None,
+    project_runtime_root: Path | None = None,
+) -> ActionResult:
     """Transition CONFLICT_RESOLUTION_NEEDED → CONFLICT_RESOLUTION_FAILED.
 
     Returns an ActionResult with ok=False and a 409 error code stored in
     `error` when the ticket is not in CONFLICT_RESOLUTION_NEEDED.
     """
-    run_dir = resolve_ticket_run_dir(ticket_id, resolve_runs_dir(project_root), worktrees_dir)
+    run_dir = resolve_ticket_run_dir(ticket_id, resolve_runs_dir(project_root, project_runtime_root=project_runtime_root), worktrees_dir)
     state_file = run_dir / "state.json"
     if not state_file.exists():
         return ActionResult(ok=False, message=f"ticket {ticket_id} not found", returncode=404)
@@ -261,9 +266,14 @@ def _mark_conflict_failed(project_root: Path, ticket_id: str, worktrees_dir: Pat
     return ActionResult(ok=True, message="transitioned to CONFLICT_RESOLUTION_FAILED")
 
 
-def _transition_to_resolving(project_root: Path, ticket_id: str, worktrees_dir: Path | None) -> ActionResult:
+def _transition_to_resolving(
+    project_root: Path,
+    ticket_id: str,
+    worktrees_dir: Path | None,
+    project_runtime_root: Path | None = None,
+) -> ActionResult:
     """Transition CONFLICT_RESOLUTION_NEEDED → CONFLICT_RESOLVING atomically."""
-    run_dir = resolve_ticket_run_dir(ticket_id, resolve_runs_dir(project_root), worktrees_dir)
+    run_dir = resolve_ticket_run_dir(ticket_id, resolve_runs_dir(project_root, project_runtime_root=project_runtime_root), worktrees_dir)
     state_file = run_dir / "state.json"
     if not state_file.exists():
         return ActionResult(ok=False, message=f"ticket {ticket_id} not found", returncode=404)
@@ -381,18 +391,31 @@ def get_audit_log(ticket_id: str, request: Request) -> list[AuditEvent]:
 
 
 @project_router.get("/{project_id}/tickets", response_model=list[TicketSummary])
-def project_list_tickets(project_root: Path = Depends(resolve_project)) -> list[TicketSummary]:
-    return artifact_reader.list_tickets(project_root, worktrees_dir=resolve_worktrees_dir(project_root))
+def project_list_tickets(
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> list[TicketSummary]:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
+    return artifact_reader.list_tickets(project_root, worktrees_dir=wt_dir)
 
 
 @project_router.get("/{project_id}/tickets/{ticket_id}", response_model=TicketSummary)
-def project_get_ticket(ticket_id: str, project_root: Path = Depends(resolve_project)) -> TicketSummary:
-    return _get_or_404(project_root, ticket_id, resolve_worktrees_dir(project_root))
+def project_get_ticket(
+    ticket_id: str,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> TicketSummary:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
+    return _get_or_404(project_root, ticket_id, wt_dir)
 
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/state")
-def project_get_state(ticket_id: str, project_root: Path = Depends(resolve_project)) -> dict:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_get_state(
+    ticket_id: str,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> dict:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     state = artifact_reader.get_ticket_state(project_root, ticket_id, worktrees_dir=wt_dir)
     if state is None:
@@ -401,8 +424,12 @@ def project_get_state(ticket_id: str, project_root: Path = Depends(resolve_proje
 
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/logs", response_class=PlainTextResponse)
-def project_get_logs(ticket_id: str, project_root: Path = Depends(resolve_project)) -> str:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_get_logs(
+    ticket_id: str,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> str:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     logs = artifact_reader.get_ticket_logs(project_root, ticket_id, worktrees_dir=wt_dir)
     if logs is None:
@@ -411,15 +438,23 @@ def project_get_logs(ticket_id: str, project_root: Path = Depends(resolve_projec
 
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/artifacts")
-def project_get_artifacts(ticket_id: str, project_root: Path = Depends(resolve_project)) -> dict:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_get_artifacts(
+    ticket_id: str,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> dict:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     return artifact_reader.get_ticket_artifacts(project_root, ticket_id, worktrees_dir=wt_dir)
 
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/plan", response_class=PlainTextResponse)
-def project_get_plan(ticket_id: str, project_root: Path = Depends(resolve_project)) -> str:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_get_plan(
+    ticket_id: str,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> str:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     content = artifact_reader.get_ticket_plan(project_root, ticket_id, worktrees_dir=wt_dir)
     if content is None:
@@ -428,8 +463,12 @@ def project_get_plan(ticket_id: str, project_root: Path = Depends(resolve_projec
 
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/review", response_class=PlainTextResponse)
-def project_get_review(ticket_id: str, project_root: Path = Depends(resolve_project)) -> str:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_get_review(
+    ticket_id: str,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> str:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     content = artifact_reader.get_ticket_review(project_root, ticket_id, worktrees_dir=wt_dir)
     if content is None:
@@ -438,8 +477,12 @@ def project_get_review(ticket_id: str, project_root: Path = Depends(resolve_proj
 
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/tests", response_class=PlainTextResponse)
-def project_get_tests(ticket_id: str, project_root: Path = Depends(resolve_project)) -> str:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_get_tests(
+    ticket_id: str,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> str:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     content = artifact_reader.get_ticket_tests(project_root, ticket_id, worktrees_dir=wt_dir)
     if content is None:
@@ -448,8 +491,12 @@ def project_get_tests(ticket_id: str, project_root: Path = Depends(resolve_proje
 
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/timeline", response_model=TimelineResponse)
-def project_get_timeline(ticket_id: str, project_root: Path = Depends(resolve_project)) -> TimelineResponse:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_get_timeline(
+    ticket_id: str,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> TimelineResponse:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     timeline = artifact_reader.get_ticket_timeline(project_root, ticket_id, worktrees_dir=wt_dir)
     if timeline is None:
@@ -458,9 +505,14 @@ def project_get_timeline(ticket_id: str, project_root: Path = Depends(resolve_pr
 
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/approve-plan", response_model=ActionResult)
-def project_approve_plan(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
+def project_approve_plan(
+    ticket_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> ActionResult:
     logger.info("api: POST /projects/%s/tickets/%s/approve-plan", request.path_params["project_id"], ticket_id)
-    wt_dir = resolve_worktrees_dir(project_root)
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.approve_plan(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "approve-plan", result)
@@ -468,8 +520,13 @@ def project_approve_plan(ticket_id: str, request: Request, project_root: Path = 
 
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/request-plan-fix", response_model=ActionResult)
-def project_request_plan_fix(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_request_plan_fix(
+    ticket_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> ActionResult:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.request_plan_fix(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "request-plan-fix", result)
@@ -477,8 +534,13 @@ def project_request_plan_fix(ticket_id: str, request: Request, project_root: Pat
 
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/approve-implementation", response_model=ActionResult)
-def project_approve_implementation(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_approve_implementation(
+    ticket_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> ActionResult:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.approve_implementation(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "approve-implementation", result)
@@ -486,8 +548,13 @@ def project_approve_implementation(ticket_id: str, request: Request, project_roo
 
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/request-implementation-fix", response_model=ActionResult)
-def project_request_implementation_fix(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_request_implementation_fix(
+    ticket_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> ActionResult:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.request_implementation_fix(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "request-implementation-fix", result)
@@ -495,8 +562,13 @@ def project_request_implementation_fix(ticket_id: str, request: Request, project
 
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/run-next", response_model=ActionResult, status_code=202)
-def project_run_next(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_run_next(
+    ticket_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> ActionResult:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
 
     def _bg() -> None:
@@ -510,8 +582,13 @@ def project_run_next(ticket_id: str, request: Request, project_root: Path = Depe
 
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/commit", response_model=ActionResult)
-def project_commit(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_commit(
+    ticket_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> ActionResult:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.commit_ticket(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "commit", result)
@@ -519,8 +596,13 @@ def project_commit(ticket_id: str, request: Request, project_root: Path = Depend
 
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/push", response_model=ActionResult)
-def project_push(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_push(
+    ticket_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> ActionResult:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.push_ticket(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "push", result)
@@ -528,8 +610,13 @@ def project_push(ticket_id: str, request: Request, project_root: Path = Depends(
 
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/checkpoint", response_model=ActionResult)
-def project_checkpoint(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_checkpoint(
+    ticket_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> ActionResult:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.checkpoint_ticket(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "checkpoint", result)
@@ -537,8 +624,13 @@ def project_checkpoint(ticket_id: str, request: Request, project_root: Path = De
 
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/archive", response_model=ActionResult)
-def project_archive(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_archive(
+    ticket_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> ActionResult:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.archive_ticket(ticket_id, project_root, wt_dir)
     _log_action(request, ticket_id, "archive", result)
@@ -546,10 +638,15 @@ def project_archive(ticket_id: str, request: Request, project_root: Path = Depen
 
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/mark-conflict-failed", response_model=ActionResult)
-def project_mark_conflict_failed(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_mark_conflict_failed(
+    ticket_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> ActionResult:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
-    result = _mark_conflict_failed(project_root, ticket_id, wt_dir)
+    result = _mark_conflict_failed(project_root, ticket_id, wt_dir, project_runtime_root=project_runtime_root)
     if result.returncode == 409:
         raise HTTPException(status_code=409, detail=result.message)
     _log_action(request, ticket_id, "mark-conflict-failed", result)
@@ -557,11 +654,16 @@ def project_mark_conflict_failed(ticket_id: str, request: Request, project_root:
 
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/resolve-conflicts", response_model=ActionResult, status_code=202)
-def project_resolve_conflicts(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_resolve_conflicts(
+    ticket_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> ActionResult:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
 
-    transition = _transition_to_resolving(project_root, ticket_id, wt_dir)
+    transition = _transition_to_resolving(project_root, ticket_id, wt_dir, project_runtime_root=project_runtime_root)
     if transition.returncode == 409:
         raise HTTPException(status_code=409, detail=transition.message)
     if not transition.ok:
@@ -580,8 +682,13 @@ def project_resolve_conflicts(ticket_id: str, request: Request, project_root: Pa
 
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/approve-conflict-resolution", response_model=ActionResult)
-def project_approve_conflict_resolution(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_approve_conflict_resolution(
+    ticket_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> ActionResult:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.approve_conflict_resolution(ticket_id, project_root, wt_dir)
     if result.returncode not in (None, 0) and result.returncode == 2:
@@ -591,8 +698,13 @@ def project_approve_conflict_resolution(ticket_id: str, request: Request, projec
 
 
 @project_router.post("/{project_id}/tickets/{ticket_id}/reject-conflict-resolution", response_model=ActionResult)
-def project_reject_conflict_resolution(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> ActionResult:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_reject_conflict_resolution(
+    ticket_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> ActionResult:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     result = subprocess_runner.reject_conflict_resolution(ticket_id, project_root, wt_dir)
     if result.returncode not in (None, 0) and result.returncode == 2:
@@ -602,8 +714,13 @@ def project_reject_conflict_resolution(ticket_id: str, request: Request, project
 
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/audit-log", response_model=list[AuditEvent])
-def project_get_audit_log(ticket_id: str, request: Request, project_root: Path = Depends(resolve_project)) -> list[AuditEvent]:
-    wt_dir = resolve_worktrees_dir(project_root)
+def project_get_audit_log(
+    ticket_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> list[AuditEvent]:
+    wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     _get_or_404(project_root, ticket_id, wt_dir)
     db = _db_path(request)
     if db is None:

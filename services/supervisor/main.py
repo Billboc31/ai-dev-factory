@@ -68,6 +68,23 @@ def _runtime_root() -> Path:
     return _project_root() / ".ai-dev-factory"
 
 
+def _runtime_base_root() -> Path:
+    """Parent directory containing one runtime root per managed project.
+
+    Resolution order:
+    1. RUNTIME_BASE_ROOT env var (explicit config)
+    2. Parent of AI_DEV_FACTORY_RUNTIME_ROOT (derived from existing config)
+    3. ~/runtime (safe local fallback — never /runtime)
+    """
+    base = os.environ.get("RUNTIME_BASE_ROOT")
+    if base:
+        return Path(base).expanduser().resolve()
+    factory_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    if factory_root:
+        return Path(factory_root).parent
+    return Path.home() / "runtime"
+
+
 def _runs_dir() -> Path:
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
     if runtime_root:
@@ -1539,20 +1556,48 @@ def bootstrap_project_host(body: ProjectBootstrapHostRequest):
 
     stack = _detect_stack_for_path(project_root)
 
-    runtime_root = Path(body.runtime_root)
-    project_runtime_root = runtime_root / "projects" / body.project_id
+    runtime_base_root = _runtime_base_root()
+    project_runtime_root = runtime_base_root / body.project_id
+
+    logger.info(
+        "supervisor: bootstrap"
+        " project_id=%s"
+        " project_root=%s"
+        " runtime_base_root=%s"
+        " project_runtime_root=%s",
+        body.project_id, project_root, runtime_base_root, project_runtime_root,
+    )
+
+    # Check writability before attempting mkdir so we return a structured error
+    # instead of an unhandled OSError when the filesystem is read-only.
+    writable_check = runtime_base_root if runtime_base_root.exists() else runtime_base_root.parent
+    if not os.access(writable_check, os.W_OK):
+        return JSONResponse(
+            status_code=422,
+            content={
+                "error": "runtime_base_root_not_writable",
+                "detail": str(runtime_base_root),
+            },
+        )
+
     runs_dir = project_runtime_root / "runs"
     logs_dir = project_runtime_root / "logs"
     state_dir = project_runtime_root / "state"
     worktrees_dir = project_runtime_root / "worktrees"
+    clones_dir = project_runtime_root / "clones"
 
     try:
-        for d in (runs_dir, logs_dir, state_dir, worktrees_dir):
+        for d in (runs_dir, logs_dir, state_dir, worktrees_dir, clones_dir):
             d.mkdir(parents=True, exist_ok=True)
     except PermissionError as exc:
         return JSONResponse(
             status_code=422,
             content={"error": "permission_denied", "detail": str(exc)},
+        )
+    except OSError as exc:
+        return JSONResponse(
+            status_code=422,
+            content={"error": "runtime_base_root_not_writable", "detail": str(exc)},
         )
 
     ai_dev_dir = project_root / ".ai-dev-factory"
@@ -1572,11 +1617,6 @@ def bootstrap_project_host(body: ProjectBootstrapHostRequest):
                 status_code=422,
                 content={"error": "permission_denied", "detail": str(exc)},
             )
-
-    logger.info(
-        "supervisor: bootstrap project_id=%s project_root=%s runtime=%s stack=%s",
-        body.project_id, project_root, project_runtime_root, stack,
-    )
 
     return {
         "project_id": body.project_id,
@@ -1601,9 +1641,7 @@ _project_daemon_exec_cmds: dict[str, str] = {}
 
 
 def _project_runtime_root(project_id: str) -> Path:
-    rr = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
-    base = Path(rr) if rr else _project_root() / ".ai-dev-factory"
-    return base / "projects" / project_id
+    return _runtime_base_root() / project_id
 
 
 def _project_runs_dir(project_id: str) -> Path:

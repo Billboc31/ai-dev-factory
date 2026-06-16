@@ -82,14 +82,15 @@ def test_validate_path_worktree_is_recognised_as_git(tmp_path, client):
 
 # ── bootstrap ─────────────────────────────────────────────────────────────────
 
-def test_bootstrap_creates_runtime_directories(tmp_path, client):
+def test_bootstrap_creates_runtime_directories(tmp_path, client, monkeypatch):
     repo = _make_git_repo(tmp_path / "my-project")
-    runtime_root = tmp_path / "runtime"
+    runtime_base_root = tmp_path / "runtime"
+    monkeypatch.setenv("RUNTIME_BASE_ROOT", str(runtime_base_root))
 
     resp = client.post("/projects/bootstrap", json={
         "project_root": str(repo),
         "project_id": "my-project",
-        "runtime_root": str(runtime_root),
+        "runtime_root": "ignored",
     })
     assert resp.status_code == 200
     data = resp.json()
@@ -99,14 +100,28 @@ def test_bootstrap_creates_runtime_directories(tmp_path, client):
     assert Path(data["worktrees_dir"]).is_dir()
 
 
-def test_bootstrap_writes_project_yml(tmp_path, client):
+def test_bootstrap_creates_clones_directory(tmp_path, client, monkeypatch):
     repo = _make_git_repo(tmp_path / "my-project")
-    runtime_root = tmp_path / "runtime"
+    runtime_base_root = tmp_path / "runtime"
+    monkeypatch.setenv("RUNTIME_BASE_ROOT", str(runtime_base_root))
+
+    resp = client.post("/projects/bootstrap", json={
+        "project_root": str(repo),
+        "project_id": "my-project",
+        "runtime_root": "ignored",
+    })
+    assert resp.status_code == 200
+    assert (runtime_base_root / "my-project" / "clones").is_dir()
+
+
+def test_bootstrap_writes_project_yml(tmp_path, client, monkeypatch):
+    repo = _make_git_repo(tmp_path / "my-project")
+    monkeypatch.setenv("RUNTIME_BASE_ROOT", str(tmp_path / "runtime"))
 
     client.post("/projects/bootstrap", json={
         "project_root": str(repo),
         "project_id": "my-project",
-        "runtime_root": str(runtime_root),
+        "runtime_root": "ignored",
     })
 
     yml = repo / ".ai-dev-factory" / "project.yml"
@@ -116,29 +131,29 @@ def test_bootstrap_writes_project_yml(tmp_path, client):
     assert "bootstrapped_at:" in content
 
 
-def test_bootstrap_does_not_overwrite_existing_project_yml(tmp_path, client):
+def test_bootstrap_does_not_overwrite_existing_project_yml(tmp_path, client, monkeypatch):
     repo = _make_git_repo(tmp_path / "my-project")
     ai_dir = repo / ".ai-dev-factory"
     ai_dir.mkdir()
     (ai_dir / "project.yml").write_text("name: original\n", encoding="utf-8")
-    runtime_root = tmp_path / "runtime"
+    monkeypatch.setenv("RUNTIME_BASE_ROOT", str(tmp_path / "runtime"))
 
     client.post("/projects/bootstrap", json={
         "project_root": str(repo),
         "project_id": "my-project",
-        "runtime_root": str(runtime_root),
+        "runtime_root": "ignored",
     })
 
     assert (ai_dir / "project.yml").read_text(encoding="utf-8") == "name: original\n"
 
 
-def test_bootstrap_is_idempotent(tmp_path, client):
+def test_bootstrap_is_idempotent(tmp_path, client, monkeypatch):
     repo = _make_git_repo(tmp_path / "my-project")
-    runtime_root = tmp_path / "runtime"
+    monkeypatch.setenv("RUNTIME_BASE_ROOT", str(tmp_path / "runtime"))
     payload = {
         "project_root": str(repo),
         "project_id": "my-project",
-        "runtime_root": str(runtime_root),
+        "runtime_root": "ignored",
     }
 
     r1 = client.post("/projects/bootstrap", json=payload)
@@ -147,82 +162,119 @@ def test_bootstrap_is_idempotent(tmp_path, client):
     assert r2.status_code == 200
 
 
-def test_bootstrap_returns_correct_project_id(tmp_path, client):
+def test_bootstrap_returns_correct_project_id(tmp_path, client, monkeypatch):
     repo = _make_git_repo(tmp_path / "my-project")
-    runtime_root = tmp_path / "runtime"
+    monkeypatch.setenv("RUNTIME_BASE_ROOT", str(tmp_path / "runtime"))
 
     resp = client.post("/projects/bootstrap", json={
         "project_root": str(repo),
         "project_id": "my-project",
-        "runtime_root": str(runtime_root),
+        "runtime_root": "ignored",
     })
     assert resp.json()["project_id"] == "my-project"
 
 
-def test_bootstrap_runtime_dirs_under_projects_subdir(tmp_path, client):
+def test_bootstrap_runtime_dirs_under_runtime_base_root(tmp_path, client, monkeypatch):
     repo = _make_git_repo(tmp_path / "my-project")
-    runtime_root = tmp_path / "runtime"
+    runtime_base_root = tmp_path / "runtime"
+    monkeypatch.setenv("RUNTIME_BASE_ROOT", str(runtime_base_root))
 
     resp = client.post("/projects/bootstrap", json={
         "project_root": str(repo),
         "project_id": "my-project",
-        "runtime_root": str(runtime_root),
+        "runtime_root": "ignored",
     })
     data = resp.json()
-    expected_prefix = str(runtime_root / "projects" / "my-project")
+    # Dirs must be under <RUNTIME_BASE_ROOT>/<project_id>, NOT /projects/
+    expected_prefix = str(runtime_base_root / "my-project")
     assert data["runs_dir"].startswith(expected_prefix)
     assert data["logs_dir"].startswith(expected_prefix)
+    assert "projects" not in data["runs_dir"]
 
 
-def test_bootstrap_missing_path_returns_error(tmp_path, client):
-    runtime_root = tmp_path / "runtime"
+def test_bootstrap_uses_parent_of_factory_runtime_root_when_no_base(tmp_path, client, monkeypatch):
+    """When RUNTIME_BASE_ROOT is absent, derive it from parent of AI_DEV_FACTORY_RUNTIME_ROOT."""
+    repo = _make_git_repo(tmp_path / "my-project")
+    factory_runtime = tmp_path / "runtime" / "ai-dev-factory"
+    monkeypatch.delenv("RUNTIME_BASE_ROOT", raising=False)
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(factory_runtime))
+
+    resp = client.post("/projects/bootstrap", json={
+        "project_root": str(repo),
+        "project_id": "my-project",
+        "runtime_root": "ignored",
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    # project_runtime_root must be <parent of factory_runtime>/<project_id>
+    expected_prefix = str(tmp_path / "runtime" / "my-project")
+    assert data["runs_dir"].startswith(expected_prefix)
+
+
+def test_bootstrap_not_writable_runtime_base_returns_422(tmp_path, client, monkeypatch):
+    """Unwritable runtime_base_root must return 422, not 500."""
+    repo = _make_git_repo(tmp_path / "my-project")
+    # Use /runtime as the base root — it is not writable on macOS/Linux
+    monkeypatch.setenv("RUNTIME_BASE_ROOT", "/runtime")
+
+    resp = client.post("/projects/bootstrap", json={
+        "project_root": str(repo),
+        "project_id": "my-project",
+        "runtime_root": "ignored",
+    })
+    assert resp.status_code == 422
+    assert resp.json()["error"] == "runtime_base_root_not_writable"
+
+
+def test_bootstrap_missing_path_returns_error(tmp_path, client, monkeypatch):
+    monkeypatch.setenv("RUNTIME_BASE_ROOT", str(tmp_path / "runtime"))
     resp = client.post("/projects/bootstrap", json={
         "project_root": str(tmp_path / "nonexistent"),
         "project_id": "my-project",
-        "runtime_root": str(runtime_root),
+        "runtime_root": "ignored",
     })
     assert resp.status_code == 422
     assert resp.json()["error"] == "path_not_found"
 
 
-def test_bootstrap_non_git_dir_returns_error(tmp_path, client):
+def test_bootstrap_non_git_dir_returns_error(tmp_path, client, monkeypatch):
     d = tmp_path / "not-a-repo"
     d.mkdir()
-    runtime_root = tmp_path / "runtime"
+    monkeypatch.setenv("RUNTIME_BASE_ROOT", str(tmp_path / "runtime"))
 
     resp = client.post("/projects/bootstrap", json={
         "project_root": str(d),
         "project_id": "my-project",
-        "runtime_root": str(runtime_root),
+        "runtime_root": "ignored",
     })
     assert resp.status_code == 422
     assert resp.json()["error"] == "git_not_found"
 
 
-def test_bootstrap_detects_python_stack(tmp_path, client):
+def test_bootstrap_detects_python_stack(tmp_path, client, monkeypatch):
     repo = _make_git_repo(tmp_path / "py-project")
     (repo / "pyproject.toml").write_text("[tool.poetry]\n", encoding="utf-8")
-    runtime_root = tmp_path / "runtime"
+    monkeypatch.setenv("RUNTIME_BASE_ROOT", str(tmp_path / "runtime"))
 
     resp = client.post("/projects/bootstrap", json={
         "project_root": str(repo),
         "project_id": "py-project",
-        "runtime_root": str(runtime_root),
+        "runtime_root": "ignored",
     })
     assert resp.json()["stack"] == "python"
 
 
-def test_bootstrap_worktree_git_file_accepted(tmp_path, client):
+def test_bootstrap_worktree_git_file_accepted(tmp_path, client, monkeypatch):
     main_clone = tmp_path / "main"
     _make_git_repo(main_clone)
     worktree_gitdir = main_clone / ".git" / "worktrees" / "feat"
     worktree_gitdir.mkdir(parents=True)
     worktree = _make_git_worktree(tmp_path / "feat", worktree_gitdir)
-    runtime_root = tmp_path / "runtime"
+    monkeypatch.setenv("RUNTIME_BASE_ROOT", str(tmp_path / "runtime"))
 
     resp = client.post("/projects/bootstrap", json={
         "project_root": str(worktree),
         "project_id": "feat-project",
-        "runtime_root": str(runtime_root),
+        "runtime_root": "ignored",
     })
     assert resp.status_code == 200

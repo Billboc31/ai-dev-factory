@@ -4,7 +4,7 @@ from pathlib import Path
 import httpx
 from fastapi import APIRouter, Depends, Query, Request
 
-from ..dependencies import resolve_project
+from ..dependencies import resolve_project, resolve_project_runtime_root
 from ..models.schemas import ActionResult, DaemonActivity, DaemonStartRequest, DaemonStatus, BoardResponse, RuntimeStatus
 from ..services import daemon_manager, board_service
 from ..services.runtime_resolver import resolve_worktrees_dir
@@ -118,8 +118,12 @@ def project_daemon_sync_main(project_root: Path = Depends(resolve_project)) -> A
 
 
 @project_router.get("/{project_id}/daemon/board", response_model=BoardResponse)
-def project_daemon_board(request: Request, project_root: Path = Depends(resolve_project)) -> BoardResponse:
-    worktrees_dir = getattr(request.app.state, "worktrees_dir", None) or resolve_worktrees_dir(project_root)
+def project_daemon_board(
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> BoardResponse:
+    worktrees_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
     return board_service.get_board(project_root, worktrees_dir=worktrees_dir)
 
 

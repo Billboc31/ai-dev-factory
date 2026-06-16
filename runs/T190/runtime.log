@@ -77,3 +77,16 @@
 [2026-06-16T09:51:54Z] push: tolerating runtime dirty files (not blocking): ['runs/T190/runtime.log']
 [2026-06-16T09:51:54Z] push: pushing branch=ticket/T190-t190-fix-supervisor-runtime-base-resolution-for-pr
 [2026-06-16T09:51:56Z] push: done branch=ticket/T190-t190-fix-supervisor-runtime-base-resolution-for-pr
+[2026-06-16T12:11:17Z] auto-run start: state=PLAN_APPROVED
+[2026-06-16T12:11:17Z] auto-run: running step=coder
+[2026-06-16T12:11:17Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-06-16T12:11:17Z] prompt: generic fallback — injecting runs/T190/ticket.md
+[2026-06-16T12:11:17Z] compose: global-context=docs/ai/global-context.md
+[2026-06-16T12:11:17Z] compose: role=ai/roles/coder.md
+[2026-06-16T12:11:17Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-16T12:11:17Z] compose: skill=ai/skills/git-discipline.md
+[2026-06-16T12:11:17Z] compose: skill=ai/skills/code-quality.md
+[2026-06-16T12:11:17Z] compose: skill=ai/skills/refactor-safety.md
+[2026-06-16T12:11:17Z] compose: skill=ai/skills/security.md
+[2026-06-16T12:11:17Z] compose: task (canonical prompt)
+[2026-06-16T12:11:17Z] snapshot: runtime-prompt=runs/T190/prompts/coder-attempt-1.md

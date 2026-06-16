@@ -16,6 +16,7 @@ _WORKSPACE_FILENAME = "workspace.json"
 class ProjectEntry:
     id: str
     root: Path
+    project_runtime_root: Path | None = None
 
 
 class ProjectRegistry:
@@ -61,7 +62,9 @@ class ProjectRegistry:
                 data = json.loads(workspace_file.read_text(encoding="utf-8"))
                 for project_id, info in data.items():
                     root = Path(info["root"])
-                    entries.append(ProjectEntry(id=project_id, root=root))
+                    prt_raw = info.get("project_runtime_root")
+                    prt = Path(prt_raw) if prt_raw else None
+                    entries.append(ProjectEntry(id=project_id, root=root, project_runtime_root=prt))
                 logger.info(
                     "project_registry: loaded %d project(s) from %s",
                     len(entries), workspace_file,
@@ -73,28 +76,41 @@ class ProjectRegistry:
     def _persist(self) -> None:
         if self._workspace_file is None:
             return
-        data = {entry.id: {"root": str(entry.root)} for entry in self._entries}
+        data = {}
+        for entry in self._entries:
+            entry_data: dict = {"root": str(entry.root)}
+            if entry.project_runtime_root is not None:
+                entry_data["project_runtime_root"] = str(entry.project_runtime_root)
+            data[entry.id] = entry_data
         try:
             self._workspace_file.parent.mkdir(parents=True, exist_ok=True)
             self._workspace_file.write_text(json.dumps(data, indent=2), encoding="utf-8")
         except OSError:
             logger.exception("project_registry: failed to persist %s", self._workspace_file)
 
-    def ensure_registered(self, project_id: str, root: Path) -> bool:
+    def ensure_registered(
+        self,
+        project_id: str,
+        root: Path,
+        project_runtime_root: Path | None = None,
+    ) -> bool:
         """Register *project_id* → *root* only if not already present.
 
         Returns True if a new entry was added, False if it already existed.
+        Preserves the existing ``project_runtime_root`` on re-registration so
+        that changing env vars after first import does not silently relocate
+        the project's runtime directory.
         Persists to workspace.json when a workspace file is configured.
         """
         for entry in self._entries:
             if entry.id == project_id:
                 return False
-        self._entries.append(ProjectEntry(id=project_id, root=root))
+        self._entries.append(ProjectEntry(id=project_id, root=root, project_runtime_root=project_runtime_root))
         self._persist()
         logger.info("project_registry: auto-registered project_id=%s root=%s", project_id, root)
         return True
 
-    def register(self, project_id: str, root: Path) -> None:
+    def register(self, project_id: str, root: Path, project_runtime_root: Path | None = None) -> None:
         """Add *project_id* → *root* to the registry.
 
         Raises ``ValueError`` if the project_id is already registered.
@@ -103,7 +119,7 @@ class ProjectRegistry:
         for entry in self._entries:
             if entry.id == project_id:
                 raise ValueError(f"project_id already registered: {project_id!r}")
-        self._entries.append(ProjectEntry(id=project_id, root=root))
+        self._entries.append(ProjectEntry(id=project_id, root=root, project_runtime_root=project_runtime_root))
         self._persist()
         logger.info("project_registry: registered project_id=%s root=%s", project_id, root)
 
@@ -140,4 +156,11 @@ class ProjectRegistry:
         for entry in self._entries:
             if entry.id == project_id:
                 return entry.root
+        return None
+
+    def resolve_runtime_root(self, project_id: str) -> Path | None:
+        """Return the persisted ``project_runtime_root`` for *project_id*, or None."""
+        for entry in self._entries:
+            if entry.id == project_id:
+                return entry.project_runtime_root
         return None

@@ -94,7 +94,11 @@ def bootstrap(
         data["project_id"], data["project_root"], data["runtime_root"],
     )
 
-    registry.register(project_id, Path(data["project_root"]))
+    registry.register(
+        project_id,
+        Path(data["project_root"]),
+        project_runtime_root=Path(data["runtime_root"]),
+    )
 
     return BootstrapResult(
         project_id=data["project_id"],
@@ -151,7 +155,11 @@ def auto_bootstrap(
                 "auto_bootstrap: project_id=%s project_root=%s runtime_root=%s",
                 project_id, data["project_root"], data["runtime_root"],
             )
-            registry.ensure_registered(project_id, Path(data["project_root"]))
+            registry.ensure_registered(
+                project_id,
+                Path(data["project_root"]),
+                project_runtime_root=Path(data["runtime_root"]),
+            )
             return
 
     registry.ensure_registered(project_id, Path(str(project_root)))

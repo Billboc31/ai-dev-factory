@@ -50,18 +50,18 @@ def validate_project_id(raw: str) -> str:
 
 
 def assert_contained(runtime_root: Path, project_id: str) -> Path:
-    """Resolve ``{runtime_root}/projects/{project_id}`` and assert it stays inside
-    ``{runtime_root}/projects/``.
+    """Resolve ``{runtime_root}/{project_id}`` and assert it stays inside
+    ``{runtime_root}/``.
 
     Returns the resolved project runtime root on success.
     Raises ``ValueError`` on path traversal or symlink escape.
     """
     validate_project_id(project_id)
-    projects_base = (runtime_root / "projects").resolve()
-    candidate = (projects_base / project_id).resolve()
+    base = runtime_root.resolve()
+    candidate = (base / project_id).resolve()
 
-    if not str(candidate).startswith(str(projects_base) + "/") and candidate != projects_base:
+    if not str(candidate).startswith(str(base) + "/") and candidate != base:
         raise ValueError(
-            f"project_id {project_id!r} would escape the workspace projects directory: {candidate}"
+            f"project_id {project_id!r} would escape the workspace directory: {candidate}"
         )
     return candidate

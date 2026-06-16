@@ -15,3 +15,9 @@ def resolve_project(project_id: str, request: Request) -> Path:
     if root is None:
         raise HTTPException(status_code=404, detail=f"project {project_id!r} not found")
     return root
+
+
+def resolve_project_runtime_root(project_id: str, request: Request) -> Path | None:
+    """FastAPI dependency: return the persisted project_runtime_root, or None."""
+    registry = request.app.state.project_registry
+    return registry.resolve_runtime_root(project_id)
