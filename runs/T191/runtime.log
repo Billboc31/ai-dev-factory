@@ -21,3 +21,14 @@
 [2026-06-16T13:35:41Z] push: tolerating runtime dirty files (not blocking): ['runs/T191/runtime.log']
 [2026-06-16T13:35:41Z] push: pushing branch=ticket/T191-t191-fix-runtime-base-root-initialization-causing
 [2026-06-16T13:35:43Z] push: done branch=ticket/T191-t191-fix-runtime-base-root-initialization-causing
+[2026-06-16T13:44:10Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-16T13:44:10Z] auto-run: running step=tester
+[2026-06-16T13:44:10Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-16T13:44:10Z] prompt: generic fallback — injecting runs/T191/ticket.md
+[2026-06-16T13:44:10Z] compose: global-context=docs/ai/global-context.md
+[2026-06-16T13:44:10Z] compose: role=ai/roles/tester.md
+[2026-06-16T13:44:10Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-16T13:44:10Z] compose: skill=ai/skills/testing.md
+[2026-06-16T13:44:10Z] compose: skill=ai/skills/debugging.md
+[2026-06-16T13:44:10Z] compose: task (canonical prompt)
+[2026-06-16T13:44:10Z] snapshot: runtime-prompt=runs/T191/prompts/tester-attempt-1.md
