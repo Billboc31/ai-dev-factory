@@ -1,0 +1,7 @@
+{
+  "ticket_id": "T192",
+  "state": "TEST_COMPLETE",
+  "branch": "ticket/T192-t192-fix-runtime-base-root-resolving-to-filesystem",
+  "issue_number": 235,
+  "updated_at": "2026-06-16T15:52:49Z"
+}

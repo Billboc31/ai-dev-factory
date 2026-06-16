@@ -158,3 +158,8 @@ def test_assert_contained_raises_on_empty_root():
 def test_assert_contained_raises_on_dot_root():
     with pytest.raises(ValueError, match="invalid runtime_base_root"):
         assert_contained(Path("."), "test-ai-dev")
+
+
+def test_assert_contained_raises_on_filesystem_root():
+    with pytest.raises(ValueError, match="filesystem root"):
+        assert_contained(Path("/"), "test-ai-dev")

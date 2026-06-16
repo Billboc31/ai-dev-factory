@@ -78,10 +78,20 @@ def _runtime_base_root() -> Path:
     """
     base = os.environ.get("RUNTIME_BASE_ROOT")
     if base:
-        return Path(base).expanduser().resolve()
+        result = Path(base).expanduser().resolve()
+        if result == Path("/"):
+            raise RuntimeError(
+                "RUNTIME_BASE_ROOT resolves to filesystem root '/' — check environment configuration"
+            )
+        return result
     factory_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
     if factory_root:
-        return Path(factory_root).parent
+        result = Path(factory_root).parent
+        if result == Path("/"):
+            raise RuntimeError(
+                "AI_DEV_FACTORY_RUNTIME_ROOT resolves to filesystem root '/' — check environment configuration"
+            )
+        return result
     return Path.home() / "runtime"
 
 
