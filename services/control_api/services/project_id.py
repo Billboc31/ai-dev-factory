@@ -54,8 +54,12 @@ def assert_contained(runtime_root: Path, project_id: str) -> Path:
     ``{runtime_root}/``.
 
     Returns the resolved project runtime root on success.
-    Raises ``ValueError`` on path traversal or symlink escape.
+    Raises ``ValueError`` on path traversal, symlink escape, or invalid base.
     """
+    if runtime_root is None:
+        raise ValueError("runtime_base_root is not configured")
+    if str(runtime_root) in ("", "."):
+        raise ValueError(f"invalid runtime_base_root: {runtime_root!r}")
     validate_project_id(project_id)
     base = runtime_root.resolve()
     candidate = (base / project_id).resolve()
