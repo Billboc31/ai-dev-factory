@@ -66,3 +66,14 @@
 [2026-06-16T09:51:02Z] compose: extra-context=runs/T190/fixes/context-20260616T095102Z.md
 [2026-06-16T09:51:02Z] snapshot: runtime-prompt=runs/T190/prompts/planner-attempt-3.md
 [2026-06-16T09:51:52Z] auto-run: step=planner done rc=0
+[2026-06-16T09:51:54Z] planner checkpoint: committed
+[2026-06-16T09:51:54Z] planner checkpoint: pushed
+[2026-06-16T09:51:54Z] planner validation success
+[2026-06-16T09:51:54Z] auto-run: transition PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED
+[2026-06-16T09:51:54Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-16T09:51:54Z] commit-checkpoint: unstaged runtime garbage: ['runs/T190/runtime.log']
+[2026-06-16T09:51:54Z] commit-checkpoint: sha=f0d149b1 files=2 title='docs(T190/workflow): planner — update 2 file(s)'
+[2026-06-16T09:51:54Z] auto-run: auto-push triggered
+[2026-06-16T09:51:54Z] push: tolerating runtime dirty files (not blocking): ['runs/T190/runtime.log']
+[2026-06-16T09:51:54Z] push: pushing branch=ticket/T190-t190-fix-supervisor-runtime-base-resolution-for-pr
+[2026-06-16T09:51:56Z] push: done branch=ticket/T190-t190-fix-supervisor-runtime-base-resolution-for-pr
