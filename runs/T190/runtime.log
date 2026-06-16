@@ -49,3 +49,20 @@
 [2026-06-16T09:44:30Z] push: tolerating runtime dirty files (not blocking): ['runs/T190/runtime.log']
 [2026-06-16T09:44:30Z] push: pushing branch=ticket/T190-t190-fix-supervisor-runtime-base-resolution-for-pr
 [2026-06-16T09:44:32Z] push: done branch=ticket/T190-t190-fix-supervisor-runtime-base-resolution-for-pr
+[2026-06-16T09:51:02Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-06-16T09:51:02Z] auto-run: running step=planner
+[2026-06-16T09:51:02Z] auto-run: fix context: previous_output=runs/T190/plan.md
+[2026-06-16T09:51:02Z] auto-run: fix context: review=runs/T190/reviews/plan-review-reimport-runtime-root-fix-required.md
+[2026-06-16T09:51:02Z] auto-run: fix context: fix_instructions=runs/T190/fixes/plan-fix-runtime-base-resolution-contract.md
+[2026-06-16T09:51:02Z] auto-run: fix context: context_file=runs/T190/fixes/context-20260616T095102Z.md
+[2026-06-16T09:51:02Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-16T09:51:02Z] prompt: generic fallback — injecting runs/T190/ticket.md
+[2026-06-16T09:51:02Z] compose: global-context=docs/ai/global-context.md
+[2026-06-16T09:51:02Z] compose: role=ai/roles/planner.md
+[2026-06-16T09:51:02Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-16T09:51:02Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-16T09:51:02Z] compose: skill=ai/skills/documentation.md
+[2026-06-16T09:51:02Z] compose: task (canonical prompt)
+[2026-06-16T09:51:02Z] compose: extra-context=runs/T190/fixes/context-20260616T095102Z.md
+[2026-06-16T09:51:02Z] snapshot: runtime-prompt=runs/T190/prompts/planner-attempt-3.md
+[2026-06-16T09:51:52Z] auto-run: step=planner done rc=0
