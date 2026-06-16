@@ -107,3 +107,23 @@
 [2026-06-16T12:32:25Z] auto-run: step=coder done rc=1
 [2026-06-16T12:32:25Z] auto-run: runtime failure: empty_output (rc=1)
 [2026-06-16T12:32:25Z] auto-run: step=coder failed rc=1, state unchanged=PLAN_APPROVED
+[2026-06-16T12:56:37Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-16T12:56:37Z] auto-run: running step=tester
+[2026-06-16T12:56:37Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-16T12:56:37Z] prompt: generic fallback — injecting runs/T190/ticket.md
+[2026-06-16T12:56:37Z] compose: global-context=docs/ai/global-context.md
+[2026-06-16T12:56:37Z] compose: role=ai/roles/tester.md
+[2026-06-16T12:56:37Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-16T12:56:37Z] compose: skill=ai/skills/testing.md
+[2026-06-16T12:56:37Z] compose: skill=ai/skills/debugging.md
+[2026-06-16T12:56:37Z] compose: task (canonical prompt)
+[2026-06-16T12:56:37Z] snapshot: runtime-prompt=runs/T190/prompts/tester-attempt-1.md
+[2026-06-16T12:57:54Z] auto-run: step=tester done rc=0
+[2026-06-16T12:57:54Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-16T12:57:54Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-16T12:57:54Z] commit-checkpoint: unstaged runtime garbage: ['runs/T190/runtime.log']
+[2026-06-16T12:57:54Z] commit-checkpoint: sha=c4f1709e files=4 title='test(T190/workflow): tester — update 4 file(s)'
+[2026-06-16T12:57:54Z] auto-run: auto-push triggered
+[2026-06-16T12:57:54Z] push: tolerating runtime dirty files (not blocking): ['runs/T190/runtime.log']
+[2026-06-16T12:57:54Z] push: pushing branch=ticket/T190-t190-fix-supervisor-runtime-base-resolution-for-pr
+[2026-06-16T12:57:56Z] push: done branch=ticket/T190-t190-fix-supervisor-runtime-base-resolution-for-pr
