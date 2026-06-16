@@ -74,8 +74,16 @@ def create_app(
     _runtime_base_root_env = os.environ.get("RUNTIME_BASE_ROOT")
     if _runtime_base_root_env:
         _runtime_base_root: Path = Path(_runtime_base_root_env).expanduser().resolve()
+        if _runtime_base_root == Path("/"):
+            raise RuntimeError(
+                "RUNTIME_BASE_ROOT resolves to filesystem root '/' — check environment configuration"
+            )
     elif _runtime_root is not None:
         _runtime_base_root = _runtime_root.parent
+        if _runtime_base_root == Path("/"):
+            raise RuntimeError(
+                "AI_DEV_FACTORY_RUNTIME_ROOT resolves to filesystem root '/' — check environment configuration"
+            )
     else:
         _runtime_base_root = Path.home() / "runtime"
     app.state.runtime_base_root = _runtime_base_root

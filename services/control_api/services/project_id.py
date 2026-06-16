@@ -62,6 +62,8 @@ def assert_contained(runtime_root: Path, project_id: str) -> Path:
         raise ValueError(f"invalid runtime_base_root: {runtime_root!r}")
     validate_project_id(project_id)
     base = runtime_root.resolve()
+    if base == Path("/"):
+        raise ValueError("invalid runtime_base_root: '/' (filesystem root)")
     candidate = (base / project_id).resolve()
 
     if not str(candidate).startswith(str(base) + "/") and candidate != base:
