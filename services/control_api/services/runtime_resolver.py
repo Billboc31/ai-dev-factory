@@ -91,14 +91,14 @@ def resolve_logs_dir(
     return project_root / "logs"
 
 
-def resolve_project_runtime_root(project_id: str, runtime_root: Path) -> Path:
+def resolve_project_runtime_root(project_id: str, runtime_base_root: Path) -> Path:
     """Return the per-project runtime root, validated for path containment.
 
     Delegates to ``assert_contained`` so callers get the same safety guarantee as
     the bootstrap service.
     """
     from .project_id import assert_contained
-    return assert_contained(runtime_root, project_id)
+    return assert_contained(runtime_base_root, project_id)
 
 
 def get_sandbox_root() -> Path:

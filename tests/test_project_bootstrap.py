@@ -33,6 +33,7 @@ def _mock_bootstrap_response(project_id: str, project_root: str, runtime_base_ro
         "logs_dir": f"{base}/logs",
         "state_dir": f"{base}/state",
         "worktrees_dir": f"{base}/worktrees",
+        "clones_dir": f"{base}/clones",
     }
 
 
@@ -62,6 +63,7 @@ def test_bootstrap_returns_paths_from_supervisor(tmp_path):
     assert result.logs_dir == f"{expected_base}/logs"
     assert result.state_dir == f"{expected_base}/state"
     assert result.worktrees_dir == f"{expected_base}/worktrees"
+    assert result.clones_dir == f"{expected_base}/clones"
 
 
 def test_bootstrap_runtime_dirs_are_under_project_runtime_root(tmp_path):

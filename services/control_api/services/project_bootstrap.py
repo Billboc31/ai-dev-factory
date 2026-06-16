@@ -22,6 +22,7 @@ class BootstrapResult:
     logs_dir: str
     state_dir: str
     worktrees_dir: str
+    clones_dir: str = ""
 
 
 def _supervisor_url() -> str:
@@ -54,7 +55,7 @@ def _call_supervisor(
 def bootstrap(
     project_root: str | Path,
     project_id: str,
-    runtime_root: Path,
+    runtime_base_root: Path,
     registry,
 ) -> BootstrapResult:
     """Bootstrap project_root as an isolated ai-dev-factory project via supervisor.
@@ -65,12 +66,12 @@ def bootstrap(
     from .project_id import assert_contained, validate_project_id
 
     validate_project_id(project_id)
-    assert_contained(runtime_root, project_id)
+    assert_contained(runtime_base_root, project_id)
 
     data, err = _call_supervisor("POST", "/projects/bootstrap", {
         "project_root": str(project_root),
         "project_id": project_id,
-        "runtime_root": str(runtime_root),
+        "runtime_root": str(runtime_base_root),
     })
 
     if err:
@@ -111,20 +112,21 @@ def bootstrap(
         logs_dir=data["logs_dir"],
         state_dir=data["state_dir"],
         worktrees_dir=data["worktrees_dir"],
+        clones_dir=data.get("clones_dir", ""),
     )
 
 
 def auto_bootstrap(
     project_root: Path,
     project_id: str,
-    runtime_root: Path | None,
+    runtime_base_root: Path | None,
     registry,
 ) -> None:
     """Idempotent startup registration for the current AI Dev Factory repo.
 
     Unlike bootstrap(), this function:
     - Never raises (logs warnings instead).
-    - Accepts runtime_root=None to skip bootstrap and just register.
+    - Accepts runtime_base_root=None to skip bootstrap and just register.
     - Uses ensure_registered (idempotent) instead of register.
     """
     from .project_id import validate_project_id
@@ -135,11 +137,11 @@ def auto_bootstrap(
         logger.warning("auto_bootstrap: invalid project_id %r — skipping", project_id)
         return
 
-    if runtime_root is not None:
+    if runtime_base_root is not None:
         data, err = _call_supervisor("POST", "/projects/bootstrap", {
             "project_root": str(project_root),
             "project_id": project_id,
-            "runtime_root": str(runtime_root),
+            "runtime_root": str(runtime_base_root),
         })
 
         if err:

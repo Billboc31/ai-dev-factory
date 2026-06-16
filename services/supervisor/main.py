@@ -1627,6 +1627,7 @@ def bootstrap_project_host(body: ProjectBootstrapHostRequest):
         "logs_dir": str(logs_dir),
         "state_dir": str(state_dir),
         "worktrees_dir": str(worktrees_dir),
+        "clones_dir": str(clones_dir),
     }
 
 
