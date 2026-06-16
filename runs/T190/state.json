@@ -1,7 +1,7 @@
 {
   "ticket_id": "T190",
-  "state": "TEST_COMPLETE",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T190-t190-fix-supervisor-runtime-base-resolution-for-pr",
   "issue_number": 230,
-  "updated_at": "2026-06-16T14:45:00Z"
+  "updated_at": "2026-06-16T12:44:24Z"
 }
