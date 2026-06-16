@@ -141,3 +141,20 @@ def test_assert_contained_different_ids_produce_different_paths(tmp_path):
     assert p1 != p2
     assert str(p1).startswith(str(tmp_path))
     assert str(p2).startswith(str(tmp_path))
+
+
+# ── assert_contained — invalid base root ──────────────────────────────────────
+
+def test_assert_contained_raises_on_none_root():
+    with pytest.raises(ValueError, match="not configured"):
+        assert_contained(None, "test-ai-dev")
+
+
+def test_assert_contained_raises_on_empty_root():
+    with pytest.raises(ValueError, match="invalid runtime_base_root"):
+        assert_contained(Path(""), "test-ai-dev")
+
+
+def test_assert_contained_raises_on_dot_root():
+    with pytest.raises(ValueError, match="invalid runtime_base_root"):
+        assert_contained(Path("."), "test-ai-dev")
