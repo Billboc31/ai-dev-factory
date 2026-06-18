@@ -117,12 +117,17 @@ def _fetch_ai_ready_issues(repo: str | None) -> list[dict]:
         return []
 
 
-def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path | None = None) -> BoardResponse:
-    runs_dir = resolve_runs_dir(project_root)
-    state_dir = resolve_state_dir(project_root)
+def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path | None = None, project_runtime_root: Path | None = None) -> BoardResponse:
+    runs_dir = resolve_runs_dir(project_root, project_runtime_root=project_runtime_root)
+    state_dir = resolve_state_dir(project_root, project_runtime_root=project_runtime_root)
     columns: dict[str, list[BoardItem]] = {col_id: [] for col_id, _ in _COLUMN_ORDER}
 
-    rdb, db_path, degraded = _try_load_runtime_db(project_root)
+    # Skip the global SQLite DB when a specific project runtime root is selected —
+    # the DB belongs to ai-dev-factory, not the managed project.
+    if project_runtime_root is not None:
+        rdb, db_path, degraded = None, None, False
+    else:
+        rdb, db_path, degraded = _try_load_runtime_db(project_root)
 
     if rdb and db_path:
         try:
