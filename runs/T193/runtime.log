@@ -21,3 +21,20 @@
 [2026-06-18T20:16:06Z] push: tolerating runtime dirty files (not blocking): ['runs/T193/runtime.log']
 [2026-06-18T20:16:06Z] push: pushing branch=ticket/T193-t193-make-ticket-boards-runs-logs-and-daemon-lifec
 [2026-06-18T20:16:08Z] push: done branch=ticket/T193-t193-make-ticket-boards-runs-logs-and-daemon-lifec
+[2026-06-18T20:24:16Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-06-18T20:24:16Z] auto-run: running step=planner
+[2026-06-18T20:24:16Z] auto-run: fix context: previous_output=runs/T193/plan.md
+[2026-06-18T20:24:16Z] auto-run: fix context: review=runs/T193/reviews/plan-review-daemon-supervisor-fix-required.md
+[2026-06-18T20:24:16Z] auto-run: fix context: fix_instructions=runs/T193/fixes/plan-fix-daemon-supervisor-architecture.md
+[2026-06-18T20:24:16Z] auto-run: fix context: context_file=runs/T193/fixes/context-20260618T202416Z.md
+[2026-06-18T20:24:16Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-18T20:24:16Z] prompt: generic fallback — injecting runs/T193/ticket.md
+[2026-06-18T20:24:16Z] compose: global-context=docs/ai/global-context.md
+[2026-06-18T20:24:16Z] compose: role=ai/roles/planner.md
+[2026-06-18T20:24:16Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-18T20:24:16Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-18T20:24:16Z] compose: skill=ai/skills/documentation.md
+[2026-06-18T20:24:16Z] compose: task (canonical prompt)
+[2026-06-18T20:24:16Z] compose: extra-context=runs/T193/fixes/context-20260618T202416Z.md
+[2026-06-18T20:24:16Z] snapshot: runtime-prompt=runs/T193/prompts/planner-attempt-2.md
+[2026-06-18T20:29:36Z] auto-run: step=planner done rc=0
