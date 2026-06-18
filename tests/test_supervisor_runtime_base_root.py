@@ -13,15 +13,20 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "services" / "super
 from services.supervisor.main import _runtime_base_root
 
 
-@pytest.mark.parametrize("env_key,env_val", [
-    ("RUNTIME_BASE_ROOT", "/"),
-    ("AI_DEV_FACTORY_RUNTIME_ROOT", "/"),
-])
-def test_runtime_base_root_raises_on_filesystem_root(env_key, env_val, monkeypatch):
-    monkeypatch.delenv("RUNTIME_BASE_ROOT", raising=False)
+def test_runtime_base_root_raises_on_explicit_filesystem_root(monkeypatch):
+    """Explicit RUNTIME_BASE_ROOT=/ is rejected with a 'filesystem root' error."""
     monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
-    monkeypatch.setenv(env_key, env_val)
+    monkeypatch.setenv("RUNTIME_BASE_ROOT", "/")
     with pytest.raises(RuntimeError, match="filesystem root"):
+        _runtime_base_root()
+
+
+def test_runtime_base_root_slash_runtime_raises_clear_config_error(monkeypatch):
+    """AI_DEV_FACTORY_RUNTIME_ROOT=/runtime (parent '/') raises a config error,
+    not a 'filesystem root' rejection — RUNTIME_BASE_ROOT must be set explicitly."""
+    monkeypatch.delenv("RUNTIME_BASE_ROOT", raising=False)
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", "/runtime")
+    with pytest.raises(RuntimeError, match="RUNTIME_BASE_ROOT is not configured"):
         _runtime_base_root()
 
 

@@ -71,21 +71,23 @@ def create_app(
     _runtime_root: Path | None = Path(_runtime_root_env).expanduser().resolve() if _runtime_root_env else None
     app.state.runtime_root = _runtime_root
 
+    # RUNTIME_BASE_ROOT is the explicit parent for multi-project runtimes
+    # ({base}/{project_id}). It is the ONLY source for a multi-project base.
+    # We never derive it from AI_DEV_FACTORY_RUNTIME_ROOT.parent because that
+    # breaks valid single-project setups such as AI_DEV_FACTORY_RUNTIME_ROOT=/runtime
+    # (its parent is '/'). When RUNTIME_BASE_ROOT is absent the API starts
+    # normally with runtime_base_root=None; multi-project operations that
+    # actually need a base raise a clear error at import/bootstrap time.
     _runtime_base_root_env = os.environ.get("RUNTIME_BASE_ROOT")
+    _runtime_base_root: Path | None
     if _runtime_base_root_env:
-        _runtime_base_root: Path = Path(_runtime_base_root_env).expanduser().resolve()
+        _runtime_base_root = Path(_runtime_base_root_env).expanduser().resolve()
         if _runtime_base_root == Path("/"):
             raise RuntimeError(
                 "RUNTIME_BASE_ROOT resolves to filesystem root '/' — check environment configuration"
             )
-    elif _runtime_root is not None:
-        _runtime_base_root = _runtime_root.parent
-        if _runtime_base_root == Path("/"):
-            raise RuntimeError(
-                "AI_DEV_FACTORY_RUNTIME_ROOT resolves to filesystem root '/' — check environment configuration"
-            )
     else:
-        _runtime_base_root = Path.home() / "runtime"
+        _runtime_base_root = None
     app.state.runtime_base_root = _runtime_base_root
 
     _pr = projects_root or (
@@ -112,7 +114,15 @@ def create_app(
     _git_root = resolve_git_root(_root)
     if (_git_root / ".git").exists():
         _self_id = normalize_project_id(_git_root.name)
-        auto_bootstrap(_git_root, _self_id, _runtime_base_root, app.state.project_registry)
+        # When no multi-project base is configured, the current project keeps
+        # AI_DEV_FACTORY_RUNTIME_ROOT as its own runtime root directly.
+        auto_bootstrap(
+            _git_root,
+            _self_id,
+            _runtime_base_root,
+            app.state.project_registry,
+            self_runtime_root=_runtime_root,
+        )
 
     app.add_middleware(
         CORSMiddleware,
