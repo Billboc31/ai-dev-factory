@@ -16,3 +16,5 @@
 [2026-05-19T23:40:30Z] auto-run: auto-push triggered
 [2026-05-19T23:40:30Z] push: refused — DIRTY_RUNTIME_CHECKPOINT — uncommitted changes present before push
 [2026-05-19T23:40:30Z] auto-run: auto-push failed rc=2
+[2026-06-18T21:13:28Z] auto-run start: state=TEST_COMPLETE
+[2026-06-18T21:13:28Z] auto-run: workflow complete (TEST_COMPLETE)
