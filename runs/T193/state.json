@@ -1,7 +1,7 @@
 {
   "ticket_id": "T193",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_FIX_REQUIRED",
   "branch": "ticket/T193-t193-make-ticket-boards-runs-logs-and-daemon-lifec",
   "issue_number": 237,
-  "updated_at": "2026-06-18T20:16:05Z"
+  "updated_at": "2026-06-18T20:21:46Z"
 }
