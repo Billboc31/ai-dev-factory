@@ -71,10 +71,18 @@ def _runtime_root() -> Path:
 def _runtime_base_root() -> Path:
     """Parent directory containing one runtime root per managed project.
 
+    Used only by multi-project operations (bootstrap, per-project daemons), so
+    it is safe to raise here — this is never reached during plain startup.
+
     Resolution order:
-    1. RUNTIME_BASE_ROOT env var (explicit config)
-    2. Parent of AI_DEV_FACTORY_RUNTIME_ROOT (derived from existing config)
-    3. ~/runtime (safe local fallback — never /runtime)
+    1. RUNTIME_BASE_ROOT env var (explicit config) — rejected only if it
+       resolves to '/'.
+    2. Parent of AI_DEV_FACTORY_RUNTIME_ROOT, but only when that parent is not
+       '/'. We never accept '/' derived from e.g. AI_DEV_FACTORY_RUNTIME_ROOT=/runtime.
+    3. ~/runtime (safe local fallback) when no env is configured at all.
+
+    Raises a clear configuration error when a base is required but cannot be
+    resolved (e.g. AI_DEV_FACTORY_RUNTIME_ROOT=/runtime with no RUNTIME_BASE_ROOT).
     """
     base = os.environ.get("RUNTIME_BASE_ROOT")
     if base:
@@ -86,12 +94,14 @@ def _runtime_base_root() -> Path:
         return result
     factory_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
     if factory_root:
-        result = Path(factory_root).parent
-        if result == Path("/"):
-            raise RuntimeError(
-                "AI_DEV_FACTORY_RUNTIME_ROOT resolves to filesystem root '/' — check environment configuration"
-            )
-        return result
+        parent = Path(factory_root).expanduser().resolve().parent
+        if parent != Path("/"):
+            return parent
+        raise RuntimeError(
+            "RUNTIME_BASE_ROOT is not configured and cannot be derived from "
+            f"AI_DEV_FACTORY_RUNTIME_ROOT={factory_root!r} (parent is '/'). "
+            "Set RUNTIME_BASE_ROOT explicitly for multi-project operations."
+        )
     return Path.home() / "runtime"
 
 

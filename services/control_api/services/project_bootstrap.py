@@ -121,6 +121,7 @@ def auto_bootstrap(
     project_id: str,
     runtime_base_root: Path | None,
     registry,
+    self_runtime_root: Path | None = None,
 ) -> None:
     """Idempotent startup registration for the current AI Dev Factory repo.
 
@@ -128,6 +129,8 @@ def auto_bootstrap(
     - Never raises (logs warnings instead).
     - Accepts runtime_base_root=None to skip bootstrap and just register.
     - Uses ensure_registered (idempotent) instead of register.
+    - When no multi-project base is configured, registers the project with
+      *self_runtime_root* (AI_DEV_FACTORY_RUNTIME_ROOT) as its own runtime root.
     """
     from .project_id import validate_project_id
 
@@ -166,4 +169,8 @@ def auto_bootstrap(
             )
             return
 
-    registry.ensure_registered(project_id, Path(str(project_root)))
+    registry.ensure_registered(
+        project_id,
+        Path(str(project_root)),
+        project_runtime_root=self_runtime_root,
+    )

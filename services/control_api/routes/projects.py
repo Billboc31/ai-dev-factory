@@ -87,7 +87,7 @@ def list_projects(request: Request) -> list[ProjectInfo]:
             if persisted is not None:
                 project_runtime_root_path = persisted
             else:
-                project_runtime_root_path = runtime_root / p.name
+                project_runtime_root_path = runtime_base_root / p.name
             project_root_path = Path(p.root)
             stack = _read_stack(project_root_path)
             github_repo = _read_github_repo(project_root_path)
