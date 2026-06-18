@@ -1,11 +1,5 @@
-T193 is complete. All 7 plan changes were implemented and merged via PR #238:
+All clean. Here's a summary of what was done:
 
-1. **`runtime_resolver.py`** — fixed `resolve_state_dir` fallback returning `state/` not `runs/`
-2. **`artifact_reader.py`** — threaded `project_runtime_root` through all public functions
-3. **`board_service.py`** — added `project_runtime_root` param; skips SQLite for non-factory projects
-4. **`daemon_manager.py`** — routes lifecycle calls to `/projects/{id}/daemon/*` endpoints when `project_id` is set
-5. **`routes/daemon.py`** — injects `project_id` + `project_runtime_root` into all project-scoped handlers
-6. **`routes/tickets.py`** — forwards `project_runtime_root` to all `artifact_reader` calls
-7. **`supervisor/main.py`** — injects `AI_DEV_FACTORY_RUNTIME_ROOT` into per-project daemon subprocess env
+**`services/control_api/routes/tickets.py`** — Added `project_runtime_root=project_runtime_root` to all 14 `_get_or_404` calls in the project-scoped action routes (`project_approve_plan`, `project_request_plan_fix`, `project_approve_implementation`, `project_request_implementation_fix`, `project_run_next`, `project_commit`, `project_push`, `project_checkpoint`, `project_archive`, `project_mark_conflict_failed`, `project_resolve_conflicts`, `project_approve_conflict_resolution`, `project_reject_conflict_resolution`, `project_get_audit_log`). Without this, tickets that exist only under `project_runtime_root/runs` (not in a worktree) would return false 404s for all workflow actions.
 
-8 new tests all pass. The 21 pre-existing failures in `test_control_api_artifacts.py` / `test_ticket_timeline.py` are unrelated to T193 (confirmed by running them on the original codebase).
+**`tests/test_project_scoped_isolation.py`** — Added test 9: `test_project_action_route_finds_ticket_via_project_runtime_root`, which creates a ticket only under `project_runtime_root/runs` (not under `project_root/runs`) and verifies that `POST /projects/my-project/tickets/T001/approve-plan` returns 200, not 404.

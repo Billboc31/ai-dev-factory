@@ -1,6 +1,6 @@
 """Tests for T193 — project-scoped isolation of tickets, runs, logs and daemon.
 
-Eight test cases covering:
+Nine test cases covering:
 1. state_dir fix: resolve_state_dir fallback returns state/ not runs/
 2. artifact reader isolation: list_tickets reads from project_runtime_root
 3. board isolation: get_board reads from project_runtime_root
@@ -9,6 +9,7 @@ Eight test cases covering:
 6. supervisor routing for daemon stop
 7. supervisor routing for daemon status
 8. Popen env injection in supervisor project_daemon_start
+9. Regression: project action routes pass project_runtime_root to _get_or_404
 """
 
 from __future__ import annotations
@@ -236,3 +237,53 @@ def test_supervisor_project_daemon_start_injects_runtime_root_env(tmp_path, monk
     assert captured_env is not None
     expected_runtime_root = str(tmp_path / "runtime" / "my-project")
     assert captured_env.get("AI_DEV_FACTORY_RUNTIME_ROOT") == expected_runtime_root
+
+
+# ── 9. action routes pass project_runtime_root to _get_or_404 ─────────────────
+
+def test_project_action_route_finds_ticket_via_project_runtime_root(tmp_path, monkeypatch):
+    """Regression: project action routes must pass project_runtime_root to _get_or_404.
+
+    A ticket whose state.json exists only under project_runtime_root/runs must
+    not produce a 404 when a project-scoped action route (approve-plan) is called.
+    """
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    monkeypatch.delenv("AI_DEV_FACTORY_PROJECTS_ROOT", raising=False)
+
+    from fastapi.testclient import TestClient
+    from services.control_api.main import create_app
+    from services.control_api.models.schemas import ActionResult
+    import services.control_api.services.subprocess_runner as sr
+
+    factory_root = tmp_path / "factory"
+    factory_root.mkdir()
+    (factory_root / ".git").mkdir()
+
+    project_root = tmp_path / "my-project"
+    project_root.mkdir()
+    (project_root / ".git").mkdir()
+    (project_root / "runs").mkdir()  # empty — T001 is not here
+
+    project_runtime_root = tmp_path / "runtime" / "my-project"
+    run_dir = project_runtime_root / "runs" / "T001"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(
+        json.dumps({"ticket_id": "T001", "state": "PLAN_APPROVED", "branch": "ticket/T001-work"}),
+        encoding="utf-8",
+    )
+
+    app = create_app(project_root=factory_root)
+    app.state.project_registry.ensure_registered(
+        "my-project", project_root, project_runtime_root=project_runtime_root
+    )
+
+    ok_result = ActionResult(ok=True, message="approved")
+    monkeypatch.setattr(sr, "approve_plan", lambda *a, **kw: ok_result)
+
+    client = TestClient(app)
+    r = client.post("/projects/my-project/tickets/T001/approve-plan")
+
+    assert r.status_code == 200, (
+        f"Expected 200 but got {r.status_code}: {r.text}. "
+        "Action route is missing project_runtime_root in _get_or_404."
+    )
