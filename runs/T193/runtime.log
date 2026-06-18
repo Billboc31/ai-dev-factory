@@ -10,3 +10,14 @@
 [2026-06-18T20:09:12Z] compose: task (canonical prompt)
 [2026-06-18T20:09:12Z] snapshot: runtime-prompt=runs/T193/prompts/planner-attempt-1.md
 [2026-06-18T20:16:03Z] auto-run: step=planner done rc=0
+[2026-06-18T20:16:05Z] planner checkpoint: committed
+[2026-06-18T20:16:05Z] planner checkpoint: pushed
+[2026-06-18T20:16:05Z] planner validation success
+[2026-06-18T20:16:05Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-18T20:16:05Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-18T20:16:06Z] commit-checkpoint: unstaged runtime garbage: ['runs/T193/runtime.log']
+[2026-06-18T20:16:06Z] commit-checkpoint: sha=4af3b773 files=2 title='docs(T193/workflow): planner — update 2 file(s)'
+[2026-06-18T20:16:06Z] auto-run: auto-push triggered
+[2026-06-18T20:16:06Z] push: tolerating runtime dirty files (not blocking): ['runs/T193/runtime.log']
+[2026-06-18T20:16:06Z] push: pushing branch=ticket/T193-t193-make-ticket-boards-runs-logs-and-daemon-lifec
+[2026-06-18T20:16:08Z] push: done branch=ticket/T193-t193-make-ticket-boards-runs-logs-and-daemon-lifec
