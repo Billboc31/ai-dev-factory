@@ -1,15 +1,24 @@
 The plan is written at `runs/T193/plan.md`. Here is what it covers:
 
-**Architecture decision (explicit):** Supervisor-backed project daemons. The Control API never spawns daemon processes locally — all project daemon lifecycle calls go through the supervisor's `/projects/{project_id}/daemon/*` endpoints with `project_id`, `project_root`, `project_runtime_root`, `exec_cmd`, and `restart_policy` in the body.
+---
 
-**Seven files in scope:**
+## Objective
+Thread `project_runtime_root` through all read paths and route project-daemon lifecycle calls to the supervisor's per-project endpoints.
 
-1. `runtime_resolver.py` — add `project_runtime_root` param to all resolve functions; fix `resolve_state_dir` bug
-2. `daemon_manager.py` — thread `project_id` + `project_runtime_root` through all functions; route to supervisor project endpoint when `project_id` is set
-3. `routes/daemon.py` — forward both params from dependency injection into daemon_manager calls
-4. `artifact_reader.py` — add `project_runtime_root` to `_runs_root()` and all public functions
-5. `board_service.py` — pass `project_runtime_root` into resolver calls; no global fallback
-6. `routes/tickets.py` — forward `project_runtime_root` from DI into artifact_reader and board_service
-7. `supervisor/main.py` — verify/fix `AI_DEV_FACTORY_RUNTIME_ROOT` env injection and per-project PID/log isolation
+## Seven concrete changes
 
-**Seven concrete test cases** covering board isolation, artifact reader isolation, daemon manager supervisor routing, global endpoint preservation, supervisor env injection, PID file isolation, and route propagation.
+| # | File | Change |
+|---|------|--------|
+| 1 | `runtime_resolver.py` | Fix `resolve_state_dir` fallback: `/ "runs"` → `/ "state"` |
+| 2 | `artifact_reader.py` | Add `project_runtime_root` param to `_runs_root` and all public functions |
+| 3 | `board_service.py` | Thread `project_runtime_root` through `get_board`; skip global SQLite DB when project is selected |
+| 4 | `daemon_manager.py` | Add `project_id` + `project_runtime_root` params; route to `/projects/{id}/daemon/*` when `project_id` is set |
+| 5 | `routes/daemon.py` | Inject `project_id` and `project_runtime_root` into all project-scoped daemon calls |
+| 6 | `routes/tickets.py` | Forward `project_runtime_root` from DI into `artifact_reader` call sites |
+| 7 | `supervisor/main.py` | Inject `AI_DEV_FACTORY_RUNTIME_ROOT={project_runtime_root}` into the Popen env for `project_daemon_start` |
+
+## Eight test cases
+Covering: state_dir fix, artifact reader isolation, board isolation, SQLite skip, supervisor routing for start/stop/status, backward compatibility for global routes, and Popen env injection.
+
+## Key architecture decision (explicit)
+Supervisor-backed project daemons. The Control API never starts project daemons locally — all lifecycle calls go to supervisor `/projects/{project_id}/daemon/*`. The supervisor already has these endpoints; it just needs to inject the env var on spawn.
