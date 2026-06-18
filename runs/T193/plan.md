@@ -1,19 +1,15 @@
-The plan is written. Here's a summary of what it covers:
+The plan is written at `runs/T193/plan.md`. Here is what it covers:
 
-**Architecture decision:** supervisor-backed project daemons (Option A from the review). The plan explicitly forbids the control API from calling global supervisor endpoints for project-scoped routes.
+**Architecture decision (explicit):** Supervisor-backed project daemons. The Control API never spawns daemon processes locally — all project daemon lifecycle calls go through the supervisor's `/projects/{project_id}/daemon/*` endpoints with `project_id`, `project_root`, `project_runtime_root`, `exec_cmd`, and `restart_policy` in the body.
 
-**Root causes identified and fixed:**
+**Seven files in scope:**
 
-1. **`daemon_manager.py`** — calls `/daemon/start`, `/daemon/stop`, `/daemon/status` (global) for all projects. Fixed to call `/projects/{project_id}/daemon/*` when `project_id` is provided.
+1. `runtime_resolver.py` — add `project_runtime_root` param to all resolve functions; fix `resolve_state_dir` bug
+2. `daemon_manager.py` — thread `project_id` + `project_runtime_root` through all functions; route to supervisor project endpoint when `project_id` is set
+3. `routes/daemon.py` — forward both params from dependency injection into daemon_manager calls
+4. `artifact_reader.py` — add `project_runtime_root` to `_runs_root()` and all public functions
+5. `board_service.py` — pass `project_runtime_root` into resolver calls; no global fallback
+6. `routes/tickets.py` — forward `project_runtime_root` from DI into artifact_reader and board_service
+7. `supervisor/main.py` — verify/fix `AI_DEV_FACTORY_RUNTIME_ROOT` env injection and per-project PID/log isolation
 
-2. **`supervisor/main.py`** — `project_daemon_start` does not set `AI_DEV_FACTORY_RUNTIME_ROOT` in the spawned daemon env. Fixed to inject it from `body.project_runtime_root` (passed by control API) or computed from env.
-
-3. **`routes/daemon.py`** — project-scoped handlers don't forward `project_id` or `project_runtime_root` to `daemon_manager`. Fixed.
-
-4. **`board_service.py`** — ignores `project_runtime_root`, reads global DB. Fixed with no-fallback rule.
-
-5. **`artifact_reader.py`** — `list_tickets`/`get_ticket_logs` use global runs dir. Fixed with explicit `runs_dir` param.
-
-6. **`routes/tickets.py`** — project-scoped endpoints don't propagate `project_runtime_root` to artifact reader. Fixed.
-
-**7 concrete test cases** covering board isolation, daemon manager supervisor call routing, and supervisor subprocess env injection.
+**Seven concrete test cases** covering board isolation, artifact reader isolation, daemon manager supervisor routing, global endpoint preservation, supervisor env injection, PID file isolation, and route propagation.
