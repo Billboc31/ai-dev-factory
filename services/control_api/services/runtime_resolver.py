@@ -68,7 +68,7 @@ def resolve_state_dir(
         return Path(runtime_root) / project_id / "state"
     if runtime_root:
         return Path(runtime_root) / "state"
-    return project_root / "runs"
+    return project_root / "state"
 
 
 def resolve_logs_dir(

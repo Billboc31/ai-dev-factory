@@ -53,9 +53,9 @@ def _log_action(request: Request, ticket_id: str, action: str, result: ActionRes
         logger.exception("audit log write failed for %s/%s (non-fatal)", ticket_id, action)
 
 
-def _get_or_404(project_root: Path, ticket_id: str, worktrees_dir: Path | None = None) -> TicketSummary:
+def _get_or_404(project_root: Path, ticket_id: str, worktrees_dir: Path | None = None, project_runtime_root: Path | None = None) -> TicketSummary:
     try:
-        ticket = artifact_reader.get_ticket(project_root, ticket_id, worktrees_dir=worktrees_dir)
+        ticket = artifact_reader.get_ticket(project_root, ticket_id, worktrees_dir=worktrees_dir, project_runtime_root=project_runtime_root)
     except ValueError:
         raise HTTPException(status_code=422, detail=f"invalid ticket_id: {ticket_id!r}")
     if ticket is None:
@@ -396,7 +396,7 @@ def project_list_tickets(
     project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
 ) -> list[TicketSummary]:
     wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
-    return artifact_reader.list_tickets(project_root, worktrees_dir=wt_dir)
+    return artifact_reader.list_tickets(project_root, worktrees_dir=wt_dir, project_runtime_root=project_runtime_root)
 
 
 @project_router.get("/{project_id}/tickets/{ticket_id}", response_model=TicketSummary)
@@ -406,7 +406,7 @@ def project_get_ticket(
     project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
 ) -> TicketSummary:
     wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
-    return _get_or_404(project_root, ticket_id, wt_dir)
+    return _get_or_404(project_root, ticket_id, wt_dir, project_runtime_root=project_runtime_root)
 
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/state")
@@ -416,8 +416,8 @@ def project_get_state(
     project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
 ) -> dict:
     wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
-    _get_or_404(project_root, ticket_id, wt_dir)
-    state = artifact_reader.get_ticket_state(project_root, ticket_id, worktrees_dir=wt_dir)
+    _get_or_404(project_root, ticket_id, wt_dir, project_runtime_root=project_runtime_root)
+    state = artifact_reader.get_ticket_state(project_root, ticket_id, worktrees_dir=wt_dir, project_runtime_root=project_runtime_root)
     if state is None:
         raise HTTPException(status_code=404, detail="state.json not found")
     return state
@@ -430,8 +430,8 @@ def project_get_logs(
     project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
 ) -> str:
     wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
-    _get_or_404(project_root, ticket_id, wt_dir)
-    logs = artifact_reader.get_ticket_logs(project_root, ticket_id, worktrees_dir=wt_dir)
+    _get_or_404(project_root, ticket_id, wt_dir, project_runtime_root=project_runtime_root)
+    logs = artifact_reader.get_ticket_logs(project_root, ticket_id, worktrees_dir=wt_dir, project_runtime_root=project_runtime_root)
     if logs is None:
         raise HTTPException(status_code=404, detail="no logs found")
     return logs
@@ -444,8 +444,8 @@ def project_get_artifacts(
     project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
 ) -> dict:
     wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
-    _get_or_404(project_root, ticket_id, wt_dir)
-    return artifact_reader.get_ticket_artifacts(project_root, ticket_id, worktrees_dir=wt_dir)
+    _get_or_404(project_root, ticket_id, wt_dir, project_runtime_root=project_runtime_root)
+    return artifact_reader.get_ticket_artifacts(project_root, ticket_id, worktrees_dir=wt_dir, project_runtime_root=project_runtime_root)
 
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/plan", response_class=PlainTextResponse)
@@ -455,8 +455,8 @@ def project_get_plan(
     project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
 ) -> str:
     wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
-    _get_or_404(project_root, ticket_id, wt_dir)
-    content = artifact_reader.get_ticket_plan(project_root, ticket_id, worktrees_dir=wt_dir)
+    _get_or_404(project_root, ticket_id, wt_dir, project_runtime_root=project_runtime_root)
+    content = artifact_reader.get_ticket_plan(project_root, ticket_id, worktrees_dir=wt_dir, project_runtime_root=project_runtime_root)
     if content is None:
         raise HTTPException(status_code=404, detail="plan not found")
     return content
@@ -469,8 +469,8 @@ def project_get_review(
     project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
 ) -> str:
     wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
-    _get_or_404(project_root, ticket_id, wt_dir)
-    content = artifact_reader.get_ticket_review(project_root, ticket_id, worktrees_dir=wt_dir)
+    _get_or_404(project_root, ticket_id, wt_dir, project_runtime_root=project_runtime_root)
+    content = artifact_reader.get_ticket_review(project_root, ticket_id, worktrees_dir=wt_dir, project_runtime_root=project_runtime_root)
     if content is None:
         raise HTTPException(status_code=404, detail="review not found")
     return content
@@ -483,8 +483,8 @@ def project_get_tests(
     project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
 ) -> str:
     wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
-    _get_or_404(project_root, ticket_id, wt_dir)
-    content = artifact_reader.get_ticket_tests(project_root, ticket_id, worktrees_dir=wt_dir)
+    _get_or_404(project_root, ticket_id, wt_dir, project_runtime_root=project_runtime_root)
+    content = artifact_reader.get_ticket_tests(project_root, ticket_id, worktrees_dir=wt_dir, project_runtime_root=project_runtime_root)
     if content is None:
         raise HTTPException(status_code=404, detail="test report not found")
     return content
@@ -497,8 +497,8 @@ def project_get_timeline(
     project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
 ) -> TimelineResponse:
     wt_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
-    _get_or_404(project_root, ticket_id, wt_dir)
-    timeline = artifact_reader.get_ticket_timeline(project_root, ticket_id, worktrees_dir=wt_dir)
+    _get_or_404(project_root, ticket_id, wt_dir, project_runtime_root=project_runtime_root)
+    timeline = artifact_reader.get_ticket_timeline(project_root, ticket_id, worktrees_dir=wt_dir, project_runtime_root=project_runtime_root)
     if timeline is None:
         raise HTTPException(status_code=404, detail="timeline not available")
     return timeline

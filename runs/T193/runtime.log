@@ -1,0 +1,98 @@
+[2026-06-18T20:09:12Z] auto-run start: state=INIT
+[2026-06-18T20:09:12Z] auto-run: running step=planner
+[2026-06-18T20:09:12Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-18T20:09:12Z] prompt: generic fallback — injecting runs/T193/ticket.md
+[2026-06-18T20:09:12Z] compose: global-context=docs/ai/global-context.md
+[2026-06-18T20:09:12Z] compose: role=ai/roles/planner.md
+[2026-06-18T20:09:12Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-18T20:09:12Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-18T20:09:12Z] compose: skill=ai/skills/documentation.md
+[2026-06-18T20:09:12Z] compose: task (canonical prompt)
+[2026-06-18T20:09:12Z] snapshot: runtime-prompt=runs/T193/prompts/planner-attempt-1.md
+[2026-06-18T20:16:03Z] auto-run: step=planner done rc=0
+[2026-06-18T20:16:05Z] planner checkpoint: committed
+[2026-06-18T20:16:05Z] planner checkpoint: pushed
+[2026-06-18T20:16:05Z] planner validation success
+[2026-06-18T20:16:05Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-18T20:16:05Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-18T20:16:06Z] commit-checkpoint: unstaged runtime garbage: ['runs/T193/runtime.log']
+[2026-06-18T20:16:06Z] commit-checkpoint: sha=4af3b773 files=2 title='docs(T193/workflow): planner — update 2 file(s)'
+[2026-06-18T20:16:06Z] auto-run: auto-push triggered
+[2026-06-18T20:16:06Z] push: tolerating runtime dirty files (not blocking): ['runs/T193/runtime.log']
+[2026-06-18T20:16:06Z] push: pushing branch=ticket/T193-t193-make-ticket-boards-runs-logs-and-daemon-lifec
+[2026-06-18T20:16:08Z] push: done branch=ticket/T193-t193-make-ticket-boards-runs-logs-and-daemon-lifec
+[2026-06-18T20:24:16Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-06-18T20:24:16Z] auto-run: running step=planner
+[2026-06-18T20:24:16Z] auto-run: fix context: previous_output=runs/T193/plan.md
+[2026-06-18T20:24:16Z] auto-run: fix context: review=runs/T193/reviews/plan-review-daemon-supervisor-fix-required.md
+[2026-06-18T20:24:16Z] auto-run: fix context: fix_instructions=runs/T193/fixes/plan-fix-daemon-supervisor-architecture.md
+[2026-06-18T20:24:16Z] auto-run: fix context: context_file=runs/T193/fixes/context-20260618T202416Z.md
+[2026-06-18T20:24:16Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-18T20:24:16Z] prompt: generic fallback — injecting runs/T193/ticket.md
+[2026-06-18T20:24:16Z] compose: global-context=docs/ai/global-context.md
+[2026-06-18T20:24:16Z] compose: role=ai/roles/planner.md
+[2026-06-18T20:24:16Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-18T20:24:16Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-18T20:24:16Z] compose: skill=ai/skills/documentation.md
+[2026-06-18T20:24:16Z] compose: task (canonical prompt)
+[2026-06-18T20:24:16Z] compose: extra-context=runs/T193/fixes/context-20260618T202416Z.md
+[2026-06-18T20:24:16Z] snapshot: runtime-prompt=runs/T193/prompts/planner-attempt-2.md
+[2026-06-18T20:29:36Z] auto-run: step=planner done rc=0
+[2026-06-18T20:31:47Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-06-18T20:31:47Z] auto-run: running step=planner
+[2026-06-18T20:31:47Z] auto-run: fix context: previous_output=runs/T193/plan.md
+[2026-06-18T20:31:47Z] auto-run: fix context: review=runs/T193/reviews/plan-review-daemon-supervisor-fix-required.md
+[2026-06-18T20:31:47Z] auto-run: fix context: fix_instructions=runs/T193/fixes/plan-fix-daemon-supervisor-architecture.md
+[2026-06-18T20:31:47Z] auto-run: fix context: context_file=runs/T193/fixes/context-20260618T203147Z.md
+[2026-06-18T20:31:47Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-18T20:31:47Z] prompt: generic fallback — injecting runs/T193/ticket.md
+[2026-06-18T20:31:47Z] compose: global-context=docs/ai/global-context.md
+[2026-06-18T20:31:47Z] compose: role=ai/roles/planner.md
+[2026-06-18T20:31:47Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-18T20:31:47Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-18T20:31:47Z] compose: skill=ai/skills/documentation.md
+[2026-06-18T20:31:47Z] compose: task (canonical prompt)
+[2026-06-18T20:31:47Z] compose: extra-context=runs/T193/fixes/context-20260618T203147Z.md
+[2026-06-18T20:31:47Z] snapshot: runtime-prompt=runs/T193/prompts/planner-attempt-3.md
+[2026-06-18T20:33:47Z] auto-run: step=planner done rc=0
+[2026-06-18T20:36:00Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-06-18T20:36:00Z] auto-run: running step=planner
+[2026-06-18T20:36:00Z] auto-run: fix context: previous_output=runs/T193/plan.md
+[2026-06-18T20:36:00Z] auto-run: fix context: review=runs/T193/reviews/plan-review-daemon-supervisor-fix-required.md
+[2026-06-18T20:36:00Z] auto-run: fix context: fix_instructions=runs/T193/fixes/plan-fix-daemon-supervisor-architecture.md
+[2026-06-18T20:36:00Z] auto-run: fix context: context_file=runs/T193/fixes/context-20260618T203600Z.md
+[2026-06-18T20:36:00Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-18T20:36:00Z] prompt: generic fallback — injecting runs/T193/ticket.md
+[2026-06-18T20:36:00Z] compose: global-context=docs/ai/global-context.md
+[2026-06-18T20:36:00Z] compose: role=ai/roles/planner.md
+[2026-06-18T20:36:00Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-18T20:36:00Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-18T20:36:00Z] compose: skill=ai/skills/documentation.md
+[2026-06-18T20:36:00Z] compose: task (canonical prompt)
+[2026-06-18T20:36:00Z] compose: extra-context=runs/T193/fixes/context-20260618T203600Z.md
+[2026-06-18T20:36:00Z] snapshot: runtime-prompt=runs/T193/prompts/planner-attempt-4.md
+[2026-06-18T20:39:14Z] auto-run: step=planner done rc=0
+[2026-06-18T20:39:16Z] planner checkpoint: committed
+[2026-06-18T20:39:16Z] planner checkpoint: pushed
+[2026-06-18T20:39:16Z] planner validation success
+[2026-06-18T20:39:16Z] auto-run: transition PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED
+[2026-06-18T20:39:16Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-18T20:39:16Z] commit-checkpoint: unstaged runtime garbage: ['runs/T193/runtime.log']
+[2026-06-18T20:39:16Z] commit-checkpoint: sha=01e50c59 files=2 title='docs(T193/workflow): planner — update 2 file(s)'
+[2026-06-18T20:39:16Z] auto-run: auto-push triggered
+[2026-06-18T20:39:16Z] push: tolerating runtime dirty files (not blocking): ['runs/T193/runtime.log']
+[2026-06-18T20:39:16Z] push: pushing branch=ticket/T193-t193-make-ticket-boards-runs-logs-and-daemon-lifec
+[2026-06-18T20:39:18Z] push: done branch=ticket/T193-t193-make-ticket-boards-runs-logs-and-daemon-lifec
+[2026-06-18T20:41:32Z] auto-run start: state=PLAN_APPROVED
+[2026-06-18T20:41:32Z] auto-run: running step=coder
+[2026-06-18T20:41:32Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-06-18T20:41:32Z] prompt: generic fallback — injecting runs/T193/ticket.md
+[2026-06-18T20:41:32Z] compose: global-context=docs/ai/global-context.md
+[2026-06-18T20:41:32Z] compose: role=ai/roles/coder.md
+[2026-06-18T20:41:32Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-18T20:41:32Z] compose: skill=ai/skills/git-discipline.md
+[2026-06-18T20:41:32Z] compose: skill=ai/skills/code-quality.md
+[2026-06-18T20:41:32Z] compose: skill=ai/skills/refactor-safety.md
+[2026-06-18T20:41:32Z] compose: skill=ai/skills/security.md
+[2026-06-18T20:41:32Z] compose: task (canonical prompt)
+[2026-06-18T20:41:32Z] snapshot: runtime-prompt=runs/T193/prompts/coder-attempt-1.md

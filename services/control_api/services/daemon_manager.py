@@ -198,8 +198,11 @@ def _call_supervisor(
         return None, "supervisor_unreachable"
 
 
-def _last_heartbeat(project_root: Path) -> str | None:
-    path = _log_path(project_root)
+def _last_heartbeat(project_root: Path, project_runtime_root: Path | None = None) -> str | None:
+    if project_runtime_root is not None:
+        path = project_runtime_root / "logs" / _LOG_FILENAME
+    else:
+        path = _log_path(project_root)
     if not path.exists():
         return None
     try:
@@ -209,8 +212,8 @@ def _last_heartbeat(project_root: Path) -> str | None:
         return None
 
 
-def _current_ticket(project_root: Path) -> str | None:
-    runs = resolve_runs_dir(project_root)
+def _current_ticket(project_root: Path, project_runtime_root: Path | None = None) -> str | None:
+    runs = resolve_runs_dir(project_root, project_runtime_root=project_runtime_root)
     if not runs.exists():
         return None
     for ticket_dir in sorted(runs.iterdir(), reverse=True):
@@ -228,16 +231,17 @@ def _current_ticket(project_root: Path) -> str | None:
     return None
 
 
-def get_status(project_root: Path) -> DaemonStatus:
+def get_status(project_root: Path, project_id: str | None = None, project_runtime_root: Path | None = None) -> DaemonStatus:
     if _supervisor_url():
-        sup_data, error = _call_supervisor("GET", "/daemon/status")
+        status_path = f"/projects/{project_id}/daemon/status" if project_id else "/daemon/status"
+        sup_data, error = _call_supervisor("GET", status_path)
         if error is None and sup_data:
             return DaemonStatus(
                 running=sup_data.get("running", False),
                 pid=sup_data.get("pid"),
                 started_at=sup_data.get("started_at"),
-                last_heartbeat=_last_heartbeat(project_root),
-                current_ticket=_current_ticket(project_root),
+                last_heartbeat=_last_heartbeat(project_root, project_runtime_root),
+                current_ticket=_current_ticket(project_root, project_runtime_root),
                 last_exit_code=sup_data.get("last_exit_code"),
                 last_exit_time=sup_data.get("last_exit_time"),
                 last_error=sup_data.get("last_error"),
@@ -262,13 +266,16 @@ def get_status(project_root: Path) -> DaemonStatus:
         running=True,
         pid=pid,
         started_at=data.get("started_at"),
-        last_heartbeat=_last_heartbeat(project_root),
-        current_ticket=_current_ticket(project_root),
+        last_heartbeat=_last_heartbeat(project_root, project_runtime_root),
+        current_ticket=_current_ticket(project_root, project_runtime_root),
     )
 
 
-def get_activity(project_root: Path, lines: int = 50) -> list[str]:
-    path = _log_path(project_root)
+def get_activity(project_root: Path, lines: int = 50, project_runtime_root: Path | None = None) -> list[str]:
+    if project_runtime_root is not None:
+        path = project_runtime_root / "logs" / _LOG_FILENAME
+    else:
+        path = _log_path(project_root)
     if not path.exists():
         return []
     try:
@@ -279,7 +286,7 @@ def get_activity(project_root: Path, lines: int = 50) -> list[str]:
         return []
 
 
-def check_environment(project_root: Path) -> tuple[bool, list[str], dict[str, str]]:
+def check_environment(project_root: Path, project_runtime_root: Path | None = None) -> tuple[bool, list[str], dict[str, str]]:
     """Return ``(ok, errors, facts)`` describing the canonical daemon env.
 
     The dashboard daemon must run in the same environment as a host-side
@@ -306,9 +313,9 @@ def check_environment(project_root: Path) -> tuple[bool, list[str], dict[str, st
     facts: dict[str, str] = {
         "project_root": str(project_root),
         "cwd": str(project_root),
-        "runs_dir": str(resolve_runs_dir(project_root)),
-        "worktrees_dir": str(resolve_worktrees_dir(project_root)),
-        "logs_dir": str(resolve_logs_dir(project_root)),
+        "runs_dir": str(resolve_runs_dir(project_root, project_runtime_root=project_runtime_root)),
+        "worktrees_dir": str(resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)),
+        "logs_dir": str(resolve_logs_dir(project_root, project_runtime_root=project_runtime_root)),
         "runtime_root": os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT", "<unset>"),
         "python": sys.executable,
         "gh_path": shutil.which("gh") or "<missing>",
@@ -430,7 +437,7 @@ def _start_via_host_command(project_root: Path, host_cmd: str) -> ActionResult:
         )
 
 
-def start(project_root: Path, exec_cmd: str, restart_policy: str = "no-restart") -> ActionResult:
+def start(project_root: Path, exec_cmd: str, restart_policy: str = "no-restart", project_id: str | None = None, project_runtime_root: Path | None = None) -> ActionResult:
     """Start the daemon — host-side, never inside Docker.
 
     Four paths:
@@ -450,13 +457,14 @@ def start(project_root: Path, exec_cmd: str, restart_policy: str = "no-restart")
     3. **API on host**: existing preflight + Popen flow.
     """
     logger.info("api: daemon start requested")
-    status = get_status(project_root)
+    status = get_status(project_root, project_id=project_id, project_runtime_root=project_runtime_root)
     if status.running:
         return ActionResult(ok=False, message=f"daemon already running (pid={status.pid})")
 
     # ── path 0: supervisor delegation ─────────────────────────────────────
     if _supervisor_url():
-        data, error = _call_supervisor("POST", "/daemon/start", {"exec_cmd": exec_cmd, "restart_policy": restart_policy})
+        start_path = f"/projects/{project_id}/daemon/start" if project_id else "/daemon/start"
+        data, error = _call_supervisor("POST", start_path, {"exec_cmd": exec_cmd, "restart_policy": restart_policy})
         if error == "supervisor_unreachable":
             logger.warning("api: supervisor unreachable at %s", _supervisor_url())
             return ActionResult(
@@ -584,11 +592,12 @@ def start(project_root: Path, exec_cmd: str, restart_policy: str = "no-restart")
         return ActionResult(ok=False, message=f"daemon spawn failed: {exc}")
 
 
-def stop(project_root: Path) -> ActionResult:
+def stop(project_root: Path, project_id: str | None = None, project_runtime_root: Path | None = None) -> ActionResult:
     logger.info("api: daemon stop requested")
 
     if _supervisor_url():
-        data, error = _call_supervisor("POST", "/daemon/stop")
+        stop_path = f"/projects/{project_id}/daemon/stop" if project_id else "/daemon/stop"
+        data, error = _call_supervisor("POST", stop_path)
         if error == "supervisor_unreachable":
             logger.warning("api: supervisor unreachable at %s", _supervisor_url())
             return ActionResult(
@@ -618,17 +627,17 @@ def stop(project_root: Path) -> ActionResult:
         return ActionResult(ok=False, message=str(exc))
 
 
-def restart(project_root: Path, exec_cmd: str, restart_policy: str = "no-restart") -> ActionResult:
+def restart(project_root: Path, exec_cmd: str, restart_policy: str = "no-restart", project_id: str | None = None, project_runtime_root: Path | None = None) -> ActionResult:
     logger.info("api: daemon restart requested")
-    stop_result = stop(project_root)
+    stop_result = stop(project_root, project_id=project_id, project_runtime_root=project_runtime_root)
     if not stop_result.ok and "not running" not in stop_result.message:
         return stop_result
-    return start(project_root, exec_cmd, restart_policy)
+    return start(project_root, exec_cmd, restart_policy, project_id=project_id, project_runtime_root=project_runtime_root)
 
 
-def get_workers(project_root: Path) -> list[WorkerInfo]:
-    runs_dir = resolve_runs_dir(project_root)
-    state_dir = resolve_state_dir(project_root)
+def get_workers(project_root: Path, project_runtime_root: Path | None = None) -> list[WorkerInfo]:
+    runs_dir = resolve_runs_dir(project_root, project_runtime_root=project_runtime_root)
+    state_dir = resolve_state_dir(project_root, project_runtime_root=project_runtime_root)
     workers_path = state_dir / "workers.json"
     if not workers_path.exists():
         workers_path = runs_dir / "workers.json"
@@ -659,8 +668,8 @@ def get_workers(project_root: Path) -> list[WorkerInfo]:
     return result
 
 
-def get_retry_blocked(project_root: Path) -> list[RetryBlockedTicket]:
-    runs_dir = resolve_runs_dir(project_root)
+def get_retry_blocked(project_root: Path, project_runtime_root: Path | None = None) -> list[RetryBlockedTicket]:
+    runs_dir = resolve_runs_dir(project_root, project_runtime_root=project_runtime_root)
     if not runs_dir.exists():
         return []
     result = []
@@ -687,11 +696,11 @@ def get_retry_blocked(project_root: Path) -> list[RetryBlockedTicket]:
     return result
 
 
-def get_intake_queue(project_root: Path) -> list[QueueEntry]:
-    runs_dir = resolve_runs_dir(project_root)
+def get_intake_queue(project_root: Path, project_runtime_root: Path | None = None) -> list[QueueEntry]:
+    runs_dir = resolve_runs_dir(project_root, project_runtime_root=project_runtime_root)
     if not runs_dir.exists():
         return []
-    state_dir = resolve_state_dir(project_root)
+    state_dir = resolve_state_dir(project_root, project_runtime_root=project_runtime_root)
     workers_path = state_dir / "workers.json"
     if not workers_path.exists():
         workers_path = runs_dir / "workers.json"
@@ -726,8 +735,11 @@ def get_intake_queue(project_root: Path) -> list[QueueEntry]:
     return result
 
 
-def get_last_error(project_root: Path) -> str | None:
-    path = _log_path(project_root)
+def get_last_error(project_root: Path, project_runtime_root: Path | None = None) -> str | None:
+    if project_runtime_root is not None:
+        path = project_runtime_root / "logs" / _LOG_FILENAME
+    else:
+        path = _log_path(project_root)
     if not path.exists():
         return None
     try:
@@ -740,15 +752,15 @@ def get_last_error(project_root: Path) -> str | None:
         return None
 
 
-def get_runtime_status(project_root: Path) -> RuntimeStatus:
-    status = get_status(project_root)
+def get_runtime_status(project_root: Path, project_id: str | None = None, project_runtime_root: Path | None = None) -> RuntimeStatus:
+    status = get_status(project_root, project_id=project_id, project_runtime_root=project_runtime_root)
     return RuntimeStatus(
         daemon_online=status.running,
-        workers=get_workers(project_root),
-        retry_blocked=get_retry_blocked(project_root),
-        intake_queue=get_intake_queue(project_root),
-        last_action=_last_heartbeat(project_root),
-        last_error=get_last_error(project_root),
+        workers=get_workers(project_root, project_runtime_root=project_runtime_root),
+        retry_blocked=get_retry_blocked(project_root, project_runtime_root=project_runtime_root),
+        intake_queue=get_intake_queue(project_root, project_runtime_root=project_runtime_root),
+        last_action=_last_heartbeat(project_root, project_runtime_root),
+        last_error=get_last_error(project_root, project_runtime_root=project_runtime_root),
     )
 
 

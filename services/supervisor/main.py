@@ -1793,7 +1793,11 @@ def project_daemon_start(project_id: str, body: ProjectDaemonStartRequest = None
         "--worktrees-dir", str(worktrees_dir),
     ]
     try:
-        env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+        env = {
+            **os.environ,
+            "PYTHONDONTWRITEBYTECODE": "1",
+            "AI_DEV_FACTORY_RUNTIME_ROOT": str(project_runtime_root),
+        }
         with open(log, "a", encoding="utf-8") as log_fh:
             log_fh.write(
                 f"[{started_at}] supervisor spawning project daemon\n"
