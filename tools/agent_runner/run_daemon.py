@@ -1682,7 +1682,7 @@ def run_once(
                     pr_number=ticket_data.get("pr_number"),
                 )
             except Exception as exc:
-                _log(f"SQLite ticket sync failed for {ticket_id}: {exc}")
+                _log(f"runtime_db ticket sync failed for {ticket_id}: {exc}")
 
         # Conflict detection: check any ticket that has a PR and is not already
         # in a conflict or terminal state.

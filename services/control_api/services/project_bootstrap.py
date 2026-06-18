@@ -30,6 +30,28 @@ def _supervisor_url() -> str:
     return url.rstrip("/")
 
 
+def _ensure_project_runtime_db(project_id: str) -> None:
+    """Create + initialise the project's runtime database (Postgres backend only).
+
+    Best-effort: a failure here must not abort project registration. With the
+    SQLite backend this is a no-op (single shared file, created on demand).
+    """
+    if os.environ.get("RUNTIME_DB_BACKEND", "sqlite").strip().lower() != "postgres":
+        return
+    try:
+        import importlib.util
+
+        tools = Path(__file__).resolve().parents[3] / "tools" / "agent_runner"
+        spec = importlib.util.spec_from_file_location("_rdb_bootstrap", tools / "runtime_db.py")
+        mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        handle = mod.get_db_path(project_id)
+        mod.init_runtime_db(handle)
+        logger.info("runtime_db: initialised Postgres database for project %s (%s)", project_id, handle)
+    except Exception:
+        logger.warning("runtime_db: could not initialise Postgres DB for %s — will init lazily", project_id, exc_info=True)
+
+
 def _call_supervisor(
     method: str,
     path: str,
@@ -102,6 +124,7 @@ def bootstrap(
         Path(data["project_root"]),
         project_runtime_root=Path(data["runtime_root"]),
     )
+    _ensure_project_runtime_db(project_id)
 
     return BootstrapResult(
         project_id=data["project_id"],
@@ -167,6 +190,7 @@ def auto_bootstrap(
                 Path(data["project_root"]),
                 project_runtime_root=Path(data["runtime_root"]),
             )
+            _ensure_project_runtime_db(project_id)
             return
 
     registry.ensure_registered(
@@ -174,3 +198,4 @@ def auto_bootstrap(
         Path(str(project_root)),
         project_runtime_root=self_runtime_root,
     )
+    _ensure_project_runtime_db(project_id)

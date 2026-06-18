@@ -85,18 +85,29 @@ def _load_runtime_db(project_root: Path):
         return None, None
 
 
-def _try_load_runtime_db(project_root: Path) -> tuple:
+def _is_postgres_backend() -> bool:
+    return os.environ.get("RUNTIME_DB_BACKEND", "sqlite").strip().lower() == "postgres"
+
+
+def _try_load_runtime_db(project_root: Path, project_id: str | None = None) -> tuple:
     """Like _load_runtime_db but returns (module, db_path, degraded).
 
     degraded=True when the module loads but something fails (DB inaccessible).
     degraded=False when the DB is absent (not yet initialized) or fully healthy.
+
+    With the Postgres backend, *project_id* selects the per-project database
+    (``adf_<project_id>``); with SQLite it is ignored (single shared file).
     """
     try:
         _tools = Path(__file__).resolve().parent.parent.parent.parent / "tools" / "agent_runner"
         spec = importlib.util.spec_from_file_location("_rdb_board", _tools / "runtime_db.py")
         mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
         spec.loader.exec_module(mod)  # type: ignore[union-attr]
-        db_path = mod.get_db_path()
+        # Postgres get_db_path accepts a project_id; SQLite ignores extra args.
+        try:
+            db_path = mod.get_db_path(project_id)
+        except TypeError:
+            db_path = mod.get_db_path()
         if db_path is None or not db_path.exists():
             return None, None, False
         return mod, db_path, False
@@ -117,14 +128,18 @@ def _fetch_ai_ready_issues(repo: str | None) -> list[dict]:
         return []
 
 
-def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path | None = None, project_runtime_root: Path | None = None) -> BoardResponse:
+def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path | None = None, project_runtime_root: Path | None = None, project_id: str | None = None) -> BoardResponse:
     runs_dir = resolve_runs_dir(project_root, project_runtime_root=project_runtime_root)
     state_dir = resolve_state_dir(project_root, project_runtime_root=project_runtime_root)
     columns: dict[str, list[BoardItem]] = {col_id: [] for col_id, _ in _COLUMN_ORDER}
 
-    # Skip the global SQLite DB when a specific project runtime root is selected —
-    # the DB belongs to ai-dev-factory, not the managed project.
-    if project_runtime_root is not None:
+    if _is_postgres_backend():
+        # Postgres has one database per project; always read the project's own DB
+        # (selected by project_id), regardless of project_runtime_root.
+        rdb, db_path, degraded = _try_load_runtime_db(project_root, project_id or project_root.name)
+    elif project_runtime_root is not None:
+        # Legacy SQLite: the single shared file belongs to ai-dev-factory, not the
+        # managed project — skip it so a managed board doesn't read foreign state.
         rdb, db_path, degraded = None, None, False
     else:
         rdb, db_path, degraded = _try_load_runtime_db(project_root)

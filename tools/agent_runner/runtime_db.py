@@ -356,3 +356,45 @@ def list_runtime_events(
                 "SELECT * FROM runtime_events ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Backend selection ─────────────────────────────────────────────────────────
+# Everything above is the SQLite backend (the default). When
+# RUNTIME_DB_BACKEND=postgres the public API is rebound to the networked
+# Postgres backend (runtime_db_pg) so all callers keep using the same names
+# (get_db_path, upsert_ticket_runtime, …) without changes. The Postgres handle
+# returned by get_db_path() quacks like a Path (.exists()) for compatibility.
+
+def _load_pg_backend():
+    import importlib.util
+    pg_path = Path(__file__).resolve().parent / "runtime_db_pg.py"
+    spec = importlib.util.spec_from_file_location("runtime_db_pg", pg_path)
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+if os.environ.get("RUNTIME_DB_BACKEND", "sqlite").strip().lower() == "postgres":
+    try:
+        _pg = _load_pg_backend()
+        # get_db_path(project_id=None) → Postgres handle (per-project database).
+        get_db_path = _pg.get_handle  # type: ignore[assignment]
+        init_runtime_db = _pg.init_runtime_db  # type: ignore[assignment]
+        check_and_recover_db = _pg.check_and_recover_db  # type: ignore[assignment]
+        record_issue_intake = _pg.record_issue_intake  # type: ignore[assignment]
+        get_issue_intake = _pg.get_issue_intake  # type: ignore[assignment]
+        list_issue_intake = _pg.list_issue_intake  # type: ignore[assignment]
+        upsert_ticket_runtime = _pg.upsert_ticket_runtime  # type: ignore[assignment]
+        get_ticket_runtime = _pg.get_ticket_runtime  # type: ignore[assignment]
+        list_ticket_runtime = _pg.list_ticket_runtime  # type: ignore[assignment]
+        upsert_worker = _pg.upsert_worker  # type: ignore[assignment]
+        remove_worker = _pg.remove_worker  # type: ignore[assignment]
+        list_workers = _pg.list_workers  # type: ignore[assignment]
+        append_runtime_event = _pg.append_runtime_event  # type: ignore[assignment]
+        list_runtime_events = _pg.list_runtime_events  # type: ignore[assignment]
+    except Exception as exc:  # pragma: no cover - misconfiguration fallback
+        print(
+            f"[runtime_db] RUNTIME_DB_BACKEND=postgres but backend failed to load "
+            f"({exc!r}); falling back to SQLite.",
+            flush=True,
+        )
