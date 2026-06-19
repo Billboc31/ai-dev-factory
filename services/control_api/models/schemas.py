@@ -386,3 +386,43 @@ class InstallAgentLayoutResult(BaseModel):
     analysis_summary: str | None = None
     warnings: list[str] = []
     error: str | None = None
+
+
+class AgentLayoutJobStart(BaseModel):
+    ok: bool = True
+    job_id: str
+
+
+class AgentLayoutJobStatus(BaseModel):
+    job_id: str
+    project_id: str
+    status: str
+    started_at: str | None = None
+    finished_at: str | None = None
+    branch: str | None = None
+    result: InstallAgentLayoutResult | None = None
+    error: str | None = None
+
+
+class AgentLayoutLogChunk(BaseModel):
+    text: str = ""
+    offset: int = 0
+    status: str | None = None
+
+
+class AgentLayoutFileEntry(BaseModel):
+    status: str
+    path: str
+
+
+class AgentLayoutFileList(BaseModel):
+    files: list[AgentLayoutFileEntry] = []
+    docs_paths: list[str] = []
+    warnings: list[str] = []
+    branch: str | None = None
+
+
+class AgentLayoutFileDetail(BaseModel):
+    path: str
+    content: str = ""
+    diff: str = ""

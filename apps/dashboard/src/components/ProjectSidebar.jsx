@@ -6,6 +6,7 @@ const PROJECT_NAV = [
   { label: 'Worktrees', path: 'worktrees' },
   { label: 'Logs', path: 'logs' },
   { label: 'Daemon', path: 'daemon' },
+  { label: 'Agent Layout', path: 'agent-layout' },
 ]
 
 const GLOBAL_NAV = [

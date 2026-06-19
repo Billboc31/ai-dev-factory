@@ -17,5 +17,21 @@ export const getProject = (projectId) =>
     return { data: project ?? null }
   })
 
-export const installAgentLayout = (projectId) =>
-  client.post(`/projects/${projectId}/install-agent-layout`, {}, { timeout: 420000 })
+// Agent layout — async job (returns { ok, job_id })
+export const startAgentLayout = (projectId) =>
+  client.post(`/projects/${projectId}/install-agent-layout`, {})
+
+export const getAgentLayoutLatest = (projectId) =>
+  client.get(`/projects/${projectId}/install-agent-layout/latest`)
+
+export const getAgentLayoutJob = (projectId, jobId) =>
+  client.get(`/projects/${projectId}/install-agent-layout/${jobId}`)
+
+export const getAgentLayoutLogs = (projectId, jobId, offset = 0) =>
+  client.get(`/projects/${projectId}/install-agent-layout/${jobId}/logs`, { params: { offset } })
+
+export const getAgentLayoutFiles = (projectId, jobId) =>
+  client.get(`/projects/${projectId}/install-agent-layout/${jobId}/files`)
+
+export const getAgentLayoutFile = (projectId, jobId, path) =>
+  client.get(`/projects/${projectId}/install-agent-layout/${jobId}/file`, { params: { path } })

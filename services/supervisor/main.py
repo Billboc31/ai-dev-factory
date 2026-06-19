@@ -1649,7 +1649,34 @@ def bootstrap_project_host(body: ProjectBootstrapHostRequest):
     }
 
 
-# ── install-agent-layout endpoint ────────────────────────────────────────────
+# ── install-agent-layout endpoints (async job) ───────────────────────────────
+
+
+try:
+    from agent_layout_jobs import (  # noqa: E402
+        append_log as _al_append_log,
+        job_log_path as _al_job_log_path,
+        latest_job as _al_latest_job,
+        list_jobs as _al_list_jobs,
+        load_job as _al_load_job,
+        make_job as _al_make_job,
+        new_job_id as _al_new_job_id,
+        persist_job as _al_persist_job,
+        read_log as _al_read_log,
+    )
+    _agent_layout_available = True
+except ImportError:
+    _agent_layout_available = False
+
+
+def _agent_layout_runtime_root() -> Path:
+    return _runtime_root()
+
+
+def _run_supervisor_git(args: list[str], cwd: Path) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        ["git", *args], cwd=str(cwd), capture_output=True, text=True,
+    )
 
 
 class InstallAgentLayoutRequest(BaseModel):
@@ -1658,9 +1685,56 @@ class InstallAgentLayoutRequest(BaseModel):
     exec_cmd: str = "claude --dangerously-skip-permissions"
 
 
+def _run_agent_layout_bg(
+    job: dict,
+    project_root: Path,
+    stack: str,
+    exec_cmd: str,
+    runtime_root: Path,
+) -> None:
+    """Background thread: run install_agent_layout, streaming progress to the job log."""
+    project_id = job["project_id"]
+    log_path = Path(job["log_path"])
+
+    def _log(message: str) -> None:
+        _al_append_log(log_path, message)
+
+    try:
+        from tools.agent_runner.install_agent_layout import install_agent_layout
+        result = install_agent_layout(
+            project_root, project_id, stack, exec_cmd, log_cb=_log,
+        )
+        job["result"] = result
+        job["branch"] = result.get("branch")
+        job["error"] = result.get("error")
+        job["status"] = "error" if result.get("error") else "done"
+    except Exception as exc:  # noqa: BLE001 - report any failure to the dashboard
+        job["status"] = "error"
+        job["error"] = str(exc)
+        _log(f"ERROR: {exc}")
+        logger.warning("agent-layout job %s crashed: %s", job.get("job_id"), exc)
+    finally:
+        job["finished_at"] = datetime.datetime.now(
+            datetime.timezone.utc
+        ).strftime("%Y-%m-%dT%H:%M:%SZ")
+        try:
+            _al_persist_job(project_id, job, runtime_root)
+        except Exception as persist_exc:  # noqa: BLE001
+            logger.error(
+                "supervisor: failed to persist agent-layout job %s: %s",
+                job.get("job_id"), persist_exc,
+            )
+
+
 @app.post("/projects/{project_id}/install-agent-layout")
 def install_agent_layout_endpoint(project_id: str, body: InstallAgentLayoutRequest):
     from fastapi.responses import JSONResponse
+
+    if not _agent_layout_available:
+        return JSONResponse(
+            status_code=503,
+            content={"error": "agent_layout_jobs not available"},
+        )
 
     try:
         mapped = mapper.map(body.project_root)
@@ -1684,23 +1758,155 @@ def install_agent_layout_endpoint(project_id: str, body: InstallAgentLayoutReque
         )
 
     stack = _detect_stack_for_path(project_root)
+    runtime_root = _agent_layout_runtime_root()
+    job_id = _al_new_job_id()
+    log_path = _al_job_log_path(runtime_root, project_id, job_id)
+    job = _al_make_job(
+        job_id=job_id,
+        project_id=project_id,
+        project_root=str(project_root),
+        stack=stack,
+        exec_cmd=body.exec_cmd,
+        log_path=str(log_path),
+    )
+    _al_persist_job(project_id, job, runtime_root)
+    _al_append_log(log_path, f"Queued agent-layout job for '{project_id}' (stack={stack})")
+
     logger.info(
-        "supervisor: install-agent-layout project_id=%s root=%s stack=%s",
-        body.project_id, project_root, stack,
+        "supervisor: install-agent-layout job=%s project_id=%s root=%s stack=%s",
+        job_id, project_id, project_root, stack,
     )
 
-    try:
-        from tools.agent_runner.install_agent_layout import install_agent_layout
-        result = install_agent_layout(project_root, body.project_id, stack, body.exec_cmd)
-    except Exception as exc:
-        logger.warning("install_agent_layout: unexpected error: %s", exc)
-        result = {
-            "branch": None, "pr_url": None, "pr_number": None,
-            "docs_paths": [], "docs_count": 0,
-            "analysis_summary": None, "warnings": [], "error": str(exc),
-        }
+    threading.Thread(
+        target=_run_agent_layout_bg,
+        args=(job, project_root, stack, body.exec_cmd, runtime_root),
+        daemon=True,
+    ).start()
 
-    return result
+    return {"ok": True, "job_id": job_id}
+
+
+@app.get("/projects/{project_id}/install-agent-layout/jobs")
+def install_agent_layout_jobs(project_id: str):
+    from fastapi.responses import JSONResponse
+
+    if not _agent_layout_available:
+        return JSONResponse(status_code=503, content={"error": "agent_layout_jobs not available"})
+    return {"jobs": _al_list_jobs(project_id, _agent_layout_runtime_root())}
+
+
+@app.get("/projects/{project_id}/install-agent-layout/latest")
+def install_agent_layout_latest(project_id: str):
+    from fastapi.responses import JSONResponse
+
+    if not _agent_layout_available:
+        return JSONResponse(status_code=503, content={"error": "agent_layout_jobs not available"})
+    job = _al_latest_job(project_id, _agent_layout_runtime_root())
+    if job is None:
+        return JSONResponse(status_code=404, content={"error": "no agent-layout job yet"})
+    return job
+
+
+@app.get("/projects/{project_id}/install-agent-layout/{job_id}")
+def install_agent_layout_job(project_id: str, job_id: str):
+    from fastapi.responses import JSONResponse
+
+    if not _agent_layout_available:
+        return JSONResponse(status_code=503, content={"error": "agent_layout_jobs not available"})
+    job = _al_load_job(project_id, job_id, _agent_layout_runtime_root())
+    if job is None:
+        return JSONResponse(status_code=404, content={"error": f"job not found: {job_id}"})
+    return job
+
+
+@app.get("/projects/{project_id}/install-agent-layout/{job_id}/logs")
+def install_agent_layout_logs(project_id: str, job_id: str, offset: int = Query(default=0, ge=0)):
+    from fastapi.responses import JSONResponse
+
+    if not _agent_layout_available:
+        return JSONResponse(status_code=503, content={"error": "agent_layout_jobs not available"})
+    runtime_root = _agent_layout_runtime_root()
+    job = _al_load_job(project_id, job_id, runtime_root)
+    if job is None:
+        return JSONResponse(status_code=404, content={"error": f"job not found: {job_id}"})
+    text, new_offset = _al_read_log(Path(job["log_path"]), offset)
+    return {"text": text, "offset": new_offset, "status": job.get("status")}
+
+
+def _agent_layout_base_branch(project_root: Path) -> str:
+    """Best-effort default/base branch for diffing the docs branch."""
+    res = _run_supervisor_git(["rev-parse", "--abbrev-ref", "origin/HEAD"], project_root)
+    if res.returncode == 0:
+        ref = res.stdout.strip()
+        if ref.startswith("origin/"):
+            return ref.split("/", 1)[1]
+    for candidate in ("main", "master"):
+        chk = _run_supervisor_git(["rev-parse", "--verify", candidate], project_root)
+        if chk.returncode == 0:
+            return candidate
+    return "main"
+
+
+@app.get("/projects/{project_id}/install-agent-layout/{job_id}/files")
+def install_agent_layout_files(project_id: str, job_id: str):
+    from fastapi.responses import JSONResponse
+
+    if not _agent_layout_available:
+        return JSONResponse(status_code=503, content={"error": "agent_layout_jobs not available"})
+    runtime_root = _agent_layout_runtime_root()
+    job = _al_load_job(project_id, job_id, runtime_root)
+    if job is None:
+        return JSONResponse(status_code=404, content={"error": f"job not found: {job_id}"})
+
+    project_root = Path(job["project_root"])
+    branch = job.get("branch")
+    result = job.get("result") or {}
+    files: list[dict] = []
+    if branch and project_root.exists():
+        base = _agent_layout_base_branch(project_root)
+        diff = _run_supervisor_git(
+            ["diff", "--name-status", f"{base}...{branch}"], project_root,
+        )
+        if diff.returncode == 0:
+            for line in diff.stdout.splitlines():
+                parts = line.split("\t")
+                if len(parts) >= 2:
+                    files.append({"status": parts[0].strip(), "path": parts[-1].strip()})
+    return {
+        "files": files,
+        "docs_paths": result.get("docs_paths", []),
+        "warnings": result.get("warnings", []),
+        "branch": branch,
+    }
+
+
+@app.get("/projects/{project_id}/install-agent-layout/{job_id}/file")
+def install_agent_layout_file(project_id: str, job_id: str, path: str = Query(...)):
+    from fastapi.responses import JSONResponse
+
+    if not _agent_layout_available:
+        return JSONResponse(status_code=503, content={"error": "agent_layout_jobs not available"})
+    runtime_root = _agent_layout_runtime_root()
+    job = _al_load_job(project_id, job_id, runtime_root)
+    if job is None:
+        return JSONResponse(status_code=404, content={"error": f"job not found: {job_id}"})
+
+    if path.startswith("/") or ".." in Path(path).parts:
+        return JSONResponse(status_code=422, content={"error": "invalid path"})
+
+    project_root = Path(job["project_root"])
+    branch = job.get("branch")
+    if not branch or not project_root.exists():
+        return JSONResponse(status_code=404, content={"error": "no branch for this job"})
+
+    base = _agent_layout_base_branch(project_root)
+    show = _run_supervisor_git(["show", f"{branch}:{path}"], project_root)
+    diff = _run_supervisor_git(["diff", f"{base}...{branch}", "--", path], project_root)
+    return {
+        "path": path,
+        "content": show.stdout if show.returncode == 0 else "",
+        "diff": diff.stdout if diff.returncode == 0 else "",
+    }
 
 
 # ── per-project daemon endpoints ─────────────────────────────────────────────
