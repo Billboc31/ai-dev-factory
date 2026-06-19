@@ -217,6 +217,46 @@ def _extract_analysis_summary(generated: dict[str, str]) -> str | None:
     return None
 
 
+def _read_analysis_summary_from_disk(project_path: Path) -> str | None:
+    """Fallback when the LLM wrote analysis-summary.md directly (no FILE block)."""
+    path = project_path / "docs" / "analysis-summary.md"
+    if not path.exists():
+        return None
+    try:
+        return path.read_text(encoding="utf-8").strip() or None
+    except OSError:
+        return None
+
+
+def _staged_doc_paths(project_path: Path) -> list[str]:
+    """Top-level ``docs/<name>.md`` files created/modified in the index.
+
+    Counts the *actual* documentation changes from git rather than the parsed
+    FILE blocks, so the result is correct whether the LLM returned FILE blocks
+    on stdout or (as agentic CLIs do) wrote the files to disk itself. Excludes
+    deletions, the internal ``analysis-summary.md`` helper, and the ``docs/ai/``
+    scaffolding so the count reflects user-facing docs only.
+    """
+    res = _run_git(["diff", "--cached", "--name-status"], project_path)
+    if res.returncode != 0:
+        return []
+    paths: list[str] = []
+    for line in res.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        status, path = parts[0].strip(), parts[-1].strip()
+        if status.startswith("D"):
+            continue
+        if not path.startswith("docs/") or not path.endswith(".md"):
+            continue
+        rel = path[len("docs/"):]
+        if "/" in rel or rel == "analysis-summary.md":
+            continue
+        paths.append(path)
+    return sorted(paths)
+
+
 def _build_pr_body(
     project_name: str,
     is_update: bool,
@@ -349,10 +389,14 @@ def install_agent_layout(
     generated = _parse_file_blocks(llm_output)
     analysis_summary = _extract_analysis_summary(generated)
 
-    # Validate and write generated docs
+    # Write any docs the LLM returned as FILE blocks. NOTE: when the exec_cmd is
+    # an agentic CLI (e.g. `claude --dangerously-skip-permissions`), the model
+    # writes the files to disk itself and prints a prose summary instead of FILE
+    # blocks — so `generated` may be empty even though docs were produced. We
+    # reconcile the real set of changes from git below rather than trusting the
+    # parsed blocks alone.
     docs_path = project_path / "docs"
     docs_path.mkdir(exist_ok=True)
-    written_paths: list[str] = []
 
     for rel_path, content in generated.items():
         # Skip the analysis-summary helper doc — it's used internally
@@ -371,17 +415,28 @@ def install_agent_layout(
         target = (project_path / rel_path).resolve()
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
-        written_paths.append(rel_path)
         _emit(log_cb, f"wrote {rel_path}")
 
-    # Check all required base docs were generated
-    missing = [d for d in REQUIRED_BASE_DOCS if d not in written_paths]
+    # Stage everything (parser-written docs, agent-written docs, and the ai/
+    # layout scaffolding), then derive the real documentation changes from git
+    # so the count is accurate regardless of how the LLM emitted its output.
+    _run_git(["add", "-A"], project_path)
+    written_paths = _staged_doc_paths(project_path)
+    for rel_path in written_paths:
+        _emit(log_cb, f"doc changed: {rel_path}")
+
+    # Fall back to the on-disk analysis summary when the LLM wrote it directly.
+    if analysis_summary is None:
+        analysis_summary = _read_analysis_summary_from_disk(project_path)
+
+    # Check required base docs exist on disk (independent of how they were
+    # written) so an empty/new project is still fully initialised.
+    missing = [d for d in REQUIRED_BASE_DOCS if not (project_path / d).exists()]
     if missing:
         warnings.append(f"missing required base docs: {', '.join(missing)}")
 
     # Commit
-    _emit(log_cb, f"Committing {len(written_paths)} generated doc(s)")
-    _run_git(["add", "-A"], project_path)
+    _emit(log_cb, f"Committing {len(written_paths)} doc change(s)")
     result = _run_git(["commit", "-m", commit_msg], project_path)
     if result.returncode != 0:
         combined = result.stdout + result.stderr
