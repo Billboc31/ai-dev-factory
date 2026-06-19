@@ -39,10 +39,18 @@ fi
 SUP_PORT="${AI_DEV_FACTORY_SUPERVISOR_PORT:-8090}"
 SUP_LOG="${TMPDIR:-/tmp}/adf-supervisor.log"
 
-# ── 1. Host supervisor (start only if not already listening) ──────────────────
-if lsof -nP -iTCP:"$SUP_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "supervisor: already running on 127.0.0.1:$SUP_PORT — leaving it"
-else
+# ── 1. Host supervisor ───────────────────────────────────────────────────────
+# On a real (re)deploy we RESTART the supervisor so host-side code changes
+# (services/supervisor, tools/agent_runner) take effect: uvicorn runs without
+# --reload, so a supervisor left running after a `git pull` keeps serving stale
+# code and silently 404s newly added routes. For non-deploy subcommands
+# (logs, down, ps, …) we only ensure it is running and never restart it.
+_is_deploy=false
+if [ "$#" -eq 0 ] || [ "${1:-}" = "up" ]; then
+  _is_deploy=true
+fi
+
+_start_supervisor() {
   echo "supervisor: starting in background (log → $SUP_LOG)"
   nohup bash "$SCRIPT_DIR/start_supervisor.sh" >"$SUP_LOG" 2>&1 &
   disown || true
@@ -50,17 +58,31 @@ else
   for _ in $(seq 1 20); do
     if curl -sf "http://127.0.0.1:$SUP_PORT/health" >/dev/null 2>&1; then
       echo " — ok (127.0.0.1:$SUP_PORT)"
-      break
+      return 0
     fi
     printf "."
     sleep 1
   done
-  if ! curl -sf "http://127.0.0.1:$SUP_PORT/health" >/dev/null 2>&1; then
-    echo
-    echo "supervisor: did NOT become healthy — last log lines:" >&2
-    tail -n 20 "$SUP_LOG" >&2 || true
-    exit 1
+  echo
+  echo "supervisor: did NOT become healthy — last log lines:" >&2
+  tail -n 20 "$SUP_LOG" >&2 || true
+  return 1
+}
+
+if lsof -nP -iTCP:"$SUP_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  if [ "$_is_deploy" = true ]; then
+    echo "supervisor: restarting to pick up host code changes…"
+    pkill -f "supervisor.main:app" 2>/dev/null || true
+    for _ in $(seq 1 10); do
+      lsof -nP -iTCP:"$SUP_PORT" -sTCP:LISTEN >/dev/null 2>&1 || break
+      sleep 1
+    done
+    _start_supervisor || exit 1
+  else
+    echo "supervisor: already running on 127.0.0.1:$SUP_PORT — leaving it"
   fi
+else
+  _start_supervisor || exit 1
 fi
 
 # ── 2. Docker stack (db + api + web) ──────────────────────────────────────────
