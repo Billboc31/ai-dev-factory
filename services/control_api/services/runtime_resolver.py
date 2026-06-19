@@ -2,11 +2,22 @@
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 from pathlib import Path
 
-from .container_paths import to_container_path
+try:
+    from .container_paths import to_container_path
+except ImportError:
+    _cp_spec = importlib.util.spec_from_file_location(
+        "_adf_container_paths",
+        Path(__file__).resolve().parent / "container_paths.py",
+    )
+    _cp_mod = importlib.util.module_from_spec(_cp_spec)  # type: ignore[arg-type]
+    _cp_spec.loader.exec_module(_cp_mod)  # type: ignore[union-attr]
+    to_container_path = _cp_mod.to_container_path
+    del _cp_spec, _cp_mod
 
 _WORKERS_JSON = "workers.json"
 
