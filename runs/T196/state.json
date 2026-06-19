@@ -1,7 +1,7 @@
 {
   "ticket_id": "T196",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_APPROVED",
   "branch": "ticket/T196-t196-add-ui-action-to-install-agent-layout-on-exis",
   "issue_number": 244,
-  "updated_at": "2026-06-19T13:23:02Z"
+  "updated_at": "2026-06-19T13:25:55Z"
 }
