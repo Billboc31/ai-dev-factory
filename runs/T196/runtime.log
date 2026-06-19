@@ -21,3 +21,20 @@
 [2026-06-19T12:27:29Z] push: tolerating runtime dirty files (not blocking): ['runs/T196/runtime.log']
 [2026-06-19T12:27:29Z] push: pushing branch=ticket/T196-t196-add-ui-action-to-install-agent-layout-on-exis
 [2026-06-19T12:27:31Z] push: done branch=ticket/T196-t196-add-ui-action-to-install-agent-layout-on-exis
+[2026-06-19T13:14:22Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-06-19T13:14:22Z] auto-run: running step=planner
+[2026-06-19T13:14:22Z] auto-run: fix context: previous_output=runs/T196/plan.md
+[2026-06-19T13:14:22Z] auto-run: fix context: review=runs/T196/reviews/plan-review-dynamic-docs-generation.md
+[2026-06-19T13:14:22Z] auto-run: fix context: fix_instructions=runs/T196/fixes/plan-fix-dynamic-docs-generation.md
+[2026-06-19T13:14:22Z] auto-run: fix context: context_file=runs/T196/fixes/context-20260619T131422Z.md
+[2026-06-19T13:14:22Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-19T13:14:22Z] prompt: generic fallback — injecting runs/T196/ticket.md
+[2026-06-19T13:14:22Z] compose: global-context=docs/ai/global-context.md
+[2026-06-19T13:14:22Z] compose: role=ai/roles/planner.md
+[2026-06-19T13:14:22Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-19T13:14:22Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-19T13:14:22Z] compose: skill=ai/skills/documentation.md
+[2026-06-19T13:14:22Z] compose: task (canonical prompt)
+[2026-06-19T13:14:22Z] compose: extra-context=runs/T196/fixes/context-20260619T131422Z.md
+[2026-06-19T13:14:22Z] snapshot: runtime-prompt=runs/T196/prompts/planner-attempt-2.md
+[2026-06-19T13:17:16Z] auto-run: step=planner done rc=0
