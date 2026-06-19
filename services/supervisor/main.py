@@ -1649,6 +1649,59 @@ def bootstrap_project_host(body: ProjectBootstrapHostRequest):
     }
 
 
+# ── install-agent-layout endpoint ────────────────────────────────────────────
+
+
+class InstallAgentLayoutRequest(BaseModel):
+    project_root: str
+    project_id: str
+    exec_cmd: str = "claude --dangerously-skip-permissions"
+
+
+@app.post("/projects/{project_id}/install-agent-layout")
+def install_agent_layout_endpoint(project_id: str, body: InstallAgentLayoutRequest):
+    from fastapi.responses import JSONResponse
+
+    try:
+        project_root = Path(body.project_root).expanduser().resolve()
+    except (OSError, PermissionError) as exc:
+        return JSONResponse(
+            status_code=422,
+            content={"error": "permission_denied", "detail": str(exc)},
+        )
+
+    if not project_root.exists() or not project_root.is_dir():
+        return JSONResponse(
+            status_code=422,
+            content={"error": "path_not_found", "detail": str(project_root)},
+        )
+
+    if not (project_root / ".git").exists():
+        return JSONResponse(
+            status_code=422,
+            content={"error": "git_not_found", "detail": str(project_root)},
+        )
+
+    stack = _detect_stack_for_path(project_root)
+    logger.info(
+        "supervisor: install-agent-layout project_id=%s root=%s stack=%s",
+        body.project_id, project_root, stack,
+    )
+
+    try:
+        from tools.agent_runner.install_agent_layout import install_agent_layout
+        result = install_agent_layout(project_root, body.project_id, stack, body.exec_cmd)
+    except Exception as exc:
+        logger.warning("install_agent_layout: unexpected error: %s", exc)
+        result = {
+            "branch": None, "pr_url": None, "pr_number": None,
+            "docs_paths": [], "docs_count": 0,
+            "analysis_summary": None, "warnings": [], "error": str(exc),
+        }
+
+    return result
+
+
 # ── per-project daemon endpoints ─────────────────────────────────────────────
 #
 # Each imported project gets its own isolated daemon.  Global daemon state

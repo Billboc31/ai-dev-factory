@@ -16,3 +16,6 @@ export const getProject = (projectId) =>
     const project = res.data.find(p => p.name === projectId)
     return { data: project ?? null }
   })
+
+export const installAgentLayout = (projectId) =>
+  client.post(`/projects/${projectId}/install-agent-layout`, {}, { timeout: 420000 })
