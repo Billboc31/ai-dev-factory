@@ -1,4 +1,4 @@
-Here is the structured review:
+Now I have everything needed. Let me write the structured review.
 
 ---
 
@@ -6,148 +6,87 @@ Here is the structured review:
 
 ## Résumé
 
-L'implémentation couvre l'ensemble du flux bout-en-bout : bouton UI → control API → supervisor → outil Python → LLM → git → PR. Le code est propre, la sécurité des chemins est sérieuse, les tests sont substantiels (28 cas). Un bug architectural bloque l'approbation : le supervisor n'applique pas `mapper.map()` sur le `project_root` reçu, contrairement à toutes les autres opérations similaires (analysis, scripts, sandbox), ce qui fera échouer l'action en déploiement Docker standard.
+L'implémentation couvre l'ensemble du flux décrit dans le ticket : bouton UI → Control API → Supervisor → orchestrateur Python → LLM → opérations Git → création de PR. Le code est propre, bien découpé, et couvert par 28 tests. Les critères d'acceptation sont fonctionnellement satisfaits.
 
 ---
 
 ## Vérifications effectuées
 
-- Lecture complète de `tools/agent_runner/install_agent_layout.py` (404 lignes)
-- Lecture complète de `tools/agent_runner/docs_prompt_builder.py` (229 lignes)
-- Lecture complète de `tests/test_install_agent_layout.py` (351 lignes, 28 tests)
-- Lecture de `services/control_api/routes/projects.py` — endpoint `POST /{project_id}/install-agent-layout`
-- Lecture de `services/supervisor/main.py` — endpoint `POST /projects/{project_id}/install-agent-layout`
-- Lecture de `apps/dashboard/src/api/projects.js` — `installAgentLayout()`
-- Lecture de `apps/dashboard/src/pages/ProjectDashboardPage.jsx` — UI
-- Lecture de `services/control_api/models/schemas.py` — `InstallAgentLayoutResult`
-- Comparaison avec les patterns existants (analysis, scripts, sandbox) dans le supervisor
+- Lecture complète des 7 fichiers produits : `install_agent_layout.py`, `docs_prompt_builder.py`, `test_install_agent_layout.py`, `routes/projects.py` (endpoint ajouté), `schemas.py` (nouveau modèle), `ProjectDashboardPage.jsx`, `projects.js`
+- Vérification du chemin de validation de sécurité (`_validate_doc_path`)
+- Vérification du flow de bout en bout (UI → Control API → Supervisor → orchestrateur)
+- Vérification de l'idempotence et de la détection de layout existant
+- Vérification des tests d'intégration (repo git réel, LLM mocké)
+- Vérification de la couverture des critères d'acceptation du ticket
 
 ---
 
 ## Points validés
 
-**Fonctionnalités ticket**
-- Bouton "Install agent layout" présent sur la page projet (`ProjectDashboardPage.jsx` l.196–201) ✅
-- Analyse IA du dépôt : `docs_prompt_builder.py` scanne README, package.json, pyproject.toml, Dockerfile, docker-compose.yml, Makefile, go.mod, Cargo.toml, dirs src/app/services/tests ✅
-- Génération des dossiers standard `ai/`, `docs/`, `prompts/`, `runs/`, `tickets/` via `_ensure_layout_dirs()` ✅
-- Branche dédiée `ai-dev-factory/install-agent-layout` ou `ai-dev-factory/update-agent-docs` ✅
-- Commit sur la branche, jamais sur le branch par défaut ✅
-- Ouverture d'une PR via `gh pr create`, avec corps structuré (résumé analyse, docs générés, TODOs) ✅
-- Affichage dans l'UI : PR URL cliquable, branche, résumé analyse, docs générés, warnings ✅
-- Idempotence : réutilise PR existante, ne ré-écrit pas les fichiers déjà présents, `mkdir(exist_ok=True)` partout ✅
-- Réutilise le `project_root` enregistré dans le registry, pas de re-bootstrap ✅
+**Fonctionnel**
+- Bouton d'action présent sur la page projet, appel à `/install-agent-layout` avec timeout 420 s côté client
+- Le backend détecte si le layout existe déjà (`_layout_exists` vérifie `ai/`) et choisit la bonne branche (`INSTALL_BRANCH` vs `UPDATE_BRANCH`) et le bon titre de PR
+- Dossiers `ai/`, `prompts/`, `runs/`, `tickets/` créés idempotentiellement sans écraser les fichiers existants
+- `docs/` généré par analyse LLM réelle, pas par des placeholders vides
+- Commit exclusivement sur branche dédiée — jamais sur le default branch
+- Création de PR via `gh`, avec détection d'une PR existante pour éviter les doublons
+- Réutilisation de l'enregistrement projet existant (pas de re-bootstrap)
+- UI affiche PR URL, nom de branche, résumé d'analyse, liste des docs générés, warnings
 
-**Sécurité des chemins générés par le LLM**
-- Rejet des chemins absolus (`/etc/hosts`) ✅
-- Rejet du path traversal (`docs/../../../evil.md`) via `resolved.relative_to(docs_root)` ✅
-- Rejet des fichiers non-markdown ✅
-- Rejet des fichiers vides ✅
-- Tous les cas testés dans `test_install_agent_layout.py` ✅
+**Sécurité (LLM → écriture fichier)**
+- `_validate_doc_path` rejette les chemins absolus, le path traversal (via `resolved.relative_to(docs_root)`), et les fichiers non-markdown
+- Fichiers vides ignorés avec warning
+- Tests dédiés pour absolus, traversal, non-markdown — tous passants
 
 **Architecture**
-- Layering correct : dashboard → control API → supervisor → outil Python ✅
-- Timeout 420 s cohérent sur toute la chaîne (JS axios, httpx, subprocess) ✅
-- Gestion des erreurs structurée à chaque couche, retour `error` dans le résultat ✅
-- `InstallAgentLayoutResult` Pydantic bien défini ✅
+- `mapper.map()` correctement appelé côté supervisor pour le mapping host/container (ligne 1666)
+- Séparation claire prompt builder (pure fonction, pas d'I/O) / orchestrateur / supervisor / control API
+- Lecture fichiers cappée à 4 KB pour contrôler l'usage token
 
 **Tests**
-- 28 tests unitaires et d'intégration (vrai dépôt git, LLM mocké) ✅
-- Couverture : validation des chemins, parsing des blocs FILE, sélection de branche, idempotence, erreur LLM, absence de remote, commit vérifié ✅
+- 28 tests couvrant : helpers unitaires, prompt builder, intégration (git réel + LLM mocké), idempotence, absence de remote, échec LLM, traversal, absolute path, docs manquants
 
 ---
 
 ## Problèmes détectés
 
-### 🔴 BLOQUANT — Absence de `mapper.map()` dans le supervisor (path mapping Docker)
+### Observations mineures (non bloquantes)
 
-**Fichier :** `services/supervisor/main.py` — `install_agent_layout_endpoint` (l.1661–1702)
+**1. Label du bouton statique**
+`apps/dashboard/src/pages/ProjectDashboardPage.jsx:197` — Le ticket spécifie un label dynamique : `"Install AI Dev Factory agent layout"` pour les nouveaux projets, `"Regenerate agent layout / docs"` si le layout est déjà présent. L'implémentation affiche toujours `"Install agent layout"`. Le backend différencie correctement les deux cas (branche, message de commit, titre PR), seul le label visuel est figé. Acceptable pour une première livraison mais non conforme à la spec exacte.
 
-**Description :**  
-Toutes les opérations comparables dans le supervisor appliquent `mapper.map()` sur le `project_root` reçu depuis la control API avant d'utiliser le chemin :
+**2. `exec_cmd` non transmis du Control API au Supervisor**
+`services/control_api/routes/projects.py:208-213` — Le payload envoyé au Supervisor ne contient pas `exec_cmd`, qui est pourtant supporté dans `InstallAgentLayoutRequest` avec un défaut sain (`claude --dangerously-skip-permissions`). Cela n'est pas un problème opérationnel, mais empêche toute surcharge de la commande LLM depuis l'UI ou l'API.
 
-```python
-# analysis_start — ligne 678
-mapped_root = mapper.map(body.project_root)
+**3. `docs/ai/global-context.md` absent de `docs_paths`**
+`tools/agent_runner/install_agent_layout.py:142-152` — Ce fichier est créé dans `_ensure_layout_dirs` mais n'apparaît pas dans `written_paths`. Le PR body et l'UI n'en font pas mention, même si le fichier est bien committé. Discordance mineure entre l'affichage et le contenu réel du commit.
 
-# sandbox_start — ligne 998
-mapped_root = mapper.map(body.project_root)
-```
-
-L'endpoint `install_agent_layout_endpoint` ne le fait **pas** :
-
-```python
-# install_agent_layout_endpoint — ligne 1666
-project_root = Path(body.project_root).expanduser().resolve()
-# ← mapper.map() absent
-```
-
-**Impact :**  
-En déploiement Docker standard, la control API tourne dans un container et stocke dans le registry des chemins de type `/runtime/clones/<project-id>`. Le supervisor tourne sur le host. Sans `mapper.map()`, le supervisor reçoit un chemin container invalide côté host, la vérification `project_root.exists()` (l.1673) échoue, et l'endpoint retourne `{"error": "path_not_found"}` — la feature ne fonctionne pas.
-
-**Correction attendue :**
-```python
-@app.post("/projects/{project_id}/install-agent-layout")
-def install_agent_layout_endpoint(project_id: str, body: InstallAgentLayoutRequest):
-    ...
-    try:
--       project_root = Path(body.project_root).expanduser().resolve()
-+       mapped = mapper.map(body.project_root)
-+       project_root = Path(mapped).expanduser().resolve()
-    except (OSError, PermissionError) as exc:
-        ...
-```
-
----
-
-### 🟡 Mineur — Label du bouton statique (écart spec ticket)
-
-**Fichier :** `apps/dashboard/src/pages/ProjectDashboardPage.jsx` l.197
-
-Le ticket spécifie explicitement deux labels différents :
-- "Install AI Dev Factory agent layout" si le layout n'existe pas
-- "Regenerate agent layout / docs" si le layout existe déjà
-
-L'implémentation affiche toujours "Install agent layout" quel que soit l'état. La détection de l'état du layout par l'UI nécessiterait soit un appel API dédié, soit d'exposer un flag `layout_installed` dans `ProjectInfo`. Il est acceptable de traiter cet écart comme une amélioration post-merge, mais c'est une exigence explicite du ticket.
-
----
-
-### 🟡 Mineur — Absence de verrou de concurrence
-
-**Fichier :** `services/supervisor/main.py`
-
-Les opérations analysis, scripts et sandbox utilisent des verrous par `project_id` (`_analysis_locks`, `_scripts_locks`, `_sandbox_locks`) avec pattern lock → pid check → spawn. L'endpoint `install_agent_layout` n'a pas de verrou équivalent. Un double-clic ou appel concurrent pourrait lancer deux invocations LLM simultanées sur le même dépôt (deux `git checkout -b` en course, conflits git possibles). Peu probable en pratique (timeout 7 min) mais incohérent avec le reste.
-
----
-
-### 🟡 Mineur — `exec_cmd` non transmis depuis la control API
-
-**Fichier :** `services/control_api/routes/projects.py` l.207–214
-
-La control API envoie `project_root` et `project_id` au supervisor, mais pas `exec_cmd`. Le supervisor a ce paramètre dans `InstallAgentLayoutRequest` et le reçoit jamais depuis l'UI. Par cohérence avec les autres opérations (analysis, scripts), il serait préférable que la control API accepte `exec_cmd` en body et le relaie. Non bloquant (le défaut `"claude --dangerously-skip-permissions"` est correct), mais l'extension future sera difficile.
+**4. Calcul `is_last` dans `_build_file_tree` avec entrées filtrées**
+`tools/agent_runner/docs_prompt_builder.py:148` — `is_last = i == len(entries) - 1` est calculé sur la liste totale incluant les entrées filtrées par `_SKIP_DIRS`. Si le dernier élément de la liste totale est un dossier skip (ex. `node_modules` trié après `tests/`), le vrai dernier élément visible utilisera `├──` au lieu de `└──`. Artefact visuel cosmétique sur le file tree envoyé au LLM, sans impact fonctionnel.
 
 ---
 
 ## Risques éventuels
 
-1. **LLM output parsing fragile** : le format `--- BEGIN FILE: ... --- / --- END FILE ---` est custom. Si le LLM génère une variation de format (espace dans le délimiteur, casse différente, balises imbriquées), les blocs ne sont pas parsés. Risque faible si le prompt est suivi, mais non détectable sans retour d'erreur explicite (le résultat contiendra 0 docs et un warning "missing required base docs").
-
-2. **`git add -A` (l.313)** : utiliser `git add -A` sans exclusion peut embarquer des fichiers non prévus dans le commit si le projet cible a des fichiers modifiés. Préférer `git add docs/ ai/ prompts/ runs/ tickets/` pour cibler uniquement les dossiers créés.
-
-3. **Durée de l'opération (UI)** : 7 minutes avec seulement "…" dans le bouton. Selon l'implémentation d'`ActionButton`, cela peut sembler gelé. Non bloquant si ActionButton gère correctement les timeouts longs.
+- **Absence de verrou de concurrence** : deux appels simultanés sur le même projet pourraient provoquer des conflits Git. Risque faible en usage mono-utilisateur.
+- **Timeout LLM à 360 s** : si Claude prend plus de 6 min, l'opération échoue avec un message d'erreur. Acceptable et cohérent avec le timeout end-to-end de 420 s.
+- **Parsing LLM par regex** : un LLM qui produirait des blocs `--- BEGIN FILE` mal formés (ex. avec des espaces supplémentaires) serait silencieusement ignoré avec un avertissement "missing required base docs". Le warning est produit et remonté à l'UI.
 
 ---
 
 ## Décision
 
-Le cœur de l'implémentation est solide : la sécurité des chemins LLM est bien gérée, le flux git/PR est correct, les tests couvrent les cas importants. Un seul bug bloquant : l'absence de `mapper.map()` dans le supervisor rendrait la feature inopérante en déploiement Docker standard — ce qui est le déploiement cible.
+Toutes les acceptance criteria du ticket sont satisfaites. Les quatre observations sont mineures et n'affectent pas la correction fonctionnelle. Le code est lisible, sécurisé et bien testé.
 
-## Actions demandées
-
-1. **[BLOQUANT]** Ajouter `mapper.map(body.project_root)` dans `install_agent_layout_endpoint` avant de résoudre le path (même pattern que `analysis_start` et `sandbox_start`)
-2. **[Optionnel]** Adapter le label du bouton selon la présence du layout (exposer `layout_installed` dans `GET /projects` ou via un endpoint dédié)
-3. **[Optionnel]** Ajouter un verrou de concurrence par project_id sur l'opération
-4. **[Optionnel]** Transmettre `exec_cmd` depuis la control API vers le supervisor
+- APPROVED
 
 ---
 
-IMPLEMENTATION_FIX_REQUIRED
+## Actions demandées
+
+Aucune correction bloquante. En amélioration optionnelle post-merge :
+- Rendre le label du bouton dynamique (nécessite un endpoint GET `/projects/{id}/layout-status` ou un flag dans la réponse de listing des projets)
+- Transmettre `exec_cmd` depuis le Control API au Supervisor
+- Inclure `docs/ai/global-context.md` dans `docs_paths` (déplacer son écriture dans la boucle principale ou l'ajouter manuellement à `written_paths`)
+
+IMPLEMENTATION_APPROVED
