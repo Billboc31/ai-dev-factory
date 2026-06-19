@@ -10,3 +10,14 @@
 [2026-06-19T21:20:09Z] compose: task (canonical prompt)
 [2026-06-19T21:20:09Z] snapshot: runtime-prompt=runs/T197/prompts/planner-attempt-1.md
 [2026-06-19T21:22:30Z] auto-run: step=planner done rc=0
+[2026-06-19T21:22:32Z] planner checkpoint: committed
+[2026-06-19T21:22:32Z] planner checkpoint: pushed
+[2026-06-19T21:22:32Z] planner validation success
+[2026-06-19T21:22:32Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-19T21:22:32Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-19T21:22:32Z] commit-checkpoint: unstaged runtime garbage: ['runs/T197/runtime.log']
+[2026-06-19T21:22:32Z] commit-checkpoint: sha=245d0757 files=2 title='docs(T197/workflow): planner — update 2 file(s)'
+[2026-06-19T21:22:32Z] auto-run: auto-push triggered
+[2026-06-19T21:22:32Z] push: tolerating runtime dirty files (not blocking): ['runs/T197/runtime.log']
+[2026-06-19T21:22:32Z] push: pushing branch=ticket/T197-add-advisory-ticket-intelligence-analysis-before-d
+[2026-06-19T21:22:34Z] push: done branch=ticket/T197-add-advisory-ticket-intelligence-analysis-before-d
