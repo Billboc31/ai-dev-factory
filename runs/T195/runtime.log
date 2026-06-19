@@ -63,3 +63,12 @@
 [2026-06-19T11:23:38Z] compose: skill=ai/skills/debugging.md
 [2026-06-19T11:23:38Z] compose: task (canonical prompt)
 [2026-06-19T11:23:38Z] snapshot: runtime-prompt=runs/T195/prompts/tester-attempt-1.md
+[2026-06-19T11:35:42Z] auto-run: step=tester done rc=0
+[2026-06-19T11:35:42Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-19T11:35:42Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-19T11:35:42Z] commit-checkpoint: unstaged runtime garbage: ['runs/T195/runtime.log']
+[2026-06-19T11:35:42Z] commit-checkpoint: sha=4c328565 files=3 title='test(T195/workflow): tester — update 3 file(s)'
+[2026-06-19T11:35:42Z] auto-run: auto-push triggered
+[2026-06-19T11:35:42Z] push: tolerating runtime dirty files (not blocking): ['runs/T195/runtime.log']
+[2026-06-19T11:35:42Z] push: pushing branch=ticket/T195-t195-correct-bootstrap-onboarding-to-use-standard
+[2026-06-19T11:35:44Z] push: done branch=ticket/T195-t195-correct-bootstrap-onboarding-to-use-standard
