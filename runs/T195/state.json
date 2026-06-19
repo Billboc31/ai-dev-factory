@@ -1,7 +1,7 @@
 {
   "ticket_id": "T195",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_APPROVED",
   "branch": "ticket/T195-t195-correct-bootstrap-onboarding-to-use-standard",
   "issue_number": 242,
-  "updated_at": "2026-06-19T10:44:53Z"
+  "updated_at": "2026-06-19T10:45:44Z"
 }
