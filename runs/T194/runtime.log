@@ -10,3 +10,14 @@
 [2026-06-19T10:15:34Z] compose: task (canonical prompt)
 [2026-06-19T10:15:34Z] snapshot: runtime-prompt=runs/T194/prompts/planner-attempt-1.md
 [2026-06-19T10:20:19Z] auto-run: step=planner done rc=0
+[2026-06-19T10:20:21Z] planner checkpoint: committed
+[2026-06-19T10:20:21Z] planner checkpoint: pushed
+[2026-06-19T10:20:21Z] planner validation success
+[2026-06-19T10:20:21Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-19T10:20:21Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-19T10:20:21Z] commit-checkpoint: unstaged runtime garbage: ['runs/T194/runtime.log']
+[2026-06-19T10:20:21Z] commit-checkpoint: sha=1ae036ec files=2 title='docs(T194/workflow): planner — update 2 file(s)'
+[2026-06-19T10:20:21Z] auto-run: auto-push triggered
+[2026-06-19T10:20:22Z] push: tolerating runtime dirty files (not blocking): ['runs/T194/runtime.log']
+[2026-06-19T10:20:22Z] push: pushing branch=ticket/T194-t194-project-bootstrap-must-inject-agent-onboardin
+[2026-06-19T10:20:23Z] push: done branch=ticket/T194-t194-project-bootstrap-must-inject-agent-onboardin
