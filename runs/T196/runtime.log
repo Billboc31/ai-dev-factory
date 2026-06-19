@@ -55,3 +55,14 @@
 [2026-06-19T13:19:28Z] compose: extra-context=runs/T196/fixes/context-20260619T131928Z.md
 [2026-06-19T13:19:28Z] snapshot: runtime-prompt=runs/T196/prompts/planner-attempt-3.md
 [2026-06-19T13:23:00Z] auto-run: step=planner done rc=0
+[2026-06-19T13:23:02Z] planner checkpoint: committed
+[2026-06-19T13:23:02Z] planner checkpoint: pushed
+[2026-06-19T13:23:02Z] planner validation success
+[2026-06-19T13:23:02Z] auto-run: transition PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED
+[2026-06-19T13:23:02Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-19T13:23:02Z] commit-checkpoint: unstaged runtime garbage: ['runs/T196/runtime.log']
+[2026-06-19T13:23:02Z] commit-checkpoint: sha=a8708f34 files=2 title='docs(T196/workflow): planner — update 2 file(s)'
+[2026-06-19T13:23:02Z] auto-run: auto-push triggered
+[2026-06-19T13:23:02Z] push: tolerating runtime dirty files (not blocking): ['runs/T196/runtime.log']
+[2026-06-19T13:23:02Z] push: pushing branch=ticket/T196-t196-add-ui-action-to-install-agent-layout-on-exis
+[2026-06-19T13:23:04Z] push: done branch=ticket/T196-t196-add-ui-action-to-install-agent-layout-on-exis
