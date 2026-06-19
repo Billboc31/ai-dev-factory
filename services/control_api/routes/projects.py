@@ -16,6 +16,7 @@ from ..models.schemas import (
     AgentLayoutJobStart,
     AgentLayoutJobStatus,
     AgentLayoutLogChunk,
+    AgentLayoutStatus,
     BootstrapResult,
     ProjectImportRequest,
     ProjectInfo,
@@ -261,6 +262,15 @@ def install_agent_layout(project_id: str, request: Request):
         raise HTTPException(status_code=resp.status_code, detail=data.get("detail", data.get("error", "supervisor error")))
 
     return AgentLayoutJobStart(ok=bool(data.get("ok", True)), job_id=data["job_id"])
+
+
+@router.get("/{project_id}/install-agent-layout/status", response_model=AgentLayoutStatus)
+def agent_layout_status(project_id: str, request: Request):
+    project_root = _agent_layout_project_root(request, project_id)
+    return _proxy_supervisor_get(
+        f"/projects/{project_id}/install-agent-layout/status",
+        {"project_root": str(project_root)},
+    )
 
 
 @router.get("/{project_id}/install-agent-layout/jobs")

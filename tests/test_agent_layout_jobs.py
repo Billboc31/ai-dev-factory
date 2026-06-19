@@ -173,6 +173,32 @@ def test_latest_with_no_jobs_returns_404(client):
     assert client.get("/projects/empty/install-agent-layout/latest").status_code == 404
 
 
+def test_status_reports_layout_presence(tmp_path, client):
+    repo = _init_git_repo(tmp_path / "repo")
+    r = client.get(
+        "/projects/proj/install-agent-layout/status",
+        params={"project_root": str(repo)},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["layout_exists"] is False
+
+    (repo / "ai").mkdir()
+    r = client.get(
+        "/projects/proj/install-agent-layout/status",
+        params={"project_root": str(repo)},
+    )
+    assert r.json()["layout_exists"] is True
+
+
+def test_status_rejects_missing_path(tmp_path, client):
+    r = client.get(
+        "/projects/proj/install-agent-layout/status",
+        params={"project_root": str(tmp_path / "nope")},
+    )
+    assert r.status_code == 422
+
+
 def test_files_endpoint_parses_name_status(tmp_path, client, monkeypatch):
     repo = _init_git_repo(tmp_path / "repo2")
     base = _current_branch(repo)

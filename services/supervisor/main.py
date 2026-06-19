@@ -1795,6 +1795,27 @@ def install_agent_layout_jobs(project_id: str):
     return {"jobs": _al_list_jobs(project_id, _agent_layout_runtime_root())}
 
 
+@app.get("/projects/{project_id}/install-agent-layout/status")
+def install_agent_layout_status(project_id: str, project_root: str = Query(...)):
+    from fastapi.responses import JSONResponse
+
+    if not _agent_layout_available:
+        return JSONResponse(status_code=503, content={"error": "agent_layout_jobs not available"})
+    try:
+        mapped = mapper.map(project_root)
+        root = Path(mapped).expanduser().resolve()
+    except (OSError, PermissionError) as exc:
+        return JSONResponse(status_code=422, content={"error": "permission_denied", "detail": str(exc)})
+    if not root.exists() or not root.is_dir():
+        return JSONResponse(status_code=422, content={"error": "path_not_found", "detail": str(root)})
+    try:
+        from tools.agent_runner.install_agent_layout import inspect_layout
+        return inspect_layout(root)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("install-agent-layout status failed: %s", exc)
+        return JSONResponse(status_code=500, content={"error": str(exc)})
+
+
 @app.get("/projects/{project_id}/install-agent-layout/latest")
 def install_agent_layout_latest(project_id: str):
     from fastapi.responses import JSONResponse

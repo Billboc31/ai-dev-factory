@@ -7,6 +7,7 @@ import {
   getAgentLayoutLogs,
   getAgentLayoutFiles,
   getAgentLayoutFile,
+  getAgentLayoutStatus,
 } from '../api/projects'
 import ErrorBanner from '../components/ErrorBanner'
 import usePolling from '../hooks/usePolling'
@@ -30,6 +31,73 @@ function StatusBadge({ status }) {
   )
 }
 
+function LayoutStatusCard({ layout }) {
+  if (!layout) return null
+
+  if (!layout.layout_exists) {
+    return (
+      <div className="border border-gray-200 bg-gray-50 rounded p-4 mb-6 text-sm">
+        <p className="font-semibold text-gray-700">Aucun layout agent détecté</p>
+        <p className="text-gray-500 mt-1">
+          Ce projet n'a pas encore de dossier <code className="font-mono">ai/</code>.
+          Lancer l'agent va initialiser le layout complet (rôles, skills, templates,
+          docs et mémoire projet).
+        </p>
+      </div>
+    )
+  }
+
+  const ai = layout.ai_counts || {}
+  const mem = layout.memory_files || {}
+  const docs = layout.docs_present || []
+
+  return (
+    <div className="border border-amber-300 bg-amber-50 rounded p-4 mb-6 text-sm">
+      <p className="font-semibold text-amber-800">⚠ Layout agent déjà présent</p>
+      <p className="text-amber-700 mt-1">
+        Relancer l'agent <strong>régénère les docs générées</strong>{' '}
+        (<code className="font-mono">docs/*.md</code>) à partir de l'analyse IA —
+        toute modification manuelle de ces fichiers sera écrasée. Le dossier{' '}
+        <code className="font-mono">ai/</code> et la mémoire projet
+        (<code className="font-mono">global-context.md</code>,{' '}
+        <code className="font-mono">project-life.md</code>,{' '}
+        <code className="font-mono">decisions-log.md</code>) sont préservés.
+      </p>
+      <div className="mt-3 grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+        <div>
+          <p className="font-semibold text-gray-600">ai/</p>
+          <ul className="text-gray-600 mt-0.5">
+            <li>roles: {ai.roles ?? 0}</li>
+            <li>skills: {ai.skills ?? 0}</li>
+            <li>templates: {ai.templates ?? 0}</li>
+          </ul>
+        </div>
+        <div>
+          <p className="font-semibold text-gray-600">
+            Docs ({layout.base_docs_present}/{layout.base_docs_total} de base)
+          </p>
+          <ul className="text-gray-600 mt-0.5 max-h-24 overflow-auto">
+            {docs.length === 0 && <li className="text-gray-400">aucune</li>}
+            {docs.map(d => (
+              <li key={d} className="font-mono truncate">{d}</li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <p className="font-semibold text-gray-600">Mémoire projet</p>
+          <ul className="text-gray-600 mt-0.5">
+            {Object.entries(mem).map(([f, present]) => (
+              <li key={f} className="font-mono truncate">
+                {present ? '✓' : '✗'} {f.replace('docs/ai/', '')}
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function FileBadge({ status }) {
   const map = { A: 'bg-green-100 text-green-700', M: 'bg-amber-100 text-amber-700', D: 'bg-red-100 text-red-700' }
   const label = { A: 'created', M: 'modified', D: 'deleted' }[status] || status
@@ -50,6 +118,7 @@ export default function ProjectAgentLayoutPage() {
   const [fileLoading, setFileLoading] = useState(false)
   const [starting, setStarting] = useState(false)
   const [error, setError] = useState(null)
+  const [layout, setLayout] = useState(null)
 
   const logOffsetRef = useRef(0)
   const logEndRef = useRef(null)
@@ -97,9 +166,13 @@ export default function ProjectAgentLayoutPage() {
     setSelected(null)
     setFileDetail(null)
     logOffsetRef.current = 0
+    setLayout(null)
     getAgentLayoutLatest(projectId)
       .then(res => setJob(res.data))
       .catch(() => {}) // 404 = no job yet
+    getAgentLayoutStatus(projectId)
+      .then(res => setLayout(res.data))
+      .catch(() => {})
   }, [projectId])
 
   // When the active job id changes, reset the log stream and pull from the start.
@@ -122,6 +195,9 @@ export default function ProjectAgentLayoutPage() {
     if (status === 'done' || status === 'error') {
       fetchLogs(jobId)
       fetchFiles(jobId)
+      getAgentLayoutStatus(projectId)
+        .then(res => setLayout(res.data))
+        .catch(() => {})
     }
   }, [status, jobId]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -133,6 +209,18 @@ export default function ProjectAgentLayoutPage() {
   }, [logText, running])
 
   const handleStart = () => {
+    if (layout?.layout_exists) {
+      const ok = window.confirm(
+        'Le layout agent est déjà présent dans ce projet.\n\n' +
+        'Relancer va RÉGÉNÉRER les docs générées (docs/*.md) à partir de ' +
+        "l'analyse IA — d'éventuelles modifications manuelles de ces fichiers " +
+        'seront écrasées.\n\n' +
+        "Le dossier ai/ (rôles/skills/templates) et la mémoire projet " +
+        '(docs/ai/global-context.md, project-life.md, decisions-log.md) sont ' +
+        'préservés.\n\nContinuer ?'
+      )
+      if (!ok) return
+    }
     setStarting(true)
     setError(null)
     setFiles(null)
@@ -185,6 +273,8 @@ export default function ProjectAgentLayoutPage() {
       </p>
 
       <ErrorBanner message={error} onClose={() => setError(null)} />
+
+      <LayoutStatusCard layout={layout} />
 
       {/* Summary */}
       {job && (

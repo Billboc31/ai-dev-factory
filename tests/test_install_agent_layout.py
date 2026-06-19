@@ -17,6 +17,7 @@ from install_agent_layout import (
     _layout_exists,
     _validate_doc_path,
     _parse_file_blocks,
+    inspect_layout,
     install_agent_layout,
 )
 from docs_prompt_builder import scan_and_build_prompt, _build_file_tree
@@ -370,6 +371,31 @@ def test_install_log_cb_receives_progress_without_changing_result(tmp_path):
     joined = "\n".join(messages)
     assert "Scanning repository" in joined
     assert any("wrote" in m for m in messages)
+
+
+def test_inspect_layout_reports_absent(tmp_path):
+    repo = tmp_path / "empty"
+    repo.mkdir()
+    status = inspect_layout(repo)
+    assert status["layout_exists"] is False
+    assert status["docs_present"] == []
+    assert status["base_docs_present"] == 0
+    assert all(v is False for v in status["memory_files"].values())
+
+
+def test_inspect_layout_reports_present_after_install(tmp_path):
+    repo = _init_git_repo(tmp_path / "target")
+    llm_output = _make_base_docs_output()
+
+    with patch("install_agent_layout._invoke_llm", return_value=llm_output):
+        with patch("install_agent_layout._get_remote_url", return_value=None):
+            install_agent_layout(repo, "test-project")
+
+    status = inspect_layout(repo)
+    assert status["layout_exists"] is True
+    assert status["base_docs_present"] == status["base_docs_total"] == len(REQUIRED_BASE_DOCS)
+    assert status["memory_files"]["docs/ai/global-context.md"] is True
+    assert all(d.startswith("docs/") for d in status["docs_present"])
 
 
 def test_install_seeds_memory_triad(tmp_path):

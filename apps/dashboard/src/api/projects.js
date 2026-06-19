@@ -35,3 +35,6 @@ export const getAgentLayoutFiles = (projectId, jobId) =>
 
 export const getAgentLayoutFile = (projectId, jobId, path) =>
   client.get(`/projects/${projectId}/install-agent-layout/${jobId}/file`, { params: { path } })
+
+export const getAgentLayoutStatus = (projectId) =>
+  client.get(`/projects/${projectId}/install-agent-layout/status`)

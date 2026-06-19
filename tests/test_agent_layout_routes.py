@@ -146,6 +146,29 @@ def test_files_proxy(client, monkeypatch):
     assert r.json()["files"][0]["path"] == "docs/X.md"
 
 
+def test_status_proxy_forwards_project_root(client, monkeypatch):
+    seen = {}
+
+    def handler(method, url, params=None, **kwargs):
+        seen["url"] = url
+        seen["params"] = params
+        return _FakeResponse(200, {
+            "layout_exists": True,
+            "ai_counts": {"roles": 2, "skills": 1, "templates": 3},
+            "docs_present": ["docs/overview.md"],
+            "base_docs_present": 5,
+            "base_docs_total": 10,
+            "memory_files": {"docs/ai/global-context.md": True},
+        })
+
+    _patch_supervisor(monkeypatch, handler)
+    r = client.get("/projects/alpha/install-agent-layout/status")
+    assert r.status_code == 200
+    assert r.json()["layout_exists"] is True
+    assert seen["url"].endswith("/projects/alpha/install-agent-layout/status")
+    assert "project_root" in seen["params"]
+
+
 def test_file_proxy_forwards_path(client, monkeypatch):
     seen = {}
 

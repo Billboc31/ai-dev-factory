@@ -87,6 +87,44 @@ def _layout_exists(project_path: Path) -> bool:
     return (project_path / "ai").is_dir()
 
 
+def inspect_layout(project_path: Path) -> dict:
+    """Report whether the AI Dev Factory layout is already present in a project.
+
+    Used by the dashboard to show the current state and warn before re-running
+    (re-running regenerates the descriptive ``docs/*.md`` but preserves the
+    ``ai/`` scaffolding and the project memory files).
+    """
+    def _count_md(rel: str) -> int:
+        d = project_path / rel
+        return len([f for f in d.glob("*.md")]) if d.is_dir() else 0
+
+    docs_present = sorted(
+        f"docs/{p.name}"
+        for p in (project_path / "docs").glob("*.md")
+    ) if (project_path / "docs").is_dir() else []
+
+    memory_files = {
+        "docs/ai/global-context.md": (project_path / "docs" / "ai" / "global-context.md").is_file(),
+        "docs/ai/project-life.md": (project_path / "docs" / "ai" / "project-life.md").is_file(),
+        "docs/ai/decisions-log.md": (project_path / "docs" / "ai" / "decisions-log.md").is_file(),
+    }
+
+    base_docs_present = [d for d in REQUIRED_BASE_DOCS if (project_path / d).is_file()]
+
+    return {
+        "layout_exists": _layout_exists(project_path),
+        "ai_counts": {
+            "roles": _count_md("ai/roles"),
+            "skills": _count_md("ai/skills"),
+            "templates": _count_md("ai/templates"),
+        },
+        "docs_present": docs_present,
+        "base_docs_present": len(base_docs_present),
+        "base_docs_total": len(REQUIRED_BASE_DOCS),
+        "memory_files": memory_files,
+    }
+
+
 def _invoke_llm(exec_cmd: str, prompt: str, cwd: Path, log_cb: "LogCb | None" = None) -> str:
     import shlex
     parts = shlex.split(exec_cmd) + ["--print"]

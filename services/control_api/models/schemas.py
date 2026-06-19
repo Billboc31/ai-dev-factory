@@ -426,3 +426,12 @@ class AgentLayoutFileDetail(BaseModel):
     path: str
     content: str = ""
     diff: str = ""
+
+
+class AgentLayoutStatus(BaseModel):
+    layout_exists: bool = False
+    ai_counts: dict[str, int] = {}
+    docs_present: list[str] = []
+    base_docs_present: int = 0
+    base_docs_total: int = 0
+    memory_files: dict[str, bool] = {}
