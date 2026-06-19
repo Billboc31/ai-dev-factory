@@ -1,9 +1,15 @@
-The plan has been written to `runs/T197/plan.md`. Here is a summary of what changed from the previous version and why:
+The plan has been written to `runs/T197/plan.md`. Here is a summary:
 
-**Fix 1 — Provider-agnostic AI execution**: Replaced the phrase "via existing Claude API integration pattern" with a concrete description of the existing `exec_cmd` subprocess abstraction. The analyzer builds a prompt file, runs `exec_cmd` (e.g., `claude`, a local Qwen CLI, or any other agent tool) as a subprocess, and captures stdout — no provider-specific SDK is imported. The `exec_cmd` value is injected from `app.state.daemon_exec_cmd` at call time, the same way the daemon already works.
+**Objective**: Add an advisory Ticket Intelligence Analyzer — pre-development, advisory only, no scheduler impact.
 
-**Fix 2 — Non-blocking POST analyze**: Changed the endpoint from a synchronous blocking AI call to a `202 Accepted` response backed by FastAPI `BackgroundTasks`. The HTTP response returns immediately with `{"ticket_id": ..., "analysis_status": "queued"}`. The background task transitions status `queued → running → completed` (or `failed`), with an explicit subprocess timeout stored as `analysis_status = failed` + `last_error` on timeout or exception.
+**Key design decisions from the retry context:**
 
-**Fix 3 — Analysis status lifecycle**: The DB and API now support all five states: `not_started`, `queued`, `running`, `completed`, `failed`.
+1. **Provider-agnostic AI execution**: The analyzer invokes `exec_cmd` (from `app.state.daemon_exec_cmd`) as a subprocess, identical to the existing `resolve-conflicts` pattern. No provider-specific SDK is imported.
 
-**Fix 4 — UI states**: `TicketIntelligencePanel` now explicitly handles no-analysis, queued/running (spinner + slow polling), completed, and failed states. The advisory badge is always visible regardless of state.
+2. **Non-blocking POST analyze**: Returns HTTP 202 immediately with `{"ticket_id": ..., "analysis_status": "queued"}`. Analysis runs in a `threading.Thread` (consistent with `run-next` and `resolve-conflicts` patterns already in the codebase).
+
+3. **Five-state lifecycle**: `not_started → queued → running → completed → failed`, persisted in the new `ticket_intelligence` SQLite table.
+
+4. **Hybrid analysis**: A pure-Python `compute_signals()` function extracts deterministic features (risky keywords, domain tags, dependency references, token size estimate, migration/scheduler flags) before the AI prompt is built — no AI for those signals.
+
+5. **UI handles all states**: `TicketIntelligencePanel` renders spinner+polling for queued/running, full table for completed, error+retry for failed, with the advisory badge always visible.
