@@ -17,7 +17,12 @@ def get_ticket_worktree_path(ticket_id: str, worktrees_dir: Path) -> Path:
     return worktrees_dir / ticket_id
 
 
-def create_ticket_worktree(ticket_id: str, branch: str, worktrees_dir: Path) -> tuple[bool, str]:
+def create_ticket_worktree(
+    ticket_id: str,
+    branch: str,
+    worktrees_dir: Path,
+    repo_root: "Path | None" = None,
+) -> tuple[bool, str]:
     """Create a git worktree for the ticket branch. Returns (success, message)."""
     worktree_path = get_ticket_worktree_path(ticket_id, worktrees_dir)
     if worktree_path.exists():
@@ -26,6 +31,7 @@ def create_ticket_worktree(ticket_id: str, branch: str, worktrees_dir: Path) -> 
     result = subprocess.run(
         ["git", "worktree", "add", str(worktree_path), branch],
         capture_output=True, text=True, check=False,
+        cwd=str(repo_root) if repo_root else None,
     )
     if result.returncode == 0:
         return True, f"worktree created: {worktree_path}"

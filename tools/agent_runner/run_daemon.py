@@ -31,7 +31,10 @@ sys.dont_write_bytecode = True
 
 
 ROOT = Path(__file__).resolve().parent
-REPO_ROOT = ROOT.parent.parent
+# Location of the factory scripts (ai-dev-factory clone). Managed-project daemons
+# must NOT use this for git operations — see ``_resolve_repo_root`` in ``main()``.
+_SCRIPT_REPO_ROOT = ROOT.parent.parent
+REPO_ROOT = _SCRIPT_REPO_ROOT
 RUN_TICKET = ROOT / "run_ticket.py"
 RUN_ISSUE_INTAKE = ROOT / "run_issue_intake.py"
 RUN_ISSUE_MAPPER = ROOT / "run_issue_mapper.py"
@@ -39,7 +42,7 @@ ISSUE_INDEX_FILENAME = ".issue-intake.json"
 PROJECT_MAP_FILENAME = ".project-map.json"
 RETRY_STATE_FILENAME = "retry-state.json"
 WORKERS_REGISTRY_FILENAME = "workers.json"
-DEFAULT_WORKTREES_DIR = REPO_ROOT.parent / (REPO_ROOT.name + "-worktrees")
+DEFAULT_WORKTREES_DIR = _SCRIPT_REPO_ROOT.parent / (_SCRIPT_REPO_ROOT.name + "-worktrees")
 
 _LOG_FILE: "Path | None" = None
 
@@ -85,7 +88,6 @@ _rdb_spec.loader.exec_module(_rdb_mod)  # type: ignore[union-attr]
 _rdb_get_db_path = _rdb_mod.get_db_path
 _rdb_init = _rdb_mod.init_runtime_db
 _rdb_check_and_recover = _rdb_mod.check_and_recover_db
-_rdb_verify_backend = _rdb_mod.verify_backend_available
 _rdb_record_intake = _rdb_mod.record_issue_intake
 _rdb_list_intake = _rdb_mod.list_issue_intake
 _rdb_upsert_ticket = _rdb_mod.upsert_ticket_runtime
@@ -104,14 +106,10 @@ _rr_resolve_state_dir = _rr_mod.resolve_state_dir
 _rr_resolve_logs_dir = _rr_mod.resolve_logs_dir
 del _rr_spec, _rr_mod
 
-# Runtime DB handle is cached so resolution (and, for SQLite, the git subprocess)
-# runs only once per daemon process.
+# SQLite path and init are cached so _rdb_get_db_path() (subprocess) runs only once per daemon process.
 _DB_PATH_RESOLVED: bool = False
 _DB_PATH_VALUE: "Path | None" = None
 _DB_INITIALIZED: bool = False
-# Project id this daemon serves — scopes runtime DB rows (Postgres backend).
-# Resolved from --project (then PROJECT_NAME) in main(); None until then.
-_PROJECT_ID: "str | None" = None
 
 # Singleton guard — file handle kept open for process lifetime so the exclusive lock holds.
 _SINGLETON_LOCK_FH = None
@@ -120,26 +118,9 @@ _SINGLETON_LOCK_FH = None
 def _cached_db_path() -> "Path | None":
     global _DB_PATH_RESOLVED, _DB_PATH_VALUE
     if not _DB_PATH_RESOLVED:
-        # Pass the project id so the Postgres backend scopes rows to this
-        # project. The SQLite backend ignores the extra argument.
-        try:
-            _DB_PATH_VALUE = _rdb_get_db_path(_PROJECT_ID)
-        except TypeError:
-            _DB_PATH_VALUE = _rdb_get_db_path()
+        _DB_PATH_VALUE = _rdb_get_db_path()
         _DB_PATH_RESOLVED = True
     return _DB_PATH_VALUE
-
-
-def _runtime_db_banner() -> str:
-    """One-line description of the active runtime DB backend for boot logs."""
-    backend = os.environ.get("RUNTIME_DB_BACKEND", "sqlite").strip().lower()
-    handle = _cached_db_path()
-    if backend == "postgres":
-        describe = getattr(handle, "describe", None)
-        if callable(describe):
-            return describe()
-        return f"backend=postgres project_id={_PROJECT_ID}"
-    return f"backend=sqlite path={handle}"
 
 
 def _ensure_db() -> "Path | None":
@@ -149,22 +130,13 @@ def _ensure_db() -> "Path | None":
     if not db_path:
         return None
     if not _DB_INITIALIZED:
-        backend = os.environ.get("RUNTIME_DB_BACKEND", "sqlite").strip().lower()
-        if backend == "postgres":
-            # Fail fast: a daemon that cannot reach Postgres must NOT silently
-            # downgrade to SQLite (that would split-brain the board state).
-            _rdb_verify_backend()
+        try:
             _rdb_check_and_recover(db_path)
             _rdb_init(db_path)
             _DB_INITIALIZED = True
-        else:
-            try:
-                _rdb_check_and_recover(db_path)
-                _rdb_init(db_path)
-                _DB_INITIALIZED = True
-            except Exception as exc:
-                _log(f"runtime_db (sqlite) init failed: {exc}")
-                return None
+        except Exception as exc:
+            _log(f"SQLite init failed: {exc}")
+            return None
     return db_path
 
 
@@ -1288,7 +1260,7 @@ def launch_ticket(
             ticket_state = _load_state_json(runs_dir / ticket_id)
             branch = ticket_state.get("branch")
             if branch:
-                ok, msg = create_ticket_worktree(ticket_id, branch, worktrees_dir)
+                ok, msg = create_ticket_worktree(ticket_id, branch, worktrees_dir, repo_root=REPO_ROOT)
                 _log(f"{ticket_id}: on-demand worktree: {msg}")
                 if ok:
                     worktree_path = wt
@@ -1713,7 +1685,7 @@ def run_once(
                     pr_number=ticket_data.get("pr_number"),
                 )
             except Exception as exc:
-                _log(f"runtime_db ticket sync failed for {ticket_id}: {exc}")
+                _log(f"SQLite ticket sync failed for {ticket_id}: {exc}")
 
         # Conflict detection: check any ticket that has a PR and is not already
         # in a conflict or terminal state.
@@ -1787,6 +1759,38 @@ def _check_runtime_clone() -> bool:
     return False
 
 
+def _resolve_repo_root(args: argparse.Namespace) -> Path:
+    """Return the git project root this daemon serves.
+
+    Managed-project daemons are spawned with ``cwd=<project_root>`` and
+    ``AI_DEV_FACTORY_RUNTIME_ROOT=<project_runtime>``. Git operations (fetch,
+    branch, worktree) must target the *managed* repo, not the factory clone that
+  hosts ``run_daemon.py``.
+    """
+    if getattr(args, "project_root", None):
+        root = Path(args.project_root).expanduser().resolve()
+    elif os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT"):
+        root = Path.cwd().resolve()
+    else:
+        return _SCRIPT_REPO_ROOT
+
+    check = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--show-toplevel"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=10,
+    )
+    if check.returncode != 0:
+        print(
+            f"error: project root is not a git repository: {root}\n"
+            f"  {check.stderr.strip()}",
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    return Path(check.stdout.strip())
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Local workflow daemon for ai-dev-factory")
     parser.add_argument("--exec-cmd", required=True, help="Command passed to run_ticket.py --auto")
@@ -1804,7 +1808,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--auto-include-code", action="store_true", help="With --auto-commit, also stage COMMIT_SCOPE paths (tools/, tests/, prompts/, tickets/, docs/, ai/)")
     parser.add_argument("--poll-project-map", action="store_true", help="Run issue mapper at each daemon cycle to refresh the project dependency map")
     parser.add_argument("--use-project-map", action="store_true", help="Use project map next_recommended for scheduling instead of FIFO (fallback to FIFO if map absent)")
-    parser.add_argument("--project", default=None, help="Project id this daemon serves; scopes runtime DB rows (default: PROJECT_NAME env)")
+    parser.add_argument("--project-root", default=None, help="Git root of the managed project (default: cwd when AI_DEV_FACTORY_RUNTIME_ROOT is set)")
+    parser.add_argument("--project", default=None, help="Project id for runtime DB scoping (also sets PROJECT_NAME when unset)")
     return parser.parse_args(argv)
 
 
@@ -1814,25 +1819,25 @@ def main(argv: list[str]) -> int:
 
     args = parse_args(argv)
 
-    # Resolve the project id this daemon serves and expose it via PROJECT_NAME so
-    # the runtime DB backend (and any child process) scopes rows to this project.
-    global _PROJECT_ID
-    _PROJECT_ID = args.project or os.environ.get("PROJECT_NAME")
-    if _PROJECT_ID:
-        os.environ["PROJECT_NAME"] = _PROJECT_ID
+    global REPO_ROOT
+    REPO_ROOT = _resolve_repo_root(args)
+
+    if args.project:
+        os.environ.setdefault("PROJECT_NAME", args.project)
 
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
     if runtime_root:
         rt = Path(runtime_root)
         runs_dir = rt / "runs"
-        worktrees_dir = rt / "worktrees"
+        worktrees_dir = Path(args.worktrees_dir)
         global _LOG_FILE
-        _LOG_FILE = _rr_resolve_logs_dir(REPO_ROOT) / "daemon.log"
+        _LOG_FILE = rt / "logs" / "daemon.log"
         _LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
+        state_dir = rt / "state"
     else:
         runs_dir = Path(args.runs_dir)
         worktrees_dir = Path(args.worktrees_dir)
-    state_dir = _rr_resolve_state_dir(REPO_ROOT)
+        state_dir = _rr_resolve_state_dir(REPO_ROOT)
 
     if not runs_dir.exists():
         print(f"error: runs dir not found: {runs_dir}", file=sys.stderr)
@@ -1869,8 +1874,8 @@ def main(argv: list[str]) -> int:
     _log(f"  exec_cmd       = {args.exec_cmd!r}")
     _log(f"  interval       = {args.interval}s  dry-run={args.dry_run}")
     _log(f"  max-workers    = {args.max_workers}")
-    _log(f"  project_id     = {_PROJECT_ID or '<unset>'}")
-    _log(f"  runtime_db     = {_runtime_db_banner()}")
+    if args.project:
+        _log(f"  project_id     = {args.project}")
     _log("=" * 60)
 
     # Strict refuse mode: if gh is missing while issue polling is requested,

@@ -373,3 +373,42 @@ def test_build_run_ticket_command_optional_flags_absent_by_default():
     assert "--auto-commit" not in cmd
     assert "--auto-push" not in cmd
     assert "--auto-include-code" not in cmd
+
+
+def test_resolve_repo_root_uses_explicit_project_root(tmp_path, monkeypatch):
+    from argparse import Namespace
+    from run_daemon import _resolve_repo_root
+
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    repo = tmp_path / "managed"
+    repo.mkdir()
+    subprocess_run = __import__("subprocess").run
+    subprocess_run(["git", "init", "-b", "main"], cwd=repo, capture_output=True, check=True)
+    subprocess_run(["git", "config", "user.email", "t@e.com"], cwd=repo, capture_output=True, check=True)
+    subprocess_run(["git", "config", "user.name", "T"], cwd=repo, capture_output=True, check=True)
+    (repo / "README.md").write_text("# x\n", encoding="utf-8")
+    subprocess_run(["git", "add", "-A"], cwd=repo, capture_output=True, check=True)
+    subprocess_run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True, check=True)
+
+    args = Namespace(project_root=str(repo))
+    assert _resolve_repo_root(args) == repo.resolve()
+
+
+def test_resolve_repo_root_uses_cwd_when_runtime_root_set(tmp_path, monkeypatch):
+    from argparse import Namespace
+    from run_daemon import _resolve_repo_root
+
+    repo = tmp_path / "managed"
+    repo.mkdir()
+    subprocess_run = __import__("subprocess").run
+    subprocess_run(["git", "init", "-b", "main"], cwd=repo, capture_output=True, check=True)
+    subprocess_run(["git", "config", "user.email", "t@e.com"], cwd=repo, capture_output=True, check=True)
+    subprocess_run(["git", "config", "user.name", "T"], cwd=repo, capture_output=True, check=True)
+    (repo / "README.md").write_text("# x\n", encoding="utf-8")
+    subprocess_run(["git", "add", "-A"], cwd=repo, capture_output=True, check=True)
+    subprocess_run(["git", "commit", "-m", "init"], cwd=repo, capture_output=True, check=True)
+
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path / "runtime"))
+    monkeypatch.chdir(repo)
+    args = Namespace(project_root=None)
+    assert _resolve_repo_root(args) == repo.resolve()

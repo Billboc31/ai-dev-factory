@@ -2074,6 +2074,7 @@ def project_daemon_start(project_id: str, body: ProjectDaemonStartRequest = None
         "--auto-push",
         "--auto-include-code",
         "--worktrees-dir", str(worktrees_dir),
+        "--project-root", str(project_root),
         # Scope this daemon's runtime DB rows to its project (Postgres backend).
         "--project", project_id,
     ]
