@@ -375,3 +375,14 @@ class ScriptsStatus(BaseModel):
     error: str | None = None
     branch: str | None = None
     pr_url: str | None = None
+
+
+class InstallAgentLayoutResult(BaseModel):
+    branch: str | None = None
+    pr_url: str | None = None
+    pr_number: int | None = None
+    docs_paths: list[str] = []
+    docs_count: int = 0
+    analysis_summary: str | None = None
+    warnings: list[str] = []
+    error: str | None = None

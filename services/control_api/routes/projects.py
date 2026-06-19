@@ -10,7 +10,7 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from ..models.schemas import BootstrapResult, ProjectImportRequest, ProjectInfo
+from ..models.schemas import BootstrapResult, InstallAgentLayoutResult, ProjectImportRequest, ProjectInfo
 from ..services.project_bootstrap import bootstrap
 from ..services.project_id import validate_project_id
 
@@ -187,6 +187,50 @@ def delete_project(project_id: str, request: Request):
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     return {"ok": True}
+
+
+@router.post("/{project_id}/install-agent-layout", response_model=InstallAgentLayoutResult)
+def install_agent_layout(project_id: str, request: Request):
+    """Install or regenerate the AI Dev Factory agent layout for an existing project."""
+    try:
+        validate_project_id(project_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    registry = request.app.state.project_registry
+    project_root = registry.resolve(project_id)
+    if project_root is None:
+        raise HTTPException(status_code=404, detail=f"project not found: {project_id}")
+
+    url = os.environ.get("AI_DEV_FACTORY_SUPERVISOR_URL", "http://host.docker.internal:8090").rstrip("/")
+    try:
+        with httpx.Client(timeout=420.0) as client:
+            resp = client.post(
+                f"{url}/projects/{project_id}/install-agent-layout",
+                json={
+                    "project_root": str(project_root),
+                    "project_id": project_id,
+                },
+            )
+        data = resp.json()
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="supervisor unreachable")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=503, detail="supervisor timed out during agent layout install")
+
+    if "error" in data and data["error"] in ("path_not_found", "git_not_found", "permission_denied"):
+        raise HTTPException(status_code=422, detail=data.get("detail", data["error"]))
+
+    return InstallAgentLayoutResult(
+        branch=data.get("branch"),
+        pr_url=data.get("pr_url"),
+        pr_number=data.get("pr_number"),
+        docs_paths=data.get("docs_paths", []),
+        docs_count=data.get("docs_count", 0),
+        analysis_summary=data.get("analysis_summary"),
+        warnings=data.get("warnings", []),
+        error=data.get("error"),
+    )
 
 
 @router.get("/{project_id}/branches")

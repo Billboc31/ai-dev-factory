@@ -1,0 +1,1 @@
+Fix applied. `services/supervisor/main.py:1666` now calls `mapper.map(body.project_root)` before resolving the path, exactly matching the pattern used by `analysis_start` (l.678) and `sandbox_start` (l.998). This makes the endpoint functional in Docker deployments where the control API and supervisor run on different filesystem namespaces.
