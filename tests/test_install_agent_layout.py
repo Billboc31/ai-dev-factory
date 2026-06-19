@@ -372,6 +372,35 @@ def test_install_log_cb_receives_progress_without_changing_result(tmp_path):
     assert any("wrote" in m for m in messages)
 
 
+def test_install_counts_docs_written_directly_by_agentic_llm(tmp_path):
+    """Agentic CLIs (e.g. `claude --dangerously-skip-permissions`) write files to
+    disk themselves and print a prose summary instead of FILE blocks. The count
+    must still reflect reality (derived from git), not the 0 parsed blocks."""
+    repo = _init_git_repo(tmp_path / "target")
+
+    def _fake_agentic_llm(exec_cmd, prompt, cwd, log_cb=None):
+        docs = Path(cwd) / "docs"
+        docs.mkdir(exist_ok=True)
+        for rel in REQUIRED_BASE_DOCS:
+            target = Path(cwd) / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(f"# {rel}\n\ncontent\n", encoding="utf-8")
+        (docs / "analysis-summary.md").write_text("Empty project, scaffolded.\n", encoding="utf-8")
+        return "All documentation files have been written to docs/."  # prose, no FILE blocks
+
+    with patch("install_agent_layout._invoke_llm", side_effect=_fake_agentic_llm):
+        with patch("install_agent_layout._get_remote_url", return_value=None):
+            result = install_agent_layout(repo, "test-project")
+
+    assert result["error"] is None
+    assert result["docs_count"] == len(REQUIRED_BASE_DOCS)
+    assert set(result["docs_paths"]) == set(REQUIRED_BASE_DOCS)
+    # analysis summary recovered from disk even without a FILE block
+    assert result["analysis_summary"] == "Empty project, scaffolded."
+    # the docs/ai scaffolding is not counted as a user-facing doc
+    assert "docs/ai/global-context.md" not in result["docs_paths"]
+
+
 def test_install_log_cb_and_no_cb_produce_same_result(tmp_path):
     repo_a = _init_git_repo(tmp_path / "a")
     repo_b = _init_git_repo(tmp_path / "b")
