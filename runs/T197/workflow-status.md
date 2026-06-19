@@ -22,3 +22,9 @@
 - prev: INIT
 - step: planner
 - next: PLAN_REVIEW_NEEDED
+
+## 2026-06-19T21:26:24Z
+
+- prev: PLAN_REVIEW_NEEDED
+- step: request-plan-fix
+- next: PLAN_FIX_REQUIRED
