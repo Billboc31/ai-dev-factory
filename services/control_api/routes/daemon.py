@@ -147,7 +147,7 @@ def project_daemon_board(
     project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
 ) -> BoardResponse:
     worktrees_dir = resolve_worktrees_dir(project_root, project_runtime_root=project_runtime_root)
-    return board_service.get_board(project_root, worktrees_dir=worktrees_dir, project_runtime_root=project_runtime_root)
+    return board_service.get_board(project_root, worktrees_dir=worktrees_dir, project_runtime_root=project_runtime_root, project_id=project_id)
 
 
 @project_router.get("/{project_id}/daemon/runtime-status", response_model=RuntimeStatus)

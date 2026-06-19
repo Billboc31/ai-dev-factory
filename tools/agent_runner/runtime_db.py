@@ -356,3 +356,95 @@ def list_runtime_events(
                 "SELECT * FROM runtime_events ORDER BY id DESC LIMIT ?", (limit,)
             ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Backend selection ─────────────────────────────────────────────────────────
+# Everything above is the SQLite backend (the default). When
+# RUNTIME_DB_BACKEND=postgres the public API is rebound to the networked
+# Postgres backend (runtime_db_pg) so all callers keep using the same names
+# (get_db_path, upsert_ticket_runtime, …) without changes. The Postgres handle
+# returned by get_db_path() quacks like a Path (.exists()) for compatibility.
+#
+# IMPORTANT: Postgres mode NEVER falls back to SQLite. A backend mismatch
+# between the API, the supervisor and the daemon is a configuration error: a
+# silent downgrade would create an invisible split-brain where some components
+# read/write Postgres and others read/write a local SQLite file. We therefore
+# fail fast (raise) instead of swallowing errors. Backend selection is
+# deterministic: it is decided once, here, from RUNTIME_DB_BACKEND.
+
+def _load_pg_backend():
+    import importlib.util
+    pg_path = Path(__file__).resolve().parent / "runtime_db_pg.py"
+    spec = importlib.util.spec_from_file_location("runtime_db_pg", pg_path)
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+    return mod
+
+
+def verify_backend_available() -> None:
+    """SQLite is always available (stdlib). No-op; rebound for Postgres."""
+    return None
+
+
+def healthcheck(db_path) -> None:
+    """Validate the SQLite backend (ensure the schema can be created).
+
+    Rebound to the Postgres healthcheck (psycopg + reachability + schema) when
+    RUNTIME_DB_BACKEND=postgres. Raises on failure; never degrades silently.
+    """
+    init_runtime_db(db_path)
+
+
+def describe_backend():
+    """Unambiguous, multi-line description of the ACTIVE backend for logs.
+
+    Returns a list of `runtime_db ...` lines so startup diagnostics make the
+    selected backend (and where it points) completely explicit.
+    """
+    backend = os.environ.get("RUNTIME_DB_BACKEND", "sqlite").strip().lower()
+    if backend == "postgres":
+        handle = get_db_path()
+        return [
+            "runtime_db backend=postgres",
+            f"runtime_db host={os.environ.get('RUNTIME_DB_HOST', '127.0.0.1')}",
+            f"runtime_db database={os.environ.get('RUNTIME_DB_NAME', 'adf')}",
+            f"runtime_db project_id={getattr(handle, 'project_id', '?')}",
+        ]
+    return ["runtime_db backend=sqlite", f"runtime_db path={get_db_path()}"]
+
+
+_RUNTIME_DB_BACKEND = os.environ.get("RUNTIME_DB_BACKEND", "sqlite").strip().lower()
+
+if _RUNTIME_DB_BACKEND == "postgres":
+    # Fail fast on load failure — do NOT fall back to SQLite.
+    try:
+        _pg = _load_pg_backend()
+    except Exception as exc:
+        raise RuntimeError(
+            "RUNTIME_DB_BACKEND=postgres but the Postgres backend failed to load "
+            f"({exc!r}). Postgres mode never falls back to SQLite — fix the "
+            "configuration (RUNTIME_DB_* / psycopg). A backend mismatch between "
+            "API, supervisor and daemon is a configuration error."
+        ) from exc
+    # get_db_path(project_id=None) → Postgres handle (single 'adf' DB, project-scoped rows).
+    get_db_path = _pg.get_handle  # type: ignore[assignment]
+    init_runtime_db = _pg.init_runtime_db  # type: ignore[assignment]
+    check_and_recover_db = _pg.check_and_recover_db  # type: ignore[assignment]
+    verify_backend_available = _pg.verify_backend_available  # type: ignore[assignment]
+    healthcheck = _pg.healthcheck  # type: ignore[assignment]
+    record_issue_intake = _pg.record_issue_intake  # type: ignore[assignment]
+    get_issue_intake = _pg.get_issue_intake  # type: ignore[assignment]
+    list_issue_intake = _pg.list_issue_intake  # type: ignore[assignment]
+    upsert_ticket_runtime = _pg.upsert_ticket_runtime  # type: ignore[assignment]
+    get_ticket_runtime = _pg.get_ticket_runtime  # type: ignore[assignment]
+    list_ticket_runtime = _pg.list_ticket_runtime  # type: ignore[assignment]
+    upsert_worker = _pg.upsert_worker  # type: ignore[assignment]
+    remove_worker = _pg.remove_worker  # type: ignore[assignment]
+    list_workers = _pg.list_workers  # type: ignore[assignment]
+    append_runtime_event = _pg.append_runtime_event  # type: ignore[assignment]
+    list_runtime_events = _pg.list_runtime_events  # type: ignore[assignment]
+elif _RUNTIME_DB_BACKEND not in ("", "sqlite"):
+    raise RuntimeError(
+        f"unknown RUNTIME_DB_BACKEND={_RUNTIME_DB_BACKEND!r} "
+        "(expected 'sqlite' or 'postgres')"
+    )

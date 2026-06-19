@@ -49,6 +49,15 @@ services:
       - CONTAINER_SANDBOX_ROOT=/sandboxes
       # PROJECT_NAME is provided via deploy/.env (env_file) — not overridden here
       # so the value in deploy/.env takes effect inside the container.
+      #
+      # Runtime store backend. SQLite (default) stores a file under /runtime,
+      # which corrupts when shared across the container/host over a macOS
+      # bind-mount. Set RUNTIME_DB_BACKEND=postgres (in deploy/.env) to use the
+      # networked Postgres service below instead — no file locking, one DB per
+      # project. Inside the container Postgres is reached at host "db"; the host
+      # supervisor reaches it at 127.0.0.1 (deploy/.env). RUNTIME_DB_BACKEND and
+      # credentials come from deploy/.env so both halves of the stack agree.
+      - RUNTIME_DB_HOST=db
     volumes:
       # Mount the same host runtime root that deploy/.env's HOST_RUNTIME_ROOT
       # refers to. Using ${HOST_RUNTIME_ROOT} ensures the supervisor's path
@@ -64,11 +73,40 @@ services:
     ports:
       - "${API_PORT:-8080}:8080"
     restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
     networks:
       default:
       ai-dev-factory-runtime:
         aliases:
           - sandbox-${SANDBOX_ID:-default}-api
+
+  # Networked runtime store. Replaces the corruption-prone SQLite-on-bind-mount
+  # setup: a single Postgres server holds one database per project (created at
+  # bootstrap). Reached as "db" inside the Docker network and on
+  # 127.0.0.1:${RUNTIME_DB_PORT} from the host (supervisor/daemon).
+  db:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_USER=${RUNTIME_DB_USER:-adf}
+      - POSTGRES_PASSWORD=${RUNTIME_DB_PASSWORD:-adf}
+      # Maintenance/bootstrap database; per-project databases are created on demand.
+      - POSTGRES_DB=${RUNTIME_DB_NAME:-adf}
+    volumes:
+      # Named volume (lives inside the Docker VM, NOT a macOS bind-mount) so
+      # Postgres file locking is reliable and the data survives recreation.
+      - adf-db-data:/var/lib/postgresql/data
+    ports:
+      - "${RUNTIME_DB_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${RUNTIME_DB_USER:-adf} -d ${RUNTIME_DB_NAME:-adf}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      default:
 
   web:
     build:
@@ -84,6 +122,9 @@ services:
       ai-dev-factory-runtime:
         aliases:
           - sandbox-${SANDBOX_ID:-default}-web
+
+volumes:
+  adf-db-data:
 
 networks:
   ai-dev-factory-runtime:

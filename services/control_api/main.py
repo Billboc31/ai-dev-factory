@@ -66,6 +66,28 @@ def create_app(
     app.state.daemon_exec_cmd = daemon_exec_cmd
     app.state.worktrees_dir = worktrees_dir or resolve_worktrees_dir(_root)
     app.state.db_path = _runtime_db.get_db_path()
+    # Diagnostics: make the active runtime DB backend completely unambiguous at
+    # boot (multi-line: backend / host / database / project_id, or path).
+    _rdb_backend = os.environ.get("RUNTIME_DB_BACKEND", "sqlite").strip().lower()
+    for _line in _runtime_db.describe_backend():
+        logger.info("%s", _line)
+    # Ensure the runtime store exists (idempotent).
+    #  - Postgres mode: fail fast. We validate psycopg + reachability + schema
+    #    before reporting healthy and NEVER silently fall back to SQLite (that
+    #    would create an invisible API/Postgres + daemon/SQLite split-brain).
+    #  - SQLite mode: best-effort. A missing/unreachable local file must not
+    #    block boot — the board degrades gracefully to filesystem state.
+    if app.state.db_path is not None:
+        if _rdb_backend == "postgres":
+            _runtime_db.verify_backend_available()
+            _runtime_db.check_and_recover_db(app.state.db_path)
+            _runtime_db.init_runtime_db(app.state.db_path)
+        else:
+            try:
+                _runtime_db.check_and_recover_db(app.state.db_path)
+                _runtime_db.init_runtime_db(app.state.db_path)
+            except Exception:
+                logger.exception("runtime_db: init/recover failed at startup — continuing")
 
     _runtime_root_env = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
     _runtime_root: Path | None = Path(_runtime_root_env).expanduser().resolve() if _runtime_root_env else None

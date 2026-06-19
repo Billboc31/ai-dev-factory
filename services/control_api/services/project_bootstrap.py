@@ -30,6 +30,37 @@ def _supervisor_url() -> str:
     return url.rstrip("/")
 
 
+def _ensure_project_runtime_db(project_id: str) -> None:
+    """Best-effort ensure the shared runtime store exists (Postgres backend only).
+
+    The Postgres backend uses ONE database with project-scoped rows, so there is
+    no per-project database to create — this only guarantees the shared schema
+    is present (idempotent). It is intentionally best-effort and NON-BLOCKING:
+    a failure here is logged and ignored so it can never leave a half-registered
+    project. The same schema is also ensured lazily on first runtime access
+    (API startup, daemon startup), so registration never depends on it.
+
+    With the SQLite backend this is a no-op (single shared file, created on demand).
+    """
+    if os.environ.get("RUNTIME_DB_BACKEND", "sqlite").strip().lower() != "postgres":
+        return
+    try:
+        import importlib.util
+
+        tools = Path(__file__).resolve().parents[3] / "tools" / "agent_runner"
+        spec = importlib.util.spec_from_file_location("_rdb_bootstrap", tools / "runtime_db.py")
+        mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+        spec.loader.exec_module(mod)  # type: ignore[union-attr]
+        handle = mod.get_db_path(project_id)
+        mod.init_runtime_db(handle)
+        logger.info("runtime_db: ensured shared store for project %s (%s)", project_id, handle)
+    except Exception:
+        logger.warning(
+            "runtime_db: could not pre-init shared store for %s — will init lazily on first access",
+            project_id, exc_info=True,
+        )
+
+
 def _call_supervisor(
     method: str,
     path: str,
@@ -102,6 +133,7 @@ def bootstrap(
         Path(data["project_root"]),
         project_runtime_root=Path(data["runtime_root"]),
     )
+    _ensure_project_runtime_db(project_id)
 
     return BootstrapResult(
         project_id=data["project_id"],
@@ -167,6 +199,7 @@ def auto_bootstrap(
                 Path(data["project_root"]),
                 project_runtime_root=Path(data["runtime_root"]),
             )
+            _ensure_project_runtime_db(project_id)
             return
 
     registry.ensure_registered(
@@ -174,3 +207,4 @@ def auto_bootstrap(
         Path(str(project_root)),
         project_runtime_root=self_runtime_root,
     )
+    _ensure_project_runtime_db(project_id)
