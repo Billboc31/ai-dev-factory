@@ -69,10 +69,12 @@ generate comprehensive AI agent documentation for the `docs/` folder.
 1. Analyze the repository evidence provided (file contents and tree).
 2. Write a short analysis summary (2-5 sentences) of the project.
 3. Generate ALL required base documentation files listed below.
-4. Generate ONLY the conditional documentation files for which you found clear \
+4. (Re)generate the project memory file `docs/ai/global-context.md` — see the \
+dedicated section. ALWAYS generate it.
+5. Generate ONLY the conditional documentation files for which you found clear \
 evidence in the repository (do not generate files for features not present).
-5. Mark any uncertain findings with "TODO: verify" rather than guessing.
-6. Use only information you can infer from the provided repository evidence.
+6. Mark any uncertain findings with "TODO: verify" rather than guessing.
+7. Use only information you can infer from the provided repository evidence.
 
 ## Output format
 
@@ -82,9 +84,57 @@ Output ONLY file blocks in this exact format — no text outside the blocks:
 <Markdown content>
 --- END FILE ---
 
+--- BEGIN FILE: docs/ai/global-context.md ---
+<project memory — see structure below>
+--- END FILE ---
+
 --- BEGIN FILE: docs/analysis-summary.md ---
 <2-5 sentence project analysis summary>
 --- END FILE ---
+
+## Project memory — `docs/ai/global-context.md` (ALWAYS generate)
+
+This file is the canonical project memory injected at the top of EVERY AI agent \
+prompt (planner/coder/reviewer/tester). Make it as complete as the evidence \
+allows — it is the single most important file for agents to behave well on this \
+project. It will be kept up to date by the memory-updater as development \
+progresses, so write it as a living document.
+
+Keep it concise and strictly evidence-based. If the repository is nearly empty, \
+produce a short but well-structured skeleton with `TODO:` placeholders rather \
+than inventing content.
+
+IMPORTANT — preserve accumulated memory: if `docs/ai/global-context.md` already \
+exists in the repository, treat it as authoritative project memory. Preserve all \
+existing content, only refine wording and append newly-evidenced facts; never \
+delete history or accumulated decisions. If it does not exist, create it fresh.
+
+Use exactly these sections:
+
+```
+# Global Context — <Project Name>
+
+## Identity
+- project_id, repository, primary language/stack
+
+## Purpose
+What the project does and who/what it serves.
+
+## Stack & Components
+Languages, frameworks, runtime services, key directories.
+
+## Architecture
+High-level structure, main modules, how they interact.
+
+## Conventions & Invariants
+Coding conventions, naming, things that must always hold true.
+
+## Workflow notes
+Build/test/run commands, branching, anything an agent must know before acting.
+
+## Known risks & TODOs
+Gaps, uncertainties, follow-ups (use `TODO:` for unverified items).
+```
 
 ## Required base docs (ALWAYS generate these 10 files)
 
@@ -106,6 +156,7 @@ Output ONLY file blocks in this exact format — no text outside the blocks:
 **docs/deployment.md** — how to build, how to deploy, infrastructure notes
 **docs/agent-guidelines.md** — how AI agents should work in this repo, conventions, safe-change policy, files to avoid
 **docs/known-risks-and-todos.md** — uncertain detections, missing tests, missing docs, commands requiring human confirmation
+**docs/ai/global-context.md** — canonical project memory injected into every agent prompt (see the dedicated section above for the required structure)
 
 **docs/api.md** — API routes, endpoints, request/response shape (generate if routes/controllers found)
 **docs/database.md** — database type, schema, migrations (generate if DB detected)

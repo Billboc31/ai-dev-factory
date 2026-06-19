@@ -372,6 +372,58 @@ def test_install_log_cb_receives_progress_without_changing_result(tmp_path):
     assert any("wrote" in m for m in messages)
 
 
+def test_install_seeds_memory_triad(tmp_path):
+    repo = _init_git_repo(tmp_path / "target")
+    llm_output = _make_base_docs_output()
+
+    with patch("install_agent_layout._invoke_llm", return_value=llm_output):
+        with patch("install_agent_layout._get_remote_url", return_value=None):
+            install_agent_layout(repo, "test-project")
+
+    assert (repo / "docs" / "ai" / "global-context.md").exists()
+    assert (repo / "docs" / "ai" / "project-life.md").exists()
+    assert (repo / "docs" / "ai" / "decisions-log.md").exists()
+
+
+def test_install_writes_global_context_from_llm_block(tmp_path):
+    repo = _init_git_repo(tmp_path / "target")
+    llm_output = _make_base_docs_output() + (
+        "\n\n--- BEGIN FILE: docs/ai/global-context.md ---\n"
+        "# Global Context\n\nRich evidence-based content.\n--- END FILE ---\n"
+    )
+
+    with patch("install_agent_layout._invoke_llm", return_value=llm_output):
+        with patch("install_agent_layout._get_remote_url", return_value=None):
+            install_agent_layout(repo, "test-project")
+
+    assert "Rich evidence-based content." in (repo / "docs" / "ai" / "global-context.md").read_text()
+
+
+def test_update_preserves_existing_global_context(tmp_path):
+    repo = _init_git_repo(tmp_path / "target")
+    # First install (creates ai/ → subsequent runs are "update").
+    with patch("install_agent_layout._invoke_llm", return_value=_make_base_docs_output()):
+        with patch("install_agent_layout._get_remote_url", return_value=None):
+            install_agent_layout(repo, "test-project")
+
+    # Simulate the memory-updater enriching the project memory over time.
+    ctx = repo / "docs" / "ai" / "global-context.md"
+    ctx.write_text("# Global Context\n\n## Decisions\n- important accumulated memory\n", encoding="utf-8")
+
+    # Re-run agent layout: the LLM tries to overwrite global-context.md.
+    llm2 = _make_base_docs_output() + (
+        "\n\n--- BEGIN FILE: docs/ai/global-context.md ---\nOVERWRITTEN\n--- END FILE ---\n"
+    )
+    with patch("install_agent_layout._invoke_llm", return_value=llm2):
+        with patch("install_agent_layout._get_remote_url", return_value=None):
+            result = install_agent_layout(repo, "test-project")
+
+    content = ctx.read_text()
+    assert "important accumulated memory" in content
+    assert "OVERWRITTEN" not in content
+    assert any("preserved" in w for w in result["warnings"])
+
+
 def test_install_counts_docs_written_directly_by_agentic_llm(tmp_path):
     """Agentic CLIs (e.g. `claude --dangerously-skip-permissions`) write files to
     disk themselves and print a prose summary instead of FILE blocks. The count
