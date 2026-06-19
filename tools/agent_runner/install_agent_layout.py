@@ -199,13 +199,48 @@ def _ensure_layout_dirs(project_path: Path, factory: Path, project_id: str, repo
 
     docs_ai = project_path / "docs" / "ai"
     docs_ai.mkdir(parents=True, exist_ok=True)
+    project_name = project_id.replace("-", " ").title()
+
+    # Seed the project memory triad (global-context / project-life / decisions-log).
+    # These are maintained over time by the memory-updater role after each
+    # approved ticket; we only create structured skeletons here (never overwrite).
     ctx = docs_ai / "global-context.md"
     if not ctx.exists():
-        project_name = project_id.replace("-", " ").title()
         ctx.write_text(
             f"# Global Context — {project_name}\n\n"
+            "> Canonical project memory injected into every agent prompt. Keep it\n"
+            "> concise, evidence-based, and up to date as development progresses.\n\n"
+            "## Identity\n"
             f"- project_id: {project_id}\n"
-            f"- repo: {repo_url}\n",
+            f"- repo: {repo_url}\n\n"
+            "## Purpose\nTODO: what this project does.\n\n"
+            "## Stack & Components\nTODO\n\n"
+            "## Architecture\nTODO\n\n"
+            "## Conventions & Invariants\nTODO\n\n"
+            "## Workflow notes\nTODO\n\n"
+            "## Known risks & TODOs\nTODO\n",
+            encoding="utf-8",
+        )
+
+    life = docs_ai / "project-life.md"
+    if not life.exists():
+        life.write_text(
+            f"# Project Life — {project_name}\n\n"
+            "Chronological log of meaningful project evolution (milestones, major\n"
+            "changes). Maintained by the memory-updater after each approved ticket.\n\n"
+            "## Timeline\n"
+            "- (init) AI Dev Factory agent layout installed.\n",
+            encoding="utf-8",
+        )
+
+    decisions = docs_ai / "decisions-log.md"
+    if not decisions.exists():
+        decisions.write_text(
+            f"# Decisions Log — {project_name}\n\n"
+            "Architectural and process decisions (newest first). Maintained by the\n"
+            "memory-updater after each approved ticket.\n\n"
+            "## Decisions\n"
+            "- (init) Adopted the AI Dev Factory agent layout (ai/, docs/ai/, prompts/).\n",
             encoding="utf-8",
         )
 
@@ -401,6 +436,12 @@ def install_agent_layout(
     for rel_path, content in generated.items():
         # Skip the analysis-summary helper doc — it's used internally
         if "analysis-summary" in rel_path:
+            continue
+
+        # Preserve accumulated project memory on update: the memory-updater owns
+        # global-context.md after the initial install, so never clobber it here.
+        if rel_path == "docs/ai/global-context.md" and is_update and (project_path / rel_path).exists():
+            warnings.append("preserved existing docs/ai/global-context.md (maintained by memory-updater)")
             continue
 
         err = _validate_doc_path(rel_path, project_path)
