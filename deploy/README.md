@@ -17,6 +17,21 @@ cp deploy/.env.example deploy/.env
 
 ## 2. Start the host supervisor
 
+The supervisor (and the daemons it spawns) run on the host from a
+virtualenv at `.venv`. Install the host dependencies from the same
+requirements file the API image uses — it already pins `psycopg[binary]`,
+which is **required** when `RUNTIME_DB_BACKEND=postgres`:
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r services/control_api/requirements.txt
+```
+
+> Postgres mode never falls back to SQLite. If `psycopg` is missing in the
+> host venv, the daemon fails fast with a clear error instead of silently
+> writing to a local SQLite file (which would split-brain the board against
+> the API/Postgres state). Re-run the `pip install` above after upgrading.
+
 ```bash
 bash deploy/start_supervisor.sh
 ```
