@@ -8,7 +8,7 @@
 # is started only if it is not already listening, so re-running is safe.
 #
 # Usage:
-#   bash deploy/deploy.sh              # supervisor (if needed) + docker compose up -d
+#   bash deploy/deploy.sh              # supervisor (if needed) + rebuild/recreate api & web (db untouched)
 #   bash deploy/deploy.sh logs -f      # any extra args are forwarded to docker compose
 #
 # Notes:
@@ -66,5 +66,5 @@ fi
 # ── 2. Docker stack (db + api + web) ──────────────────────────────────────────
 # up.sh re-sources deploy/.env so compose interpolation can't be fooled by stale
 # shell exports, then runs `docker compose up -d` (or any forwarded subcommand).
-echo "compose: starting db + api + web…"
+echo "compose: rebuilding api + web (db left running, started via depends_on)…"
 exec bash "$SCRIPT_DIR/up.sh" "$@"
