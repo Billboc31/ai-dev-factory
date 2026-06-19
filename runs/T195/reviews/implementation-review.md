@@ -1,0 +1,99 @@
+---
+
+# PR Review — T195: Correct bootstrap onboarding to use standard ai/docs/prompts/runs/tickets layout
+
+## Résumé
+
+L'implémentation crée un nouveau module `bootstrap_agent_layout.py` qui génère la structure standard `ai/`, `docs/`, `prompts/`, `runs/`, `tickets/` dans le projet managé, supprime la direction erronée T194 (`.ai-dev-factory/project.yml`), et expose les résultats dans l'API bootstrap. La section "Agent integration" du ticket (chargement du contexte projet-local dans le runner) n'est pas implémentée.
+
+---
+
+## Vérifications effectuées
+
+- Diff complet `git diff main...HEAD` (6 fichiers production, 2 tests)
+- Lecture complète de `tools/agent_runner/bootstrap_agent_layout.py`
+- Vérification des changements dans `services/supervisor/main.py`
+- Vérification des modèles Pydantic et dataclass (`schemas.py`, `project_bootstrap.py`)
+- Vérification des tests (`test_bootstrap_agent_layout.py`, `test_supervisor_projects.py`)
+- Lecture de `tools/agent_runner/run_step.py` (résolution des chemins contexte)
+- Vérification des références `.ai-dev-factory` restantes dans la codebase
+
+---
+
+## Points validés
+
+**Suppression de la direction erronée T194**
+- Le bloc créant `.ai-dev-factory/project.yml` est entièrement supprimé de `main.py` (lignes 1268–1284 du diff).
+- Test `test_bootstrap_does_not_write_ai_dev_factory_dir` confirme l'absence du fichier.
+
+**Structure standard générée**
+- `bootstrap_agent_layout.py` crée bien `ai/roles/`, `ai/skills/`, `ai/templates/`, `docs/ai/`, `prompts/generic/`, `runs/`, `tickets/`.
+- Copie depuis les dossiers factory existants, avec fallback gracieux si les sources n'existent pas.
+- `docs/ai/global-context.md` généré avec `project_id`, `project_name`, `repo_url`.
+
+**Workflow git correct**
+- Branche `ai-dev-factory/bootstrap-agent-layout` créée systématiquement (jamais sur la branche défaut).
+- Commit avec message `chore: add AI Dev Factory agent workspace`.
+- Push + PR via `gh pr create` quand un remote est disponible.
+- PR title : `Add AI Dev Factory agent workspace`. PR body documenté (dossiers, usage agents, commandes détectées, TODOs humains).
+
+**Gestion d'erreurs et idempotence**
+- Si `ai/` existe déjà : skip silencieux, pas d'erreur, pas de branche.
+- Si pas de remote : branche+commit locaux, pas de PR, pas d'erreur.
+- Toutes les erreurs capturées sans faire échouer l'enregistrement projet.
+
+**API étendue correctement**
+- 4 champs ajoutés dans les deux modèles (`schemas.py` et `project_bootstrap.py`) : `agent_layout_branch`, `agent_layout_pr_url`, `agent_layout_pr_number`, `agent_layout_error`.
+- Les deux sont synchronisés.
+
+**Couverture de tests**
+- 14 tests unitaires dans `test_bootstrap_agent_layout.py` (helpers, création dossiers, git workflow, PR, idempotence, no-remote, erreur gracieuse).
+- 2 tests superviseur mis à jour (`test_bootstrap_returns_agent_layout_fields`, `test_bootstrap_does_not_write_ai_dev_factory_dir`).
+
+**Références `.ai-dev-factory` restantes**
+- Toutes les références `.ai-dev-factory` restantes concernent le système de déploiement/sandbox (scripts, deploy.yml, PID files) — domaine distinct, non affecté par T195.
+
+---
+
+## Problèmes détectés
+
+### BLOQUANT — Section "Agent integration" non implémentée
+
+Le ticket spécifie explicitement :
+
+> The agent runner must load project-local context from the standard folders:
+> `<project_root>/ai/`, `<project_root>/docs/`, `<project_root>/prompts/`, `<project_root>/runs/`, `<project_root>/tickets/`
+> …
+> Existing projects without this layout should keep working with defaults, but bootstrapped projects must prefer project-local context.
+
+Et dans les critères d'acceptation :
+
+> **Agent runner steps load project-local context from these folders when present.**
+
+**État actuel :** `run_step.py` utilise des `Path` relatifs (`docs/ai/global-context.md`, `ai/roles/planner.md`, `ai/skills/*.md`) sans paramètre `--project-root` et sans mécanisme de détection/préférence pour le contexte projet managé. Quand les tickets du projet managé sont traités, le runner charge le contexte de la factory (CWD = racine factory), pas le contexte du projet managé bootstrappé.
+
+L'implémentation installe la structure dans le projet cible mais le runner ne la consulte jamais.
+
+**Critère d'acceptation non satisfait :** `Agent runner steps load project-local context from these folders when present.`
+
+---
+
+## Risques éventuels
+
+- Le module `bootstrap_agent_layout.py` utilise `git add -A` puis commit immédiat. Si des fichiers non-trackés préexistent dans le projet managé lors du bootstrap, ils pourraient être inclus dans le commit de layout. Risque mineur, non bloquant.
+
+- `_factory_root()` est résolu par `Path(__file__).resolve().parents[2]`. Si le module est installé dans un chemin inhabituel ou via un lien symbolique, la résolution peut échouer silencieusement (sources non copiées). Comportement gracieux mais log non émis dans ce cas.
+
+---
+
+## Décision
+
+- REQUEST_CHANGES
+
+---
+
+## Actions demandées
+
+1. **Implémenter la section "Agent integration"** : modifier `run_step.py` et/ou `run_ticket.py` pour accepter un paramètre `--project-root` (ou équivalent) et charger le contexte en priorité depuis `<project_root>/ai/`, `<project_root>/docs/`, etc. quand ce dossier existe, avec fallback sur les chemins relatifs actuels (factory) si absent. Cela satisfait la contrainte "existing projects keep working with defaults."
+
+IMPLEMENTATION_FIX_REQUIRED
