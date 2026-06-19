@@ -1758,7 +1758,11 @@ def project_daemon_start(project_id: str, body: ProjectDaemonStartRequest = None
             content={"ok": False, "error": f"project not registered in workspace: {project_id!r}"},
         )
 
-    project_root = Path(project_root_str)
+    # The control API runs inside Docker, so its registry "root" is a CONTAINER
+    # path (e.g. /runtime/clones/<id>). Map it to the host path before using it
+    # as the daemon's working directory — otherwise Popen(cwd=...) fails with
+    # "No such file or directory" on the host.
+    project_root = Path(mapper.map(project_root_str))
     project_runtime_root = _project_runtime_root(project_id)
     runs_dir = _project_runs_dir(project_id)
     logs_dir = _project_logs_dir(project_id)
