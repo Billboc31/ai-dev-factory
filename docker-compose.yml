@@ -58,11 +58,21 @@ services:
       # supervisor reaches it at 127.0.0.1 (deploy/.env). RUNTIME_DB_BACKEND and
       # credentials come from deploy/.env so both halves of the stack agree.
       - RUNTIME_DB_HOST=db
+      # Managed projects' runtimes live as siblings under RUNTIME_BASE_ROOT (NOT
+      # under HOST_RUNTIME_ROOT), so they are bind-mounted at this container path.
+      # The API maps host runtime paths persisted in workspace.json to it, so
+      # filesystem-backed endpoints (tickets/logs/diffs) work for every project,
+      # not just ai-dev-factory. See services/control_api/services/container_paths.py
+      - CONTAINER_RUNTIME_BASE=/runtime-base
     volumes:
       # Mount the same host runtime root that deploy/.env's HOST_RUNTIME_ROOT
       # refers to. Using ${HOST_RUNTIME_ROOT} ensures the supervisor's path
       # mapping rules and the actual bind-mount agree.
       - ${HOST_RUNTIME_ROOT:-~/runtime/ai-dev-factory}:/runtime
+      # Mount the whole runtime base so the container can read the runtime of
+      # every managed project (each lives at ${RUNTIME_BASE_ROOT}/<project_id>),
+      # not only ai-dev-factory's own runtime mounted at /runtime above.
+      - ${RUNTIME_BASE_ROOT:-~/runtime}:/runtime-base
       # Mount the sandbox root so container-side code can read/write sandbox
       # state at the new location (outside the main runtime hierarchy).
       - ${HOST_SANDBOX_ROOT:-~/sandboxes}:/sandboxes

@@ -6,6 +6,8 @@ import json
 import os
 from pathlib import Path
 
+from .container_paths import to_container_path
+
 _WORKERS_JSON = "workers.json"
 
 
@@ -22,7 +24,7 @@ def resolve_runs_dir(
     ``project_root/runs``.
     """
     if project_runtime_root is not None:
-        return project_runtime_root / "runs"
+        return to_container_path(project_runtime_root) / "runs"
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
     if project_id and runtime_root:
         return Path(runtime_root) / project_id / "runs"
@@ -42,7 +44,7 @@ def resolve_worktrees_dir(
     ``{project_runtime_root}/worktrees`` directly.
     """
     if project_runtime_root is not None:
-        return project_runtime_root / "worktrees"
+        return to_container_path(project_runtime_root) / "worktrees"
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
     if project_id and runtime_root:
         return Path(runtime_root) / project_id / "worktrees"
@@ -62,7 +64,7 @@ def resolve_state_dir(
     ``{project_runtime_root}/state`` directly.
     """
     if project_runtime_root is not None:
-        return project_runtime_root / "state"
+        return to_container_path(project_runtime_root) / "state"
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
     if project_id and runtime_root:
         return Path(runtime_root) / project_id / "state"
@@ -82,7 +84,7 @@ def resolve_logs_dir(
     ``{project_runtime_root}/logs`` directly.
     """
     if project_runtime_root is not None:
-        return project_runtime_root / "logs"
+        return to_container_path(project_runtime_root) / "logs"
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
     if project_id and runtime_root:
         return Path(runtime_root) / project_id / "logs"
@@ -149,7 +151,7 @@ def resolve_ticket_run_dir(
     worker = workers.get(ticket_id, {})
     wt_path = worker.get("worktree_path")
     if wt_path:
-        candidate = Path(wt_path) / "runs" / ticket_id
+        candidate = to_container_path(wt_path) / "runs" / ticket_id
         if candidate.exists():
             return candidate
 

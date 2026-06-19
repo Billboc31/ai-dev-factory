@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 
 from ..models.schemas import BoardColumn, BoardItem, BoardResponse
+from .container_paths import to_container_path
 from .runtime_resolver import resolve_runs_dir, resolve_state_dir
 
 _TICKET_RE = re.compile(r"^T\d{3,}$")
@@ -167,7 +168,7 @@ def get_board(project_root: Path, repo: str | None = None, worktrees_dir: Path |
     for ticket_id, worker in workers.items():
         wt_path = worker.get("worktree_path")
         if wt_path:
-            wt_run_dir = Path(wt_path) / "runs" / ticket_id
+            wt_run_dir = to_container_path(wt_path) / "runs" / ticket_id
             if wt_run_dir.exists():
                 ticket_dirs[ticket_id] = wt_run_dir
 
