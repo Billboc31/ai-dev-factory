@@ -1,17 +1,23 @@
-The full run shows 1294 passed — the 117 failures are pre-existing (runtime_db, daemon state, and environment-specific issues unrelated to T195). My 54 focused tests all pass.
+Implementation complete. Here's the summary:
 
-The implementation is complete. Here's the summary:
+---
 
-**Removed (wrong T194 direction):**
-- The block in `supervisor/main.py` that wrote `.ai-dev-factory/project.yml` into the target project — gone
+**Files modified:**
 
-**Added:**
-- `tools/agent_runner/bootstrap_agent_layout.py` — creates `ai/`, `docs/`, `prompts/`, `runs/`, `tickets/` on branch `ai-dev-factory/bootstrap-agent-layout` in the target project, commits, and opens a PR when a GitHub remote is available; all errors are captured gracefully without failing project registration
-- `tests/test_bootstrap_agent_layout.py` — 14 tests covering folder creation, branch/commit behavior, skip-when-exists, no-remote, and idempotency
+- `tools/agent_runner/run_step.py`
+  - `compose_runtime_prompt` gains a `project_root: Path | None = None` parameter. A new `_resolve(rel)` inner function checks `project_root / rel` first; falls back to `Path(rel)` (factory-relative CWD) when absent or when `project_root` is `None`. Applied to global-context, role file, and all skill files.
+  - `parse_args` gains `--project-root` argument.
+  - `main` reads `args.project_root` and passes it to `compose_runtime_prompt`.
 
-**Updated:**
-- `services/supervisor/main.py` — calls `bootstrap_agent_layout` and includes result fields in the response
-- `services/control_api/models/schemas.py` and `services/control_api/services/project_bootstrap.py` — both `BootstrapResult` models (Pydantic + dataclass) now expose `agent_layout_branch`, `agent_layout_pr_url`, `agent_layout_pr_number`, `agent_layout_error`
-- `tests/test_supervisor_projects.py` — replaced the two `project.yml` tests with `test_bootstrap_returns_agent_layout_fields` and `test_bootstrap_does_not_write_ai_dev_factory_dir`
+- `tools/agent_runner/run_ticket.py`
+  - `_call_run_step` gains `project_root: Path | None = None`; passes `--project-root` to the `run_step.py` subprocess when set.
+  - `execute_once` gains `project_root: Path | None = None`; passes `--project-root` to subprocess when set.
+  - `auto_run` gains `project_root: Path | None = None`; threads it into `_call_run_step`.
+  - `parse_args` gains `--project-root` argument.
+  - `main` reads `args.project_root` and passes to `auto_run` / `execute_once`.
 
-**Unchanged by design:** `run_step.py` already resolves `docs/ai/global-context.md`, `ai/roles/*.md`, and `ai/skills/*.md` relative to CWD, so managed project worktrees pick up project-local context automatically when those files exist.
+**File created:**
+
+- `tests/test_run_step_project_root.py` — 10 tests covering: project_root global-context preferred, fallback to factory, no project_root unchanged, role preferred/fallback, skill preferred/fallback, task always included, CLI `--project-root` flag with and without project context.
+
+**Result:** 1312 passed (10 new), no regressions.
