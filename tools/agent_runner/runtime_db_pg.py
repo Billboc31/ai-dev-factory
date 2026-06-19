@@ -7,18 +7,28 @@ networked Postgres server. Selected when ``RUNTIME_DB_BACKEND=postgres``.
 Why Postgres: the SQLite file lives under the runtime root, which on macOS is a
 Docker bind-mount shared between the container (control API) and the host
 (supervisor/daemon). SQLite's file locking is unreliable across that boundary →
-recurring corruption. A networked server removes the shared-file problem and
-gives one database per project.
+recurring corruption. A networked server removes the shared-file problem.
+
+Data model — ONE logical database, project-scoped rows
+------------------------------------------------------
+A single database (``RUNTIME_DB_NAME``, default ``adf``) holds every project's
+state. Every table carries a ``project_id`` column and every query filters by
+it, so projects are isolated by row, not by database. This was chosen over
+"one database per project" because it is far easier to back up, migrate, query,
+monitor and reason about, and it avoids unbounded ``CREATE DATABASE`` growth and
+the privileges/round-trips that requires. Isolation is enforced by composite
+primary keys ``(project_id, <natural key>)`` and ``WHERE project_id = %s``.
 
 Connection comes from the environment:
-    RUNTIME_DB_HOST       (default 127.0.0.1; the container overrides to "db")
+    RUNTIME_DB_HOST       (default 127.0.0.1; the API container overrides to "db")
     RUNTIME_DB_PORT       (default 5432)
     RUNTIME_DB_USER       (default adf)
     RUNTIME_DB_PASSWORD   (default adf)
-    RUNTIME_DB_NAME       (maintenance DB, default adf)
+    RUNTIME_DB_NAME       (the single database, default adf)
 
-Each project gets its own database ``adf_<project_id>``; ``get_handle`` resolves
-it. Tables are created lazily by ``init_runtime_db``.
+psycopg is imported lazily inside the connection helpers so the pure helpers
+(resolve_project_id, PgHandle, get_handle) stay importable without the optional
+dependency.
 """
 
 from __future__ import annotations
@@ -26,25 +36,26 @@ from __future__ import annotations
 import datetime
 import json
 import os
-import re
 
-# psycopg is imported lazily inside the connection helpers so that the pure
-# helpers (db_name_for, PgHandle, get_handle) remain importable/testable even
-# when the optional dependency is not installed.
+_DEFAULT_DBNAME = "adf"
+_DEFAULT_PROJECT_ID = "ai-dev-factory"
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS issue_intake (
-    issue_number INTEGER PRIMARY KEY,
+    project_id   TEXT NOT NULL,
+    issue_number INTEGER NOT NULL,
     ticket_id    TEXT NOT NULL,
     branch       TEXT,
     status       TEXT NOT NULL DEFAULT 'ingested',
     ingested_at  TEXT NOT NULL,
     updated_at   TEXT NOT NULL,
-    last_error   TEXT
+    last_error   TEXT,
+    PRIMARY KEY (project_id, issue_number)
 );
 
 CREATE TABLE IF NOT EXISTS ticket_runtime (
-    ticket_id       TEXT PRIMARY KEY,
+    project_id      TEXT NOT NULL,
+    ticket_id       TEXT NOT NULL,
     issue_number    INTEGER,
     branch          TEXT,
     state           TEXT NOT NULL DEFAULT 'INIT',
@@ -55,80 +66,87 @@ CREATE TABLE IF NOT EXISTS ticket_runtime (
     pr_state        TEXT,
     last_transition TEXT,
     last_error      TEXT,
-    updated_at      TEXT NOT NULL
+    updated_at      TEXT NOT NULL,
+    PRIMARY KEY (project_id, ticket_id)
 );
 
 CREATE TABLE IF NOT EXISTS workers (
-    ticket_id     TEXT PRIMARY KEY,
+    project_id    TEXT NOT NULL,
+    ticket_id     TEXT NOT NULL,
     pid           INTEGER,
     branch        TEXT,
     worktree_path TEXT,
     status        TEXT NOT NULL DEFAULT 'running',
     started_at    TEXT,
     heartbeat_at  TEXT,
-    updated_at    TEXT NOT NULL
+    updated_at    TEXT NOT NULL,
+    PRIMARY KEY (project_id, ticket_id)
 );
 
 CREATE TABLE IF NOT EXISTS runtime_events (
     id            BIGSERIAL PRIMARY KEY,
+    project_id    TEXT NOT NULL,
     ticket_id     TEXT,
     event_type    TEXT NOT NULL,
     message       TEXT NOT NULL,
     metadata_json TEXT,
     created_at    TEXT NOT NULL
 );
-"""
 
-_DEFAULT_DBNAME = "adf"
+CREATE INDEX IF NOT EXISTS idx_runtime_events_project ON runtime_events (project_id);
+CREATE INDEX IF NOT EXISTS idx_runtime_events_project_ticket ON runtime_events (project_id, ticket_id);
+"""
 
 
 def _now_iso() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _maintenance_dbname() -> str:
+def database_name() -> str:
+    """The single logical database that holds all projects' rows."""
     return os.environ.get("RUNTIME_DB_NAME", _DEFAULT_DBNAME)
 
 
-def db_name_for(project_id: str | None) -> str:
-    """Return the per-project database name, e.g. ``adf_ai_dev_factory``.
+def resolve_project_id(project_id: str | None) -> str:
+    """Resolve the project_id used to scope rows.
 
-    When *project_id* is omitted, falls back to the current project (PROJECT_NAME
-    env) so writers (daemon/run_ticket) and readers (board) target the same DB
-    without threading a project_id everywhere. As a last resort uses the
-    maintenance database (RUNTIME_DB_NAME).
+    Order: explicit argument → PROJECT_NAME env → default (ai-dev-factory).
+    The value is stored verbatim in the project_id column (parameterised, so no
+    sanitisation needed). Falling back to a default keeps the column NOT NULL
+    while a clear startup banner makes the active project_id observable.
     """
-    pid = project_id or os.environ.get("PROJECT_NAME")
-    if not pid:
-        return _maintenance_dbname()
-    safe = re.sub(r"[^a-zA-Z0-9_]", "_", pid).lower().strip("_")
-    return f"adf_{safe}" if safe else _maintenance_dbname()
+    return project_id or os.environ.get("PROJECT_NAME") or _DEFAULT_PROJECT_ID
 
 
 class PgHandle:
     """Opaque DB handle for the Postgres backend.
 
-    Quacks like the ``Path`` returned by the SQLite backend's ``get_db_path`` so
-    existing callers (e.g. ``if handle is None or not handle.exists()``) keep
-    working unchanged.
+    Carries the project_id used to scope every query, and quacks like the
+    ``Path`` returned by the SQLite backend's ``get_db_path`` so existing
+    callers (e.g. ``if handle is None or not handle.exists()``) keep working.
     """
 
-    def __init__(self, dbname: str) -> None:
-        self.dbname = dbname
+    def __init__(self, project_id: str) -> None:
+        self.project_id = project_id
+        self.dbname = database_name()
 
     def exists(self) -> bool:
         # Server-backed store: presence is established lazily via init_runtime_db.
         return True
 
+    def describe(self) -> str:
+        host = os.environ.get("RUNTIME_DB_HOST", "127.0.0.1")
+        return f"backend=postgres project_id={self.project_id} db={self.dbname} host={host}"
+
     def __str__(self) -> str:
-        return f"postgres:{self.dbname}"
+        return f"postgres:{self.dbname}#{self.project_id}"
 
     def __repr__(self) -> str:
-        return f"PgHandle({self.dbname!r})"
+        return f"PgHandle(project_id={self.project_id!r}, dbname={self.dbname!r})"
 
 
 def get_handle(project_id: str | None = None) -> PgHandle:
-    return PgHandle(db_name_for(project_id))
+    return PgHandle(resolve_project_id(project_id))
 
 
 def _conn_kwargs(dbname: str) -> dict:
@@ -150,27 +168,39 @@ def _connect(handle: PgHandle):
     return conn
 
 
-def ensure_database(dbname: str) -> None:
-    """Create the project database if it does not exist (idempotent)."""
+def ensure_database() -> None:
+    """Create the single runtime database if it does not exist (idempotent).
+
+    Connects to the always-present ``postgres`` maintenance DB. In the default
+    docker-compose setup the database is created by the container
+    (POSTGRES_DB), so this is a best-effort safety net.
+    """
     import psycopg
 
-    maint = _maintenance_dbname()
-    kwargs = _conn_kwargs(maint)
-    with psycopg.connect(**kwargs, autocommit=True) as conn:
+    dbname = database_name()
+    with psycopg.connect(**_conn_kwargs("postgres"), autocommit=True) as conn:
         exists = conn.execute(
             "SELECT 1 FROM pg_database WHERE datname = %s", (dbname,)
         ).fetchone()
         if not exists:
-            # Identifier can't be parameterised; dbname is sanitised by db_name_for.
             conn.execute(f'CREATE DATABASE "{dbname}"')
 
 
 def init_runtime_db(handle: PgHandle) -> None:
-    """Ensure the database and tables exist. Safe to call repeatedly."""
-    if handle.dbname != _maintenance_dbname():
-        ensure_database(handle.dbname)
-    with _connect(handle) as conn:
-        conn.execute(_DDL)
+    """Ensure the database and (project-agnostic) tables exist. Idempotent.
+
+    The schema is shared across all projects, so this does no per-project work —
+    it just guarantees the single database and tables are present.
+    """
+    try:
+        with _connect(handle) as conn:
+            conn.execute(_DDL)
+    except Exception:
+        # Database may not exist yet (fresh server without POSTGRES_DB) — create
+        # it once, then retry the DDL.
+        ensure_database()
+        with _connect(handle) as conn:
+            conn.execute(_DDL)
 
 
 def check_and_recover_db(handle: PgHandle) -> bool:
@@ -192,29 +222,33 @@ def record_issue_intake(
         conn.execute(
             """
             INSERT INTO issue_intake
-                (issue_number, ticket_id, branch, status, ingested_at, updated_at)
-            VALUES (%s, %s, %s, %s, %s, %s)
-            ON CONFLICT (issue_number) DO UPDATE SET
+                (project_id, issue_number, ticket_id, branch, status, ingested_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (project_id, issue_number) DO UPDATE SET
                 ticket_id  = EXCLUDED.ticket_id,
                 branch     = EXCLUDED.branch,
                 status     = EXCLUDED.status,
                 updated_at = EXCLUDED.updated_at
             """,
-            (issue_number, ticket_id, branch, status, now, now),
+            (handle.project_id, issue_number, ticket_id, branch, status, now, now),
         )
 
 
 def get_issue_intake(handle: PgHandle, issue_number: int) -> dict | None:
     with _connect(handle) as conn:
         row = conn.execute(
-            "SELECT * FROM issue_intake WHERE issue_number = %s", (issue_number,)
+            "SELECT * FROM issue_intake WHERE project_id = %s AND issue_number = %s",
+            (handle.project_id, issue_number),
         ).fetchone()
     return dict(row) if row else None
 
 
 def list_issue_intake(handle: PgHandle) -> list[dict]:
     with _connect(handle) as conn:
-        rows = conn.execute("SELECT * FROM issue_intake ORDER BY issue_number").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM issue_intake WHERE project_id = %s ORDER BY issue_number",
+            (handle.project_id,),
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -224,41 +258,47 @@ def upsert_ticket_runtime(handle: PgHandle, ticket_id: str, **fields) -> None:
     now = _now_iso()
     with _connect(handle) as conn:
         existing = conn.execute(
-            "SELECT ticket_id FROM ticket_runtime WHERE ticket_id = %s", (ticket_id,)
+            "SELECT ticket_id FROM ticket_runtime WHERE project_id = %s AND ticket_id = %s",
+            (handle.project_id, ticket_id),
         ).fetchone()
         if existing:
             if fields:
                 set_clause = ", ".join(f"{k}=%s" for k in fields)
                 conn.execute(
-                    f"UPDATE ticket_runtime SET {set_clause}, updated_at=%s WHERE ticket_id=%s",
-                    list(fields.values()) + [now, ticket_id],
+                    f"UPDATE ticket_runtime SET {set_clause}, updated_at=%s "
+                    f"WHERE project_id=%s AND ticket_id=%s",
+                    list(fields.values()) + [now, handle.project_id, ticket_id],
                 )
             else:
                 conn.execute(
-                    "UPDATE ticket_runtime SET updated_at=%s WHERE ticket_id=%s",
-                    (now, ticket_id),
+                    "UPDATE ticket_runtime SET updated_at=%s WHERE project_id=%s AND ticket_id=%s",
+                    (now, handle.project_id, ticket_id),
                 )
         else:
             fields.setdefault("state", "INIT")
-            cols = ["ticket_id", "updated_at"] + list(fields.keys())
+            cols = ["project_id", "ticket_id", "updated_at"] + list(fields.keys())
             placeholders = ", ".join(["%s"] * len(cols))
             conn.execute(
                 f"INSERT INTO ticket_runtime ({', '.join(cols)}) VALUES ({placeholders})",
-                [ticket_id, now] + list(fields.values()),
+                [handle.project_id, ticket_id, now] + list(fields.values()),
             )
 
 
 def get_ticket_runtime(handle: PgHandle, ticket_id: str) -> dict | None:
     with _connect(handle) as conn:
         row = conn.execute(
-            "SELECT * FROM ticket_runtime WHERE ticket_id = %s", (ticket_id,)
+            "SELECT * FROM ticket_runtime WHERE project_id = %s AND ticket_id = %s",
+            (handle.project_id, ticket_id),
         ).fetchone()
     return dict(row) if row else None
 
 
 def list_ticket_runtime(handle: PgHandle) -> list[dict]:
     with _connect(handle) as conn:
-        rows = conn.execute("SELECT * FROM ticket_runtime ORDER BY ticket_id").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM ticket_runtime WHERE project_id = %s ORDER BY ticket_id",
+            (handle.project_id,),
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -276,9 +316,9 @@ def upsert_worker(
         conn.execute(
             """
             INSERT INTO workers
-                (ticket_id, pid, branch, worktree_path, status, started_at, updated_at)
-            VALUES (%s, %s, %s, %s, 'running', %s, %s)
-            ON CONFLICT (ticket_id) DO UPDATE SET
+                (project_id, ticket_id, pid, branch, worktree_path, status, started_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, 'running', %s, %s)
+            ON CONFLICT (project_id, ticket_id) DO UPDATE SET
                 pid           = EXCLUDED.pid,
                 branch        = EXCLUDED.branch,
                 worktree_path = EXCLUDED.worktree_path,
@@ -286,18 +326,24 @@ def upsert_worker(
                 started_at    = EXCLUDED.started_at,
                 updated_at    = EXCLUDED.updated_at
             """,
-            (ticket_id, pid, branch, worktree_path, now, now),
+            (handle.project_id, ticket_id, pid, branch, worktree_path, now, now),
         )
 
 
 def remove_worker(handle: PgHandle, ticket_id: str) -> None:
     with _connect(handle) as conn:
-        conn.execute("DELETE FROM workers WHERE ticket_id = %s", (ticket_id,))
+        conn.execute(
+            "DELETE FROM workers WHERE project_id = %s AND ticket_id = %s",
+            (handle.project_id, ticket_id),
+        )
 
 
 def list_workers(handle: PgHandle) -> list[dict]:
     with _connect(handle) as conn:
-        rows = conn.execute("SELECT * FROM workers ORDER BY ticket_id").fetchall()
+        rows = conn.execute(
+            "SELECT * FROM workers WHERE project_id = %s ORDER BY ticket_id",
+            (handle.project_id,),
+        ).fetchall()
     return [dict(r) for r in rows]
 
 
@@ -315,10 +361,11 @@ def append_runtime_event(
     with _connect(handle) as conn:
         conn.execute(
             """
-            INSERT INTO runtime_events (ticket_id, event_type, message, metadata_json, created_at)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO runtime_events
+                (project_id, ticket_id, event_type, message, metadata_json, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s)
             """,
-            (ticket_id, event_type, message, meta_json, now),
+            (handle.project_id, ticket_id, event_type, message, meta_json, now),
         )
 
 
@@ -330,11 +377,13 @@ def list_runtime_events(
     with _connect(handle) as conn:
         if ticket_id:
             rows = conn.execute(
-                "SELECT * FROM runtime_events WHERE ticket_id = %s ORDER BY id DESC LIMIT %s",
-                (ticket_id, limit),
+                "SELECT * FROM runtime_events WHERE project_id = %s AND ticket_id = %s "
+                "ORDER BY id DESC LIMIT %s",
+                (handle.project_id, ticket_id, limit),
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT * FROM runtime_events ORDER BY id DESC LIMIT %s", (limit,)
+                "SELECT * FROM runtime_events WHERE project_id = %s ORDER BY id DESC LIMIT %s",
+                (handle.project_id, limit),
             ).fetchall()
     return [dict(r) for r in rows]

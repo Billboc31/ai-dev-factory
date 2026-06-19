@@ -103,10 +103,14 @@ _rr_resolve_state_dir = _rr_mod.resolve_state_dir
 _rr_resolve_logs_dir = _rr_mod.resolve_logs_dir
 del _rr_spec, _rr_mod
 
-# SQLite path and init are cached so _rdb_get_db_path() (subprocess) runs only once per daemon process.
+# Runtime DB handle is cached so resolution (and, for SQLite, the git subprocess)
+# runs only once per daemon process.
 _DB_PATH_RESOLVED: bool = False
 _DB_PATH_VALUE: "Path | None" = None
 _DB_INITIALIZED: bool = False
+# Project id this daemon serves — scopes runtime DB rows (Postgres backend).
+# Resolved from --project (then PROJECT_NAME) in main(); None until then.
+_PROJECT_ID: "str | None" = None
 
 # Singleton guard — file handle kept open for process lifetime so the exclusive lock holds.
 _SINGLETON_LOCK_FH = None
@@ -115,9 +119,26 @@ _SINGLETON_LOCK_FH = None
 def _cached_db_path() -> "Path | None":
     global _DB_PATH_RESOLVED, _DB_PATH_VALUE
     if not _DB_PATH_RESOLVED:
-        _DB_PATH_VALUE = _rdb_get_db_path()
+        # Pass the project id so the Postgres backend scopes rows to this
+        # project. The SQLite backend ignores the extra argument.
+        try:
+            _DB_PATH_VALUE = _rdb_get_db_path(_PROJECT_ID)
+        except TypeError:
+            _DB_PATH_VALUE = _rdb_get_db_path()
         _DB_PATH_RESOLVED = True
     return _DB_PATH_VALUE
+
+
+def _runtime_db_banner() -> str:
+    """One-line description of the active runtime DB backend for boot logs."""
+    backend = os.environ.get("RUNTIME_DB_BACKEND", "sqlite").strip().lower()
+    handle = _cached_db_path()
+    if backend == "postgres":
+        describe = getattr(handle, "describe", None)
+        if callable(describe):
+            return describe()
+        return f"backend=postgres project_id={_PROJECT_ID}"
+    return f"backend=sqlite path={handle}"
 
 
 def _ensure_db() -> "Path | None":
@@ -1773,6 +1794,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--auto-include-code", action="store_true", help="With --auto-commit, also stage COMMIT_SCOPE paths (tools/, tests/, prompts/, tickets/, docs/, ai/)")
     parser.add_argument("--poll-project-map", action="store_true", help="Run issue mapper at each daemon cycle to refresh the project dependency map")
     parser.add_argument("--use-project-map", action="store_true", help="Use project map next_recommended for scheduling instead of FIFO (fallback to FIFO if map absent)")
+    parser.add_argument("--project", default=None, help="Project id this daemon serves; scopes runtime DB rows (default: PROJECT_NAME env)")
     return parser.parse_args(argv)
 
 
@@ -1781,6 +1803,13 @@ def main(argv: list[str]) -> int:
         return 2
 
     args = parse_args(argv)
+
+    # Resolve the project id this daemon serves and expose it via PROJECT_NAME so
+    # the runtime DB backend (and any child process) scopes rows to this project.
+    global _PROJECT_ID
+    _PROJECT_ID = args.project or os.environ.get("PROJECT_NAME")
+    if _PROJECT_ID:
+        os.environ["PROJECT_NAME"] = _PROJECT_ID
 
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
     if runtime_root:
@@ -1830,6 +1859,8 @@ def main(argv: list[str]) -> int:
     _log(f"  exec_cmd       = {args.exec_cmd!r}")
     _log(f"  interval       = {args.interval}s  dry-run={args.dry_run}")
     _log(f"  max-workers    = {args.max_workers}")
+    _log(f"  project_id     = {_PROJECT_ID or '<unset>'}")
+    _log(f"  runtime_db     = {_runtime_db_banner()}")
     _log("=" * 60)
 
     # Strict refuse mode: if gh is missing while issue polling is requested,

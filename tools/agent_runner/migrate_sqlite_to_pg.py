@@ -2,11 +2,15 @@
 """One-shot migration of the runtime store from SQLite to Postgres.
 
 Copies issue_intake, ticket_runtime, workers and runtime_events from a legacy
-SQLite file into the per-project Postgres database (adf_<project_id>).
+SQLite file into the single Postgres database (RUNTIME_DB_NAME, default ``adf``),
+tagging every row with --project so the data is project-scoped.
 
-Idempotent for the keyed tables (issue_intake/ticket_runtime/workers use
-upserts). runtime_events is append-only, so events are migrated only when the
-target events table is empty to avoid duplication on re-runs.
+Idempotent and safe to re-run:
+- issue_intake/ticket_runtime/workers use upserts keyed by (project_id, …), so
+  re-running updates the same rows instead of duplicating them and never
+  touches other projects' rows.
+- runtime_events is append-only, so events are migrated only when THIS project's
+  events table is empty, avoiding duplicates on re-runs.
 
 Usage (typically inside the API container, which has psycopg + the Postgres env):
 
@@ -14,7 +18,8 @@ Usage (typically inside the API container, which has psycopg + the Postgres env)
         --sqlite /runtime/.runtime/ai-dev-factory.sqlite \
         --project ai-dev-factory
 
-If --project is omitted, PROJECT_NAME (then RUNTIME_DB_NAME) is used.
+If --project is omitted, PROJECT_NAME (then the ai-dev-factory default) is used.
+Run it once per project, pointing --sqlite at that project's legacy file.
 """
 
 from __future__ import annotations
@@ -101,7 +106,10 @@ def main() -> int:
         return 1
 
     handle = pg.get_handle(args.project)
-    print(f"migrating {args.sqlite} → Postgres database {handle.dbname}")
+    print(
+        f"migrating {args.sqlite} → Postgres db={handle.dbname} "
+        f"project_id={handle.project_id}"
+    )
     counts = migrate(args.sqlite, args.project)
     for table, n in counts.items():
         print(f"  {table}: {n} rows")

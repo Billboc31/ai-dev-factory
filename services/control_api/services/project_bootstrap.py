@@ -31,10 +31,16 @@ def _supervisor_url() -> str:
 
 
 def _ensure_project_runtime_db(project_id: str) -> None:
-    """Create + initialise the project's runtime database (Postgres backend only).
+    """Best-effort ensure the shared runtime store exists (Postgres backend only).
 
-    Best-effort: a failure here must not abort project registration. With the
-    SQLite backend this is a no-op (single shared file, created on demand).
+    The Postgres backend uses ONE database with project-scoped rows, so there is
+    no per-project database to create — this only guarantees the shared schema
+    is present (idempotent). It is intentionally best-effort and NON-BLOCKING:
+    a failure here is logged and ignored so it can never leave a half-registered
+    project. The same schema is also ensured lazily on first runtime access
+    (API startup, daemon startup), so registration never depends on it.
+
+    With the SQLite backend this is a no-op (single shared file, created on demand).
     """
     if os.environ.get("RUNTIME_DB_BACKEND", "sqlite").strip().lower() != "postgres":
         return
@@ -47,9 +53,12 @@ def _ensure_project_runtime_db(project_id: str) -> None:
         spec.loader.exec_module(mod)  # type: ignore[union-attr]
         handle = mod.get_db_path(project_id)
         mod.init_runtime_db(handle)
-        logger.info("runtime_db: initialised Postgres database for project %s (%s)", project_id, handle)
+        logger.info("runtime_db: ensured shared store for project %s (%s)", project_id, handle)
     except Exception:
-        logger.warning("runtime_db: could not initialise Postgres DB for %s — will init lazily", project_id, exc_info=True)
+        logger.warning(
+            "runtime_db: could not pre-init shared store for %s — will init lazily on first access",
+            project_id, exc_info=True,
+        )
 
 
 def _call_supervisor(

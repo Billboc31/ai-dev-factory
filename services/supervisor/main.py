@@ -222,6 +222,7 @@ def _spawn_daemon(exec_cmd: str) -> tuple[int | None, str | None, str | None]:
     started_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     log = _log_path()
     log.parent.mkdir(parents=True, exist_ok=True)
+    _legacy_project = os.environ.get("PROJECT_NAME")
     cmd = [
         sys.executable,
         str(_run_daemon_path()),
@@ -233,7 +234,11 @@ def _spawn_daemon(exec_cmd: str) -> tuple[int | None, str | None, str | None]:
         "--auto-include-code",
         "--worktrees-dir", str(_worktrees_dir()),
     ]
+    if _legacy_project:
+        cmd += ["--project", _legacy_project]
     try:
+        # Daemon inherits the supervisor env (incl. RUNTIME_DB_* from deploy/.env)
+        # so it shares the same runtime DB backend as the API — no split-brain.
         env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
         with open(log, "a", encoding="utf-8") as log_fh:
             log_fh.write(
@@ -1791,12 +1796,21 @@ def project_daemon_start(project_id: str, body: ProjectDaemonStartRequest = None
         "--auto-push",
         "--auto-include-code",
         "--worktrees-dir", str(worktrees_dir),
+        # Scope this daemon's runtime DB rows to its project (Postgres backend).
+        "--project", project_id,
     ]
     try:
+        # The daemon inherits the supervisor's environment, which carries the
+        # runtime DB config (RUNTIME_DB_BACKEND/HOST/PORT/USER/PASSWORD/NAME)
+        # loaded from deploy/.env — so API, supervisor and daemon all share one
+        # backend (no SQLite/Postgres split-brain). PROJECT_NAME is overridden
+        # per project so rows are tagged with the correct project_id even though
+        # the supervisor's own PROJECT_NAME is ai-dev-factory.
         env = {
             **os.environ,
             "PYTHONDONTWRITEBYTECODE": "1",
             "AI_DEV_FACTORY_RUNTIME_ROOT": str(project_runtime_root),
+            "PROJECT_NAME": project_id,
         }
         with open(log, "a", encoding="utf-8") as log_fh:
             log_fh.write(
@@ -1809,6 +1823,9 @@ def project_daemon_start(project_id: str, body: ProjectDaemonStartRequest = None
                 f"  state_dir={state_dir}\n"
                 f"  worktrees_dir={worktrees_dir}\n"
                 f"  daemon_pid_path={daemon_pid_path}\n"
+                f"  runtime_db_backend={os.environ.get('RUNTIME_DB_BACKEND', 'sqlite')} "
+                f"runtime_db_host={os.environ.get('RUNTIME_DB_HOST', '<unset>')} "
+                f"runtime_db_name={os.environ.get('RUNTIME_DB_NAME', '<unset>')}\n"
                 f"  command={' '.join(cmd)}\n"
             )
             log_fh.flush()

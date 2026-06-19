@@ -66,6 +66,13 @@ def create_app(
     app.state.daemon_exec_cmd = daemon_exec_cmd
     app.state.worktrees_dir = worktrees_dir or resolve_worktrees_dir(_root)
     app.state.db_path = _runtime_db.get_db_path()
+    # Diagnostics: make the active runtime DB backend observable at boot.
+    _rdb_backend = os.environ.get("RUNTIME_DB_BACKEND", "sqlite").strip().lower()
+    _describe = getattr(app.state.db_path, "describe", None)
+    logger.info(
+        "runtime_db: %s",
+        _describe() if callable(_describe) else f"backend={_rdb_backend} path={app.state.db_path}",
+    )
     # Ensure the runtime store exists (idempotent). Best-effort: a missing or
     # unreachable store must never block the API from booting — the board and
     # ticket views degrade gracefully to filesystem state when the DB is absent.
