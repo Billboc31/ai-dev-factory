@@ -349,3 +349,40 @@ def test_install_commits_on_setup_branch(tmp_path):
         cwd=repo, capture_output=True, text=True,
     )
     assert "AI Dev Factory" in log.stdout
+
+
+def test_install_log_cb_receives_progress_without_changing_result(tmp_path):
+    repo = _init_git_repo(tmp_path / "target")
+    llm_output = _make_base_docs_output()
+    messages: list[str] = []
+
+    with patch("install_agent_layout._invoke_llm", return_value=llm_output):
+        with patch("install_agent_layout._get_remote_url", return_value=None):
+            result = install_agent_layout(
+                repo, "test-project", log_cb=messages.append,
+            )
+
+    # Result shape/behaviour is unchanged by the presence of log_cb.
+    assert result["error"] is None
+    assert result["branch"] == INSTALL_BRANCH
+    # Progress was streamed to the callback.
+    assert messages, "log_cb should have received progress lines"
+    joined = "\n".join(messages)
+    assert "Scanning repository" in joined
+    assert any("wrote" in m for m in messages)
+
+
+def test_install_log_cb_and_no_cb_produce_same_result(tmp_path):
+    repo_a = _init_git_repo(tmp_path / "a")
+    repo_b = _init_git_repo(tmp_path / "b")
+    llm_output = _make_base_docs_output()
+
+    with patch("install_agent_layout._invoke_llm", return_value=llm_output):
+        with patch("install_agent_layout._get_remote_url", return_value=None):
+            res_no_cb = install_agent_layout(repo_a, "test-project")
+    with patch("install_agent_layout._invoke_llm", return_value=llm_output):
+        with patch("install_agent_layout._get_remote_url", return_value=None):
+            res_cb = install_agent_layout(repo_b, "test-project", log_cb=lambda _m: None)
+
+    for key in ("branch", "docs_count", "docs_paths", "error"):
+        assert res_no_cb[key] == res_cb[key]

@@ -10,9 +10,23 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
+from typing import Callable
 
 logger = logging.getLogger(__name__)
+
+# Optional progress sink: the supervisor passes a callback that appends to the
+# per-job log file so the dashboard can tail progress live. When absent we fall
+# back to the module logger so standalone/CLI behaviour is unchanged.
+LogCb = Callable[[str], None]
+
+
+def _emit(log_cb: "LogCb | None", message: str) -> None:
+    if log_cb is not None:
+        log_cb(message)
+    else:
+        logger.info("%s", message)
 
 INSTALL_BRANCH = "ai-dev-factory/install-agent-layout"
 UPDATE_BRANCH = "ai-dev-factory/update-agent-docs"
@@ -73,22 +87,66 @@ def _layout_exists(project_path: Path) -> bool:
     return (project_path / "ai").is_dir()
 
 
-def _invoke_llm(exec_cmd: str, prompt: str, cwd: Path) -> str:
+def _invoke_llm(exec_cmd: str, prompt: str, cwd: Path, log_cb: "LogCb | None" = None) -> str:
     import shlex
     parts = shlex.split(exec_cmd) + ["--print"]
-    result = subprocess.run(
+    env = {**__import__("os").environ, "PYTHONDONTWRITEBYTECODE": "1"}
+
+    if log_cb is None:
+        result = subprocess.run(
+            parts,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            cwd=str(cwd),
+            timeout=360,
+            env=env,
+        )
+        if result.returncode != 0:
+            snippet = (result.stderr or "")[:500]
+            raise RuntimeError(f"LLM execution failed (exit {result.returncode}): {snippet}")
+        return result.stdout
+
+    # Streaming mode: tee the LLM stdout to the job log as it arrives so the
+    # dashboard sees live progress. A writer thread feeds stdin to avoid a
+    # pipe deadlock on large prompts.
+    proc = subprocess.Popen(
         parts,
-        input=prompt,
-        capture_output=True,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
         cwd=str(cwd),
-        timeout=360,
-        env={**__import__("os").environ, "PYTHONDONTWRITEBYTECODE": "1"},
+        env=env,
     )
-    if result.returncode != 0:
-        snippet = (result.stderr or "")[:500]
-        raise RuntimeError(f"LLM execution failed (exit {result.returncode}): {snippet}")
-    return result.stdout
+
+    def _feed() -> None:
+        try:
+            if proc.stdin is not None:
+                proc.stdin.write(prompt)
+                proc.stdin.close()
+        except Exception:  # noqa: BLE001 - best-effort stdin feed
+            pass
+
+    writer = threading.Thread(target=_feed, daemon=True)
+    writer.start()
+
+    out_lines: list[str] = []
+    try:
+        if proc.stdout is not None:
+            for line in proc.stdout:
+                out_lines.append(line)
+                log_cb(line.rstrip("\n"))
+        proc.wait(timeout=360)
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        raise RuntimeError("LLM execution timed out")
+
+    stderr = proc.stderr.read() if proc.stderr is not None else ""
+    if proc.returncode != 0:
+        snippet = (stderr or "")[:500]
+        raise RuntimeError(f"LLM execution failed (exit {proc.returncode}): {snippet}")
+    return "".join(out_lines)
 
 
 def _parse_file_blocks(llm_output: str) -> dict[str, str]:
@@ -209,8 +267,13 @@ def install_agent_layout(
     project_id: str,
     stack: str = "unknown",
     exec_cmd: str = "claude --dangerously-skip-permissions",
+    log_cb: "LogCb | None" = None,
 ) -> dict:
     """Install or regenerate the agent layout and AI-generated docs in a project.
+
+    ``log_cb`` is an optional callback receiving human-readable progress lines
+    (used by the supervisor to stream into a per-job log). When omitted, progress
+    is sent to the module logger and behaviour/return value are unchanged.
 
     Returns dict with: branch, pr_url, pr_number, docs_paths, docs_count,
     analysis_summary, warnings, error.
@@ -228,10 +291,13 @@ def install_agent_layout(
     project_name = project_id.replace("-", " ").title()
     warnings: list[str] = []
 
+    _emit(log_cb, f"{'Updating' if is_update else 'Installing'} agent layout for '{project_id}' (stack={stack})")
+
     repo_url = _get_remote_url(project_path) or ""
     default_branch = _get_default_branch(project_path)
 
     # Create or checkout the working branch
+    _emit(log_cb, f"Preparing working branch '{branch}'")
     result = _run_git(["checkout", "-b", branch], project_path)
     if result.returncode != 0:
         if "already exists" in result.stderr:
@@ -254,6 +320,7 @@ def install_agent_layout(
     factory = _factory_root()
 
     # Ensure layout dirs (idempotent — does not overwrite existing files)
+    _emit(log_cb, "Ensuring standard ai/ layout directories")
     try:
         _ensure_layout_dirs(project_path, factory, project_id, repo_url)
     except Exception as exc:
@@ -266,8 +333,11 @@ def install_agent_layout(
 
     # Run AI analysis and generate docs
     try:
+        _emit(log_cb, "Scanning repository and building analysis prompt")
         prompt = scan_and_build_prompt(project_path)
-        llm_output = _invoke_llm(exec_cmd, prompt, project_path)
+        _emit(log_cb, "Invoking LLM to generate documentation (this can take a few minutes)…")
+        llm_output = _invoke_llm(exec_cmd, prompt, project_path, log_cb=log_cb)
+        _emit(log_cb, "LLM analysis complete")
     except Exception as exc:
         return {
             "branch": branch, "pr_url": None, "pr_number": None,
@@ -302,7 +372,7 @@ def install_agent_layout(
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(content, encoding="utf-8")
         written_paths.append(rel_path)
-        logger.info("wrote %s", rel_path)
+        _emit(log_cb, f"wrote {rel_path}")
 
     # Check all required base docs were generated
     missing = [d for d in REQUIRED_BASE_DOCS if d not in written_paths]
@@ -310,6 +380,7 @@ def install_agent_layout(
         warnings.append(f"missing required base docs: {', '.join(missing)}")
 
     # Commit
+    _emit(log_cb, f"Committing {len(written_paths)} generated doc(s)")
     _run_git(["add", "-A"], project_path)
     result = _run_git(["commit", "-m", commit_msg], project_path)
     if result.returncode != 0:
@@ -339,6 +410,7 @@ def install_agent_layout(
         }
 
     # Push
+    _emit(log_cb, f"Pushing branch '{branch}' to origin")
     result = _run_git(["push", "-u", "origin", branch], project_path)
     if result.returncode != 0:
         return {
@@ -349,6 +421,7 @@ def install_agent_layout(
         }
 
     # Create PR (check for existing open PR on this branch first)
+    _emit(log_cb, "Opening pull request")
     pr_url: str | None = None
     pr_number: int | None = None
 
@@ -392,6 +465,7 @@ def install_agent_layout(
         if m:
             pr_number = int(m.group(1))
 
+    _emit(log_cb, f"Done — PR: {pr_url or '(none)'}")
     return {
         "branch": branch,
         "pr_url": pr_url,

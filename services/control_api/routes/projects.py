@@ -10,7 +10,16 @@ import httpx
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 
-from ..models.schemas import BootstrapResult, InstallAgentLayoutResult, ProjectImportRequest, ProjectInfo
+from ..models.schemas import (
+    AgentLayoutFileDetail,
+    AgentLayoutFileList,
+    AgentLayoutJobStart,
+    AgentLayoutJobStatus,
+    AgentLayoutLogChunk,
+    BootstrapResult,
+    ProjectImportRequest,
+    ProjectInfo,
+)
 from ..services.project_bootstrap import bootstrap
 from ..services.project_id import validate_project_id
 
@@ -189,22 +198,52 @@ def delete_project(project_id: str, request: Request):
     return {"ok": True}
 
 
-@router.post("/{project_id}/install-agent-layout", response_model=InstallAgentLayoutResult)
-def install_agent_layout(project_id: str, request: Request):
-    """Install or regenerate the AI Dev Factory agent layout for an existing project."""
+def _supervisor_url() -> str:
+    return os.environ.get(
+        "AI_DEV_FACTORY_SUPERVISOR_URL", "http://host.docker.internal:8090"
+    ).rstrip("/")
+
+
+def _agent_layout_project_root(request: Request, project_id: str) -> Path:
     try:
         validate_project_id(project_id)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-
     registry = request.app.state.project_registry
     project_root = registry.resolve(project_id)
     if project_root is None:
         raise HTTPException(status_code=404, detail=f"project not found: {project_id}")
+    return project_root
 
-    url = os.environ.get("AI_DEV_FACTORY_SUPERVISOR_URL", "http://host.docker.internal:8090").rstrip("/")
+
+def _proxy_supervisor_get(path: str, params: dict | None = None) -> JSONResponse:
+    """Forward a GET to the supervisor, propagating its status and body.
+
+    Unlike the previous behaviour, non-2xx supervisor responses (404/422/5xx)
+    are surfaced to the dashboard instead of being swallowed into an empty 200.
+    """
+    url = _supervisor_url()
     try:
-        with httpx.Client(timeout=420.0) as client:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.get(f"{url}{path}", params=params or {})
+    except httpx.ConnectError:
+        raise HTTPException(status_code=503, detail="supervisor unreachable")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=503, detail="supervisor timed out")
+    try:
+        body = resp.json()
+    except ValueError:
+        body = {"error": "invalid supervisor response", "detail": resp.text[:500]}
+    return JSONResponse(status_code=resp.status_code, content=body)
+
+
+@router.post("/{project_id}/install-agent-layout", response_model=AgentLayoutJobStart)
+def install_agent_layout(project_id: str, request: Request):
+    """Start an async agent-layout job; returns a job_id to poll for status/logs."""
+    project_root = _agent_layout_project_root(request, project_id)
+    url = _supervisor_url()
+    try:
+        with httpx.Client(timeout=30.0) as client:
             resp = client.post(
                 f"{url}/projects/{project_id}/install-agent-layout",
                 json={
@@ -216,20 +255,51 @@ def install_agent_layout(project_id: str, request: Request):
     except httpx.ConnectError:
         raise HTTPException(status_code=503, detail="supervisor unreachable")
     except httpx.TimeoutException:
-        raise HTTPException(status_code=503, detail="supervisor timed out during agent layout install")
+        raise HTTPException(status_code=503, detail="supervisor timed out starting agent layout")
 
-    if "error" in data and data["error"] in ("path_not_found", "git_not_found", "permission_denied"):
-        raise HTTPException(status_code=422, detail=data.get("detail", data["error"]))
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=data.get("detail", data.get("error", "supervisor error")))
 
-    return InstallAgentLayoutResult(
-        branch=data.get("branch"),
-        pr_url=data.get("pr_url"),
-        pr_number=data.get("pr_number"),
-        docs_paths=data.get("docs_paths", []),
-        docs_count=data.get("docs_count", 0),
-        analysis_summary=data.get("analysis_summary"),
-        warnings=data.get("warnings", []),
-        error=data.get("error"),
+    return AgentLayoutJobStart(ok=bool(data.get("ok", True)), job_id=data["job_id"])
+
+
+@router.get("/{project_id}/install-agent-layout/jobs")
+def agent_layout_jobs(project_id: str, request: Request):
+    _agent_layout_project_root(request, project_id)
+    return _proxy_supervisor_get(f"/projects/{project_id}/install-agent-layout/jobs")
+
+
+@router.get("/{project_id}/install-agent-layout/latest", response_model=AgentLayoutJobStatus)
+def agent_layout_latest(project_id: str, request: Request):
+    _agent_layout_project_root(request, project_id)
+    return _proxy_supervisor_get(f"/projects/{project_id}/install-agent-layout/latest")
+
+
+@router.get("/{project_id}/install-agent-layout/{job_id}", response_model=AgentLayoutJobStatus)
+def agent_layout_job(project_id: str, job_id: str, request: Request):
+    _agent_layout_project_root(request, project_id)
+    return _proxy_supervisor_get(f"/projects/{project_id}/install-agent-layout/{job_id}")
+
+
+@router.get("/{project_id}/install-agent-layout/{job_id}/logs", response_model=AgentLayoutLogChunk)
+def agent_layout_logs(project_id: str, job_id: str, request: Request, offset: int = 0):
+    _agent_layout_project_root(request, project_id)
+    return _proxy_supervisor_get(
+        f"/projects/{project_id}/install-agent-layout/{job_id}/logs", {"offset": offset}
+    )
+
+
+@router.get("/{project_id}/install-agent-layout/{job_id}/files", response_model=AgentLayoutFileList)
+def agent_layout_files(project_id: str, job_id: str, request: Request):
+    _agent_layout_project_root(request, project_id)
+    return _proxy_supervisor_get(f"/projects/{project_id}/install-agent-layout/{job_id}/files")
+
+
+@router.get("/{project_id}/install-agent-layout/{job_id}/file", response_model=AgentLayoutFileDetail)
+def agent_layout_file(project_id: str, job_id: str, request: Request, path: str):
+    _agent_layout_project_root(request, project_id)
+    return _proxy_supervisor_get(
+        f"/projects/{project_id}/install-agent-layout/{job_id}/file", {"path": path}
     )
 
 

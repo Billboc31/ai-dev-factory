@@ -1,7 +1,7 @@
 import { useCallback, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { getDaemonStatus, startDaemon, stopDaemon, restartDaemon, getBoardData } from '../api/daemon'
-import { listProjects, importProject, installAgentLayout } from '../api/projects'
+import { listProjects, importProject } from '../api/projects'
 import { listTickets } from '../api/tickets'
 import ActionButton from '../components/ActionButton'
 import DaemonActivityFeed from '../components/DaemonActivityFeed'
@@ -96,8 +96,6 @@ export default function ProjectDashboardPage() {
   const [attentionTickets, setAttentionTickets] = useState([])
   const [error, setError] = useState(null)
   const [hostCommand, setHostCommand] = useState(null)
-  const [layoutResult, setLayoutResult] = useState(null)
-
   const fetchProject = useCallback(() => {
     listProjects()
       .then(res => {
@@ -193,12 +191,12 @@ export default function ProjectDashboardPage() {
           >
             Re-import
           </button>
-          <ActionButton
-            label="Install agent layout"
-            action={() => installAgentLayout(projectId)}
-            variant="secondary"
-            onResult={(data) => setLayoutResult(data)}
-          />
+          <Link
+            to={`/projects/${projectId}/agent-layout`}
+            className="px-3 py-1.5 text-sm bg-gray-100 hover:bg-gray-200 rounded border border-gray-300 transition-colors"
+          >
+            Agent layout
+          </Link>
         </div>
       </div>
 
@@ -216,66 +214,6 @@ export default function ProjectDashboardPage() {
           >
             Dismiss
           </button>
-        </div>
-      )}
-
-      {layoutResult && (
-        <div className={`border rounded p-4 ${layoutResult.error ? 'bg-red-50 border-red-300' : 'bg-green-50 border-green-300'}`}>
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-sm font-semibold text-gray-900">
-              {layoutResult.error ? 'Agent layout install failed' : 'Agent layout installed'}
-            </p>
-            <button
-              onClick={() => setLayoutResult(null)}
-              className="text-xs text-gray-500 hover:underline flex-shrink-0"
-            >
-              Dismiss
-            </button>
-          </div>
-          {layoutResult.error && (
-            <p className="text-xs text-red-700 mt-1 font-mono">{layoutResult.error}</p>
-          )}
-          {layoutResult.pr_url && (
-            <p className="text-xs mt-2">
-              <span className="text-gray-600">PR: </span>
-              <a
-                href={layoutResult.pr_url}
-                target="_blank"
-                rel="noreferrer"
-                className="text-blue-600 hover:underline font-mono break-all"
-              >
-                {layoutResult.pr_url}
-              </a>
-            </p>
-          )}
-          {layoutResult.branch && (
-            <p className="text-xs text-gray-600 mt-1">
-              Branch: <code className="font-mono">{layoutResult.branch}</code>
-            </p>
-          )}
-          {layoutResult.analysis_summary && (
-            <p className="text-xs text-gray-700 mt-2 italic">{layoutResult.analysis_summary}</p>
-          )}
-          {layoutResult.docs_count > 0 && (
-            <div className="mt-2">
-              <p className="text-xs text-gray-600 font-semibold">{layoutResult.docs_count} doc(s) generated:</p>
-              <ul className="mt-1 space-y-0.5">
-                {layoutResult.docs_paths.map(p => (
-                  <li key={p} className="text-xs font-mono text-gray-700">{p}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-          {layoutResult.warnings && layoutResult.warnings.length > 0 && (
-            <div className="mt-2">
-              <p className="text-xs text-orange-700 font-semibold">Warnings:</p>
-              <ul className="mt-1 space-y-0.5">
-                {layoutResult.warnings.map((w, i) => (
-                  <li key={i} className="text-xs text-orange-700">{w}</li>
-                ))}
-              </ul>
-            </div>
-          )}
         </div>
       )}
 
