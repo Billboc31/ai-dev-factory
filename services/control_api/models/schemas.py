@@ -124,6 +124,10 @@ class BootstrapResult(BaseModel):
     state_dir: str
     worktrees_dir: str
     clones_dir: str = ""
+    agent_layout_branch: str | None = None
+    agent_layout_pr_url: str | None = None
+    agent_layout_pr_number: int | None = None
+    agent_layout_error: str | None = None
 
 
 class ProviderStatus(BaseModel):

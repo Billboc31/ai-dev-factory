@@ -114,7 +114,24 @@ def test_bootstrap_creates_clones_directory(tmp_path, client, monkeypatch):
     assert (runtime_base_root / "my-project" / "clones").is_dir()
 
 
-def test_bootstrap_writes_project_yml(tmp_path, client, monkeypatch):
+def test_bootstrap_returns_agent_layout_fields(tmp_path, client, monkeypatch):
+    repo = _make_git_repo(tmp_path / "my-project")
+    monkeypatch.setenv("RUNTIME_BASE_ROOT", str(tmp_path / "runtime"))
+
+    resp = client.post("/projects/bootstrap", json={
+        "project_root": str(repo),
+        "project_id": "my-project",
+        "runtime_root": "ignored",
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "agent_layout_branch" in data
+    assert "agent_layout_pr_url" in data
+    assert "agent_layout_pr_number" in data
+    assert "agent_layout_error" in data
+
+
+def test_bootstrap_does_not_write_ai_dev_factory_dir(tmp_path, client, monkeypatch):
     repo = _make_git_repo(tmp_path / "my-project")
     monkeypatch.setenv("RUNTIME_BASE_ROOT", str(tmp_path / "runtime"))
 
@@ -124,27 +141,7 @@ def test_bootstrap_writes_project_yml(tmp_path, client, monkeypatch):
         "runtime_root": "ignored",
     })
 
-    yml = repo / ".ai-dev-factory" / "project.yml"
-    assert yml.exists()
-    content = yml.read_text(encoding="utf-8")
-    assert "name: my-project" in content
-    assert "bootstrapped_at:" in content
-
-
-def test_bootstrap_does_not_overwrite_existing_project_yml(tmp_path, client, monkeypatch):
-    repo = _make_git_repo(tmp_path / "my-project")
-    ai_dir = repo / ".ai-dev-factory"
-    ai_dir.mkdir()
-    (ai_dir / "project.yml").write_text("name: original\n", encoding="utf-8")
-    monkeypatch.setenv("RUNTIME_BASE_ROOT", str(tmp_path / "runtime"))
-
-    client.post("/projects/bootstrap", json={
-        "project_root": str(repo),
-        "project_id": "my-project",
-        "runtime_root": "ignored",
-    })
-
-    assert (ai_dir / "project.yml").read_text(encoding="utf-8") == "name: original\n"
+    assert not (repo / ".ai-dev-factory" / "project.yml").exists()
 
 
 def test_bootstrap_is_idempotent(tmp_path, client, monkeypatch):

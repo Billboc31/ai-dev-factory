@@ -21,3 +21,16 @@
 [2026-06-19T10:44:53Z] push: tolerating runtime dirty files (not blocking): ['runs/T195/runtime.log']
 [2026-06-19T10:44:53Z] push: pushing branch=ticket/T195-t195-correct-bootstrap-onboarding-to-use-standard
 [2026-06-19T10:44:55Z] push: done branch=ticket/T195-t195-correct-bootstrap-onboarding-to-use-standard
+[2026-06-19T10:46:05Z] auto-run start: state=PLAN_APPROVED
+[2026-06-19T10:46:05Z] auto-run: running step=coder
+[2026-06-19T10:46:05Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-06-19T10:46:05Z] prompt: generic fallback — injecting runs/T195/ticket.md
+[2026-06-19T10:46:05Z] compose: global-context=docs/ai/global-context.md
+[2026-06-19T10:46:05Z] compose: role=ai/roles/coder.md
+[2026-06-19T10:46:05Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-19T10:46:05Z] compose: skill=ai/skills/git-discipline.md
+[2026-06-19T10:46:05Z] compose: skill=ai/skills/code-quality.md
+[2026-06-19T10:46:05Z] compose: skill=ai/skills/refactor-safety.md
+[2026-06-19T10:46:05Z] compose: skill=ai/skills/security.md
+[2026-06-19T10:46:05Z] compose: task (canonical prompt)
+[2026-06-19T10:46:05Z] snapshot: runtime-prompt=runs/T195/prompts/coder-attempt-1.md

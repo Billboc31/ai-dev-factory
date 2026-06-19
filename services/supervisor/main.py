@@ -1625,23 +1625,12 @@ def bootstrap_project_host(body: ProjectBootstrapHostRequest):
             content={"error": "runtime_base_root_not_writable", "detail": str(exc)},
         )
 
-    ai_dev_dir = project_root / ".ai-dev-factory"
-    project_yml = ai_dev_dir / "project.yml"
-    if not project_yml.exists():
-        try:
-            ai_dev_dir.mkdir(exist_ok=True)
-            bootstrapped_at = datetime.datetime.now(datetime.timezone.utc).strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
-            project_yml.write_text(
-                f"name: {body.project_id}\nstack: {stack}\nbootstrapped_at: {bootstrapped_at}\n",
-                encoding="utf-8",
-            )
-        except PermissionError as exc:
-            return JSONResponse(
-                status_code=422,
-                content={"error": "permission_denied", "detail": str(exc)},
-            )
+    try:
+        from tools.agent_runner.bootstrap_agent_layout import bootstrap_agent_layout
+        layout_result = bootstrap_agent_layout(project_root, body.project_id, stack)
+    except Exception as exc:
+        logger.warning("bootstrap_agent_layout: unexpected error: %s", exc)
+        layout_result = {"branch": None, "pr_url": None, "pr_number": None, "error": str(exc)}
 
     return {
         "project_id": body.project_id,
@@ -1653,6 +1642,10 @@ def bootstrap_project_host(body: ProjectBootstrapHostRequest):
         "state_dir": str(state_dir),
         "worktrees_dir": str(worktrees_dir),
         "clones_dir": str(clones_dir),
+        "agent_layout_branch": layout_result.get("branch"),
+        "agent_layout_pr_url": layout_result.get("pr_url"),
+        "agent_layout_pr_number": layout_result.get("pr_number"),
+        "agent_layout_error": layout_result.get("error"),
     }
 
 
