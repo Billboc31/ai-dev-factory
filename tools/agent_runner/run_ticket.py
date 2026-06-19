@@ -175,15 +175,11 @@ def show_next(ticket_id: str) -> int:
     return print_result(result)
 
 
-def execute_once(ticket_id: str, step: str, command: str) -> int:
-    result = run_command([
-        sys.executable,
-        str(RUN_STEP),
-        ticket_id,
-        step,
-        "--exec-cmd",
-        command,
-    ])
+def execute_once(ticket_id: str, step: str, command: str, project_root: Path | None = None) -> int:
+    cmd = [sys.executable, str(RUN_STEP), ticket_id, step, "--exec-cmd", command]
+    if project_root is not None:
+        cmd += ["--project-root", str(project_root)]
+    result = run_command(cmd)
     return print_result(result)
 
 
@@ -691,6 +687,7 @@ def _call_run_step(
     exec_cmd: str,
     extra_context_file: Path | None = None,
     current_state: str | None = None,
+    project_root: Path | None = None,
 ) -> tuple[int, str, Path]:
     """Invoke run_step.py for one step; return (exit_code, output_file_content, output_path)."""
     if step == "review" and current_state is not None:
@@ -712,6 +709,8 @@ def _call_run_step(
     ]
     if extra_context_file is not None:
         cmd += ["--extra-context-file", str(extra_context_file)]
+    if project_root is not None:
+        cmd += ["--project-root", str(project_root)]
     result = run_command(cmd)
     if result.stdout:
         print(result.stdout, end="")
@@ -1013,7 +1012,7 @@ def init_auto(ticket_id: str, branch_slug: str | None, ticket_source: str | None
 
 # ── --auto ────────────────────────────────────────────────────────────────────
 
-def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push: bool = False, include_code: bool = False) -> int:
+def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push: bool = False, include_code: bool = False, project_root: Path | None = None) -> int:
     try:
         state = load_state(ticket_id)
     except TicketRunnerError as exc:
@@ -1074,7 +1073,7 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
         extra_context_file = _build_review_decision_context_file(ticket_id, current_state)
         _log_runtime(ticket_id, f"auto-run: review decision context: context_file={extra_context_file}")
 
-    rc, output_content, output_path = _call_run_step(ticket_id, step, exec_cmd, extra_context_file, current_state)
+    rc, output_content, output_path = _call_run_step(ticket_id, step, exec_cmd, extra_context_file, current_state, project_root)
     _log_runtime(ticket_id, f"auto-run: step={step} done rc={rc}")
 
     if rc != 0:
@@ -1183,6 +1182,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--auto-push", action="store_true", help="After each successful --auto-commit, push the ticket branch")
     parser.add_argument("--auto-include-code", action="store_true", help="With --auto-commit, also stage COMMIT_SCOPE paths (tools/, tests/, prompts/, tickets/, docs/, ai/)")
     parser.add_argument("--repo-root", help="Path to main repo root (used when running from a worktree)")
+    parser.add_argument("--project-root", help="Absolute path to a managed project root; context files (ai/, docs/) are resolved from there first")
     parser.add_argument("--set-state", help="Manually set workflow state (human review path)")
     parser.add_argument("--approve-plan", action="store_true", help="Approve plan (PLAN_REVIEW_NEEDED → PLAN_APPROVED)")
     parser.add_argument("--request-plan-fix", action="store_true", help="Request plan fix (PLAN_REVIEW_NEEDED → PLAN_FIX_REQUIRED)")
@@ -1234,13 +1234,15 @@ def main(argv: list[str]) -> int:
             if not args.exec_cmd:
                 print("error: --exec-cmd is required with --auto", file=sys.stderr)
                 return 2
-            return auto_run(ticket_id, args.exec_cmd, auto_commit=args.auto_commit, auto_push=args.auto_push, include_code=args.auto_include_code)
+            project_root = Path(args.project_root).resolve() if getattr(args, "project_root", None) else None
+            return auto_run(ticket_id, args.exec_cmd, auto_commit=args.auto_commit, auto_push=args.auto_push, include_code=args.auto_include_code, project_root=project_root)
 
         if args.once:
             if not args.exec_cmd:
                 print("error: --exec-cmd is required with --once", file=sys.stderr)
                 return 2
-            return execute_once(ticket_id, args.once, args.exec_cmd)
+            project_root = Path(args.project_root).resolve() if getattr(args, "project_root", None) else None
+            return execute_once(ticket_id, args.once, args.exec_cmd, project_root=project_root)
 
         return show_next(ticket_id)
 

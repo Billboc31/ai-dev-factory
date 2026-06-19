@@ -1,0 +1,74 @@
+[2026-06-19T10:42:02Z] auto-run start: state=INIT
+[2026-06-19T10:42:02Z] auto-run: running step=planner
+[2026-06-19T10:42:02Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-19T10:42:02Z] prompt: generic fallback — injecting runs/T195/ticket.md
+[2026-06-19T10:42:02Z] compose: global-context=docs/ai/global-context.md
+[2026-06-19T10:42:02Z] compose: role=ai/roles/planner.md
+[2026-06-19T10:42:02Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-19T10:42:02Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-19T10:42:02Z] compose: skill=ai/skills/documentation.md
+[2026-06-19T10:42:02Z] compose: task (canonical prompt)
+[2026-06-19T10:42:02Z] snapshot: runtime-prompt=runs/T195/prompts/planner-attempt-1.md
+[2026-06-19T10:44:50Z] auto-run: step=planner done rc=0
+[2026-06-19T10:44:53Z] planner checkpoint: committed
+[2026-06-19T10:44:53Z] planner checkpoint: pushed
+[2026-06-19T10:44:53Z] planner validation success
+[2026-06-19T10:44:53Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-19T10:44:53Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-19T10:44:53Z] commit-checkpoint: unstaged runtime garbage: ['runs/T195/runtime.log']
+[2026-06-19T10:44:53Z] commit-checkpoint: sha=11c3d189 files=2 title='docs(T195/workflow): planner — update 2 file(s)'
+[2026-06-19T10:44:53Z] auto-run: auto-push triggered
+[2026-06-19T10:44:53Z] push: tolerating runtime dirty files (not blocking): ['runs/T195/runtime.log']
+[2026-06-19T10:44:53Z] push: pushing branch=ticket/T195-t195-correct-bootstrap-onboarding-to-use-standard
+[2026-06-19T10:44:55Z] push: done branch=ticket/T195-t195-correct-bootstrap-onboarding-to-use-standard
+[2026-06-19T10:46:05Z] auto-run start: state=PLAN_APPROVED
+[2026-06-19T10:46:05Z] auto-run: running step=coder
+[2026-06-19T10:46:05Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-06-19T10:46:05Z] prompt: generic fallback — injecting runs/T195/ticket.md
+[2026-06-19T10:46:05Z] compose: global-context=docs/ai/global-context.md
+[2026-06-19T10:46:05Z] compose: role=ai/roles/coder.md
+[2026-06-19T10:46:05Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-19T10:46:05Z] compose: skill=ai/skills/git-discipline.md
+[2026-06-19T10:46:05Z] compose: skill=ai/skills/code-quality.md
+[2026-06-19T10:46:05Z] compose: skill=ai/skills/refactor-safety.md
+[2026-06-19T10:46:05Z] compose: skill=ai/skills/security.md
+[2026-06-19T10:46:05Z] compose: task (canonical prompt)
+[2026-06-19T10:46:05Z] snapshot: runtime-prompt=runs/T195/prompts/coder-attempt-1.md
+[2026-06-19T11:02:58Z] auto-run start: state=IMPLEMENTATION_FIX_REQUIRED
+[2026-06-19T11:02:58Z] auto-run: running step=coder
+[2026-06-19T11:02:58Z] auto-run: fix context: previous_output=runs/T195/implementation-output.md
+[2026-06-19T11:02:58Z] auto-run: fix context: review=runs/T195/reviews/implementation-review.md
+[2026-06-19T11:02:58Z] auto-run: fix context: fix_instructions=runs/T195/fixes/implementation-fix-1.md
+[2026-06-19T11:02:58Z] auto-run: fix context: context_file=runs/T195/fixes/context-20260619T110258Z.md
+[2026-06-19T11:02:58Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-06-19T11:02:58Z] prompt: generic fallback — injecting runs/T195/ticket.md
+[2026-06-19T11:02:58Z] compose: global-context=docs/ai/global-context.md
+[2026-06-19T11:02:58Z] compose: role=ai/roles/coder.md
+[2026-06-19T11:02:58Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-19T11:02:58Z] compose: skill=ai/skills/git-discipline.md
+[2026-06-19T11:02:58Z] compose: skill=ai/skills/code-quality.md
+[2026-06-19T11:02:58Z] compose: skill=ai/skills/refactor-safety.md
+[2026-06-19T11:02:58Z] compose: skill=ai/skills/security.md
+[2026-06-19T11:02:58Z] compose: task (canonical prompt)
+[2026-06-19T11:02:58Z] compose: extra-context=runs/T195/fixes/context-20260619T110258Z.md
+[2026-06-19T11:02:58Z] snapshot: runtime-prompt=runs/T195/prompts/coder-attempt-2.md
+[2026-06-19T11:23:38Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-19T11:23:38Z] auto-run: running step=tester
+[2026-06-19T11:23:38Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-19T11:23:38Z] prompt: generic fallback — injecting runs/T195/ticket.md
+[2026-06-19T11:23:38Z] compose: global-context=docs/ai/global-context.md
+[2026-06-19T11:23:38Z] compose: role=ai/roles/tester.md
+[2026-06-19T11:23:38Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-19T11:23:38Z] compose: skill=ai/skills/testing.md
+[2026-06-19T11:23:38Z] compose: skill=ai/skills/debugging.md
+[2026-06-19T11:23:38Z] compose: task (canonical prompt)
+[2026-06-19T11:23:38Z] snapshot: runtime-prompt=runs/T195/prompts/tester-attempt-1.md
+[2026-06-19T11:35:42Z] auto-run: step=tester done rc=0
+[2026-06-19T11:35:42Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-19T11:35:42Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-19T11:35:42Z] commit-checkpoint: unstaged runtime garbage: ['runs/T195/runtime.log']
+[2026-06-19T11:35:42Z] commit-checkpoint: sha=4c328565 files=3 title='test(T195/workflow): tester — update 3 file(s)'
+[2026-06-19T11:35:42Z] auto-run: auto-push triggered
+[2026-06-19T11:35:42Z] push: tolerating runtime dirty files (not blocking): ['runs/T195/runtime.log']
+[2026-06-19T11:35:42Z] push: pushing branch=ticket/T195-t195-correct-bootstrap-onboarding-to-use-standard
+[2026-06-19T11:35:44Z] push: done branch=ticket/T195-t195-correct-bootstrap-onboarding-to-use-standard

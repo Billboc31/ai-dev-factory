@@ -23,6 +23,10 @@ class BootstrapResult:
     state_dir: str
     worktrees_dir: str
     clones_dir: str = ""
+    agent_layout_branch: str | None = None
+    agent_layout_pr_url: str | None = None
+    agent_layout_pr_number: int | None = None
+    agent_layout_error: str | None = None
 
 
 def _supervisor_url() -> str:
@@ -145,6 +149,10 @@ def bootstrap(
         state_dir=data["state_dir"],
         worktrees_dir=data["worktrees_dir"],
         clones_dir=data.get("clones_dir", ""),
+        agent_layout_branch=data.get("agent_layout_branch"),
+        agent_layout_pr_url=data.get("agent_layout_pr_url"),
+        agent_layout_pr_number=data.get("agent_layout_pr_number"),
+        agent_layout_error=data.get("agent_layout_error"),
     )
 
 

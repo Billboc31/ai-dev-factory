@@ -338,11 +338,27 @@ def _write_prompt_snapshot(ticket_id: str, step: str, prompt: str) -> Path:
     return snapshot_path
 
 
-def compose_runtime_prompt(ticket_id: str, step: str, task_content: str) -> str:
-    """Compose full runtime prompt: GLOBAL CONTEXT + ROLE + SKILLS + TASK."""
+def compose_runtime_prompt(
+    ticket_id: str,
+    step: str,
+    task_content: str,
+    project_root: Path | None = None,
+) -> str:
+    """Compose full runtime prompt: GLOBAL CONTEXT + ROLE + SKILLS + TASK.
+
+    When project_root is provided, context files are resolved preferentially from
+    <project_root>/<rel>; if absent there, falls back to Path(rel) (factory-relative CWD).
+    """
     sections: list[tuple[str, str]] = []
 
-    global_ctx_path = Path(GLOBAL_CONTEXT_FILE)
+    def _resolve(rel: str) -> Path:
+        if project_root is not None:
+            candidate = project_root / rel
+            if candidate.exists():
+                return candidate
+        return Path(rel)
+
+    global_ctx_path = _resolve(GLOBAL_CONTEXT_FILE)
     if global_ctx_path.exists():
         sections.append(("GLOBAL CONTEXT", global_ctx_path.read_text(encoding="utf-8")))
         _log_runtime(ticket_id, f"compose: global-context={global_ctx_path}")
@@ -351,7 +367,7 @@ def compose_runtime_prompt(ticket_id: str, step: str, task_content: str) -> str:
 
     role_file = STEP_ROLE_FILES.get(step)
     if role_file:
-        role_path = Path(role_file)
+        role_path = _resolve(role_file)
         if role_path.exists():
             sections.append(("ROLE", role_path.read_text(encoding="utf-8")))
             _log_runtime(ticket_id, f"compose: role={role_path}")
@@ -359,7 +375,7 @@ def compose_runtime_prompt(ticket_id: str, step: str, task_content: str) -> str:
             _log_runtime(ticket_id, f"compose: role not found at {role_path} — skipped")
 
     for skill_name in STEP_SKILL_FILES.get(step, []):
-        skill_path = Path("ai/skills") / f"{skill_name}.md"
+        skill_path = _resolve(f"ai/skills/{skill_name}.md")
         if skill_path.exists():
             sections.append((f"SKILL: {skill_name}", skill_path.read_text(encoding="utf-8")))
             _log_runtime(ticket_id, f"compose: skill={skill_path}")
@@ -492,6 +508,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--extra-context-file",
         help="Relative path to a file appended to the runtime prompt when using --show-prompt or --exec-cmd",
     )
+    parser.add_argument(
+        "--project-root",
+        help="Absolute path to a managed project root; context files (ai/, docs/) are resolved from there first",
+    )
     return parser.parse_args(argv)
 
 
@@ -530,7 +550,8 @@ def main(argv: list[str]) -> int:
                 raise RunnerError(f"extra-context-file not found: {extra_path}")
             extra_content = extra_path.read_text(encoding="utf-8")
 
-        effective_prompt = compose_runtime_prompt(ticket_id, step, prompt_content)
+        project_root = Path(args.project_root).resolve() if args.project_root else None
+        effective_prompt = compose_runtime_prompt(ticket_id, step, prompt_content, project_root=project_root)
         if extra_content:
             effective_prompt = (
                 effective_prompt
