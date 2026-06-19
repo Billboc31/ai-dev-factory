@@ -1,15 +1,17 @@
-The plan has been written to `runs/T197/plan.md`. Here is a summary:
+The plan is complete and properly structured. Here's a summary of what it covers:
 
-**Objective**: Add an advisory Ticket Intelligence Analyzer — pre-development, advisory only, no scheduler impact.
+**Objective**: Advisory Ticket Intelligence Analyzer — pre-dev, informational only, no scheduler impact.
 
-**Key design decisions from the retry context:**
+**Key design decisions** (addressing the review blockers):
 
-1. **Provider-agnostic AI execution**: The analyzer invokes `exec_cmd` (from `app.state.daemon_exec_cmd`) as a subprocess, identical to the existing `resolve-conflicts` pattern. No provider-specific SDK is imported.
+1. **Provider-agnostic AI**: Uses `execute_external_command(exec_cmd, prompt)` from `run_step.py` — same subprocess pattern as `resolve-conflicts`. No `anthropic`/`openai` imports. Model catalog uses logical names (`advanced-reasoning-model`, etc.).
 
-2. **Non-blocking POST analyze**: Returns HTTP 202 immediately with `{"ticket_id": ..., "analysis_status": "queued"}`. Analysis runs in a `threading.Thread` (consistent with `run-next` and `resolve-conflicts` patterns already in the codebase).
+2. **Non-blocking POST**: Returns HTTP 202 immediately with `{"analysis_status": "queued"}`. Analysis runs in `threading.Thread(target=_bg, daemon=True)` — identical to the `run-next` and `resolve-conflicts` patterns.
 
-3. **Five-state lifecycle**: `not_started → queued → running → completed → failed`, persisted in the new `ticket_intelligence` SQLite table.
+3. **Explicit timeout**: 120-second `subprocess.run(timeout=120)` wrapping the AI call; `TimeoutExpired` persists `analysis_status = "failed"`.
 
-4. **Hybrid analysis**: A pure-Python `compute_signals()` function extracts deterministic features (risky keywords, domain tags, dependency references, token size estimate, migration/scheduler flags) before the AI prompt is built — no AI for those signals.
+4. **Five-state lifecycle**: `not_started → queued → running → completed → failed` in a new `ticket_intelligence` SQLite/Postgres table (added via `CREATE TABLE IF NOT EXISTS`, no migration framework needed).
 
-5. **UI handles all states**: `TicketIntelligencePanel` renders spinner+polling for queued/running, full table for completed, error+retry for failed, with the advisory badge always visible.
+5. **Hybrid analysis**: `compute_signals()` is pure Python (risky keywords, domain detection, dependency refs, token estimate) — runs before the AI prompt is built.
+
+6. **UI**: New `TicketIntelligencePanel.jsx` handles all states with polling, advisory badge always visible, wired into `TicketDetailPage.jsx`.
