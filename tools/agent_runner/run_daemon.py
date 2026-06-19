@@ -85,6 +85,7 @@ _rdb_spec.loader.exec_module(_rdb_mod)  # type: ignore[union-attr]
 _rdb_get_db_path = _rdb_mod.get_db_path
 _rdb_init = _rdb_mod.init_runtime_db
 _rdb_check_and_recover = _rdb_mod.check_and_recover_db
+_rdb_verify_backend = _rdb_mod.verify_backend_available
 _rdb_record_intake = _rdb_mod.record_issue_intake
 _rdb_list_intake = _rdb_mod.list_issue_intake
 _rdb_upsert_ticket = _rdb_mod.upsert_ticket_runtime
@@ -148,13 +149,22 @@ def _ensure_db() -> "Path | None":
     if not db_path:
         return None
     if not _DB_INITIALIZED:
-        try:
+        backend = os.environ.get("RUNTIME_DB_BACKEND", "sqlite").strip().lower()
+        if backend == "postgres":
+            # Fail fast: a daemon that cannot reach Postgres must NOT silently
+            # downgrade to SQLite (that would split-brain the board state).
+            _rdb_verify_backend()
             _rdb_check_and_recover(db_path)
             _rdb_init(db_path)
             _DB_INITIALIZED = True
-        except Exception as exc:
-            _log(f"SQLite init failed: {exc}")
-            return None
+        else:
+            try:
+                _rdb_check_and_recover(db_path)
+                _rdb_init(db_path)
+                _DB_INITIALIZED = True
+            except Exception as exc:
+                _log(f"runtime_db (sqlite) init failed: {exc}")
+                return None
     return db_path
 
 

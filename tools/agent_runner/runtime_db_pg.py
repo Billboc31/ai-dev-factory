@@ -208,6 +208,32 @@ def check_and_recover_db(handle: PgHandle) -> bool:
     return True
 
 
+def verify_backend_available() -> None:
+    """Fail fast if the Postgres backend cannot be used.
+
+    Postgres mode NEVER falls back to SQLite, so a missing driver is a hard,
+    visible configuration error rather than a silent downgrade.
+    """
+    try:
+        import psycopg  # noqa: F401
+    except Exception as exc:  # ImportError or partial install
+        raise RuntimeError(
+            "RUNTIME_DB_BACKEND=postgres but psycopg is not importable "
+            f"({exc!r}). Install psycopg[binary] in this environment. "
+            "Postgres mode never falls back to SQLite."
+        ) from exc
+
+
+def healthcheck(handle: PgHandle) -> None:
+    """Validate the backend end-to-end: psycopg import + DB reachable + schema.
+
+    Raises (never returns a degraded SQLite handle) so misconfiguration is
+    immediately visible to whoever starts the API, supervisor or daemon.
+    """
+    verify_backend_available()
+    init_runtime_db(handle)
+
+
 # ── issue_intake ──────────────────────────────────────────────────────────────
 
 def record_issue_intake(

@@ -89,6 +89,59 @@ def test_postgres_backend_rebinds_and_scopes_by_project(monkeypatch):
     assert mod.check_and_recover_db(handle) is True
 
 
+def test_case_c_postgres_never_falls_back_to_sqlite_when_psycopg_missing(monkeypatch):
+    """Case C: backend=postgres but the Postgres backend cannot be initialised.
+
+    Backend selection MUST stay postgres (never silently switch to SQLite) and
+    the health/verify path MUST fail fast with a clear RuntimeError.
+    """
+    monkeypatch.setenv("RUNTIME_DB_BACKEND", "postgres")
+    monkeypatch.setenv("PROJECT_NAME", "ai-dev-factory")
+    # Make `import psycopg` raise ImportError everywhere (simulates "fails to load").
+    monkeypatch.setitem(sys.modules, "psycopg", None)
+
+    # Wiring is psycopg-free, so the module still imports — and stays postgres.
+    mod = _load_runtime_db_fresh()
+    handle = mod.get_db_path("proj")
+    assert type(handle).__name__ == "PgHandle"  # NOT a SQLite Path — no fallback
+
+    # Fail fast with a clear, psycopg-mentioning error; no SQLite degrade.
+    with pytest.raises(RuntimeError, match="psycopg"):
+        mod.verify_backend_available()
+    with pytest.raises(RuntimeError, match="psycopg"):
+        mod.healthcheck(handle)
+
+
+def test_unknown_backend_is_rejected(monkeypatch):
+    """An unrecognised backend value is a deterministic configuration error."""
+    monkeypatch.setenv("RUNTIME_DB_BACKEND", "mysql")
+    with pytest.raises(RuntimeError, match="unknown RUNTIME_DB_BACKEND"):
+        _load_runtime_db_fresh()
+
+
+# ── startup diagnostics (unambiguous backend banner) ─────────────────────────
+
+def test_describe_backend_postgres_lines(monkeypatch):
+    monkeypatch.setenv("RUNTIME_DB_BACKEND", "postgres")
+    monkeypatch.setenv("RUNTIME_DB_HOST", "db")
+    monkeypatch.setenv("RUNTIME_DB_NAME", "adf")
+    monkeypatch.setenv("PROJECT_NAME", "ai-dev-factory")
+    mod = _load_runtime_db_fresh()
+    lines = mod.describe_backend()
+    assert "runtime_db backend=postgres" in lines
+    assert "runtime_db host=db" in lines
+    assert "runtime_db database=adf" in lines
+    assert "runtime_db project_id=ai-dev-factory" in lines
+
+
+def test_describe_backend_sqlite_lines(monkeypatch):
+    monkeypatch.delenv("RUNTIME_DB_BACKEND", raising=False)
+    mod = _load_runtime_db_fresh()
+    lines = mod.describe_backend()
+    assert lines[0] == "runtime_db backend=sqlite"
+    assert lines[1].startswith("runtime_db path=")
+
+
 # ── project isolation at the query level (fake connection) ────────────────────
 
 class _FakeCursor:
