@@ -3,5 +3,7 @@
   "state": "TEST_COMPLETE",
   "branch": "ticket/T195-t195-correct-bootstrap-onboarding-to-use-standard",
   "issue_number": 242,
-  "updated_at": "2026-06-19T11:35:42Z"
+  "updated_at": "2026-06-19T11:36:21Z",
+  "pr_number": 243,
+  "pr_synced": true
 }
