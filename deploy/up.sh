@@ -9,8 +9,8 @@
 # deploy/.env here re-exports the correct values so compose can't be fooled.
 #
 # Usage:
-#   bash deploy/up.sh            # == docker compose up -d
-#   bash deploy/up.sh up         # explicit subcommand
+#   bash deploy/up.sh            # rebuild + recreate ONLY api & web (db untouched)
+#   bash deploy/up.sh up         # explicit subcommand (no rebuild)
 #   bash deploy/up.sh logs -f    # any docker compose subcommand/flags
 
 set -euo pipefail
@@ -31,6 +31,11 @@ else
 fi
 
 if [ "$#" -eq 0 ]; then
-  exec docker compose up -d
+  # Default redeploy: rebuild + recreate ONLY the application services.
+  # The db (postgres:16-alpine, no build context) is intentionally NOT
+  # rebuilt or recreated — it is started on demand through api's
+  # depends_on, and its data lives in the adf-db-data named volume, so a
+  # redeploy never touches the database.
+  exec docker compose up -d --build api web
 fi
 exec docker compose "$@"
