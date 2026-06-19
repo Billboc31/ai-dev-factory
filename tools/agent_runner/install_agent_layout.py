@@ -83,6 +83,37 @@ def _get_default_branch(project_path: Path) -> str:
     return "main"
 
 
+def _remote_branch_exists(project_path: Path, branch: str) -> bool:
+    r = _run_git(["ls-remote", "--heads", "origin", branch], project_path)
+    return r.returncode == 0 and bool(r.stdout.strip())
+
+
+def _ensure_base_branch_on_remote(
+    project_path: Path, default_branch: str, log_cb: "LogCb | None" = None
+) -> None:
+    """Guarantee the base/default branch exists on ``origin`` before we push the
+    working branch.
+
+    On a near-empty remote, pushing the agent branch as the *first* branch makes
+    GitHub adopt it as the repository's default branch — and the real default
+    (e.g. ``main``) silently disappears from the remote. Pushing the base branch
+    first keeps it present and authoritative. Best-effort and idempotent: if the
+    branch is already on the remote, or we don't have it locally, this is a no-op.
+    """
+    if _remote_branch_exists(project_path, default_branch):
+        return
+    local = _run_git(["rev-parse", "--verify", "--quiet", default_branch], project_path)
+    if local.returncode != 0:
+        return
+    _emit(log_cb, f"Base branch '{default_branch}' missing on origin — pushing it first")
+    push = _run_git(["push", "origin", f"{default_branch}:{default_branch}"], project_path)
+    if push.returncode != 0:
+        logger.warning(
+            "install_agent_layout: failed to seed base branch %r on origin: %s",
+            default_branch, push.stderr.strip(),
+        )
+
+
 def _layout_exists(project_path: Path) -> bool:
     return (project_path / "ai").is_dir()
 
@@ -542,6 +573,11 @@ def install_agent_layout(
             "analysis_summary": analysis_summary, "warnings": warnings,
             "error": None,
         }
+
+    # Make sure the base branch is on the remote *before* pushing the working
+    # branch — otherwise, on a near-empty remote, the agent branch becomes the
+    # de-facto default branch and the real default (e.g. main) disappears.
+    _ensure_base_branch_on_remote(project_path, default_branch, log_cb=log_cb)
 
     # Push
     _emit(log_cb, f"Pushing branch '{branch}' to origin")

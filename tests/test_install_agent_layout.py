@@ -17,6 +17,8 @@ from install_agent_layout import (
     _layout_exists,
     _validate_doc_path,
     _parse_file_blocks,
+    _remote_branch_exists,
+    _ensure_base_branch_on_remote,
     inspect_layout,
     install_agent_layout,
 )
@@ -371,6 +373,43 @@ def test_install_log_cb_receives_progress_without_changing_result(tmp_path):
     joined = "\n".join(messages)
     assert "Scanning repository" in joined
     assert any("wrote" in m for m in messages)
+
+
+def _init_repo_with_bare_origin(base: Path):
+    """Create a work repo on 'main' wired to a bare 'origin', with main pushed."""
+    bare = base / "origin.git"
+    subprocess.run(["git", "init", "--bare", "-b", "main", str(bare)], capture_output=True, check=True)
+    repo = _init_git_repo(base / "work")
+    subprocess.run(["git", "branch", "-M", "main"], cwd=repo, capture_output=True, check=True)
+    subprocess.run(["git", "remote", "add", "origin", str(bare)], cwd=repo, capture_output=True, check=True)
+    return repo, bare
+
+
+def test_remote_branch_exists_detects_presence(tmp_path):
+    repo, _bare = _init_repo_with_bare_origin(tmp_path)
+    assert _remote_branch_exists(repo, "main") is False
+    subprocess.run(["git", "push", "origin", "main"], cwd=repo, capture_output=True, check=True)
+    assert _remote_branch_exists(repo, "main") is True
+
+
+def test_ensure_base_branch_seeds_missing_default_on_remote(tmp_path):
+    repo, _bare = _init_repo_with_bare_origin(tmp_path)
+    # Simulate the dangerous state: working branch checked out, base not on remote.
+    subprocess.run(["git", "checkout", "-b", "ai-dev-factory/update-agent-docs"], cwd=repo, capture_output=True, check=True)
+    assert _remote_branch_exists(repo, "main") is False
+
+    _ensure_base_branch_on_remote(repo, "main")
+
+    # main must now exist on origin, so it can't be supplanted as default.
+    assert _remote_branch_exists(repo, "main") is True
+
+
+def test_ensure_base_branch_is_noop_when_already_remote(tmp_path):
+    repo, _bare = _init_repo_with_bare_origin(tmp_path)
+    subprocess.run(["git", "push", "origin", "main"], cwd=repo, capture_output=True, check=True)
+    # Should not raise or change anything.
+    _ensure_base_branch_on_remote(repo, "main")
+    assert _remote_branch_exists(repo, "main") is True
 
 
 def test_inspect_layout_reports_absent(tmp_path):
