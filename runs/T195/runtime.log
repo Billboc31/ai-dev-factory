@@ -34,3 +34,21 @@
 [2026-06-19T10:46:05Z] compose: skill=ai/skills/security.md
 [2026-06-19T10:46:05Z] compose: task (canonical prompt)
 [2026-06-19T10:46:05Z] snapshot: runtime-prompt=runs/T195/prompts/coder-attempt-1.md
+[2026-06-19T11:02:58Z] auto-run start: state=IMPLEMENTATION_FIX_REQUIRED
+[2026-06-19T11:02:58Z] auto-run: running step=coder
+[2026-06-19T11:02:58Z] auto-run: fix context: previous_output=runs/T195/implementation-output.md
+[2026-06-19T11:02:58Z] auto-run: fix context: review=runs/T195/reviews/implementation-review.md
+[2026-06-19T11:02:58Z] auto-run: fix context: fix_instructions=runs/T195/fixes/implementation-fix-1.md
+[2026-06-19T11:02:58Z] auto-run: fix context: context_file=runs/T195/fixes/context-20260619T110258Z.md
+[2026-06-19T11:02:58Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-06-19T11:02:58Z] prompt: generic fallback — injecting runs/T195/ticket.md
+[2026-06-19T11:02:58Z] compose: global-context=docs/ai/global-context.md
+[2026-06-19T11:02:58Z] compose: role=ai/roles/coder.md
+[2026-06-19T11:02:58Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-19T11:02:58Z] compose: skill=ai/skills/git-discipline.md
+[2026-06-19T11:02:58Z] compose: skill=ai/skills/code-quality.md
+[2026-06-19T11:02:58Z] compose: skill=ai/skills/refactor-safety.md
+[2026-06-19T11:02:58Z] compose: skill=ai/skills/security.md
+[2026-06-19T11:02:58Z] compose: task (canonical prompt)
+[2026-06-19T11:02:58Z] compose: extra-context=runs/T195/fixes/context-20260619T110258Z.md
+[2026-06-19T11:02:58Z] snapshot: runtime-prompt=runs/T195/prompts/coder-attempt-2.md
