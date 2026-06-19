@@ -1663,7 +1663,8 @@ def install_agent_layout_endpoint(project_id: str, body: InstallAgentLayoutReque
     from fastapi.responses import JSONResponse
 
     try:
-        project_root = Path(body.project_root).expanduser().resolve()
+        mapped = mapper.map(body.project_root)
+        project_root = Path(mapped).expanduser().resolve()
     except (OSError, PermissionError) as exc:
         return JSONResponse(
             status_code=422,
