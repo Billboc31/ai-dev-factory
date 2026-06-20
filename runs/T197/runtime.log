@@ -89,3 +89,21 @@
 [2026-06-19T21:41:41Z] compose: extra-context=runs/T197/fixes/context-20260619T214141Z.md
 [2026-06-19T21:41:41Z] snapshot: runtime-prompt=runs/T197/prompts/planner-attempt-5.md
 [2026-06-19T21:44:37Z] auto-run: step=planner done rc=0
+[2026-06-20T06:09:20Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-06-20T06:09:20Z] auto-run: running step=planner
+[2026-06-20T06:09:20Z] auto-run: fix context: previous_output=runs/T197/plan.md
+[2026-06-20T06:09:20Z] auto-run: fix context: review=runs/T197/reviews/plan-review-async-and-model-abstraction.md
+[2026-06-20T06:09:20Z] auto-run: fix context: fix_instructions=runs/T197/fixes/plan-fix-async-and-model-abstraction.md
+[2026-06-20T06:09:20Z] auto-run: fix context: context_file=runs/T197/fixes/context-20260620T060920Z.md
+[2026-06-20T06:09:20Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-20T06:09:20Z] prompt: generic fallback — injecting runs/T197/ticket.md
+[2026-06-20T06:09:20Z] compose: global-context=docs/ai/global-context.md
+[2026-06-20T06:09:20Z] compose: role=ai/roles/planner.md
+[2026-06-20T06:09:20Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-20T06:09:20Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-20T06:09:20Z] compose: skill=ai/skills/documentation.md
+[2026-06-20T06:09:20Z] compose: task (canonical prompt)
+[2026-06-20T06:09:20Z] compose: extra-context=runs/T197/fixes/context-20260620T060920Z.md
+[2026-06-20T06:09:20Z] snapshot: runtime-prompt=runs/T197/prompts/planner-attempt-6.md
+[2026-06-20T06:10:01Z] human-approval: approve-plan — PLAN_REVIEW_NEEDED → PLAN_APPROVED
+[2026-06-20T06:13:59Z] auto-run: step=planner done rc=0
