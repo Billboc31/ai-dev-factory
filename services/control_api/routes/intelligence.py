@@ -106,8 +106,8 @@ def _read_ticket_content(project_root: Path, ticket_id: str, worktrees_dir: Path
         ticket_path = run_dir / "ticket.md"
         if ticket_path.exists():
             return ticket_path.read_text(encoding="utf-8")
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("could not read ticket.md for %s: %s", ticket_id, exc)
     return ""
 
 

@@ -160,6 +160,15 @@ def _normalize(raw: dict, computed_signals: dict) -> dict:
     }
 
 
+_TEMPLATE_VARS_RE = re.compile(r"\{\{(ticket_content|computed_signals)\}\}")
+
+
+def _fill_template(template: str, ticket_content: str, computed_signals_json: str) -> str:
+    """Single-pass substitution to prevent cross-placeholder injection."""
+    values = {"ticket_content": ticket_content, "computed_signals": computed_signals_json}
+    return _TEMPLATE_VARS_RE.sub(lambda m: values.get(m.group(1), m.group(0)), template)
+
+
 def _load_prompt_template(project_root: Path) -> str:
     prompt_path = project_root / "prompts" / "ticket-intelligence-analyzer-prompt.md"
     if prompt_path.exists():
@@ -235,8 +244,7 @@ def run_analysis(
         computed_signals_json = json.dumps(computed_signals)
 
         template = _load_prompt_template(project_root)
-        prompt = template.replace("{{ticket_content}}", ticket_content)
-        prompt = prompt.replace("{{computed_signals}}", computed_signals_json)
+        prompt = _fill_template(template, ticket_content, computed_signals_json)
 
         command = shlex.split(exec_cmd)
         if not command:
