@@ -86,7 +86,7 @@ def extract(ticket_text: str) -> dict:
     # Rough file-impact: number of distinct risky domains touched
     rough_file_impact = len(risky_keywords_found) + len(affected_domains)
 
-    changes_scheduler = bool(_SCHEDULER_KEYWORDS & set(lower.split()))
+    changes_scheduler = any(kw in lower for kw in _SCHEDULER_KEYWORDS)
 
     likely_needs_db_migration = any(kw in lower for kw in _DB_MIGRATION_KEYWORDS)
 

@@ -22,6 +22,7 @@ import ticket_intelligence_analyzer as _analyzer  # noqa: E402
 
 logger = logging.getLogger("control-api")
 router = APIRouter(prefix="/tickets", tags=["intelligence"])
+project_router = APIRouter(prefix="/projects", tags=["intelligence"])
 
 
 def _root(request: Request) -> Path:
@@ -152,6 +153,10 @@ def analyze_intelligence(ticket_id: str, request: Request) -> TicketIntelligence
     if db is None:
         raise HTTPException(status_code=503, detail="database not available")
 
+    existing = runtime_db.get_ticket_intelligence(db, ticket_id)
+    if existing and existing.get("analysis_status") in {"queued", "running"}:
+        return TicketIntelligenceQueued(ticket_id=ticket_id, analysis_status=existing["analysis_status"])
+
     exec_cmd = _exec_cmd(request)
 
     ticket_content = _read_ticket_content(project_root, ticket_id, wt_dir)
@@ -168,3 +173,17 @@ def analyze_intelligence(ticket_id: str, request: Request) -> TicketIntelligence
     t.start()
 
     return TicketIntelligenceQueued(ticket_id=ticket_id, analysis_status="queued")
+
+
+@project_router.get("/{project_id}/tickets/{ticket_id}/intelligence", response_model=TicketIntelligence)
+def get_intelligence_project(project_id: str, ticket_id: str, request: Request) -> TicketIntelligence:
+    return get_intelligence(ticket_id, request)
+
+
+@project_router.post(
+    "/{project_id}/tickets/{ticket_id}/intelligence/analyze",
+    response_model=TicketIntelligenceQueued,
+    status_code=202,
+)
+def analyze_intelligence_project(project_id: str, ticket_id: str, request: Request) -> TicketIntelligenceQueued:
+    return analyze_intelligence(ticket_id, request)

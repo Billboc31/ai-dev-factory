@@ -198,6 +198,7 @@ def create_app(
     app.include_router(projects.router)
     # T197: /tickets/{id}/intelligence — advisory ticket intelligence analysis.
     app.include_router(intelligence.router)
+    app.include_router(intelligence.project_router)
 
     return app
 

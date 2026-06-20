@@ -226,6 +226,61 @@ def test_completed_analysis_readable_after_analyze(tmp_path):
     assert body["difficulty_score"] == 7
 
 
+# ── GET /projects/{project_id}/tickets/{id}/intelligence ──────────────────────
+
+def test_project_get_intelligence_returns_analysis(tmp_path):
+    _make_ticket(tmp_path, "T001")
+    app = _make_app(tmp_path)
+    db = app.state.db_path
+
+    _sqlite_db.upsert_ticket_intelligence(
+        db, "T001",
+        analysis_status="completed",
+        difficulty_score=3,
+        difficulty_label="simple",
+        analysis_summary="project-scoped test",
+    )
+
+    client = TestClient(app)
+    r = client.get("/projects/proj1/tickets/T001/intelligence")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["ticket_id"] == "T001"
+    assert body["difficulty_label"] == "simple"
+
+
+def test_project_post_analyze_returns_202(tmp_path):
+    _make_ticket(tmp_path, "T001")
+    app = _make_app(tmp_path)
+
+    with patch("ticket_intelligence_analyzer.run_analysis") as mock_run:
+        mock_run.return_value = None
+        client = TestClient(app)
+        r = client.post("/projects/proj1/tickets/T001/intelligence/analyze")
+
+    assert r.status_code == 202
+    assert r.json()["ticket_id"] == "T001"
+    assert r.json()["analysis_status"] == "queued"
+
+
+def test_post_analyze_idempotency_guard(tmp_path):
+    """Second POST while status is queued/running must return 202 without a new thread."""
+    _make_ticket(tmp_path, "T001")
+    app = _make_app(tmp_path)
+    db = app.state.db_path
+
+    _sqlite_db.upsert_ticket_intelligence(db, "T001", analysis_status="running")
+
+    with patch("ticket_intelligence_analyzer.run_analysis") as mock_run:
+        mock_run.return_value = None
+        client = TestClient(app)
+        r = client.post("/tickets/T001/intelligence/analyze")
+
+    assert r.status_code == 202
+    assert r.json()["analysis_status"] == "running"
+    mock_run.assert_not_called()
+
+
 def test_failed_analysis_persisted(tmp_path):
     """Simulate a timeout/failure and verify it is persisted as failed."""
     _make_ticket(tmp_path, "T001")
