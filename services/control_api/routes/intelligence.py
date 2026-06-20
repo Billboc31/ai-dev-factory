@@ -1,0 +1,170 @@
+"""Ticket Intelligence routes — GET + POST /tickets/{ticket_id}/intelligence[/analyze]."""
+
+from __future__ import annotations
+
+import json
+import logging
+import sys
+import threading
+from pathlib import Path
+
+from fastapi import APIRouter, HTTPException, Request
+
+from ..models.schemas import TicketIntelligence, TicketIntelligenceQueued
+from ..services.artifact_reader import get_ticket
+from ..services.runtime_resolver import resolve_runs_dir, resolve_ticket_run_dir, resolve_worktrees_dir
+
+_TOOLS_DIR = Path(__file__).resolve().parents[3] / "tools" / "agent_runner"
+if str(_TOOLS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_DIR))
+import runtime_db  # noqa: E402
+import ticket_intelligence_analyzer as _analyzer  # noqa: E402
+
+logger = logging.getLogger("control-api")
+router = APIRouter(prefix="/tickets", tags=["intelligence"])
+
+
+def _root(request: Request) -> Path:
+    return request.app.state.project_root
+
+
+def _db_path(request: Request):
+    return getattr(request.app.state, "db_path", None)
+
+
+def _worktrees_dir(request: Request) -> Path | None:
+    return getattr(request.app.state, "worktrees_dir", None)
+
+
+def _exec_cmd(request: Request) -> str:
+    return getattr(request.app.state, "daemon_exec_cmd", "claude --dangerously-skip-permissions")
+
+
+def _parse_row(row: dict) -> TicketIntelligence:
+    """Convert a raw DB row to a TicketIntelligence schema, deserialising JSON fields."""
+    def _parse_json_list(val) -> list:
+        if not val:
+            return []
+        try:
+            result = json.loads(val)
+            return result if isinstance(result, list) else []
+        except (json.JSONDecodeError, TypeError):
+            return []
+
+    def _parse_json_dict(val) -> dict | None:
+        if not val:
+            return None
+        try:
+            result = json.loads(val)
+            return result if isinstance(result, dict) else None
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    def _bool_or_none(val) -> bool | None:
+        if val is None:
+            return None
+        return bool(val)
+
+    return TicketIntelligence(
+        ticket_id=row["ticket_id"],
+        analysis_status=row["analysis_status"],
+        difficulty_score=row.get("difficulty_score"),
+        difficulty_label=row.get("difficulty_label"),
+        risk_score=row.get("risk_score"),
+        risk_label=row.get("risk_label"),
+        complexity_factors=_parse_json_list(row.get("complexity_factors")),
+        computed_signals_json=_parse_json_dict(row.get("computed_signals_json")),
+        recommended_model=row.get("recommended_model"),
+        recommended_model_reason=row.get("recommended_model_reason"),
+        estimated_input_tokens=row.get("estimated_input_tokens"),
+        estimated_output_tokens=row.get("estimated_output_tokens"),
+        estimated_cost_min=row.get("estimated_cost_min"),
+        estimated_cost_max=row.get("estimated_cost_max"),
+        cost_currency=row.get("cost_currency"),
+        cost_estimate_status=row.get("cost_estimate_status"),
+        queue_rank=row.get("queue_rank"),
+        queue_reason=row.get("queue_reason"),
+        dependency_hints=_parse_json_list(row.get("dependency_hints")),
+        parallel_safe_candidate=_bool_or_none(row.get("parallel_safe_candidate")),
+        requires_human_plan_review=_bool_or_none(row.get("requires_human_plan_review")),
+        human_plan_review_reason=row.get("human_plan_review_reason"),
+        requires_human_code_review=_bool_or_none(row.get("requires_human_code_review")),
+        human_code_review_reason=row.get("human_code_review_reason"),
+        autonomous_execution_recommendation=row.get("autonomous_execution_recommendation"),
+        analysis_summary=row.get("analysis_summary"),
+        created_at=row.get("created_at"),
+        updated_at=row.get("updated_at"),
+    )
+
+
+def _read_ticket_content(project_root: Path, ticket_id: str, worktrees_dir: Path | None) -> str:
+    """Read ticket.md from the run directory, or return empty string if not found."""
+    try:
+        runs_dir = resolve_runs_dir(project_root)
+        run_dir = resolve_ticket_run_dir(ticket_id, runs_dir, worktrees_dir)
+        ticket_path = run_dir / "ticket.md"
+        if ticket_path.exists():
+            return ticket_path.read_text(encoding="utf-8")
+    except Exception:
+        pass
+    return ""
+
+
+@router.get("/{ticket_id}/intelligence", response_model=TicketIntelligence)
+def get_intelligence(ticket_id: str, request: Request) -> TicketIntelligence:
+    logger.info("api: GET /tickets/%s/intelligence", ticket_id)
+    project_root = _root(request)
+    wt_dir = _worktrees_dir(request)
+
+    ticket = get_ticket(project_root, ticket_id, worktrees_dir=wt_dir)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail=f"ticket {ticket_id} not found")
+
+    db = _db_path(request)
+    if db is None:
+        raise HTTPException(status_code=503, detail="database not available")
+
+    row = runtime_db.get_ticket_intelligence(db, ticket_id)
+    if row is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"no intelligence analysis found for ticket {ticket_id}",
+        )
+
+    return _parse_row(row)
+
+
+@router.post(
+    "/{ticket_id}/intelligence/analyze",
+    response_model=TicketIntelligenceQueued,
+    status_code=202,
+)
+def analyze_intelligence(ticket_id: str, request: Request) -> TicketIntelligenceQueued:
+    logger.info("api: POST /tickets/%s/intelligence/analyze", ticket_id)
+    project_root = _root(request)
+    wt_dir = _worktrees_dir(request)
+
+    ticket = get_ticket(project_root, ticket_id, worktrees_dir=wt_dir)
+    if ticket is None:
+        raise HTTPException(status_code=404, detail=f"ticket {ticket_id} not found")
+
+    db = _db_path(request)
+    if db is None:
+        raise HTTPException(status_code=503, detail="database not available")
+
+    exec_cmd = _exec_cmd(request)
+
+    ticket_content = _read_ticket_content(project_root, ticket_id, wt_dir)
+
+    runtime_db.upsert_ticket_intelligence(db, ticket_id, analysis_status="queued")
+
+    def _bg() -> None:
+        try:
+            _analyzer.run_analysis(db, ticket_id, ticket_content, exec_cmd, project_root)
+        except Exception:
+            logger.exception("intelligence analysis background error for %s", ticket_id)
+
+    t = threading.Thread(target=_bg, daemon=True)
+    t.start()
+
+    return TicketIntelligenceQueued(ticket_id=ticket_id, analysis_status="queued")

@@ -95,6 +95,39 @@ CREATE TABLE IF NOT EXISTS runtime_events (
 
 CREATE INDEX IF NOT EXISTS idx_runtime_events_project ON runtime_events (project_id);
 CREATE INDEX IF NOT EXISTS idx_runtime_events_project_ticket ON runtime_events (project_id, ticket_id);
+
+CREATE TABLE IF NOT EXISTS ticket_intelligence (
+    project_id                          TEXT NOT NULL,
+    ticket_id                           TEXT NOT NULL,
+    analysis_status                     TEXT NOT NULL DEFAULT 'not_started',
+    difficulty_score                    INTEGER,
+    difficulty_label                    TEXT,
+    risk_score                          INTEGER,
+    risk_label                          TEXT,
+    complexity_factors                  TEXT,
+    computed_signals_json               TEXT,
+    recommended_model                   TEXT,
+    recommended_model_reason            TEXT,
+    estimated_input_tokens              INTEGER,
+    estimated_output_tokens             INTEGER,
+    estimated_cost_min                  DOUBLE PRECISION,
+    estimated_cost_max                  DOUBLE PRECISION,
+    cost_currency                       TEXT,
+    cost_estimate_status                TEXT,
+    queue_rank                          INTEGER,
+    queue_reason                        TEXT,
+    dependency_hints                    TEXT,
+    parallel_safe_candidate             INTEGER,
+    requires_human_plan_review          INTEGER,
+    human_plan_review_reason            TEXT,
+    requires_human_code_review          INTEGER,
+    human_code_review_reason            TEXT,
+    autonomous_execution_recommendation TEXT,
+    analysis_summary                    TEXT,
+    created_at                          TEXT NOT NULL,
+    updated_at                          TEXT NOT NULL,
+    PRIMARY KEY (project_id, ticket_id)
+);
 """
 
 
@@ -413,3 +446,46 @@ def list_runtime_events(
                 (handle.project_id, limit),
             ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── ticket_intelligence ────────────────────────────────────────────────────────
+
+def upsert_ticket_intelligence(handle: PgHandle, ticket_id: str, **fields) -> None:
+    """Insert or update a ticket_intelligence row. Sets created_at only on first insert."""
+    now = _now_iso()
+    with _connect(handle) as conn:
+        existing = conn.execute(
+            "SELECT ticket_id FROM ticket_intelligence WHERE project_id = %s AND ticket_id = %s",
+            (handle.project_id, ticket_id),
+        ).fetchone()
+        if existing:
+            if fields:
+                set_clause = ", ".join(f"{k}=%s" for k in fields)
+                conn.execute(
+                    f"UPDATE ticket_intelligence SET {set_clause}, updated_at=%s "
+                    f"WHERE project_id=%s AND ticket_id=%s",
+                    list(fields.values()) + [now, handle.project_id, ticket_id],
+                )
+            else:
+                conn.execute(
+                    "UPDATE ticket_intelligence SET updated_at=%s "
+                    "WHERE project_id=%s AND ticket_id=%s",
+                    (now, handle.project_id, ticket_id),
+                )
+        else:
+            fields.setdefault("analysis_status", "not_started")
+            cols = ["project_id", "ticket_id", "created_at", "updated_at"] + list(fields.keys())
+            placeholders = ", ".join(["%s"] * len(cols))
+            conn.execute(
+                f"INSERT INTO ticket_intelligence ({', '.join(cols)}) VALUES ({placeholders})",
+                [handle.project_id, ticket_id, now, now] + list(fields.values()),
+            )
+
+
+def get_ticket_intelligence(handle: PgHandle, ticket_id: str) -> dict | None:
+    with _connect(handle) as conn:
+        row = conn.execute(
+            "SELECT * FROM ticket_intelligence WHERE project_id = %s AND ticket_id = %s",
+            (handle.project_id, ticket_id),
+        ).fetchone()
+    return dict(row) if row else None

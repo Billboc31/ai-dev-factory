@@ -63,6 +63,37 @@ CREATE TABLE IF NOT EXISTS runtime_events (
     metadata_json TEXT,
     created_at    TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS ticket_intelligence (
+    ticket_id                           TEXT PRIMARY KEY,
+    analysis_status                     TEXT NOT NULL DEFAULT 'not_started',
+    difficulty_score                    INTEGER,
+    difficulty_label                    TEXT,
+    risk_score                          INTEGER,
+    risk_label                          TEXT,
+    complexity_factors                  TEXT,
+    computed_signals_json               TEXT,
+    recommended_model                   TEXT,
+    recommended_model_reason            TEXT,
+    estimated_input_tokens              INTEGER,
+    estimated_output_tokens             INTEGER,
+    estimated_cost_min                  REAL,
+    estimated_cost_max                  REAL,
+    cost_currency                       TEXT,
+    cost_estimate_status                TEXT,
+    queue_rank                          INTEGER,
+    queue_reason                        TEXT,
+    dependency_hints                    TEXT,
+    parallel_safe_candidate             INTEGER,
+    requires_human_plan_review          INTEGER,
+    human_plan_review_reason            TEXT,
+    requires_human_code_review          INTEGER,
+    human_code_review_reason            TEXT,
+    autonomous_execution_recommendation TEXT,
+    analysis_summary                    TEXT,
+    created_at                          TEXT NOT NULL,
+    updated_at                          TEXT NOT NULL
+);
 """
 
 
@@ -358,6 +389,45 @@ def list_runtime_events(
     return [dict(r) for r in rows]
 
 
+# ── ticket_intelligence ───────────────────────────────────────────────────────
+
+def upsert_ticket_intelligence(db_path: Path, ticket_id: str, **fields) -> None:
+    """Insert or update a ticket_intelligence row. Sets created_at only on first insert."""
+    now = _now_iso()
+    with _connect(db_path) as conn:
+        existing = conn.execute(
+            "SELECT ticket_id FROM ticket_intelligence WHERE ticket_id = ?", (ticket_id,)
+        ).fetchone()
+        if existing:
+            if fields:
+                set_clause = ", ".join(f"{k}=?" for k in fields)
+                conn.execute(
+                    f"UPDATE ticket_intelligence SET {set_clause}, updated_at=? WHERE ticket_id=?",
+                    list(fields.values()) + [now, ticket_id],
+                )
+            else:
+                conn.execute(
+                    "UPDATE ticket_intelligence SET updated_at=? WHERE ticket_id=?",
+                    (now, ticket_id),
+                )
+        else:
+            fields.setdefault("analysis_status", "not_started")
+            cols = ["ticket_id", "created_at", "updated_at"] + list(fields.keys())
+            placeholders = ", ".join("?" * len(cols))
+            conn.execute(
+                f"INSERT INTO ticket_intelligence ({', '.join(cols)}) VALUES ({placeholders})",
+                [ticket_id, now, now] + list(fields.values()),
+            )
+
+
+def get_ticket_intelligence(db_path: Path, ticket_id: str) -> dict | None:
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM ticket_intelligence WHERE ticket_id = ?", (ticket_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
 # ── Backend selection ─────────────────────────────────────────────────────────
 # Everything above is the SQLite backend (the default). When
 # RUNTIME_DB_BACKEND=postgres the public API is rebound to the networked
@@ -443,6 +513,8 @@ if _RUNTIME_DB_BACKEND == "postgres":
     list_workers = _pg.list_workers  # type: ignore[assignment]
     append_runtime_event = _pg.append_runtime_event  # type: ignore[assignment]
     list_runtime_events = _pg.list_runtime_events  # type: ignore[assignment]
+    upsert_ticket_intelligence = _pg.upsert_ticket_intelligence  # type: ignore[assignment]
+    get_ticket_intelligence = _pg.get_ticket_intelligence  # type: ignore[assignment]
 elif _RUNTIME_DB_BACKEND not in ("", "sqlite"):
     raise RuntimeError(
         f"unknown RUNTIME_DB_BACKEND={_RUNTIME_DB_BACKEND!r} "

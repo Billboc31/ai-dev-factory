@@ -435,3 +435,39 @@ class AgentLayoutStatus(BaseModel):
     base_docs_present: int = 0
     base_docs_total: int = 0
     memory_files: dict[str, bool] = {}
+
+
+class TicketIntelligence(BaseModel):
+    ticket_id: str
+    analysis_status: str
+    difficulty_score: int | None = None
+    difficulty_label: str | None = None
+    risk_score: int | None = None
+    risk_label: str | None = None
+    complexity_factors: list[str] = []
+    computed_signals_json: dict | None = None
+    recommended_model: str | None = None
+    recommended_model_reason: str | None = None
+    estimated_input_tokens: int | None = None
+    estimated_output_tokens: int | None = None
+    estimated_cost_min: float | None = None
+    estimated_cost_max: float | None = None
+    cost_currency: str | None = None
+    cost_estimate_status: str | None = None
+    queue_rank: int | None = None
+    queue_reason: str | None = None
+    dependency_hints: list[str] = []
+    parallel_safe_candidate: bool | None = None
+    requires_human_plan_review: bool | None = None
+    human_plan_review_reason: str | None = None
+    requires_human_code_review: bool | None = None
+    human_code_review_reason: str | None = None
+    autonomous_execution_recommendation: str | None = None
+    analysis_summary: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class TicketIntelligenceQueued(BaseModel):
+    ticket_id: str
+    analysis_status: str
