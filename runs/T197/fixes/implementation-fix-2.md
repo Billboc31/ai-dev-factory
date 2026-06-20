@@ -1,3 +1,11 @@
+# Fix artifact — IMPLEMENTATION_FIX_REQUIRED
+
+- decision: IMPLEMENTATION_FIX_REQUIRED
+- review source: runs/T197/reviews/implementation-review.md
+- generated at: 2026-06-20T06:53:26Z
+
+---
+
 Now I have everything needed to write the structured review.
 
 ---
