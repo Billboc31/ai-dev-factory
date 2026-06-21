@@ -151,6 +151,23 @@ _REQUIRED_SECTION_GROUPS = {
 # regardless of length. Real quality checks are the reviewer's job.
 _MIN_PLAN_WORDS = 20
 
+# Curated openings that signal the output is a meta-report *about* the
+# artifact instead of the artifact itself. Each pattern is anchored at the
+# start of the first prose line (after stripping leading headings). The
+# regexes are intentionally narrow to avoid false positives.
+_META_REPORT_OPENING_PATTERNS: tuple[str, ...] = (
+    r"^the plan(?:\s+(?:has been|was|now|is)\b|\s+rewritten\b)",
+    r"^this plan\b",
+    r"^plan rewritten\b",
+    r"^key points covered\b",
+    r"^the document now\b",
+    r"^the artifact (?:was|has been) (?:rewritten|updated|revised)",
+)
+
+# Human-readable reason emitted when the meta-report heuristic fires.
+# Kept stable so the runner can match on it when deciding whether to retry.
+META_REPORT_REASON = "plan looks like a meta-report, not the artifact itself"
+
 _QUOTA_PATTERNS: tuple[str, ...] = (
     "rate limit",
     "ratelimit",
@@ -389,7 +406,61 @@ def compose_runtime_prompt(
     return "\n\n---\n\n".join(parts)
 
 
-def validate_planner_output(content: str) -> list[str]:
+def _looks_like_meta_report(content: str) -> bool:
+    """High-precision detector for outputs that describe the artifact rather
+    than *being* the artifact.
+
+    Returns ``True`` only when the whole file reads as a report:
+
+    1. The first non-empty, non-heading line matches one of the curated
+       suspicious opening patterns (``_META_REPORT_OPENING_PATTERNS``).
+    2. The file contains no fenced code block, no bullet list, and no
+       file-path-like token. These three signals are strong indicators that
+       the output is a real artifact (plan with concrete file references,
+       bullet items, examples), so their presence suppresses the heuristic.
+
+    A structured plan that happens to contain "The plan now ensures X"
+    inside a section will not trigger because it carries bullets / paths.
+    """
+    stripped = content.strip()
+    if not stripped:
+        return False
+
+    opening = ""
+    for line in stripped.splitlines():
+        line_stripped = line.strip()
+        if not line_stripped:
+            continue
+        if line_stripped.startswith("#"):
+            continue
+        opening = line_stripped.lower()
+        break
+    if not opening:
+        return False
+
+    if not any(re.match(pat, opening) for pat in _META_REPORT_OPENING_PATTERNS):
+        return False
+
+    if "```" in stripped:
+        return False
+    for line in stripped.splitlines():
+        s = line.lstrip()
+        if s.startswith("- ") or s.startswith("* "):
+            return False
+    if re.search(
+        r"\b[\w\-./]+\.(?:py|md|ts|tsx|js|jsx|json|yml|yaml|sh|toml|ini|cfg)\b",
+        stripped,
+    ):
+        return False
+    if re.search(
+        r"\b(?:runs|tools|tests|prompts|docs|ai|services|apps)/[\w./-]+",
+        stripped,
+    ):
+        return False
+    return True
+
+
+def validate_planner_output(content: str, artifact_type: str = "plan") -> list[str]:
     """Return rejection reasons; empty list means the output is valid.
 
     Validation is intentionally permissive and decoupled from a fixed word
@@ -406,9 +477,17 @@ def validate_planner_output(content: str) -> list[str]:
       complaint.
     - **Forbidden phrases** — reviewer/coder telltales remain rejected
       regardless of structure.
+    - **Meta-report heuristic** (``artifact_type == "plan"``) — reject
+      outputs that read like a status report about the artifact rather than
+      the artifact itself (e.g. start with "The plan has been rewritten…").
 
     Deeper quality checks (sound design, complete coverage) are the
     reviewer's job — not this gate.
+
+    ``artifact_type`` is the expected output kind (one of ``plan``,
+    ``review``, ``fix``, ``code``, ``ADR``). Only ``plan`` is wired today;
+    the parameter exists so future tickets can add type-aware soft
+    heuristics without churn at every call site.
     """
     reasons: list[str] = []
     stripped = content.strip()
@@ -438,6 +517,9 @@ def validate_planner_output(content: str) -> list[str]:
     for phrase in _FORBIDDEN_PHRASES:
         if phrase in code_stripped:
             reasons.append(f"phrase interdite: «{phrase}»")
+
+    if artifact_type == "plan" and _looks_like_meta_report(content):
+        reasons.append(META_REPORT_REASON)
 
     return reasons
 

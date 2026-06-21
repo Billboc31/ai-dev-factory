@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "tools" / "agent_runner"))
 
-from run_step import validate_planner_output
+from run_step import META_REPORT_REASON, validate_planner_output
 
 
 def _make_plan(sections: list[str], extra: str = "") -> str:
@@ -145,3 +145,83 @@ def test_plan_without_any_section_is_rejected():
     )
     reasons = validate_planner_output(plan)
     assert any("section reconnue" in r for r in reasons)
+
+
+# ── meta-report heuristic (T202) ─────────────────────────────────────────────
+
+def test_meta_report_t201_repro_is_rejected():
+    """Reproduces the T201 failure mode: the planner returns a status report
+    about its own work instead of the plan artifact itself."""
+    meta_report = (
+        "The plan has been rewritten to be a real implementation document. "
+        "Key points covered include the objective, the scope, the exclusions "
+        "and the acceptance criteria. The plan now contains a clear set of "
+        "steps that the coder can follow. Plan rewritten as a real "
+        "implementation document."
+    )
+    reasons = validate_planner_output(meta_report)
+    assert META_REPORT_REASON in reasons
+
+
+def test_meta_report_after_summary_heading_is_rejected():
+    """A meta-report wrapped under a non-canonical heading (no real
+    structure, no bullet list, no paths, no code) must still be rejected
+    by the meta-report heuristic."""
+    meta_report = (
+        "## Summary\n\n"
+        "The plan has been rewritten to ensure that the acceptance criteria "
+        "are now clearer and the scope is well delimited. "
+        "Key points covered include refactor of utilities and renaming."
+    )
+    reasons = validate_planner_output(meta_report)
+    assert META_REPORT_REASON in reasons
+
+
+def test_meta_report_phrase_inside_structured_plan_is_not_rejected():
+    """Counter-test: a structured plan that *contains* a meta-report-like
+    sentence inside one of its sections must still pass — no false positive."""
+    plan = (
+        "## Objective\n"
+        "Rename `foo` to `bar` in `utils.py`. The plan now ensures behaviour "
+        "is preserved across the refactor.\n\n"
+        "## Included\n"
+        "- utils.py: rename `foo` to `bar`.\n"
+        "- tests/test_utils.py: update the assertion.\n\n"
+        "## Excluded\n"
+        "- callers in other modules.\n\n"
+        "## Acceptance criteria\n"
+        "- tests pass; the module no longer exports `foo`."
+    )
+    assert validate_planner_output(plan) == []
+
+
+def test_meta_report_with_bullets_is_not_rejected():
+    """A plan opening with 'The plan now…' but carrying a real bullet list
+    of changes is not a meta-report."""
+    plan = (
+        "## Objectif\n"
+        "The plan now covers the full migration in a single step.\n\n"
+        "## Inclus\n"
+        "- step 1: switch the config flag\n"
+        "- step 2: deploy and observe metrics\n\n"
+        "## Critères d'acceptation\n"
+        "- metric stays green for 24h"
+    )
+    reasons = validate_planner_output(plan)
+    assert META_REPORT_REASON not in reasons
+
+
+def test_artifact_type_default_is_plan():
+    """The new ``artifact_type`` parameter must default to ``"plan"`` and
+    preserve existing behaviour for callers that do not pass it."""
+    plan = (
+        "## Objective\n"
+        "Rename `foo` to `bar`.\n\n"
+        "## Included\n"
+        "- utils.py\n\n"
+        "## Excluded\n"
+        "- callers\n\n"
+        "## Acceptance criteria\n"
+        "- tests pass"
+    )
+    assert validate_planner_output(plan) == validate_planner_output(plan, artifact_type="plan")

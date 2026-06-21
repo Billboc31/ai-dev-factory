@@ -1,5 +1,16 @@
 The ticket follows.
-# Generic Planner Task Read the ticket below and produce a detailed implementation plan. 
+# Generic Planner Task Read the ticket below and produce a detailed implementation plan.
+
+## Artifact-only output (strict)
+
+Your response will be written verbatim to `runs/<ticket>/plan.md`.
+Rewrite the artifact itself. Do not describe the modifications.
+Do not explain what changed. Do not produce a status report.
+
+This rule applies to both initial plans and rewrites after a review.
+Examples of forbidden openings: "The plan has been rewritten…",
+"This plan now covers…", "Plan rewritten as a real implementation
+document…", "Key points covered…", "The document now contains…".
 
 ## Required output structure (strict) Your reply **MUST** be a Markdown document containing **exactly** these four level-2 headings, in this order, spelled exactly as shown:
 ## Objective

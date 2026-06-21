@@ -36,6 +36,7 @@ _mod = importlib.util.module_from_spec(_spec)  # type: ignore[arg-type]
 _spec.loader.exec_module(_mod)  # type: ignore[union-attr]
 validate_planner_output = _mod.validate_planner_output
 classify_runtime_failure = _mod.classify_runtime_failure
+META_REPORT_REASON = _mod.META_REPORT_REASON
 del _spec, _mod
 
 _rc_spec = importlib.util.spec_from_file_location("_runtime_checkpoint", RUNTIME_CHECKPOINT)
@@ -800,13 +801,39 @@ def _write_fix_artifact(ticket_id: str, next_state: str, review_path: Path) -> N
     _log_runtime(ticket_id, f"auto-run: fix artifact written: {artifact_path}")
 
 
-def _build_fix_context_file(ticket_id: str, artifacts: dict) -> Path:
-    """Concatenate fix artifacts into a timestamped context file; return its path."""
+_PLAN_FIX_ARTIFACT_ONLY_PREAMBLE = (
+    "## Artifact-only instruction (mandatory)\n\n"
+    "Your response will be written verbatim to `{artifact_path}`.\n"
+    "Rewrite the artifact itself. Do not describe the modifications.\n"
+    "Do not explain what changed. Do not produce a status report.\n"
+    "Openings such as \"The plan has been rewritten…\", \"This plan now\n"
+    "covers…\", \"Plan rewritten as…\", \"Key points covered…\", \"The\n"
+    "document now…\" make the output invalid."
+)
+
+
+def _build_fix_context_file(
+    ticket_id: str,
+    artifacts: dict,
+    current_state: str | None = None,
+) -> Path:
+    """Concatenate fix artifacts into a timestamped context file; return its path.
+
+    When ``current_state == "PLAN_FIX_REQUIRED"`` the file starts with an
+    explicit artifact-only preamble so the planner cannot mistake the fix
+    context for a request to summarize its own changes.
+    """
     ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     context_path = Path("runs") / ticket_id / "fixes" / f"context-{ts}.md"
     context_path.parent.mkdir(parents=True, exist_ok=True)
 
     sections = []
+    if current_state == "PLAN_FIX_REQUIRED":
+        sections.append(
+            _PLAN_FIX_ARTIFACT_ONLY_PREAMBLE.format(
+                artifact_path=f"runs/{ticket_id}/plan.md"
+            )
+        )
     for key, label in [
         ("previous_output", "## Output précédent"),
         ("review", "## Review"),
@@ -816,6 +843,31 @@ def _build_fix_context_file(ticket_id: str, artifacts: dict) -> Path:
         sections.append(f"{label}\n\n{content.strip()}")
 
     context_path.write_text("\n\n---\n\n".join(sections), encoding="utf-8")
+    return context_path
+
+
+def _build_planner_meta_report_retry_context(ticket_id: str) -> Path:
+    """Write a small artifact-only reinforcement file for the planner retry.
+
+    Used after the validator classifies a planner output as a meta-report:
+    the next attempt receives this file as ``--extra-context-file`` so the
+    artifact-only rule is unmistakable.
+    """
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    context_path = Path("runs") / ticket_id / "fixes" / f"meta-report-retry-{ts}.md"
+    context_path.parent.mkdir(parents=True, exist_ok=True)
+    content = (
+        "## Artifact-only retry instruction (mandatory)\n\n"
+        f"Your previous response was classified as a meta-report about the\n"
+        f"artifact rather than the artifact itself. Your next response will be\n"
+        f"written verbatim to `runs/{ticket_id}/plan.md`.\n\n"
+        "Rewrite the artifact itself. Do not describe the modifications.\n"
+        "Do not explain what changed. Do not produce a status report.\n"
+        "Do not open with \"The plan has been rewritten\", \"This plan now\",\n"
+        "\"Plan rewritten as\", \"Key points covered\", \"The document now\",\n"
+        "or any other meta-statement about your own work.\n"
+    )
+    context_path.write_text(content, encoding="utf-8")
     return context_path
 
 
@@ -1064,7 +1116,7 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
             print(f"error: {exc}", file=sys.stderr)
             _log_runtime(ticket_id, f"auto-run: {exc}")
             return 2
-        extra_context_file = _build_fix_context_file(ticket_id, artifacts)
+        extra_context_file = _build_fix_context_file(ticket_id, artifacts, current_state)
         for key, path in artifacts.items():
             _log_runtime(ticket_id, f"auto-run: fix context: {key}={path}")
         _log_runtime(ticket_id, f"auto-run: fix context: context_file={extra_context_file}")
@@ -1090,7 +1142,26 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
         # in git history for human inspection.
         _checkpoint_planner_artifacts(ticket_id, push=auto_push)
 
-        reasons = validate_planner_output(output_content)
+        reasons = validate_planner_output(output_content, artifact_type="plan")
+        if reasons and META_REPORT_REASON in reasons:
+            _log_runtime(ticket_id, "runtime warning: planner_meta_report_retry")
+            retry_context = _build_planner_meta_report_retry_context(ticket_id)
+            rc, output_content, output_path = _call_run_step(
+                ticket_id, step, exec_cmd, retry_context, current_state, project_root,
+            )
+            _log_runtime(ticket_id, f"auto-run: step={step} retry done rc={rc}")
+            if rc != 0:
+                failure_class = classify_runtime_failure(rc, output_content, "")
+                _log_runtime(ticket_id, f"auto-run: runtime failure: {failure_class} (rc={rc})")
+                _log_runtime(ticket_id, "runtime failure: planner_invalid")
+                print(
+                    f"error: step '{step}' retry exited with code {rc} — state unchanged ({current_state})",
+                    file=sys.stderr,
+                )
+                return 2
+            _checkpoint_planner_artifacts(ticket_id, push=auto_push)
+            reasons = validate_planner_output(output_content, artifact_type="plan")
+
         if reasons:
             for reason in reasons:
                 _log_runtime(ticket_id, f"planner validation failed: {reason}")
