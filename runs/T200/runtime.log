@@ -10,3 +10,14 @@
 [2026-06-21T19:10:14Z] compose: task (canonical prompt)
 [2026-06-21T19:10:14Z] snapshot: runtime-prompt=runs/T200/prompts/planner-attempt-1.md
 [2026-06-21T19:12:29Z] auto-run: step=planner done rc=0
+[2026-06-21T19:12:31Z] planner checkpoint: committed
+[2026-06-21T19:12:31Z] planner checkpoint: pushed
+[2026-06-21T19:12:31Z] planner validation success
+[2026-06-21T19:12:31Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-21T19:12:31Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-21T19:12:31Z] commit-checkpoint: unstaged runtime garbage: ['runs/T200/runtime.log']
+[2026-06-21T19:12:31Z] commit-checkpoint: sha=33241f8c files=2 title='docs(T200/workflow): planner — update 2 file(s)'
+[2026-06-21T19:12:31Z] auto-run: auto-push triggered
+[2026-06-21T19:12:31Z] push: tolerating runtime dirty files (not blocking): ['runs/T200/runtime.log']
+[2026-06-21T19:12:31Z] push: pushing branch=ticket/T200-add-human-approval-workflow-and-ready-to-take-life
+[2026-06-21T19:12:33Z] push: done branch=ticket/T200-add-human-approval-workflow-and-ready-to-take-life
