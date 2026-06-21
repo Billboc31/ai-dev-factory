@@ -3,5 +3,7 @@
   "state": "TEST_COMPLETE",
   "branch": "ticket/T202-t202-prevent-planner-from-returning-artifact-summa",
   "issue_number": 259,
-  "updated_at": "2026-06-21T21:46:07Z"
+  "updated_at": "2026-06-21T21:46:46Z",
+  "pr_number": 260,
+  "pr_synced": true
 }
