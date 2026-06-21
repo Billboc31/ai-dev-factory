@@ -212,3 +212,14 @@
 [2026-06-21T21:08:01Z] compose: extra-context=runs/T201/fixes/context-20260621T210801Z.md
 [2026-06-21T21:08:01Z] snapshot: runtime-prompt=runs/T201/prompts/planner-attempt-9.md
 [2026-06-21T21:10:07Z] auto-run: step=planner done rc=0
+[2026-06-21T21:10:10Z] planner checkpoint: committed
+[2026-06-21T21:10:10Z] planner checkpoint: pushed
+[2026-06-21T21:10:10Z] planner validation success
+[2026-06-21T21:10:10Z] auto-run: transition PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED
+[2026-06-21T21:10:10Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-21T21:10:10Z] commit-checkpoint: unstaged runtime garbage: ['runs/T201/runtime.log']
+[2026-06-21T21:10:10Z] commit-checkpoint: sha=265e3760 files=2 title='docs(T201/workflow): planner — update 2 file(s)'
+[2026-06-21T21:10:10Z] auto-run: auto-push triggered
+[2026-06-21T21:10:10Z] push: tolerating runtime dirty files (not blocking): ['runs/T201/runtime.log']
+[2026-06-21T21:10:10Z] push: pushing branch=ticket/T201-t201-add-execution-rules-engine-and-policy-based-t
+[2026-06-21T21:10:12Z] push: done branch=ticket/T201-t201-add-execution-rules-engine-and-policy-based-t
