@@ -263,6 +263,21 @@ def test_project_post_analyze_returns_202(tmp_path):
     assert r.json()["analysis_status"] == "queued"
 
 
+def test_project_post_analyze_delegates_to_supervisor_in_docker(tmp_path, monkeypatch):
+    _make_ticket(tmp_path, "T001")
+    app = _make_app(tmp_path)
+    monkeypatch.setenv("AI_DEV_FACTORY_API_IN_DOCKER", "1")
+
+    with patch("services.control_api.routes.intelligence._delegate_analyze_to_supervisor") as mock_delegate:
+        with patch("ticket_intelligence_analyzer.run_analysis") as mock_run:
+            client = TestClient(app)
+            r = client.post("/projects/proj1/tickets/T001/intelligence/analyze")
+
+    assert r.status_code == 202
+    mock_delegate.assert_called_once()
+    mock_run.assert_not_called()
+
+
 def test_post_analyze_idempotency_guard(tmp_path):
     """Second POST while status is queued/running must return 202 without a new thread."""
     _make_ticket(tmp_path, "T001")
