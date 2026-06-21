@@ -94,6 +94,23 @@ CREATE TABLE IF NOT EXISTS ticket_intelligence (
     created_at                          TEXT NOT NULL,
     updated_at                          TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS ticket_readiness (
+    ticket_id                TEXT PRIMARY KEY,
+    readiness_status         TEXT NOT NULL DEFAULT 'not_started',
+    ready_candidate          INTEGER NOT NULL DEFAULT 0,
+    blocking_reasons_json    TEXT,
+    warnings_json            TEXT,
+    dependency_check_status  TEXT,
+    approval_check_status    TEXT,
+    context_freshness_status TEXT,
+    human_approval_required  INTEGER,
+    human_approval_present   INTEGER,
+    main_sha_when_evaluated  TEXT,
+    evaluated_at             TEXT,
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL
+);
 """
 
 
@@ -428,6 +445,77 @@ def get_ticket_intelligence(db_path: Path, ticket_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+# ── ticket_readiness ──────────────────────────────────────────────────────────
+
+_READINESS_LIST_FIELDS = ("blocking_reasons_json", "warnings_json")
+
+
+def _encode_readiness_lists(fields: dict) -> dict:
+    """Serialise any list-typed list-field arguments to JSON strings in place."""
+    out = dict(fields)
+    for key in _READINESS_LIST_FIELDS:
+        val = out.get(key)
+        if isinstance(val, list):
+            out[key] = json.dumps(val)
+    return out
+
+
+def _decode_readiness_lists(row: dict) -> dict:
+    """Decode JSON-list columns back into Python lists, defaulting to []."""
+    out = dict(row)
+    for key in _READINESS_LIST_FIELDS:
+        val = out.get(key)
+        if val is None or val == "":
+            out[key] = []
+            continue
+        try:
+            parsed = json.loads(val)
+            out[key] = parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            out[key] = []
+    return out
+
+
+def upsert_ticket_readiness(db_path: Path, ticket_id: str, **fields) -> None:
+    """Insert or update a ticket_readiness row. Sets created_at only on first insert."""
+    fields = _encode_readiness_lists(fields)
+    now = _now_iso()
+    with _connect(db_path) as conn:
+        existing = conn.execute(
+            "SELECT ticket_id FROM ticket_readiness WHERE ticket_id = ?", (ticket_id,)
+        ).fetchone()
+        if existing:
+            if fields:
+                set_clause = ", ".join(f"{k}=?" for k in fields)
+                conn.execute(
+                    f"UPDATE ticket_readiness SET {set_clause}, updated_at=? WHERE ticket_id=?",
+                    list(fields.values()) + [now, ticket_id],
+                )
+            else:
+                conn.execute(
+                    "UPDATE ticket_readiness SET updated_at=? WHERE ticket_id=?",
+                    (now, ticket_id),
+                )
+        else:
+            fields.setdefault("readiness_status", "not_started")
+            cols = ["ticket_id", "created_at", "updated_at"] + list(fields.keys())
+            placeholders = ", ".join("?" * len(cols))
+            conn.execute(
+                f"INSERT INTO ticket_readiness ({', '.join(cols)}) VALUES ({placeholders})",
+                [ticket_id, now, now] + list(fields.values()),
+            )
+
+
+def get_ticket_readiness(db_path: Path, ticket_id: str) -> dict | None:
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM ticket_readiness WHERE ticket_id = ?", (ticket_id,)
+        ).fetchone()
+    if row is None:
+        return None
+    return _decode_readiness_lists(dict(row))
+
+
 # ── Backend selection ─────────────────────────────────────────────────────────
 # Everything above is the SQLite backend (the default). When
 # RUNTIME_DB_BACKEND=postgres the public API is rebound to the networked
@@ -515,6 +603,8 @@ if _RUNTIME_DB_BACKEND == "postgres":
     list_runtime_events = _pg.list_runtime_events  # type: ignore[assignment]
     upsert_ticket_intelligence = _pg.upsert_ticket_intelligence  # type: ignore[assignment]
     get_ticket_intelligence = _pg.get_ticket_intelligence  # type: ignore[assignment]
+    upsert_ticket_readiness = _pg.upsert_ticket_readiness  # type: ignore[assignment]
+    get_ticket_readiness = _pg.get_ticket_readiness  # type: ignore[assignment]
 elif _RUNTIME_DB_BACKEND not in ("", "sqlite"):
     raise RuntimeError(
         f"unknown RUNTIME_DB_BACKEND={_RUNTIME_DB_BACKEND!r} "

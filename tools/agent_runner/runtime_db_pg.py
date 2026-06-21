@@ -128,6 +128,25 @@ CREATE TABLE IF NOT EXISTS ticket_intelligence (
     updated_at                          TEXT NOT NULL,
     PRIMARY KEY (project_id, ticket_id)
 );
+
+CREATE TABLE IF NOT EXISTS ticket_readiness (
+    project_id               TEXT NOT NULL,
+    ticket_id                TEXT NOT NULL,
+    readiness_status         TEXT NOT NULL DEFAULT 'not_started',
+    ready_candidate          INTEGER NOT NULL DEFAULT 0,
+    blocking_reasons_json    TEXT,
+    warnings_json            TEXT,
+    dependency_check_status  TEXT,
+    approval_check_status    TEXT,
+    context_freshness_status TEXT,
+    human_approval_required  INTEGER,
+    human_approval_present   INTEGER,
+    main_sha_when_evaluated  TEXT,
+    evaluated_at             TEXT,
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL,
+    PRIMARY KEY (project_id, ticket_id)
+);
 """
 
 
@@ -489,3 +508,76 @@ def get_ticket_intelligence(handle: PgHandle, ticket_id: str) -> dict | None:
             (handle.project_id, ticket_id),
         ).fetchone()
     return dict(row) if row else None
+
+
+# ── ticket_readiness ───────────────────────────────────────────────────────────
+
+_READINESS_LIST_FIELDS = ("blocking_reasons_json", "warnings_json")
+
+
+def _encode_readiness_lists(fields: dict) -> dict:
+    out = dict(fields)
+    for key in _READINESS_LIST_FIELDS:
+        val = out.get(key)
+        if isinstance(val, list):
+            out[key] = json.dumps(val)
+    return out
+
+
+def _decode_readiness_lists(row: dict) -> dict:
+    out = dict(row)
+    for key in _READINESS_LIST_FIELDS:
+        val = out.get(key)
+        if val is None or val == "":
+            out[key] = []
+            continue
+        try:
+            parsed = json.loads(val)
+            out[key] = parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            out[key] = []
+    return out
+
+
+def upsert_ticket_readiness(handle: PgHandle, ticket_id: str, **fields) -> None:
+    """Insert or update a ticket_readiness row. Sets created_at only on first insert."""
+    fields = _encode_readiness_lists(fields)
+    now = _now_iso()
+    with _connect(handle) as conn:
+        existing = conn.execute(
+            "SELECT ticket_id FROM ticket_readiness WHERE project_id = %s AND ticket_id = %s",
+            (handle.project_id, ticket_id),
+        ).fetchone()
+        if existing:
+            if fields:
+                set_clause = ", ".join(f"{k}=%s" for k in fields)
+                conn.execute(
+                    f"UPDATE ticket_readiness SET {set_clause}, updated_at=%s "
+                    f"WHERE project_id=%s AND ticket_id=%s",
+                    list(fields.values()) + [now, handle.project_id, ticket_id],
+                )
+            else:
+                conn.execute(
+                    "UPDATE ticket_readiness SET updated_at=%s "
+                    "WHERE project_id=%s AND ticket_id=%s",
+                    (now, handle.project_id, ticket_id),
+                )
+        else:
+            fields.setdefault("readiness_status", "not_started")
+            cols = ["project_id", "ticket_id", "created_at", "updated_at"] + list(fields.keys())
+            placeholders = ", ".join(["%s"] * len(cols))
+            conn.execute(
+                f"INSERT INTO ticket_readiness ({', '.join(cols)}) VALUES ({placeholders})",
+                [handle.project_id, ticket_id, now, now] + list(fields.values()),
+            )
+
+
+def get_ticket_readiness(handle: PgHandle, ticket_id: str) -> dict | None:
+    with _connect(handle) as conn:
+        row = conn.execute(
+            "SELECT * FROM ticket_readiness WHERE project_id = %s AND ticket_id = %s",
+            (handle.project_id, ticket_id),
+        ).fetchone()
+    if row is None:
+        return None
+    return _decode_readiness_lists(dict(row))

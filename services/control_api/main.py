@@ -15,7 +15,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .routes import auto_fix, daemon, deployer, environments, health, intelligence, issues, project_map, projects, providers, runtime_dashboard, sandbox, tickets
+from .routes import auto_fix, daemon, deployer, environments, health, intelligence, issues, project_map, projects, providers, readiness, runtime_dashboard, sandbox, tickets
 from .services.project_registry import ProjectRegistry
 from .services.runtime_resolver import resolve_worktrees_dir
 
@@ -199,6 +199,9 @@ def create_app(
     # T197: /tickets/{id}/intelligence — advisory ticket intelligence analysis.
     app.include_router(intelligence.router)
     app.include_router(intelligence.project_router)
+    # T198: /tickets/{id}/readiness — advisory execution eligibility evaluation.
+    app.include_router(readiness.router)
+    app.include_router(readiness.project_router)
 
     return app
 
