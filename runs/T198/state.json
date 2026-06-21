@@ -1,7 +1,7 @@
 {
   "ticket_id": "T198",
-  "state": "IMPLEMENTATION_REVIEW_NEEDED",
+  "state": "IMPLEMENTATION_FIX_REQUIRED",
   "branch": "ticket/T198-add-ticket-readiness-evaluator-and-execution-eligi",
   "issue_number": 253,
-  "updated_at": "2026-06-21T17:12:24Z"
+  "updated_at": "2026-06-21T17:17:18Z"
 }
