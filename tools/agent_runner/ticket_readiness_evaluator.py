@@ -206,6 +206,19 @@ def run_evaluation(
         readiness_status = "ready_candidate" if all_passed else "blocked"
         ready_candidate = 1 if all_passed else 0
 
+        # Preserve ready_to_take across re-evaluations when an execution approval
+        # is already on file. Without this, recomputing base candidacy would
+        # silently demote an approved ticket back to ready_candidate.
+        if readiness_status == "ready_candidate":
+            try:
+                latest_exec = runtime_db.get_latest_ticket_approval(
+                    db_path, ticket_id, "execution"
+                )
+            except Exception:
+                latest_exec = None
+            if latest_exec and latest_exec.get("approval_status") == "approved":
+                readiness_status = "ready_to_take"
+
         runtime_db.upsert_ticket_readiness(
             db_path,
             ticket_id,
