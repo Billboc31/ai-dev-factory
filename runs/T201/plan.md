@@ -1,10 +1,13 @@
-The plan in `runs/T201/plan.md` is now a standalone implementation document — not a narrative about a plan.
+Plan replaced. `runs/T201/plan.md` is now the actual implementation plan: the four mandatory headings (`## Objective`, `## Included`, `## Excluded`, `## Acceptance criteria`), no narrative or past-tense report.
 
-It uses the four mandatory level-2 headings (`## Objective`, `## Included`, `## Excluded`, `## Acceptance criteria`) and addresses both fix instructions:
+Concrete content, grounded in the real repo:
 
-- **Real plan content, not a report.** Every section gives concrete instructions: DDL for both DB backends, the engine's public surface (function-by-function), API route shapes with status codes, frontend file paths and prop shapes, the three test files and what each verifies.
-- **`require_human_approval` aligned with T199.** §3 of `## Included` and acceptance criterion #3 both pin the rule to `compute_execution_eligibility(...) == "ready_to_take"` via a `get_execution_approval_state` wrapper, and a grep check forbids direct `ticket_approvals` access.
-- **Explicit default policy.** `DEFAULT_RULES` is given as a literal: 4 enabled (`require_ticket_intelligence`, `require_readiness_candidate`, `require_human_approval`, `block_when_human_review_required`) + 2 disabled threshold rules (`max_estimated_cost_usd`, `max_difficulty`). Acceptance criterion #4 makes this verifiable.
-- **Scheduler isolation enforced.** `## Excluded` names the specific files that must not change, and criterion #10 grep-checks it.
-
-Plan is grounded in the actual repo: routes mirror `intelligence.py`/`readiness.py`/`approvals.py`, panel mirrors sibling panels, tests mirror the existing `test_ticket_readiness_*` triplet.
+- **DDL** for both SQLite (`runtime_db.py`) and Postgres (`runtime_db_pg.py`) backends, with helper-function signatures matching the existing `upsert_*`/`get_*`/`list_*` conventions.
+- **Engine surface** in `tools/agent_runner/execution_rules_engine.py` — full Python signatures for `DEFAULT_RULES`, `ensure_default_project_rules`, `list_effective_rules`, `get_execution_approval_state`, `evaluate_ticket`, `run_evaluation`.
+- **`DEFAULT_RULES` given as a literal** with the 4 enabled + 2 disabled split spelled out, and a table mapping each `rule_key` to its pass condition.
+- **`require_human_approval` pinned to `compute_execution_eligibility(...) == "ready_to_take"`** via the `get_execution_approval_state` wrapper; criterion #3 plus a grep assertion forbids any other access to `ticket_approvals` from the engine.
+- **API** routes table — verbs, paths, response models, status codes (202 for evaluate, 503 on DB down), routers mirror `readiness.py`'s dual `router`/`project_router` pattern.
+- **Pydantic models** added to `services/control_api/models/schemas.py`.
+- **Frontend** — new `TicketRuleEvaluationPanel.jsx` (mounted on `TicketDetailPage.jsx`) and `ProjectRulesPage.jsx`, plus the four new methods to add to `apps/dashboard/src/api/tickets.js`.
+- **Three test files** with explicit per-scenario coverage, following the `_isolate_env`/`_make_app`/`_make_ticket` fixture pattern of `test_ticket_readiness_api.py`.
+- **Scheduler isolation** — `## Excluded` names the specific files that must not change; criterion #10 is a `git diff` check.
