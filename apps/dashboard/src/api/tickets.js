@@ -30,3 +30,5 @@ export const approveConflictResolution = (id, projectId) => client.post(`${_pfx(
 export const rejectConflictResolution = (id, projectId) => client.post(`${_pfx(projectId)}/tickets/${id}/reject-conflict-resolution`)
 export const getTicketIntelligence = (id, projectId) => client.get(`${_pfx(projectId)}/tickets/${id}/intelligence`)
 export const analyzeTicketIntelligence = (id, projectId) => client.post(`${_pfx(projectId)}/tickets/${id}/intelligence/analyze`)
+export const getTicketReadiness = (id, projectId) => client.get(`${_pfx(projectId)}/tickets/${id}/readiness`)
+export const postEvaluateReadiness = (id, projectId) => client.post(`${_pfx(projectId)}/tickets/${id}/evaluate-readiness`)

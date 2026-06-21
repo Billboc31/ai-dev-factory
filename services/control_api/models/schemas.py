@@ -471,3 +471,25 @@ class TicketIntelligence(BaseModel):
 class TicketIntelligenceQueued(BaseModel):
     ticket_id: str
     analysis_status: str
+
+
+class TicketReadiness(BaseModel):
+    ticket_id: str
+    readiness_status: str
+    ready_candidate: bool = False
+    blocking_reasons: list[str] = []
+    warnings: list[str] = []
+    dependency_check_status: str | None = None
+    approval_check_status: str | None = None
+    context_freshness_status: str | None = None
+    human_approval_required: bool | None = None
+    human_approval_present: bool | None = None
+    main_sha_when_evaluated: str | None = None
+    evaluated_at: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class TicketReadinessQueued(BaseModel):
+    ticket_id: str
+    readiness_status: str

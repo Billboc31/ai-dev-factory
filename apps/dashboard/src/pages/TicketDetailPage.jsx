@@ -5,6 +5,7 @@ import ActionButton from '../components/ActionButton'
 import AuditLog from '../components/AuditLog'
 import ErrorBanner from '../components/ErrorBanner'
 import TicketIntelligencePanel from '../components/TicketIntelligencePanel'
+import TicketReadinessPanel from '../components/TicketReadinessPanel'
 import WorkflowTimeline from '../components/WorkflowTimeline'
 import usePolling from '../hooks/usePolling'
 
@@ -273,6 +274,7 @@ export default function TicketDetailPage() {
       )}
 
       <TicketIntelligencePanel ticketId={id} projectId={projectId} />
+      <TicketReadinessPanel ticketId={id} projectId={projectId} />
 
       <div className="flex border-b border-gray-200 mb-4">
         {TABS.map(t => (

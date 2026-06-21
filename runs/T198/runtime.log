@@ -65,3 +65,16 @@
 [2026-06-21T16:49:11Z] push: tolerating runtime dirty files (not blocking): ['runs/T198/runtime.log']
 [2026-06-21T16:49:11Z] push: pushing branch=ticket/T198-add-ticket-readiness-evaluator-and-execution-eligi
 [2026-06-21T16:49:13Z] push: done branch=ticket/T198-add-ticket-readiness-evaluator-and-execution-eligi
+[2026-06-21T16:51:00Z] auto-run start: state=PLAN_APPROVED
+[2026-06-21T16:51:01Z] auto-run: running step=coder
+[2026-06-21T16:51:01Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-06-21T16:51:01Z] prompt: generic fallback — injecting runs/T198/ticket.md
+[2026-06-21T16:51:01Z] compose: global-context=docs/ai/global-context.md
+[2026-06-21T16:51:01Z] compose: role=ai/roles/coder.md
+[2026-06-21T16:51:01Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-21T16:51:01Z] compose: skill=ai/skills/git-discipline.md
+[2026-06-21T16:51:01Z] compose: skill=ai/skills/code-quality.md
+[2026-06-21T16:51:01Z] compose: skill=ai/skills/refactor-safety.md
+[2026-06-21T16:51:01Z] compose: skill=ai/skills/security.md
+[2026-06-21T16:51:01Z] compose: task (canonical prompt)
+[2026-06-21T16:51:01Z] snapshot: runtime-prompt=runs/T198/prompts/coder-attempt-1.md
