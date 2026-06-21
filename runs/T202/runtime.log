@@ -10,3 +10,14 @@
 [2026-06-21T21:12:31Z] compose: task (canonical prompt)
 [2026-06-21T21:12:31Z] snapshot: runtime-prompt=runs/T202/prompts/planner-attempt-1.md
 [2026-06-21T21:14:19Z] auto-run: step=planner done rc=0
+[2026-06-21T21:14:21Z] planner checkpoint: committed
+[2026-06-21T21:14:21Z] planner checkpoint: pushed
+[2026-06-21T21:14:21Z] planner validation success
+[2026-06-21T21:14:21Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-21T21:14:21Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-21T21:14:21Z] commit-checkpoint: unstaged runtime garbage: ['runs/T202/runtime.log']
+[2026-06-21T21:14:21Z] commit-checkpoint: sha=462a72dc files=2 title='docs(T202/workflow): planner — update 2 file(s)'
+[2026-06-21T21:14:21Z] auto-run: auto-push triggered
+[2026-06-21T21:14:21Z] push: tolerating runtime dirty files (not blocking): ['runs/T202/runtime.log']
+[2026-06-21T21:14:21Z] push: pushing branch=ticket/T202-t202-prevent-planner-from-returning-artifact-summa
+[2026-06-21T21:14:23Z] push: done branch=ticket/T202-t202-prevent-planner-from-returning-artifact-summa
