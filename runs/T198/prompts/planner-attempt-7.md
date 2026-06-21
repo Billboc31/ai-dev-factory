@@ -1,0 +1,862 @@
+# GLOBAL CONTEXT
+
+# Global Context — ai-dev-factory
+
+## Vision
+
+ai-dev-factory est un framework générique d’orchestration de développement assisté par IA.
+
+Le système doit permettre :
+- création de tickets structurés
+- génération de prompts spécialisés
+- orchestration planner/coder/reviewer/tester
+- reviews IA intermédiaires
+- maintenance automatique de la mémoire projet
+- workflow GitHub-centric basé sur PR
+
+Détails lifecycle PR, branches et artefacts : [pr-lifecycle.md](./pr-lifecycle.md).
+
+## Principes
+
+- GitHub = source de vérité workflow
+- PR = protocole de communication agentique
+- mémoire versionnée dans le repository
+- architecture explicitement documentée
+- aucun merge sans validations IA requises
+
+## Reviews obligatoires
+
+Aucun merge sans :
+- PLAN_APPROVED
+- IMPLEMENTATION_APPROVED
+- MEMORY_APPROVED
+
+## Mémoire
+
+Le système mémoire est composé de :
+- global-context.md
+- project-life.md
+- decisions-log.md
+
+## Workflow cible
+
+1. Ticket
+2. Classification risque
+3. Planner
+4. Review plan
+5. Coder
+6. Reviewer
+7. Tester
+8. Review implémentation
+9. Memory updater
+10. Review mémoire
+11. Merge
+
+---
+
+# ROLE
+
+# Role — Planner
+
+## Mission
+
+Lire un ticket et produire un plan d’implémentation court, concret, borné et actionnable.
+
+## Tu dois
+
+- comprendre le ticket
+- proposer les étapes minimales
+- lister les fichiers à créer ou modifier
+- identifier les risques
+- expliciter le hors scope
+- produire un plan Markdown versionnable
+- signaler les hypothèses nécessaires
+
+## Tu ne dois pas
+
+- coder
+- réécrire le ticket
+- anticiper les tickets suivants
+- élargir le scope
+- masquer les incertitudes
+
+## Sortie attendue
+
+Un fichier de plan conforme à `ai/templates/plan-template.md`.
+
+## Règles
+
+- le plan doit rester court
+- le plan doit être exécutable par un Coder sans ambiguïté
+- toute hypothèse doit être explicite
+- toute dérive de scope doit être refusée
+
+## Structure obligatoire
+
+Tout plan doit contenir au minimum **les sections suivantes** (titres
+Markdown niveau 2 — `##`). Les variantes anglaises sont acceptées à l'identique :
+
+| Français (recommandé)         | English equivalent       |
+|-------------------------------|--------------------------|
+| `## Contexte`                 | `## Context`             |
+| `## Objectif`                 | `## Objective`           |
+| `## Inclus`                   | `## Included`            |
+| `## Hors scope`               | `## Excluded`            |
+| `## Critères d'acceptation`   | `## Acceptance criteria` |
+
+Choisis une langue par plan, ne mélange pas FR et EN dans un même plan.
+
+Ces titres sont obligatoires même si une section est courte : un ticket
+trivial peut produire un plan court, mais la structure doit rester stable.
+
+Ne jamais produire uniquement un résumé.
+Ne jamais produire un compte rendu d’implémentation.
+
+## Interdictions absolues
+
+Tu ne dois jamais écrire :
+- "implémentation terminée"
+- "syntaxe valide"
+- "changements appliqués"
+- "voici ce qui a été fait"
+
+Tu dois produire uniquement un plan futur, pas un compte rendu passé.
+
+---
+
+# SKILL: workflow-discipline
+
+# Skill — Workflow Discipline
+
+## Objectif
+
+Faire respecter le lifecycle officiel des tickets et PR IA.
+
+## Règles
+
+- respecter l’ordre des étapes du workflow
+- ne pas bypass les reviews obligatoires
+- maintenir les statuts cohérents
+- conserver les artefacts versionnés
+- séparer plan, implémentation et mémoire
+
+## Refuser si
+
+- une review obligatoire est sautée
+- la mémoire est mise à jour avant validation implémentation
+- le workflow officiel est contourné
+
+---
+
+# SKILL: architecture-discipline
+
+# Skill — Architecture Discipline
+
+## Objectif
+
+Préserver la cohérence architecture du projet dans le temps.
+
+## Règles
+
+- respecter les invariants documentés
+- éviter les couplages implicites
+- éviter les dépendances inutiles
+- éviter les refactors transversaux non demandés
+- documenter toute nouvelle règle structurante
+- privilégier les changements locaux et bornés
+
+## Refuser si
+
+- le scope dérive
+- plusieurs couches sont modifiées sans justification
+- des conventions existantes sont cassées
+- la mémoire projet devient incohérente
+
+---
+
+# SKILL: documentation
+
+# Skill — Documentation
+
+## Objectif
+
+Maintenir une documentation utile, concise et alignée avec le code réel.
+
+## Règles
+
+- documenter les décisions importantes
+- éviter les documentations vagues
+- garder la mémoire projet cohérente
+- expliciter les invariants architecture
+- préférer Markdown simple et versionnable
+
+## Refuser si
+
+- la documentation diverge du comportement réel
+- la mémoire contient des suppositions non validées
+- des décisions importantes ne sont pas tracées
+
+---
+
+# TASK
+
+The ticket follows.
+# Generic Planner Task Read the ticket below and produce a detailed implementation plan. 
+
+## Required output structure (strict) Your reply **MUST** be a Markdown document containing **exactly** these four level-2 headings, in this order, spelled exactly as shown:
+## Objective
+## Included
+## Excluded
+## Acceptance criteria
+These headings are mandatory even for trivial tickets. A short plan is acceptable — an unstructured plan is not. - ## Objective — one or two sentences describing what the change achieves. - ## Included — concrete changes (files, functions, logic, tests). - ## Excluded — what is explicitly out of scope for this ticket. - ## Acceptance criteria — verifiable conditions a reviewer can check. ## Invalid output Your reply is **invalid** if any of the four headings above is missing, renamed, mistyped, or replaced by a synonym (e.g. ## Goal, ## Scope, ## In scope, ## Out of scope, ## Plan, ## Tasks are **not** accepted). An invalid reply will be rejected by the automated validator and the ticket will be retried. You **MUST NOT** write: - "implementation done" - "changes applied" - "here is what was done" - any past-tense report of work already performed You produce a *future* plan, not a status report. ## Minimal valid example (for a trivial ticket)
+markdown
+## Objective
+Rename the helper `foo()` to `bar()` in `utils.py` to align with the new
+naming convention. Behaviour is preserved.
+
+## Included
+- `utils.py`: rename `foo` → `bar`, update the docstring.
+- `tests/test_utils.py`: update the single import and assertion.
+
+## Excluded
+- Renaming callers in other modules (tracked in a follow-up ticket).
+- Any logic change inside `foo` / `bar`.
+
+## Acceptance criteria
+- `utils.py` no longer defines `foo`.
+- `pytest tests/test_utils.py` passes.
+- No other file references the old name.
+
+The ticket follows.
+
+
+
+# T198 — Add Ticket Readiness Evaluator and execution eligibility workflow
+
+**Source**: GitHub Issue #253
+
+## Description
+
+# Add Ticket Readiness Evaluator and execution eligibility workflow
+
+## Context
+
+AI Dev Factory now includes a Ticket Intelligence Analyzer that enriches tickets with advisory metadata.
+
+The next step is to determine whether a ticket is actually eligible to enter the development pipeline.
+
+A dedicated Readiness Evaluator must analyze the current project state and determine if a ticket can be executed.
+
+This component is intentionally separate from Ticket Intelligence.
+
+```text
+Ticket Intelligence
+= analysis / recommendations
+
+Readiness Evaluator
+= execution eligibility decision
+```
+
+The goal is to avoid situations where tickets start with stale context, missing approvals, or unresolved dependencies.
+
+## Goals
+
+Introduce a new evaluation step:
+
+```text
+Ticket
+↓
+Ticket Intelligence
+↓
+Readiness Evaluator
+↓
+Ready Candidate / Blocked
+```
+
+The evaluator decides whether a ticket is:
+
+```text
+READY_CANDIDATE
+BLOCKED
+```
+
+without modifying the existing execution pipeline yet.
+
+For this ticket, the evaluator is advisory only.
+
+## Non-goals
+
+Do not:
+
+- automatically start ticket execution
+- modify scheduler behavior
+- reorder queues
+- dispatch workers
+- enforce execution policies
+- automatically merge tickets
+
+These behaviors will be implemented later.
+
+## Ticket lifecycle additions
+
+Introduce two new ticket states:
+
+```text
+READY_CANDIDATE
+BLOCKED
+```
+
+A ticket may become READY_CANDIDATE when all readiness checks pass.
+
+A ticket becomes BLOCKED when at least one readiness rule fails.
+
+The evaluator must also expose blocking reasons.
+
+Example:
+
+```text
+Status: BLOCKED
+
+Reasons:
+- Dependency T001 not merged
+- Human plan approval missing
+```
+
+## Database
+
+Create a new table:
+
+```text
+ticket_readiness
+```
+
+Suggested fields:
+
+```text
+ticket_id
+readiness_status
+blocking_reasons_json
+warnings_json
+dependency_check_status
+approval_check_status
+context_freshness_status
+human_approval_required
+human_approval_present
+ready_candidate
+evaluated_at
+created_at
+updated_at
+```
+
+Only one active readiness evaluation per ticket is required.
+
+## Readiness checks
+
+The evaluator should support the following checks.
+
+### Dependency validation
+
+Detect explicit dependencies:
+
+```text
+Depends on T001
+After T001
+Blocked by T001
+```
+
+Verify:
+
+```text
+all prerequisite tickets are merged into main
+```
+
+If not:
+
+```text
+BLOCKED
+```
+
+### Human approval validation
+
+Use Ticket Intelligence metadata.
+
+If:
+
+```text
+requires_human_plan_review = true
+```
+
+then verify approval exists.
+
+If approval is missing:
+
+```text
+BLOCKED
+```
+
+### Context freshness validation
+
+Store:
+
+```text
+main_sha_when_evaluated
+```
+
+Future components will compare this against current main.
+
+For this ticket only expose:
+
+```text
+fresh
+unknown
+stale
+```
+
+without enforcing execution behavior.
+
+### Intelligence validation
+
+A ticket cannot become READY_CANDIDATE if:
+
+```text
+Ticket Intelligence analysis does not exist
+```
+
+Example:
+
+```text
+BLOCKED
+Reason: Missing Ticket Intelligence analysis
+```
+
+## Evaluator service
+
+Create:
+
+```text
+tools/agent_runner/ticket_readiness_evaluator.py
+```
+
+Responsibilities:
+
+1. Load ticket
+2. Load Ticket Intelligence result
+3. Execute readiness checks
+4. Produce structured readiness result
+5. Persist result in DB
+
+Suggested output:
+
+```json
+{
+  "readiness_status": "BLOCKED",
+  "ready_candidate": false,
+  "blocking_reasons": [
+    "Dependency T001 not merged",
+    "Human plan approval missing"
+  ],
+  "warnings": [],
+  "dependency_check_status": "failed",
+  "approval_check_status": "failed",
+  "context_freshness_status": "fresh"
+}
+```
+
+## API
+
+Add:
+
+```text
+GET /api/tickets/{ticket_id}/readiness
+POST /api/tickets/{ticket_id}/evaluate-readiness
+```
+
+POST should behave similarly to Ticket Intelligence:
+
+```text
+returns 202 Accepted
+runs in background
+```
+
+## Frontend
+
+Add a new panel:
+
+```text
+Ticket Readiness
+```
+
+Display:
+
+- readiness status
+- ready candidate badge
+- blocking reasons
+- warnings
+- last evaluation date
+- dependency state
+- approval state
+- context freshness state
+
+Example:
+
+```text
+READY CANDIDATE
+
+No blocking issues detected.
+```
+
+or
+
+```text
+BLOCKED
+
+- Dependency T001 not merged
+- Missing human approval
+```
+
+## Human workflow
+
+For now, human users manually decide if a READY_CANDIDATE ticket should later become:
+
+```text
+READY_TO_TAKE
+```
+
+This ticket does not implement READY_TO_TAKE.
+
+## Acceptance criteria
+
+- Tickets can be evaluated for readiness independently of execution.
+- Readiness results are persisted in DB.
+- Missing Ticket Intelligence analysis blocks readiness.
+- Dependency checks produce blocking reasons.
+- Human approval requirements produce blocking reasons.
+- API exposes readiness information.
+- Dashboard displays readiness status and blocking reasons.
+- Existing scheduler and execution behavior remain unchanged.
+- Existing test suite continues to pass.
+
+---
+
+## Contexte de retry injecté par run_ticket.py
+
+## Output précédent
+
+## Objective
+
+Introduce an advisory Readiness Evaluator that decides whether a ticket can enter the development pipeline. Persist a `ticket_readiness` row per ticket (status `READY_CANDIDATE` / `BLOCKED` with blocking reasons), expose it via API and dashboard, mirroring the existing Ticket Intelligence pattern. Execution behavior is **not** changed.
+
+## Included
+
+- **DB schema (`tools/agent_runner/runtime_db.py`)**
+  - Add `CREATE TABLE IF NOT EXISTS ticket_readiness (...)` to `_SCHEMA` with columns: `ticket_id PRIMARY KEY`, `readiness_status` (`not_started|queued|running|ready_candidate|blocked|failed`), `ready_candidate INTEGER`, `blocking_reasons_json TEXT`, `warnings_json TEXT`, `dependency_check_status TEXT`, `approval_check_status TEXT`, `context_freshness_status TEXT`, `human_approval_required INTEGER`, `human_approval_present INTEGER`, `main_sha_when_evaluated TEXT`, `evaluated_at TEXT`, `created_at TEXT NOT NULL`, `updated_at TEXT NOT NULL`.
+  - Add `upsert_ticket_readiness(db_path, ticket_id, **fields)` and `get_ticket_readiness(db_path, ticket_id)`, mirroring the `ticket_intelligence` helpers.
+  - Rebind both functions in the Postgres backend selection block at the bottom of the file.
+
+- **Postgres backend (`tools/agent_runner/runtime_db_pg.py`)**
+  - Add equivalent `ticket_readiness` table creation and `upsert_ticket_readiness` / `get_ticket_readiness` implementations.
+
+- **Evaluator service (`tools/agent_runner/ticket_readiness_evaluator.py`, new)**
+  - Public `run_evaluation(db_path, ticket_id, ticket_content, project_root)` callable, designed to run in a background thread; updates `readiness_status` `queued → running → ready_candidate|blocked|failed`; never raises (failures persisted).
+  - Internal helpers:
+    - `_check_intelligence(db_path, ticket_id)` — fails with `Missing Ticket Intelligence analysis` if `get_ticket_intelligence(...)` returns `None` or `analysis_status != "completed"`.
+    - `_check_dependencies(ticket_content, project_root)` — parse `Depends on T\d+`, `After T\d+`, `Blocked by T\d+` (case-insensitive) from the ticket body; for each prerequisite, verify the merge state on `main` (use `git log --grep "T<id>" main` / existing merge metadata helpers in the repo, or check for a closed PR via `runtime_db` if cheaper). Returns `passed|failed` + reasons.
+    - `_check_human_approval(intelligence_row, project_root, ticket_id)` — if `requires_human_plan_review == 1`, check for a human-approval marker (e.g. presence of `runs/<ticket>/plan-approved.md` or equivalent existing convention; if no convention exists yet, treat absence as missing and emit `Human plan approval missing`). Returns `passed|failed` + flags `human_approval_required` / `human_approval_present`.
+    - `_check_context_freshness(project_root)` — capture `main_sha_when_evaluated` via `git rev-parse main`; set `context_freshness_status="fresh"` (or `unknown` if git fails). No comparison logic in this ticket.
+  - Assemble `blocking_reasons`, set `ready_candidate=1` iff every check passes, persist with `evaluated_at=<now>`.
+
+- **API schemas (`services/control_api/models/schemas.py`)**
+  - Add `TicketReadiness` (mirrors DB row; lists for `blocking_reasons` / `warnings`) and `TicketReadinessQueued` (`ticket_id`, `readiness_status`).
+
+- **API routes (`services/control_api/routes/readiness.py`, new)**
+  - `GET /tickets/{ticket_id}/readiness` → 200 with `TicketReadiness`, 404 if no row.
+  - `POST /tickets/{ticket_id}/evaluate-readiness` → 202 with `TicketReadinessQueued`; idempotent on `queued|running`; launches `ticket_readiness_evaluator.run_evaluation` in a daemon thread.
+  - Add `/projects/{project_id}/...` variants (same pattern as `intelligence.py`).
+  - Register the new router in `services/control_api/main.py` (next to the existing `intelligence` router include).
+
+- **Frontend API helper (`apps/dashboard/src/api/tickets.js`)**
+  - Add `getTicketReadiness(ticketId, projectId)` and `postEvaluateReadiness(ticketId, projectId)`.
+
+- **Frontend panel (`apps/dashboard/src/components/TicketReadinessPanel.jsx`, new)**
+  - Display: readiness status badge, `READY CANDIDATE` badge when applicable, blocking reasons list, warnings list, last evaluation date, dependency / approval / context-freshness sub-states, an `Evaluate readiness` button that triggers the POST and polls (reuse `usePolling`).
+  - Mount the panel on `apps/dashboard/src/pages/TicketDetailPage.jsx` next to `TicketIntelligencePanel`.
+
+- **Tests (under `tests/`)**
+  - `test_ticket_readiness_db.py` — schema creation, upsert/get round-trip, JSON-list field handling.
+  - `test_ticket_readiness_evaluator.py` — unit tests covering each check in isolation: missing intelligence → blocked; unmerged dependency → blocked with reason; missing human approval → blocked; all-pass → `ready_candidate=True`, `readiness_status="ready_candidate"`.
+  - `test_ticket_readiness_api.py` — GET 404 when no row; POST returns 202 + `queued`; idempotency when already `queued|running`; project-scoped route mirror.
+
+## Excluded
+
+- Any change to scheduler, worker dispatch, daemon state machine, or merge logic.
+- Implementing the `READY_TO_TAKE` state or any transition out of `READY_CANDIDATE`.
+- Comparing `main_sha_when_evaluated` against current `main` to detect staleness (only the field and the `fresh|unknown|stale` enum surface are introduced — `stale` is never produced yet).
+- Automatic triggering of readiness evaluation (no daemon hook, no auto-run after ticket intelligence completes). Evaluation runs only on explicit POST.
+- Enforcing readiness as a gate before any existing pipeline step.
+- Refactors to `ticket_intelligence_analyzer.py` or shared extraction of common helpers between analyzer and evaluator.
+- New CLI entry point for the evaluator; it is reachable only via the API in this ticket.
+
+## Acceptance criteria
+
+- `ticket_readiness` table exists in both SQLite and Postgres backends; `upsert_ticket_readiness` / `get_ticket_readiness` round-trip cleanly.
+- `POST /tickets/{ticket_id}/evaluate-readiness` returns HTTP 202 with `readiness_status="queued"`, persists a row, and triggers a background evaluation.
+- `GET /tickets/{ticket_id}/readiness` returns the persisted result with `blocking_reasons` and `warnings` as JSON arrays.
+- Evaluator marks a ticket `BLOCKED` with reason `Missing Ticket Intelligence analysis` when no completed intelligence row exists.
+- Evaluator marks a ticket `BLOCKED` with reason `Dependency T<ID> not merged` when any parsed prerequisite is not merged into `main`.
+- Evaluator marks a ticket `BLOCKED` with reason `Human plan approval missing` when intelligence has `requires_human_plan_review=1` and no approval marker is present.
+- When all checks pass, the row has `readiness_status="ready_candidate"`, `ready_candidate=1`, empty `blocking_reasons`, and a non-null `evaluated_at` + `main_sha_when_evaluated`.
+- The dashboard `TicketReadinessPanel` renders the status, badge, reasons, warnings, sub-check states, and last evaluation date, and can trigger evaluation.
+- No existing daemon / scheduler / worker code paths are modified; the existing test suite (`pytest tests/`) continues to pass.
+
+---
+
+## Review
+
+# Plan review — T198 dependency source and status normalization
+
+The T198 plan is broadly aligned with the issue goal: it introduces an advisory Ticket Readiness Evaluator, persists readiness metadata, exposes API/UI, and explicitly avoids scheduler or worker-dispatch changes.
+
+However, two points should be corrected before implementation starts.
+
+## Blocking issue 1 — fragile dependency merge detection
+
+The current plan allows dependency checks using:
+
+```text
+git log --grep "T<ID>" main
+```
+
+This is fragile because merge commit messages are not a reliable source of truth:
+
+- squash merges may change the commit message
+- PR titles may not contain the ticket ID consistently
+- ticket IDs can appear in unrelated commits
+- rebases or manual merges may not preserve the expected grep pattern
+- future multi-project support needs a structured source of truth
+
+The evaluator should prefer structured runtime data when available.
+
+Preferred dependency resolution order:
+
+1. Existing runtime DB ticket/run/PR metadata, if it already stores merge state or PR state.
+2. Existing GitHub/PR metadata helpers, if available in the project.
+3. Local Git inspection as a fallback only, not as the primary strategy.
+
+If no reliable merge-state source exists yet, the plan should make this explicit and introduce a small helper abstraction so the implementation can be replaced later without changing evaluator logic.
+
+Suggested helper:
+
+```text
+is_ticket_merged(project_root, ticket_id) -> MergeCheckResult
+```
+
+with result fields:
+
+```text
+status: merged | not_merged | unknown
+source: runtime_db | github_metadata | git_fallback | unknown
+reason: string
+```
+
+Unknown should block readiness by default, with a clear reason.
+
+## Blocking issue 2 — status naming must be normalized
+
+The issue describes user-facing states:
+
+```text
+READY_CANDIDATE
+BLOCKED
+```
+
+The plan stores lowercase/internal values:
+
+```text
+ready_candidate
+blocked
+```
+
+That is acceptable only if the plan clearly defines canonical internal values and UI/API mapping.
+
+Required clarification:
+
+- DB/internal enum values should be lowercase snake_case:
+
+```text
+not_started
+queued
+running
+ready_candidate
+blocked
+failed
+```
+
+- API may expose the same canonical values, or expose labels separately.
+- UI labels should render uppercase/human-readable labels:
+
+```text
+READY CANDIDATE
+BLOCKED
+```
+
+Avoid mixing enum styles in logic and tests.
+
+## Required correction
+
+Update `runs/T198/plan.md` so that:
+
+1. Dependency merge detection uses a structured helper instead of directly relying on `git log --grep`.
+2. Git log grep is only a fallback.
+3. Unknown dependency merge state blocks readiness with a clear reason.
+4. Status enum canonical values are explicitly defined as lowercase snake_case.
+5. UI/API label mapping is explicitly described.
+
+## Review verdict
+
+PLAN_FIX_REQUIRED until dependency merge detection and readiness status normalization are clarified.
+
+---
+
+## Instructions de fix
+
+# Plan fix — use reliable dependency merge checks and normalize readiness statuses
+
+## Required plan update
+
+Update `runs/T198/plan.md` before starting implementation.
+
+The plan is directionally correct, but it must be corrected in two areas:
+
+1. Dependency merge detection must not primarily rely on commit-message grep.
+2. Readiness status values must be normalized and consistently mapped to UI labels.
+
+## 1. Dependency merge detection
+
+Replace direct dependency validation text like:
+
+```text
+use git log --grep "T<ID>" main
+```
+
+with a helper-based approach:
+
+```text
+is_ticket_merged(project_root, ticket_id) -> MergeCheckResult
+```
+
+Suggested result:
+
+```json
+{
+  "status": "merged",
+  "source": "runtime_db",
+  "reason": "Ticket T001 has a merged PR recorded in runtime DB"
+}
+```
+
+Supported statuses:
+
+```text
+merged
+not_merged
+unknown
+```
+
+Supported sources:
+
+```text
+runtime_db
+github_metadata
+git_fallback
+unknown
+```
+
+Preferred source order:
+
+1. Runtime DB ticket/run/PR metadata if available.
+2. Existing GitHub/PR metadata helpers if available.
+3. Local Git inspection fallback.
+
+`git log --grep` may exist only as a fallback and should not be the first-choice mechanism.
+
+If the merge state is `unknown`, readiness must be blocked by default.
+
+Example blocking reason:
+
+```text
+Dependency T001 merge state unknown
+```
+
+This is safer than accidentally allowing a dependent ticket to run.
+
+## 2. Status normalization
+
+Define canonical internal readiness status values:
+
+```text
+not_started
+queued
+running
+ready_candidate
+blocked
+failed
+```
+
+These values should be used in:
+
+- database rows
+- backend logic
+- API responses
+- tests
+
+The UI can render user-facing labels separately:
+
+```text
+ready_candidate -> READY CANDIDATE
+blocked -> BLOCKED
+queued -> QUEUED
+running -> RUNNING
+failed -> FAILED
+not_started -> NOT STARTED
+```
+
+Do not mix uppercase enum values with lowercase internal values in backend logic.
+
+## 3. API behavior
+
+`GET /tickets/{ticket_id}/readiness` should return canonical status values.
+
+Example:
+
+```json
+{
+  "ticket_id": "T198",
+  "readiness_status": "blocked",
+  "ready_candidate": false,
+  "blocking_reasons": [
+    "Dependency T197 merge state unknown"
+  ]
+}
+```
+
+The dashboard is responsible for formatting the label.
+
+## 4. Acceptance criteria additions
+
+Add these acceptance criteria to the plan:
+
+- Dependency merge checks use a helper abstraction instead of direct `git log --grep` calls in evaluator logic.
+- Runtime DB / structured metadata is preferred over local Git commit-message inspection.
+- Unknown dependency merge state blocks readiness with a clear blocking reason.
+- Readiness status values are canonical lowercase snake_case internally and in API responses.
+- UI renders human-readable labels from canonical status values.
+
+## Non-goals reminder
+
+This fix still must not change:
+
+- scheduler behavior
+- worker dispatch
+- daemon state machine
+- execution queue ordering
+- `READY_TO_TAKE` transitions
