@@ -26,3 +26,14 @@
 [2026-06-21T16:40:47Z] compose: task (canonical prompt)
 [2026-06-21T16:40:47Z] snapshot: runtime-prompt=runs/T198/prompts/planner-attempt-6.md
 [2026-06-21T16:42:39Z] auto-run: step=planner done rc=0
+[2026-06-21T16:42:41Z] planner checkpoint: committed
+[2026-06-21T16:42:41Z] planner checkpoint: pushed
+[2026-06-21T16:42:41Z] planner validation success
+[2026-06-21T16:42:41Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-21T16:42:41Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-21T16:42:42Z] commit-checkpoint: unstaged runtime garbage: ['runs/T198/runtime.log']
+[2026-06-21T16:42:42Z] commit-checkpoint: sha=b8987040 files=2 title='docs(T198/workflow): planner — update 2 file(s)'
+[2026-06-21T16:42:42Z] auto-run: auto-push triggered
+[2026-06-21T16:42:42Z] push: tolerating runtime dirty files (not blocking): ['runs/T198/runtime.log']
+[2026-06-21T16:42:42Z] push: pushing branch=ticket/T198-add-ticket-readiness-evaluator-and-execution-eligi
+[2026-06-21T16:42:44Z] push: done branch=ticket/T198-add-ticket-readiness-evaluator-and-execution-eligi
