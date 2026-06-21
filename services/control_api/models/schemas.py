@@ -493,3 +493,25 @@ class TicketReadiness(BaseModel):
 class TicketReadinessQueued(BaseModel):
     ticket_id: str
     readiness_status: str
+
+
+class TicketApproval(BaseModel):
+    id: int
+    ticket_id: str
+    approval_type: str
+    approval_status: str
+    approved_by: str | None = None
+    approval_comment: str | None = None
+    approved_at: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class TicketApprovalHistory(BaseModel):
+    ticket_id: str
+    approvals: list[TicketApproval] = []
+
+
+class ApprovalDecision(BaseModel):
+    approved_by: str
+    comment: str | None = None

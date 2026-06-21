@@ -147,6 +147,22 @@ CREATE TABLE IF NOT EXISTS ticket_readiness (
     updated_at               TEXT NOT NULL,
     PRIMARY KEY (project_id, ticket_id)
 );
+
+CREATE TABLE IF NOT EXISTS ticket_approvals (
+    id               BIGSERIAL PRIMARY KEY,
+    project_id       TEXT NOT NULL,
+    ticket_id        TEXT NOT NULL,
+    approval_type    TEXT NOT NULL,
+    approval_status  TEXT NOT NULL,
+    approved_by      TEXT,
+    approval_comment TEXT,
+    approved_at      TEXT,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_ticket_approvals_lookup
+    ON ticket_approvals (project_id, ticket_id, approval_type, id);
 """
 
 
@@ -581,3 +597,61 @@ def get_ticket_readiness(handle: PgHandle, ticket_id: str) -> dict | None:
     if row is None:
         return None
     return _decode_readiness_lists(dict(row))
+
+
+# ── ticket_approvals ──────────────────────────────────────────────────────────
+
+_APPROVAL_FINAL_STATUSES = frozenset({"approved", "rejected"})
+
+
+def insert_ticket_approval(
+    handle: PgHandle,
+    ticket_id: str,
+    approval_type: str,
+    approval_status: str,
+    approved_by: str | None = None,
+    approval_comment: str | None = None,
+) -> int:
+    now = _now_iso()
+    approved_at = now if approval_status in _APPROVAL_FINAL_STATUSES else None
+    with _connect(handle) as conn:
+        row = conn.execute(
+            """
+            INSERT INTO ticket_approvals
+                (project_id, ticket_id, approval_type, approval_status,
+                 approved_by, approval_comment, approved_at,
+                 created_at, updated_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            RETURNING id
+            """,
+            (
+                handle.project_id, ticket_id, approval_type, approval_status,
+                approved_by, approval_comment, approved_at,
+                now, now,
+            ),
+        ).fetchone()
+    return int(row["id"])
+
+
+def list_ticket_approvals(handle: PgHandle, ticket_id: str) -> list[dict]:
+    with _connect(handle) as conn:
+        rows = conn.execute(
+            "SELECT * FROM ticket_approvals "
+            "WHERE project_id = %s AND ticket_id = %s "
+            "ORDER BY id ASC",
+            (handle.project_id, ticket_id),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_latest_ticket_approval(
+    handle: PgHandle, ticket_id: str, approval_type: str
+) -> dict | None:
+    with _connect(handle) as conn:
+        row = conn.execute(
+            "SELECT * FROM ticket_approvals "
+            "WHERE project_id = %s AND ticket_id = %s AND approval_type = %s "
+            "ORDER BY id DESC LIMIT 1",
+            (handle.project_id, ticket_id, approval_type),
+        ).fetchone()
+    return dict(row) if row else None

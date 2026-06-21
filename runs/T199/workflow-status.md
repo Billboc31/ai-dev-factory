@@ -1,0 +1,60 @@
+# Workflow Status
+
+## Current Status
+
+- PLAN_APPROVED
+- PLAN_FIX_REQUIRED
+- IMPLEMENTATION_APPROVED
+- IMPLEMENTATION_FIX_REQUIRED
+- MEMORY_APPROVED
+- MEMORY_FIX_REQUIRED
+
+## Risk Level
+
+- AUTO_SAFE
+- CHAT_REVIEW_REQUIRED
+- HIGH_RISK
+
+## Notes
+
+## 2026-06-21T19:09:29Z
+
+- prev: INIT
+- step: planner
+- next: PLAN_REVIEW_NEEDED
+
+## 2026-06-21T19:13:55Z
+
+- prev: PLAN_REVIEW_NEEDED
+- step: request-plan-fix
+- next: PLAN_FIX_REQUIRED
+
+## 2026-06-21T19:15:54Z
+
+- prev: PLAN_FIX_REQUIRED
+- step: planner
+- next: PLAN_REVIEW_NEEDED
+
+## 2026-06-21T19:21:17Z
+
+- prev: PLAN_REVIEW_NEEDED
+- step: approve-plan
+- next: PLAN_APPROVED
+
+## 2026-06-21T19:41:26Z
+
+- prev: PLAN_APPROVED
+- step: coder
+- next: IMPLEMENTATION_REVIEW_NEEDED
+
+## 2026-06-21T19:49:05Z
+
+- prev: IMPLEMENTATION_REVIEW_NEEDED
+- step: review
+- next: IMPLEMENTATION_APPROVED
+
+## 2026-06-21T20:09:24Z
+
+- prev: IMPLEMENTATION_APPROVED
+- step: tester
+- next: TEST_COMPLETE

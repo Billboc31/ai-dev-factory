@@ -1,6 +1,7 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import * as daemonApi from '../api/daemon'
+import * as ticketsApi from '../api/tickets'
 import ErrorBanner from '../components/ErrorBanner'
 import usePolling from '../hooks/usePolling'
 
@@ -24,7 +25,30 @@ const HEADER_COLORS = {
   done: 'text-gray-500',
 }
 
-function BoardCard({ item }) {
+const READINESS_BADGE = {
+  ready_candidate: { label: 'READY CANDIDATE', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  ready_to_take:   { label: 'READY TO TAKE',   color: 'bg-green-100 text-green-900 border-green-300' },
+  blocked:         { label: 'BLOCKED',          color: 'bg-red-100 text-red-800 border-red-200' },
+}
+
+const FILTER_OPTIONS = [
+  { value: 'all',             label: 'All readiness states' },
+  { value: 'ready_candidate', label: 'Ready candidate' },
+  { value: 'ready_to_take',   label: 'Ready to take' },
+  { value: 'blocked',         label: 'Blocked' },
+]
+
+function ReadinessBadge({ status }) {
+  const entry = READINESS_BADGE[status]
+  if (!entry) return null
+  return (
+    <span className={`inline-block mt-1 px-1.5 py-0.5 rounded text-[10px] font-semibold border ${entry.color}`}>
+      {entry.label}
+    </span>
+  )
+}
+
+function BoardCard({ item, readinessStatus }) {
   const label = item.ticket_id
     ? item.ticket_id
     : item.issue_number
@@ -54,11 +78,12 @@ function BoardCard({ item }) {
           {worktreeName && <span className="text-gray-400"> · {worktreeName}</span>}
         </p>
       )}
+      {readinessStatus && <ReadinessBadge status={readinessStatus} />}
     </div>
   )
 }
 
-function BoardColumn({ column }) {
+function BoardColumn({ column, readinessByTicket }) {
   const colorClass = COLUMN_COLORS[column.id] || 'bg-gray-50 border-gray-200'
   const headerClass = HEADER_COLORS[column.id] || 'text-gray-600'
 
@@ -74,7 +99,13 @@ function BoardColumn({ column }) {
         {column.items.length === 0 ? (
           <p className="text-xs text-gray-400 italic">empty</p>
         ) : (
-          column.items.map((item, i) => <BoardCard key={item.ticket_id || item.issue_number || i} item={item} />)
+          column.items.map((item, i) => (
+            <BoardCard
+              key={item.ticket_id || item.issue_number || i}
+              item={item}
+              readinessStatus={item.ticket_id ? readinessByTicket[item.ticket_id] : null}
+            />
+          ))
         )}
       </div>
     </div>
@@ -85,6 +116,8 @@ export default function BoardPage({ projectId }) {
   const [columns, setColumns] = useState(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [readinessByTicket, setReadinessByTicket] = useState({})
+  const [filter, setFilter] = useState('all')
 
   const fetchBoard = useCallback(() => {
     daemonApi.getBoardData(projectId)
@@ -95,16 +128,72 @@ export default function BoardPage({ projectId }) {
 
   usePolling(fetchBoard, 10000, projectId)
 
+  // Fetch readiness per ticket once we have columns. Per-card 404 → no readiness yet.
+  useEffect(() => {
+    if (!columns) return
+    const ticketIds = []
+    for (const col of columns) {
+      for (const item of col.items) {
+        if (item.ticket_id) ticketIds.push(item.ticket_id)
+      }
+    }
+    if (ticketIds.length === 0) return
+
+    let cancelled = false
+    Promise.all(
+      ticketIds.map(id =>
+        ticketsApi.getTicketReadiness(id, projectId)
+          .then(r => [id, r.data?.readiness_status ?? null])
+          .catch(() => [id, null])
+      )
+    ).then(entries => {
+      if (cancelled) return
+      const next = {}
+      for (const [id, status] of entries) {
+        if (status) next[id] = status
+      }
+      setReadinessByTicket(next)
+    })
+    return () => { cancelled = true }
+  }, [columns, projectId])
+
+  const filteredColumns = useMemo(() => {
+    if (!columns || filter === 'all') return columns
+    return columns.map(col => ({
+      ...col,
+      items: col.items.filter(item => {
+        if (!item.ticket_id) return false
+        return readinessByTicket[item.ticket_id] === filter
+      }),
+    }))
+  }, [columns, filter, readinessByTicket])
+
   return (
     <div>
-      <h1 className="text-2xl font-bold mb-4">Daemon Board</h1>
+      <div className="flex items-center justify-between mb-4 flex-wrap gap-2">
+        <h1 className="text-2xl font-bold">Daemon Board</h1>
+        <label className="flex items-center gap-2 text-sm text-gray-700">
+          <span>Readiness filter:</span>
+          <select
+            value={filter}
+            onChange={e => setFilter(e.target.value)}
+            className="px-2 py-1 text-sm border border-gray-300 rounded"
+          >
+            {FILTER_OPTIONS.map(o => (
+              <option key={o.value} value={o.value}>{o.label}</option>
+            ))}
+          </select>
+        </label>
+      </div>
       <ErrorBanner message={error} onClose={() => setError(null)} />
 
       {loading && !columns && <p className="text-gray-500">Loading…</p>}
 
-      {columns && (
+      {filteredColumns && (
         <div className="flex gap-3 overflow-x-auto pb-4">
-          {columns.map(col => <BoardColumn key={col.id} column={col} />)}
+          {filteredColumns.map(col => (
+            <BoardColumn key={col.id} column={col} readinessByTicket={readinessByTicket} />
+          ))}
         </div>
       )}
     </div>

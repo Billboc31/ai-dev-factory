@@ -111,6 +111,21 @@ CREATE TABLE IF NOT EXISTS ticket_readiness (
     created_at               TEXT NOT NULL,
     updated_at               TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS ticket_approvals (
+    id               INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id        TEXT NOT NULL,
+    approval_type    TEXT NOT NULL,
+    approval_status  TEXT NOT NULL,
+    approved_by      TEXT,
+    approval_comment TEXT,
+    approved_at      TEXT,
+    created_at       TEXT NOT NULL,
+    updated_at       TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_ticket_approvals_ticket
+    ON ticket_approvals(ticket_id, approval_type, id);
 """
 
 
@@ -516,6 +531,68 @@ def get_ticket_readiness(db_path: Path, ticket_id: str) -> dict | None:
     return _decode_readiness_lists(dict(row))
 
 
+# ── ticket_approvals ──────────────────────────────────────────────────────────
+
+_APPROVAL_FINAL_STATUSES = frozenset({"approved", "rejected"})
+
+
+def insert_ticket_approval(
+    db_path: Path,
+    ticket_id: str,
+    approval_type: str,
+    approval_status: str,
+    approved_by: str | None = None,
+    approval_comment: str | None = None,
+) -> int:
+    """Append a row to ticket_approvals. Returns the new row id.
+
+    ``approved_at`` is set to now for final decisions (approved/rejected);
+    NULL while ``pending``.
+    """
+    now = _now_iso()
+    approved_at = now if approval_status in _APPROVAL_FINAL_STATUSES else None
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO ticket_approvals
+                (ticket_id, approval_type, approval_status,
+                 approved_by, approval_comment, approved_at,
+                 created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                ticket_id, approval_type, approval_status,
+                approved_by, approval_comment, approved_at,
+                now, now,
+            ),
+        )
+        return int(cur.lastrowid)
+
+
+def list_ticket_approvals(db_path: Path, ticket_id: str) -> list[dict]:
+    """Append-only history for ``ticket_id``, oldest first."""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM ticket_approvals WHERE ticket_id = ? ORDER BY id ASC",
+            (ticket_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_latest_ticket_approval(
+    db_path: Path, ticket_id: str, approval_type: str
+) -> dict | None:
+    """Return the latest approval row for ``(ticket_id, approval_type)``, or None."""
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM ticket_approvals "
+            "WHERE ticket_id = ? AND approval_type = ? "
+            "ORDER BY id DESC LIMIT 1",
+            (ticket_id, approval_type),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 # ── Backend selection ─────────────────────────────────────────────────────────
 # Everything above is the SQLite backend (the default). When
 # RUNTIME_DB_BACKEND=postgres the public API is rebound to the networked
@@ -605,6 +682,9 @@ if _RUNTIME_DB_BACKEND == "postgres":
     get_ticket_intelligence = _pg.get_ticket_intelligence  # type: ignore[assignment]
     upsert_ticket_readiness = _pg.upsert_ticket_readiness  # type: ignore[assignment]
     get_ticket_readiness = _pg.get_ticket_readiness  # type: ignore[assignment]
+    insert_ticket_approval = _pg.insert_ticket_approval  # type: ignore[assignment]
+    list_ticket_approvals = _pg.list_ticket_approvals  # type: ignore[assignment]
+    get_latest_ticket_approval = _pg.get_latest_ticket_approval  # type: ignore[assignment]
 elif _RUNTIME_DB_BACKEND not in ("", "sqlite"):
     raise RuntimeError(
         f"unknown RUNTIME_DB_BACKEND={_RUNTIME_DB_BACKEND!r} "
