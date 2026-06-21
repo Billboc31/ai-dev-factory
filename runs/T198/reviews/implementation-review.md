@@ -1,26 +1,25 @@
+The previous IMPLEMENTATION_FIX_REQUIRED (silent revert of main's `66165e13`) is resolved — the branch reapplied the fix as commit `21432e5a`, and `git diff main HEAD` for the three affected files is now empty. Writing the review.
+
 # Implementation review — T198 Ticket Readiness Evaluator
 
-The Readiness Evaluator code itself is well-built and matches the approved plan: canonical lowercase statuses, structured `is_ticket_merged` helper, `ticket_readiness` table in both SQLite and Postgres, advisory-only behaviour, 202/idempotent POST, scoped React panel, 34/34 targeted tests pass.
+## Verdict
 
-## Blocking issue — silent revert of `main`'s commit `66165e13`
+The blocker from review-attempt-2 (silent revert of main's `66165e13` intelligence-in-Docker fix) has been fixed: the T198 branch reapplied that exact commit as `21432e5a`, and `git diff main HEAD -- services/control_api/routes/intelligence.py services/supervisor/main.py tests/test_ticket_intelligence_api.py` is now empty. The deleted test `test_project_post_analyze_delegates_to_supervisor_in_docker` is back at `tests/test_ticket_intelligence_api.py:266`.
 
-`git merge-base main HEAD` = `0532acd9`, which predates main's recent fix `66165e13` (*"fix(intelligence): run ticket analysis on host when API is in Docker"*). The T198 branch was never rebased on current `main`, so its diff against `main` **deletes** that fix when merged:
+The remaining T198 code is faithful to the approved plan: canonical lowercase enum (`not_started|queued|running|ready_candidate|blocked|failed`), no uppercase forms leaking into DB/API/tests; `ticket_readiness` table in both SQLite (`tools/agent_runner/runtime_db.py:98-113`) and Postgres (`tools/agent_runner/runtime_db_pg.py:132-149`) with the same column set; `MergeCheckResult` dataclass and three-tier resolution (runtime DB → `gh pr view` → `git log --grep`) in `tools/agent_runner/ticket_merge_state.py`; evaluator (`tools/agent_runner/ticket_readiness_evaluator.py`) never raises and persists `readiness_status="failed"` on unexpected errors; advisory 202/idempotent POST in `services/control_api/routes/readiness.py`; React panel with sub-check badges, blocking-reasons block, freshness sha, and re-evaluate button.
 
-- `services/supervisor/main.py:2194-2287` — the host-side `POST /projects/{project_id}/tickets/{ticket_id}/intelligence/analyze` endpoint (−88 lines).
-- `services/control_api/routes/intelligence.py` — `_supervisor_url`, `_needs_host_exec`, `_delegate_analyze_to_supervisor`, the project-id forwarding signature, and the in-route delegation branch (−72 lines).
-- `tests/test_ticket_intelligence_api.py` — `test_project_post_analyze_delegates_to_supervisor_in_docker` (−15 lines).
+Targeted tests: 34/34 readiness + 14/14 intelligence-API (48/48). With Postgres env unset, the broader 74-test focused superset also passes. The 111 failures in the full 1638-test sweep (`test_sandbox_worktree`, `test_ticket_timeline`, `test_traefik_separation`, `test_runtime_db` when `RUNTIME_DB_BACKEND=postgres` is set, etc.) are pre-existing and unrelated to T198 files; the same failures reproduce on `main`.
 
-None of these appear in the plan, the fix instructions, or `implementation-output.md` — the revert is unintentional. Impact: in the standard `docker-compose.yml` deployment the control_api container has no `claude` CLI, so `POST /tickets/{id}/intelligence/analyze` will fail again.
+## Acceptance criteria check
 
-**Required fix:** rebase the branch onto current `main` so the three files above retain the post-`66165e13` content. T198's own code does not need to change.
+All eleven criteria from the plan are met. Spot checks: `tests/test_ticket_readiness_evaluator.py:151-180` validates `ready_candidate=1` + non-null `evaluated_at` and `main_sha_when_evaluated` on the happy path; `tests/test_ticket_merge_state.py:92-106` validates `source="runtime_db"` precedence; `test_ticket_readiness_api.py:182-197` validates idempotent POST while running. No call to `git log --grep` from the evaluator (confirmed by grep).
 
-## Minor observations
-- `_check_human_approval` accepts the runtime `PLAN_APPROVED` state as a proxy for human approval; the plan only described a marker file (`runs/<id>/plan-approved.md`). The daemon's own agent-driven plan review can set this state without a human, so the fallback can produce false positives. Not blocking for advisory mode.
-- `_check_dependencies` swallows `is_ticket_merged` exceptions into `Dependency T<id> merge state unknown` with no `warnings` entry — consider preserving the exception in `warnings`.
-- Project-scoped readiness routes ignore `project_id` (mirrors `intelligence.py`); fine today, worth a TODO.
-- `runs/T198/prompts/planner-attempt-1.md … attempt-7.md` and `coder-attempt-1.md` (~5,000 lines of generated prompts) are committed; prune if convention is final-only.
-- Checkpoint commit `6ec637a1` carrying T198 code is labelled `T001:` — looks like an auto-commit hook mislabel, separate follow-up.
+## Minor observations (non-blocking, carry over)
 
-The review file is at `runs/T198/reviews/review-attempt-2.md`.
+- `tools/agent_runner/ticket_readiness_evaluator.py:106-116` — `_state_implies_plan_approved` accepts the daemon's `PLAN_APPROVED` runtime state as a proxy for human approval. The plan only described the marker file `runs/<ticket>/plan-approved.md`. Because the daemon's planner/reviewer agents can drive the ticket to `PLAN_APPROVED` without a human, this fallback can produce a false-positive `approval_check_status="passed"`. Advisory-only, so not a merge blocker — but worth a follow-up issue when readiness becomes a real gate.
+- `ticket_readiness_evaluator.py:86-90` — exceptions from `is_ticket_merged` collapse to `Dependency T<id> merge state unknown` with no entry in `warnings`. Consider preserving the exception there for debuggability.
+- `services/control_api/routes/readiness.py:142-158` — project-scoped routes accept `project_id` but ignore it (same pattern as `intelligence.py`); fine today, worth a TODO.
+- `runs/T198/prompts/planner-attempt-{1..7}.md` and `coder-attempt-{1..2}.md` (~5,000 lines of generated prompts) are committed. If the convention is final-only, prune in a future cleanup.
+- Checkpoint commit `6ec637a1` carries T198 code under a `T001:` label — auto-commit-hook mislabel, separate follow-up.
 
-IMPLEMENTATION_FIX_REQUIRED
+IMPLEMENTATION_APPROVED
