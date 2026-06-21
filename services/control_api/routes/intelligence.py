@@ -4,15 +4,25 @@ from __future__ import annotations
 
 import json
 import logging
+import os
+import shlex
+import shutil
 import sys
 import threading
 from pathlib import Path
 
+import httpx
 from fastapi import APIRouter, HTTPException, Request
 
 from ..models.schemas import TicketIntelligence, TicketIntelligenceQueued
 from ..services.artifact_reader import get_ticket
 from ..services.runtime_resolver import resolve_runs_dir, resolve_ticket_run_dir, resolve_worktrees_dir
+
+try:
+    from ..services.container_paths import _in_docker as _api_in_docker
+except ImportError:
+    def _api_in_docker() -> bool:
+        return os.environ.get("AI_DEV_FACTORY_API_IN_DOCKER", "").strip().lower() in ("1", "true", "yes")
 
 _TOOLS_DIR = Path(__file__).resolve().parents[3] / "tools" / "agent_runner"
 if str(_TOOLS_DIR) not in sys.path:
@@ -39,6 +49,43 @@ def _worktrees_dir(request: Request) -> Path | None:
 
 def _exec_cmd(request: Request) -> str:
     return getattr(request.app.state, "daemon_exec_cmd", "claude --dangerously-skip-permissions")
+
+
+def _supervisor_url() -> str:
+    return os.environ.get("AI_DEV_FACTORY_SUPERVISOR_URL", "http://host.docker.internal:8090").rstrip("/")
+
+
+def _needs_host_exec(request: Request) -> bool:
+    """True when claude must run on the host (Docker API or binary missing in PATH)."""
+    if _api_in_docker():
+        return True
+    parts = shlex.split(_exec_cmd(request))
+    if not parts:
+        return False
+    return shutil.which(parts[0]) is None
+
+
+def _delegate_analyze_to_supervisor(project_id: str, ticket_id: str, exec_cmd: str) -> None:
+    """Run ticket intelligence on the host supervisor where claude is installed."""
+    url = f"{_supervisor_url()}/projects/{project_id}/tickets/{ticket_id}/intelligence/analyze"
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.post(url, json={"exec_cmd": exec_cmd})
+    except httpx.ConnectError:
+        raise HTTPException(
+            status_code=503,
+            detail="supervisor unreachable — ticket intelligence must run on the host (claude is not in the API container)",
+        ) from None
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=503, detail="supervisor timed out starting ticket intelligence analysis") from None
+
+    if resp.status_code >= 400:
+        try:
+            payload = resp.json()
+            detail = payload.get("detail") or payload.get("error") or resp.text[:300]
+        except Exception:
+            detail = resp.text[:300]
+        raise HTTPException(status_code=503, detail=f"supervisor analyze failed: {detail}")
 
 
 def _parse_row(row: dict) -> TicketIntelligence:
@@ -140,7 +187,11 @@ def get_intelligence(ticket_id: str, request: Request) -> TicketIntelligence:
     response_model=TicketIntelligenceQueued,
     status_code=202,
 )
-def analyze_intelligence(ticket_id: str, request: Request) -> TicketIntelligenceQueued:
+def analyze_intelligence(
+    ticket_id: str,
+    request: Request,
+    project_id: str | None = None,
+) -> TicketIntelligenceQueued:
     logger.info("api: POST /tickets/%s/intelligence/analyze", ticket_id)
     project_root = _root(request)
     wt_dir = _worktrees_dir(request)
@@ -158,6 +209,23 @@ def analyze_intelligence(ticket_id: str, request: Request) -> TicketIntelligence
         return TicketIntelligenceQueued(ticket_id=ticket_id, analysis_status=existing["analysis_status"])
 
     exec_cmd = _exec_cmd(request)
+
+    if _needs_host_exec(request):
+        if not project_id:
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "ticket intelligence must run on the host where claude is installed; "
+                    "use the project-scoped analyze endpoint"
+                ),
+            )
+        logger.info(
+            "api: delegating ticket intelligence %s/%s to supervisor (claude not available in API process)",
+            project_id,
+            ticket_id,
+        )
+        _delegate_analyze_to_supervisor(project_id, ticket_id, exec_cmd)
+        return TicketIntelligenceQueued(ticket_id=ticket_id, analysis_status="queued")
 
     ticket_content = _read_ticket_content(project_root, ticket_id, wt_dir)
 
@@ -186,4 +254,4 @@ def get_intelligence_project(project_id: str, ticket_id: str, request: Request) 
     status_code=202,
 )
 def analyze_intelligence_project(project_id: str, ticket_id: str, request: Request) -> TicketIntelligenceQueued:
-    return analyze_intelligence(ticket_id, request)
+    return analyze_intelligence(ticket_id, request, project_id=project_id)

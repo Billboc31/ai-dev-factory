@@ -2194,6 +2194,94 @@ def project_daemon_stop(project_id: str):
         return JSONResponse(status_code=500, content={"ok": False, "error": str(exc)})
 
 
+# ── ticket intelligence (host-side claude) ───────────────────────────────────
+#
+# The control API runs in Docker without the claude CLI. POST analyze is proxied
+# here so hybrid analysis uses the same host credentials as the daemon.
+
+
+class TicketIntelligenceAnalyzeRequest(BaseModel):
+    exec_cmd: str = "claude --dangerously-skip-permissions"
+
+
+def _default_exec_cmd() -> str:
+    return os.environ.get("DAEMON_EXEC_CMD", "claude --dangerously-skip-permissions")
+
+
+@app.post("/projects/{project_id}/tickets/{ticket_id}/intelligence/analyze")
+def project_ticket_intelligence_analyze(
+    project_id: str,
+    ticket_id: str,
+    body: TicketIntelligenceAnalyzeRequest | None = None,
+):
+    from fastapi.responses import JSONResponse
+
+    if body is None:
+        body = TicketIntelligenceAnalyzeRequest(exec_cmd=_default_exec_cmd())
+    elif body.exec_cmd == "claude --dangerously-skip-permissions":
+        body.exec_cmd = _default_exec_cmd()
+
+    project_root_str = _lookup_project_root_from_control_api(project_id)
+    if project_root_str is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"project not registered in workspace: {project_id!r}"},
+        )
+
+    project_root = Path(project_root_str)
+    project_runtime_root = _project_runtime_root(project_id)
+    worktrees_dir = _project_worktrees_dir(project_id)
+
+    tools_dir = _project_root_dir / "tools" / "agent_runner"
+    if str(tools_dir) not in sys.path:
+        sys.path.insert(0, str(tools_dir))
+    import runtime_db  # noqa: E402
+    import ticket_intelligence_analyzer as analyzer  # noqa: E402
+
+    from services.control_api.services.runtime_resolver import (  # noqa: E402
+        resolve_runs_dir,
+        resolve_ticket_run_dir,
+    )
+
+    db = runtime_db.get_db_path()
+    if db is None:
+        return JSONResponse(status_code=503, content={"error": "database not available"})
+
+    existing = runtime_db.get_ticket_intelligence(db, ticket_id)
+    if existing and existing.get("analysis_status") in {"queued", "running"}:
+        return {"ticket_id": ticket_id, "analysis_status": existing["analysis_status"]}
+
+    try:
+        runs_dir = resolve_runs_dir(
+            project_root,
+            project_id=project_id,
+            project_runtime_root=project_runtime_root,
+        )
+        run_dir = resolve_ticket_run_dir(ticket_id, runs_dir, worktrees_dir)
+        ticket_path = run_dir / "ticket.md"
+        ticket_content = ticket_path.read_text(encoding="utf-8") if ticket_path.exists() else ""
+    except Exception as exc:
+        logger.warning("supervisor: could not read ticket.md for %s: %s", ticket_id, exc)
+        ticket_content = ""
+
+    runtime_db.upsert_ticket_intelligence(db, ticket_id, analysis_status="queued")
+
+    def _bg() -> None:
+        try:
+            analyzer.run_analysis(db, ticket_id, ticket_content, body.exec_cmd, project_root)
+        except Exception:
+            logger.exception("supervisor: intelligence analysis failed for %s", ticket_id)
+
+    threading.Thread(target=_bg, daemon=True).start()
+    logger.info(
+        "supervisor: ticket intelligence analyze queued project_id=%s ticket_id=%s",
+        project_id,
+        ticket_id,
+    )
+    return {"ticket_id": ticket_id, "analysis_status": "queued"}
+
+
+
 # ── auto-fix proposal endpoints ───────────────────────────────────────────────
 #
 # Architecture:
