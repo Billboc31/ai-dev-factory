@@ -1,7 +1,7 @@
 {
   "ticket_id": "T201",
-  "state": "PLAN_FIX_REQUIRED",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T201-t201-add-execution-rules-engine-and-policy-based-t",
   "issue_number": 258,
-  "updated_at": "2026-06-21T20:32:48Z"
+  "updated_at": "2026-06-21T20:38:42Z"
 }
