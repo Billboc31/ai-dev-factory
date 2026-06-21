@@ -1,8 +1,11 @@
-Plan rewritten with the four mandatory headings and all the implementation detail the fix asked for.
+Replaced the summary placeholder in `runs/T201/plan.md` with a complete implementation plan organized under the four mandatory headings (`## Objective`, `## Included`, `## Excluded`, `## Acceptance criteria`).
 
-Key points the plan now addresses:
-
-- `require_human_approval` uses canonical T199 `ready_to_take` via `compute_execution_eligibility`, wrapped behind `get_execution_approval_state` in the engine — tests assert against `ready_to_take`, not against `ticket_approvals` rows.
-- Default policy explicitly enumerated: four enabled (`require_ticket_intelligence`, `require_readiness_candidate`, `require_human_approval`, `block_when_human_review_required`) and two disabled threshold rules (`max_estimated_cost_usd`, `max_difficulty`).
-- DB schema, DAOs, engine, API (with 202 async semantics), frontend page + panel, and tests are each spelled out concretely.
-- Scheduler/daemon/worker untouched is restated both in Excluded and in an acceptance criterion that calls out specific files that must not be modified.
+Key points covered:
+- DB schema additions in both `runtime_db.py` and `runtime_db_pg.py` for `project_execution_rules` and `ticket_rule_evaluation` with unique/index constraints.
+- New `execution_rules_engine.py` with explicit public surface, load order, and pure rule functions.
+- `require_human_approval` resolved exclusively through `get_execution_approval_state(...) → compute_execution_eligibility(...) == "ready_to_take"`; an acceptance criterion forbids direct `ticket_approvals` access (verifiable by grep).
+- Explicit default policy: four enabled rules and two disabled threshold rules.
+- API routes including `POST /tickets/{id}/evaluate-rules` returning **202** via `BackgroundTasks`.
+- Frontend page + panel under `apps/dashboard/src/`.
+- Three new test files explicitly enumerated.
+- Excluded section names the scheduler/daemon/worker files that must not change, and an acceptance criterion makes that verifiable.
