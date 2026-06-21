@@ -92,3 +92,14 @@
 [2026-06-21T17:19:51Z] compose: task (canonical prompt)
 [2026-06-21T17:19:51Z] compose: extra-context=runs/T198/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
 [2026-06-21T17:19:51Z] snapshot: runtime-prompt=runs/T198/prompts/review-attempt-2.md
+[2026-06-21T17:32:27Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-21T17:32:27Z] auto-run: running step=tester
+[2026-06-21T17:32:27Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-21T17:32:27Z] prompt: generic fallback — injecting runs/T198/ticket.md
+[2026-06-21T17:32:27Z] compose: global-context=docs/ai/global-context.md
+[2026-06-21T17:32:27Z] compose: role=ai/roles/tester.md
+[2026-06-21T17:32:27Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-21T17:32:27Z] compose: skill=ai/skills/testing.md
+[2026-06-21T17:32:27Z] compose: skill=ai/skills/debugging.md
+[2026-06-21T17:32:27Z] compose: task (canonical prompt)
+[2026-06-21T17:32:27Z] snapshot: runtime-prompt=runs/T198/prompts/tester-attempt-1.md
