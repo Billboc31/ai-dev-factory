@@ -1,11 +1,10 @@
-Replaced the summary placeholder in `runs/T201/plan.md` with a complete implementation plan organized under the four mandatory headings (`## Objective`, `## Included`, `## Excluded`, `## Acceptance criteria`).
+The plan in `runs/T201/plan.md` is now a standalone implementation document — not a narrative about a plan.
 
-Key points covered:
-- DB schema additions in both `runtime_db.py` and `runtime_db_pg.py` for `project_execution_rules` and `ticket_rule_evaluation` with unique/index constraints.
-- New `execution_rules_engine.py` with explicit public surface, load order, and pure rule functions.
-- `require_human_approval` resolved exclusively through `get_execution_approval_state(...) → compute_execution_eligibility(...) == "ready_to_take"`; an acceptance criterion forbids direct `ticket_approvals` access (verifiable by grep).
-- Explicit default policy: four enabled rules and two disabled threshold rules.
-- API routes including `POST /tickets/{id}/evaluate-rules` returning **202** via `BackgroundTasks`.
-- Frontend page + panel under `apps/dashboard/src/`.
-- Three new test files explicitly enumerated.
-- Excluded section names the scheduler/daemon/worker files that must not change, and an acceptance criterion makes that verifiable.
+It uses the four mandatory level-2 headings (`## Objective`, `## Included`, `## Excluded`, `## Acceptance criteria`) and addresses both fix instructions:
+
+- **Real plan content, not a report.** Every section gives concrete instructions: DDL for both DB backends, the engine's public surface (function-by-function), API route shapes with status codes, frontend file paths and prop shapes, the three test files and what each verifies.
+- **`require_human_approval` aligned with T199.** §3 of `## Included` and acceptance criterion #3 both pin the rule to `compute_execution_eligibility(...) == "ready_to_take"` via a `get_execution_approval_state` wrapper, and a grep check forbids direct `ticket_approvals` access.
+- **Explicit default policy.** `DEFAULT_RULES` is given as a literal: 4 enabled (`require_ticket_intelligence`, `require_readiness_candidate`, `require_human_approval`, `block_when_human_review_required`) + 2 disabled threshold rules (`max_estimated_cost_usd`, `max_difficulty`). Acceptance criterion #4 makes this verifiable.
+- **Scheduler isolation enforced.** `## Excluded` names the specific files that must not change, and criterion #10 grep-checks it.
+
+Plan is grounded in the actual repo: routes mirror `intelligence.py`/`readiness.py`/`approvals.py`, panel mirrors sibling panels, tests mirror the existing `test_ticket_readiness_*` triplet.
