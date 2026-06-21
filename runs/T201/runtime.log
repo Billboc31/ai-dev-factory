@@ -195,3 +195,20 @@
 [2026-06-21T21:06:17Z] push: tolerating runtime dirty files (not blocking): ['runs/T201/runtime.log']
 [2026-06-21T21:06:17Z] push: pushing branch=ticket/T201-t201-add-execution-rules-engine-and-policy-based-t
 [2026-06-21T21:06:19Z] push: done branch=ticket/T201-t201-add-execution-rules-engine-and-policy-based-t
+[2026-06-21T21:08:01Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-06-21T21:08:01Z] auto-run: running step=planner
+[2026-06-21T21:08:01Z] auto-run: fix context: previous_output=runs/T201/plan.md
+[2026-06-21T21:08:01Z] auto-run: fix context: review=runs/T201/reviews/plan-review-ready-to-take-rule-alignment.md
+[2026-06-21T21:08:01Z] auto-run: fix context: fix_instructions=runs/T201/fixes/plan-fix-discard-and-rewrite-complete-plan.md
+[2026-06-21T21:08:01Z] auto-run: fix context: context_file=runs/T201/fixes/context-20260621T210801Z.md
+[2026-06-21T21:08:01Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-21T21:08:01Z] prompt: generic fallback — injecting runs/T201/ticket.md
+[2026-06-21T21:08:01Z] compose: global-context=docs/ai/global-context.md
+[2026-06-21T21:08:01Z] compose: role=ai/roles/planner.md
+[2026-06-21T21:08:01Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-21T21:08:01Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-21T21:08:01Z] compose: skill=ai/skills/documentation.md
+[2026-06-21T21:08:01Z] compose: task (canonical prompt)
+[2026-06-21T21:08:01Z] compose: extra-context=runs/T201/fixes/context-20260621T210801Z.md
+[2026-06-21T21:08:01Z] snapshot: runtime-prompt=runs/T201/prompts/planner-attempt-9.md
+[2026-06-21T21:10:07Z] auto-run: step=planner done rc=0
