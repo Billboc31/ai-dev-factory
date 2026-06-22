@@ -598,3 +598,35 @@ class TicketDiagnostics(BaseModel):
     generated_at: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
+
+
+class OperationDescriptor(BaseModel):
+    operation_key: str
+    label: str
+    safety_level: Literal["low", "medium", "high", "destructive"]
+    group: Literal["advisory", "approval", "recovery", "dangerous"]
+    enabled: bool
+    disabled_reason: str | None = None
+    requires_reason: bool = False
+    requires_typed_ticket_id: bool = False
+    requires_double_confirmation: bool = False
+
+
+class OperationListResponse(BaseModel):
+    ticket_id: str
+    operations: list[OperationDescriptor] = []
+
+
+class OperationRequest(BaseModel):
+    reason: str | None = None
+    typed_ticket_id: str | None = None
+    confirm: bool = False
+    force: bool = False
+
+
+class OperationResult(BaseModel):
+    ticket_id: str
+    operation_key: str
+    status: Literal["completed", "rejected", "error"]
+    message: str
+    details: dict = {}
