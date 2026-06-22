@@ -1,7 +1,7 @@
 {
   "ticket_id": "T204",
-  "state": "PLAN_FIX_REQUIRED",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T204-t204-add-ticket-operations-panel-for-guarded-manua",
   "issue_number": 264,
-  "updated_at": "2026-06-22T16:40:49Z"
+  "updated_at": "2026-06-22T16:42:52Z"
 }
