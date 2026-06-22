@@ -148,6 +148,23 @@ CREATE TABLE IF NOT EXISTS ticket_rule_evaluation (
     created_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS ticket_diagnostics (
+    ticket_id                TEXT PRIMARY KEY,
+    project_id               TEXT,
+    diagnostic_status        TEXT NOT NULL DEFAULT 'completed',
+    is_stuck                 INTEGER NOT NULL DEFAULT 0,
+    severity                 TEXT NOT NULL DEFAULT 'info',
+    summary                  TEXT,
+    current_state            TEXT,
+    last_known_step          TEXT,
+    last_error               TEXT,
+    checks_json              TEXT NOT NULL DEFAULT '[]',
+    recommended_actions_json TEXT NOT NULL DEFAULT '[]',
+    generated_at             TEXT NOT NULL,
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL
+);
 """
 
 
@@ -774,6 +791,76 @@ def upsert_ticket_rule_evaluation(
         )
 
 
+# ── ticket_diagnostics ────────────────────────────────────────────────────────
+
+_DIAGNOSTICS_LIST_FIELDS = ("checks_json", "recommended_actions_json")
+
+
+def _encode_diagnostics_lists(fields: dict) -> dict:
+    """Serialise any list-typed JSON-list-field arguments to JSON strings."""
+    out = dict(fields)
+    for key in _DIAGNOSTICS_LIST_FIELDS:
+        val = out.get(key)
+        if isinstance(val, list):
+            out[key] = json.dumps(val)
+    return out
+
+
+def _decode_diagnostics_lists(row: dict) -> dict:
+    out = dict(row)
+    for key in _DIAGNOSTICS_LIST_FIELDS:
+        val = out.get(key)
+        if val is None or val == "":
+            out[key] = []
+            continue
+        try:
+            parsed = json.loads(val)
+            out[key] = parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            out[key] = []
+    return out
+
+
+def upsert_ticket_diagnostics(db_path: Path, ticket_id: str, **fields) -> None:
+    """Insert or update a ticket_diagnostics row. Sets created_at only on first insert."""
+    fields = _encode_diagnostics_lists(fields)
+    now = _now_iso()
+    fields.setdefault("generated_at", now)
+    with _connect(db_path) as conn:
+        existing = conn.execute(
+            "SELECT ticket_id FROM ticket_diagnostics WHERE ticket_id = ?", (ticket_id,)
+        ).fetchone()
+        if existing:
+            if fields:
+                set_clause = ", ".join(f"{k}=?" for k in fields)
+                conn.execute(
+                    f"UPDATE ticket_diagnostics SET {set_clause}, updated_at=? WHERE ticket_id=?",
+                    list(fields.values()) + [now, ticket_id],
+                )
+            else:
+                conn.execute(
+                    "UPDATE ticket_diagnostics SET updated_at=? WHERE ticket_id=?",
+                    (now, ticket_id),
+                )
+        else:
+            cols = ["ticket_id", "created_at", "updated_at"] + list(fields.keys())
+            placeholders = ", ".join("?" * len(cols))
+            conn.execute(
+                f"INSERT INTO ticket_diagnostics ({', '.join(cols)}) VALUES ({placeholders})",
+                [ticket_id, now, now] + list(fields.values()),
+            )
+
+
+def get_ticket_diagnostics(db_path: Path, ticket_id: str) -> dict | None:
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM ticket_diagnostics WHERE ticket_id = ?", (ticket_id,)
+        ).fetchone()
+    if row is None:
+        return None
+    return _decode_diagnostics_lists(dict(row))
+
+
 # ── Backend selection ─────────────────────────────────────────────────────────
 # Everything above is the SQLite backend (the default). When
 # RUNTIME_DB_BACKEND=postgres the public API is rebound to the networked
@@ -871,6 +958,8 @@ if _RUNTIME_DB_BACKEND == "postgres":
     replace_project_rules = _pg.replace_project_rules  # type: ignore[assignment]
     get_ticket_rule_evaluation = _pg.get_ticket_rule_evaluation  # type: ignore[assignment]
     upsert_ticket_rule_evaluation = _pg.upsert_ticket_rule_evaluation  # type: ignore[assignment]
+    upsert_ticket_diagnostics = _pg.upsert_ticket_diagnostics  # type: ignore[assignment]
+    get_ticket_diagnostics = _pg.get_ticket_diagnostics  # type: ignore[assignment]
 elif _RUNTIME_DB_BACKEND not in ("", "sqlite"):
     raise RuntimeError(
         f"unknown RUNTIME_DB_BACKEND={_RUNTIME_DB_BACKEND!r} "

@@ -185,6 +185,24 @@ CREATE TABLE IF NOT EXISTS ticket_rule_evaluation (
     created_at         TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
     updated_at         TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
 );
+
+CREATE TABLE IF NOT EXISTS ticket_diagnostics (
+    project_id               TEXT NOT NULL,
+    ticket_id                TEXT NOT NULL,
+    diagnostic_status        TEXT NOT NULL DEFAULT 'completed',
+    is_stuck                 INTEGER NOT NULL DEFAULT 0,
+    severity                 TEXT NOT NULL DEFAULT 'info',
+    summary                  TEXT,
+    current_state            TEXT,
+    last_known_step          TEXT,
+    last_error               TEXT,
+    checks_json              JSONB NOT NULL DEFAULT '[]'::jsonb,
+    recommended_actions_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+    generated_at             TEXT NOT NULL,
+    created_at               TEXT NOT NULL,
+    updated_at               TEXT NOT NULL,
+    PRIMARY KEY (project_id, ticket_id)
+);
 """
 
 
@@ -846,3 +864,88 @@ def upsert_ticket_rule_evaluation(
                 now,
             ),
         )
+
+
+# ── ticket_diagnostics ────────────────────────────────────────────────────────
+
+_DIAGNOSTICS_LIST_FIELDS = ("checks_json", "recommended_actions_json")
+_DIAGNOSTICS_JSONB_FIELDS = frozenset(_DIAGNOSTICS_LIST_FIELDS)
+
+
+def _encode_diagnostics_lists(fields: dict) -> dict:
+    out = dict(fields)
+    for key in _DIAGNOSTICS_LIST_FIELDS:
+        val = out.get(key)
+        if isinstance(val, list):
+            out[key] = json.dumps(val)
+    return out
+
+
+def _decode_diagnostics_lists(row: dict) -> dict:
+    out = dict(row)
+    for key in _DIAGNOSTICS_LIST_FIELDS:
+        val = out.get(key)
+        if val is None or val == "":
+            out[key] = []
+            continue
+        if isinstance(val, list):
+            continue
+        decoded = _maybe_json_decode(val)
+        out[key] = decoded if isinstance(decoded, list) else []
+    return out
+
+
+def upsert_ticket_diagnostics(handle: PgHandle, ticket_id: str, **fields) -> None:
+    """Insert or update a ticket_diagnostics row. Sets created_at only on first insert."""
+    fields = _encode_diagnostics_lists(fields)
+    now = _now_iso()
+    fields.setdefault("generated_at", now)
+    with _connect(handle) as conn:
+        existing = conn.execute(
+            "SELECT ticket_id FROM ticket_diagnostics WHERE project_id = %s AND ticket_id = %s",
+            (handle.project_id, ticket_id),
+        ).fetchone()
+        if existing:
+            if fields:
+                set_clauses = []
+                for k in fields:
+                    if k in _DIAGNOSTICS_JSONB_FIELDS:
+                        set_clauses.append(f"{k}=%s::jsonb")
+                    else:
+                        set_clauses.append(f"{k}=%s")
+                set_clause = ", ".join(set_clauses)
+                conn.execute(
+                    f"UPDATE ticket_diagnostics SET {set_clause}, updated_at=%s "
+                    f"WHERE project_id=%s AND ticket_id=%s",
+                    list(fields.values()) + [now, handle.project_id, ticket_id],
+                )
+            else:
+                conn.execute(
+                    "UPDATE ticket_diagnostics SET updated_at=%s "
+                    "WHERE project_id=%s AND ticket_id=%s",
+                    (now, handle.project_id, ticket_id),
+                )
+        else:
+            cols = ["project_id", "ticket_id", "created_at", "updated_at"] + list(fields.keys())
+            placeholder_list = []
+            for c in cols:
+                if c in _DIAGNOSTICS_JSONB_FIELDS:
+                    placeholder_list.append("%s::jsonb")
+                else:
+                    placeholder_list.append("%s")
+            placeholders = ", ".join(placeholder_list)
+            conn.execute(
+                f"INSERT INTO ticket_diagnostics ({', '.join(cols)}) VALUES ({placeholders})",
+                [handle.project_id, ticket_id, now, now] + list(fields.values()),
+            )
+
+
+def get_ticket_diagnostics(handle: PgHandle, ticket_id: str) -> dict | None:
+    with _connect(handle) as conn:
+        row = conn.execute(
+            "SELECT * FROM ticket_diagnostics WHERE project_id = %s AND ticket_id = %s",
+            (handle.project_id, ticket_id),
+        ).fetchone()
+    if row is None:
+        return None
+    return _decode_diagnostics_lists(dict(row))

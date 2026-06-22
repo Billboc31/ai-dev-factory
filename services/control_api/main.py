@@ -15,7 +15,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .routes import approvals, auto_fix, daemon, deployer, environments, health, intelligence, issues, project_map, projects, providers, readiness, rules, runtime_dashboard, sandbox, tickets
+from .routes import approvals, auto_fix, daemon, deployer, diagnostics, environments, health, intelligence, issues, project_map, projects, providers, readiness, rules, runtime_dashboard, sandbox, tickets
 from .services.project_registry import ProjectRegistry
 from .services.runtime_resolver import resolve_worktrees_dir
 
@@ -209,6 +209,9 @@ def create_app(
     app.include_router(rules.project_router)
     app.include_router(rules.ticket_router)
     app.include_router(rules.project_ticket_router)
+    # T203: /tickets/{id}/diagnostics + /diagnostics/run — read-only stuck-ticket diagnostics.
+    app.include_router(diagnostics.router)
+    app.include_router(diagnostics.project_router)
 
     return app
 

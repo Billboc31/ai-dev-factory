@@ -567,3 +567,34 @@ class TicketRuleEvaluation(BaseModel):
 class TicketRuleEvaluationQueued(BaseModel):
     status: str
     ticket_id: str
+
+
+class DiagnosticCheck(BaseModel):
+    key: str
+    status: str
+    message: str
+    details: dict = {}
+
+
+class DiagnosticRecommendedAction(BaseModel):
+    action_key: str
+    label: str
+    risk: str
+    reason: str
+
+
+class TicketDiagnostics(BaseModel):
+    ticket_id: str
+    project_id: str | None = None
+    diagnostic_status: str
+    is_stuck: bool
+    severity: str
+    summary: str | None = None
+    current_state: str | None = None
+    last_known_step: str | None = None
+    last_error: str | None = None
+    checks: list[DiagnosticCheck] = []
+    recommended_actions: list[DiagnosticRecommendedAction] = []
+    generated_at: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
