@@ -165,6 +165,21 @@ CREATE TABLE IF NOT EXISTS ticket_diagnostics (
     created_at               TEXT NOT NULL,
     updated_at               TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS ticket_operation_audit (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    ticket_id     TEXT NOT NULL,
+    project_id    TEXT,
+    operation_key TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    reason        TEXT,
+    requested_by  TEXT,
+    details_json  TEXT,
+    created_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_ticket_operation_audit_ticket
+    ON ticket_operation_audit(ticket_id, id);
 """
 
 
@@ -861,6 +876,64 @@ def get_ticket_diagnostics(db_path: Path, ticket_id: str) -> dict | None:
     return _decode_diagnostics_lists(dict(row))
 
 
+# ── ticket_operation_audit ────────────────────────────────────────────────────
+
+def append_ticket_operation_audit(
+    db_path: Path,
+    ticket_id: str,
+    project_id: str | None,
+    operation_key: str,
+    status: str,
+    reason: str | None = None,
+    requested_by: str | None = None,
+    details: dict | None = None,
+) -> int:
+    """Append a row to ticket_operation_audit and return its id."""
+    now = _now_iso()
+    details_json = json.dumps(details) if details else None
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO ticket_operation_audit
+                (ticket_id, project_id, operation_key, status,
+                 reason, requested_by, details_json, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                ticket_id, project_id, operation_key, status,
+                reason, requested_by, details_json, now,
+            ),
+        )
+        return int(cur.lastrowid)
+
+
+def list_ticket_operation_audit(
+    db_path: Path,
+    ticket_id: str,
+    limit: int = 50,
+) -> list[dict]:
+    """Return audit rows for ``ticket_id`` (most recent first)."""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM ticket_operation_audit "
+            "WHERE ticket_id = ? ORDER BY id DESC LIMIT ?",
+            (ticket_id, limit),
+        ).fetchall()
+    out: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        raw = item.get("details_json")
+        if raw:
+            try:
+                item["details"] = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                item["details"] = None
+        else:
+            item["details"] = None
+        out.append(item)
+    return out
+
+
 # ── Backend selection ─────────────────────────────────────────────────────────
 # Everything above is the SQLite backend (the default). When
 # RUNTIME_DB_BACKEND=postgres the public API is rebound to the networked
@@ -960,6 +1033,8 @@ if _RUNTIME_DB_BACKEND == "postgres":
     upsert_ticket_rule_evaluation = _pg.upsert_ticket_rule_evaluation  # type: ignore[assignment]
     upsert_ticket_diagnostics = _pg.upsert_ticket_diagnostics  # type: ignore[assignment]
     get_ticket_diagnostics = _pg.get_ticket_diagnostics  # type: ignore[assignment]
+    append_ticket_operation_audit = _pg.append_ticket_operation_audit  # type: ignore[assignment]
+    list_ticket_operation_audit = _pg.list_ticket_operation_audit  # type: ignore[assignment]
 elif _RUNTIME_DB_BACKEND not in ("", "sqlite"):
     raise RuntimeError(
         f"unknown RUNTIME_DB_BACKEND={_RUNTIME_DB_BACKEND!r} "

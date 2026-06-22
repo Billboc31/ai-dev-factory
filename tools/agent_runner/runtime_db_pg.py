@@ -203,6 +203,21 @@ CREATE TABLE IF NOT EXISTS ticket_diagnostics (
     updated_at               TEXT NOT NULL,
     PRIMARY KEY (project_id, ticket_id)
 );
+
+CREATE TABLE IF NOT EXISTS ticket_operation_audit (
+    id            BIGSERIAL PRIMARY KEY,
+    project_id    TEXT,
+    ticket_id     TEXT NOT NULL,
+    operation_key TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    reason        TEXT,
+    requested_by  TEXT,
+    details_json  JSONB,
+    created_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS ix_ticket_operation_audit_lookup
+    ON ticket_operation_audit (project_id, ticket_id, id);
 """
 
 
@@ -949,3 +964,64 @@ def get_ticket_diagnostics(handle: PgHandle, ticket_id: str) -> dict | None:
     if row is None:
         return None
     return _decode_diagnostics_lists(dict(row))
+
+
+# ── ticket_operation_audit ────────────────────────────────────────────────────
+
+def append_ticket_operation_audit(
+    handle: PgHandle,
+    ticket_id: str,
+    project_id: str | None,
+    operation_key: str,
+    status: str,
+    reason: str | None = None,
+    requested_by: str | None = None,
+    details: dict | None = None,
+) -> int:
+    now = _now_iso()
+    details_json = json.dumps(details) if details else None
+    pid = project_id if project_id is not None else handle.project_id
+    with _connect(handle) as conn:
+        row = conn.execute(
+            """
+            INSERT INTO ticket_operation_audit
+                (project_id, ticket_id, operation_key, status,
+                 reason, requested_by, details_json, created_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s::jsonb, %s)
+            RETURNING id
+            """,
+            (
+                pid, ticket_id, operation_key, status,
+                reason, requested_by, details_json, now,
+            ),
+        ).fetchone()
+    return int(row["id"])
+
+
+def list_ticket_operation_audit(
+    handle: PgHandle,
+    ticket_id: str,
+    limit: int = 50,
+) -> list[dict]:
+    with _connect(handle) as conn:
+        rows = conn.execute(
+            "SELECT * FROM ticket_operation_audit "
+            "WHERE project_id = %s AND ticket_id = %s "
+            "ORDER BY id DESC LIMIT %s",
+            (handle.project_id, ticket_id, limit),
+        ).fetchall()
+    out: list[dict] = []
+    for row in rows:
+        item = dict(row)
+        raw = item.get("details_json")
+        if isinstance(raw, (dict, list)):
+            item["details"] = raw
+        elif isinstance(raw, str) and raw:
+            try:
+                item["details"] = json.loads(raw)
+            except (json.JSONDecodeError, TypeError):
+                item["details"] = None
+        else:
+            item["details"] = None
+        out.append(item)
+    return out
