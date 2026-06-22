@@ -7,6 +7,7 @@ import ErrorBanner from '../components/ErrorBanner'
 import HumanApprovalPanel from '../components/HumanApprovalPanel'
 import TicketIntelligencePanel from '../components/TicketIntelligencePanel'
 import TicketReadinessPanel from '../components/TicketReadinessPanel'
+import TicketRuleEvaluationPanel from '../components/TicketRuleEvaluationPanel'
 import WorkflowTimeline from '../components/WorkflowTimeline'
 import usePolling from '../hooks/usePolling'
 
@@ -277,6 +278,7 @@ export default function TicketDetailPage() {
       <TicketIntelligencePanel ticketId={id} projectId={projectId} />
       <TicketReadinessPanel ticketId={id} projectId={projectId} />
       <HumanApprovalPanel ticketId={id} projectId={projectId} />
+      <TicketRuleEvaluationPanel ticketId={id} projectId={projectId} />
 
       <div className="flex border-b border-gray-200 mb-4">
         {TABS.map(t => (

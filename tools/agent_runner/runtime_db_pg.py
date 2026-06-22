@@ -163,6 +163,28 @@ CREATE TABLE IF NOT EXISTS ticket_approvals (
 
 CREATE INDEX IF NOT EXISTS ix_ticket_approvals_lookup
     ON ticket_approvals (project_id, ticket_id, approval_type, id);
+
+CREATE TABLE IF NOT EXISTS project_execution_rules (
+    project_id         TEXT NOT NULL,
+    rule_key           TEXT NOT NULL,
+    enabled            BOOLEAN NOT NULL,
+    configuration_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at         TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+    updated_at         TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+    PRIMARY KEY (project_id, rule_key)
+);
+
+CREATE TABLE IF NOT EXISTS ticket_rule_evaluation (
+    ticket_id          TEXT NOT NULL PRIMARY KEY,
+    project_id         TEXT NOT NULL,
+    eligibility_status TEXT NOT NULL,
+    failed_rules_json  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    passed_rules_json  JSONB NOT NULL DEFAULT '[]'::jsonb,
+    warnings_json      JSONB NOT NULL DEFAULT '[]'::jsonb,
+    evaluated_at       TEXT NOT NULL,
+    created_at         TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"'),
+    updated_at         TEXT NOT NULL DEFAULT to_char(now() AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"')
+);
 """
 
 
@@ -655,3 +677,172 @@ def get_latest_ticket_approval(
             (handle.project_id, ticket_id, approval_type),
         ).fetchone()
     return dict(row) if row else None
+
+
+# ── project_execution_rules ───────────────────────────────────────────────────
+
+def _maybe_json_decode(val):
+    if val is None:
+        return None
+    if isinstance(val, (dict, list)):
+        return val
+    if isinstance(val, str):
+        try:
+            return json.loads(val)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return None
+
+
+def list_project_rules(handle: PgHandle, project_id: str) -> list[dict]:
+    with _connect(handle) as conn:
+        rows = conn.execute(
+            "SELECT * FROM project_execution_rules "
+            "WHERE project_id = %s ORDER BY rule_key",
+            (project_id,),
+        ).fetchall()
+    out = []
+    for row in rows:
+        item = dict(row)
+        item["enabled"] = bool(item.get("enabled"))
+        raw = item.get("configuration_json")
+        decoded = _maybe_json_decode(raw)
+        item["configuration"] = decoded if isinstance(decoded, dict) else {}
+        out.append(item)
+    return out
+
+
+def upsert_project_rule(
+    handle: PgHandle,
+    project_id: str,
+    rule_key: str,
+    enabled: bool,
+    configuration: dict | None = None,
+) -> None:
+    now = _now_iso()
+    cfg_json = json.dumps(configuration or {})
+    with _connect(handle) as conn:
+        conn.execute(
+            """
+            INSERT INTO project_execution_rules
+                (project_id, rule_key, enabled, configuration_json, created_at, updated_at)
+            VALUES (%s, %s, %s, %s::jsonb, %s, %s)
+            ON CONFLICT (project_id, rule_key) DO UPDATE SET
+                enabled            = EXCLUDED.enabled,
+                configuration_json = EXCLUDED.configuration_json,
+                updated_at         = EXCLUDED.updated_at
+            """,
+            (project_id, rule_key, bool(enabled), cfg_json, now, now),
+        )
+
+
+def replace_project_rules(
+    handle: PgHandle,
+    project_id: str,
+    rules: list[dict],
+) -> None:
+    now = _now_iso()
+    with _connect(handle) as conn:
+        conn.execute("BEGIN")
+        try:
+            conn.execute(
+                "DELETE FROM project_execution_rules WHERE project_id = %s",
+                (project_id,),
+            )
+            for rule in rules:
+                cfg_json = json.dumps(rule.get("configuration") or {})
+                conn.execute(
+                    """
+                    INSERT INTO project_execution_rules
+                        (project_id, rule_key, enabled, configuration_json,
+                         created_at, updated_at)
+                    VALUES (%s, %s, %s, %s::jsonb, %s, %s)
+                    """,
+                    (
+                        project_id,
+                        rule["rule_key"],
+                        bool(rule.get("enabled")),
+                        cfg_json,
+                        now,
+                        now,
+                    ),
+                )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+
+# ── ticket_rule_evaluation ────────────────────────────────────────────────────
+
+_RULE_EVAL_LIST_FIELDS = ("failed_rules_json", "passed_rules_json", "warnings_json")
+
+
+def _decode_rule_eval_lists(row: dict) -> dict:
+    out = dict(row)
+    for key in _RULE_EVAL_LIST_FIELDS:
+        val = out.get(key)
+        if val is None or val == "":
+            out[key] = []
+            continue
+        if isinstance(val, list):
+            continue
+        decoded = _maybe_json_decode(val)
+        out[key] = decoded if isinstance(decoded, list) else []
+    return out
+
+
+def get_ticket_rule_evaluation(handle: PgHandle, ticket_id: str) -> dict | None:
+    with _connect(handle) as conn:
+        row = conn.execute(
+            "SELECT * FROM ticket_rule_evaluation WHERE ticket_id = %s",
+            (ticket_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return _decode_rule_eval_lists(dict(row))
+
+
+def upsert_ticket_rule_evaluation(
+    handle: PgHandle,
+    ticket_id: str,
+    project_id: str,
+    eligibility_status: str,
+    passed_rules: list,
+    failed_rules: list,
+    warnings: list,
+    evaluated_at: str,
+) -> None:
+    now = _now_iso()
+    passed_json = json.dumps(passed_rules or [])
+    failed_json = json.dumps(failed_rules or [])
+    warnings_json = json.dumps(warnings or [])
+    with _connect(handle) as conn:
+        conn.execute(
+            """
+            INSERT INTO ticket_rule_evaluation
+                (ticket_id, project_id, eligibility_status,
+                 failed_rules_json, passed_rules_json, warnings_json,
+                 evaluated_at, created_at, updated_at)
+            VALUES (%s, %s, %s, %s::jsonb, %s::jsonb, %s::jsonb, %s, %s, %s)
+            ON CONFLICT (ticket_id) DO UPDATE SET
+                project_id         = EXCLUDED.project_id,
+                eligibility_status = EXCLUDED.eligibility_status,
+                failed_rules_json  = EXCLUDED.failed_rules_json,
+                passed_rules_json  = EXCLUDED.passed_rules_json,
+                warnings_json      = EXCLUDED.warnings_json,
+                evaluated_at       = EXCLUDED.evaluated_at,
+                updated_at         = EXCLUDED.updated_at
+            """,
+            (
+                ticket_id,
+                project_id,
+                eligibility_status,
+                failed_json,
+                passed_json,
+                warnings_json,
+                evaluated_at,
+                now,
+                now,
+            ),
+        )
