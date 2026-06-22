@@ -515,3 +515,55 @@ class TicketApprovalHistory(BaseModel):
 class ApprovalDecision(BaseModel):
     approved_by: str
     comment: str | None = None
+
+
+class ProjectRule(BaseModel):
+    rule_key: str
+    enabled: bool
+    configuration: dict = {}
+    description: str | None = None
+    default_enabled: bool | None = None
+    default_configuration: dict | None = None
+
+
+class ProjectRulesResponse(BaseModel):
+    project_id: str
+    rules: list[ProjectRule] = []
+
+
+class ProjectRuleInput(BaseModel):
+    rule_key: str
+    enabled: bool
+    configuration: dict = {}
+
+
+class ProjectRulesUpdate(BaseModel):
+    rules: list[ProjectRuleInput] | None = None
+    action: Literal["reset_defaults"] | None = None
+
+
+class RuleEvaluationEntry(BaseModel):
+    rule_key: str
+    reason: str
+
+
+class RuleWarningEntry(BaseModel):
+    rule_key: str
+    message: str
+
+
+class TicketRuleEvaluation(BaseModel):
+    ticket_id: str
+    project_id: str
+    eligibility_status: str
+    passed_rules: list[RuleEvaluationEntry] = []
+    failed_rules: list[RuleEvaluationEntry] = []
+    warnings: list[RuleWarningEntry] = []
+    evaluated_at: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+
+
+class TicketRuleEvaluationQueued(BaseModel):
+    status: str
+    ticket_id: str

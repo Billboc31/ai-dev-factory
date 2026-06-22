@@ -35,3 +35,7 @@ export const postEvaluateReadiness = (id, projectId) => client.post(`${_pfx(proj
 export const getTicketApprovals = (id, projectId) => client.get(`${_pfx(projectId)}/tickets/${id}/approvals`)
 export const approveExecution = (id, projectId, payload) => client.post(`${_pfx(projectId)}/tickets/${id}/approve-execution`, payload)
 export const rejectExecution = (id, projectId, payload) => client.post(`${_pfx(projectId)}/tickets/${id}/reject-execution`, payload)
+export const getProjectRules = (projectId) => client.get(`/projects/${projectId}/rules`)
+export const putProjectRules = (projectId, payload) => client.put(`/projects/${projectId}/rules`, payload)
+export const getTicketRuleEvaluation = (id, projectId) => client.get(`${_pfx(projectId)}/tickets/${id}/rule-evaluation`)
+export const postEvaluateTicketRules = (id, projectId) => client.post(`${_pfx(projectId)}/tickets/${id}/evaluate-rules`)

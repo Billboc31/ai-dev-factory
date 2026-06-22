@@ -126,6 +126,28 @@ CREATE TABLE IF NOT EXISTS ticket_approvals (
 
 CREATE INDEX IF NOT EXISTS ix_ticket_approvals_ticket
     ON ticket_approvals(ticket_id, approval_type, id);
+
+CREATE TABLE IF NOT EXISTS project_execution_rules (
+    project_id         TEXT NOT NULL,
+    rule_key           TEXT NOT NULL,
+    enabled            INTEGER NOT NULL,
+    configuration_json TEXT NOT NULL DEFAULT '{}',
+    created_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (project_id, rule_key)
+);
+
+CREATE TABLE IF NOT EXISTS ticket_rule_evaluation (
+    ticket_id          TEXT NOT NULL PRIMARY KEY,
+    project_id         TEXT NOT NULL,
+    eligibility_status TEXT NOT NULL,
+    failed_rules_json  TEXT NOT NULL DEFAULT '[]',
+    passed_rules_json  TEXT NOT NULL DEFAULT '[]',
+    warnings_json      TEXT NOT NULL DEFAULT '[]',
+    evaluated_at       TEXT NOT NULL,
+    created_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at         TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 
@@ -593,6 +615,165 @@ def get_latest_ticket_approval(
     return dict(row) if row else None
 
 
+# ── project_execution_rules ───────────────────────────────────────────────────
+
+def list_project_rules(db_path: Path, project_id: str) -> list[dict]:
+    """Return all persisted rule rows for ``project_id`` (configuration decoded)."""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM project_execution_rules WHERE project_id = ? ORDER BY rule_key",
+            (project_id,),
+        ).fetchall()
+    out = []
+    for row in rows:
+        item = dict(row)
+        item["enabled"] = bool(item.get("enabled"))
+        raw = item.get("configuration_json")
+        try:
+            item["configuration"] = json.loads(raw) if raw else {}
+        except (json.JSONDecodeError, TypeError):
+            item["configuration"] = {}
+        out.append(item)
+    return out
+
+
+def upsert_project_rule(
+    db_path: Path,
+    project_id: str,
+    rule_key: str,
+    enabled: bool,
+    configuration: dict | None = None,
+) -> None:
+    """Upsert one rule row for ``project_id``."""
+    now = _now_iso()
+    cfg_json = json.dumps(configuration or {})
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO project_execution_rules
+                (project_id, rule_key, enabled, configuration_json, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(project_id, rule_key) DO UPDATE SET
+                enabled            = excluded.enabled,
+                configuration_json = excluded.configuration_json,
+                updated_at         = excluded.updated_at
+            """,
+            (project_id, rule_key, 1 if enabled else 0, cfg_json, now, now),
+        )
+
+
+def replace_project_rules(
+    db_path: Path,
+    project_id: str,
+    rules: list[dict],
+) -> None:
+    """Atomically replace the project's rule set with ``rules``.
+
+    Each rule dict must carry ``rule_key``, ``enabled``, and ``configuration``.
+    """
+    now = _now_iso()
+    with _connect(db_path) as conn:
+        conn.execute("BEGIN")
+        try:
+            conn.execute(
+                "DELETE FROM project_execution_rules WHERE project_id = ?",
+                (project_id,),
+            )
+            for rule in rules:
+                cfg_json = json.dumps(rule.get("configuration") or {})
+                enabled = 1 if rule.get("enabled") else 0
+                conn.execute(
+                    """
+                    INSERT INTO project_execution_rules
+                        (project_id, rule_key, enabled, configuration_json,
+                         created_at, updated_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (project_id, rule["rule_key"], enabled, cfg_json, now, now),
+                )
+            conn.execute("COMMIT")
+        except Exception:
+            conn.execute("ROLLBACK")
+            raise
+
+
+# ── ticket_rule_evaluation ────────────────────────────────────────────────────
+
+_RULE_EVAL_LIST_FIELDS = ("failed_rules_json", "passed_rules_json", "warnings_json")
+
+
+def _decode_rule_eval_lists(row: dict) -> dict:
+    out = dict(row)
+    for key in _RULE_EVAL_LIST_FIELDS:
+        val = out.get(key)
+        if val is None or val == "":
+            out[key] = []
+            continue
+        try:
+            parsed = json.loads(val)
+            out[key] = parsed if isinstance(parsed, list) else []
+        except (json.JSONDecodeError, TypeError):
+            out[key] = []
+    return out
+
+
+def get_ticket_rule_evaluation(db_path: Path, ticket_id: str) -> dict | None:
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM ticket_rule_evaluation WHERE ticket_id = ?",
+            (ticket_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    return _decode_rule_eval_lists(dict(row))
+
+
+def upsert_ticket_rule_evaluation(
+    db_path: Path,
+    ticket_id: str,
+    project_id: str,
+    eligibility_status: str,
+    passed_rules: list,
+    failed_rules: list,
+    warnings: list,
+    evaluated_at: str,
+) -> None:
+    """Overwrite the evaluation row for ``ticket_id``."""
+    now = _now_iso()
+    passed_json = json.dumps(passed_rules or [])
+    failed_json = json.dumps(failed_rules or [])
+    warnings_json = json.dumps(warnings or [])
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO ticket_rule_evaluation
+                (ticket_id, project_id, eligibility_status,
+                 failed_rules_json, passed_rules_json, warnings_json,
+                 evaluated_at, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ticket_id) DO UPDATE SET
+                project_id         = excluded.project_id,
+                eligibility_status = excluded.eligibility_status,
+                failed_rules_json  = excluded.failed_rules_json,
+                passed_rules_json  = excluded.passed_rules_json,
+                warnings_json      = excluded.warnings_json,
+                evaluated_at       = excluded.evaluated_at,
+                updated_at         = excluded.updated_at
+            """,
+            (
+                ticket_id,
+                project_id,
+                eligibility_status,
+                failed_json,
+                passed_json,
+                warnings_json,
+                evaluated_at,
+                now,
+                now,
+            ),
+        )
+
+
 # ── Backend selection ─────────────────────────────────────────────────────────
 # Everything above is the SQLite backend (the default). When
 # RUNTIME_DB_BACKEND=postgres the public API is rebound to the networked
@@ -685,6 +866,11 @@ if _RUNTIME_DB_BACKEND == "postgres":
     insert_ticket_approval = _pg.insert_ticket_approval  # type: ignore[assignment]
     list_ticket_approvals = _pg.list_ticket_approvals  # type: ignore[assignment]
     get_latest_ticket_approval = _pg.get_latest_ticket_approval  # type: ignore[assignment]
+    list_project_rules = _pg.list_project_rules  # type: ignore[assignment]
+    upsert_project_rule = _pg.upsert_project_rule  # type: ignore[assignment]
+    replace_project_rules = _pg.replace_project_rules  # type: ignore[assignment]
+    get_ticket_rule_evaluation = _pg.get_ticket_rule_evaluation  # type: ignore[assignment]
+    upsert_ticket_rule_evaluation = _pg.upsert_ticket_rule_evaluation  # type: ignore[assignment]
 elif _RUNTIME_DB_BACKEND not in ("", "sqlite"):
     raise RuntimeError(
         f"unknown RUNTIME_DB_BACKEND={_RUNTIME_DB_BACKEND!r} "

@@ -15,7 +15,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .routes import approvals, auto_fix, daemon, deployer, environments, health, intelligence, issues, project_map, projects, providers, readiness, runtime_dashboard, sandbox, tickets
+from .routes import approvals, auto_fix, daemon, deployer, environments, health, intelligence, issues, project_map, projects, providers, readiness, rules, runtime_dashboard, sandbox, tickets
 from .services.project_registry import ProjectRegistry
 from .services.runtime_resolver import resolve_worktrees_dir
 
@@ -205,6 +205,10 @@ def create_app(
     # T199: /tickets/{id}/approvals — human execution approval workflow.
     app.include_router(approvals.router)
     app.include_router(approvals.project_router)
+    # T201: /projects/{id}/rules + /tickets/{id}/rule-evaluation — advisory rules engine.
+    app.include_router(rules.project_router)
+    app.include_router(rules.ticket_router)
+    app.include_router(rules.project_ticket_router)
 
     return app
 
