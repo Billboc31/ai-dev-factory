@@ -21,3 +21,4 @@
 [2026-06-19T10:20:22Z] push: tolerating runtime dirty files (not blocking): ['runs/T194/runtime.log']
 [2026-06-19T10:20:22Z] push: pushing branch=ticket/T194-t194-project-bootstrap-must-inject-agent-onboardin
 [2026-06-19T10:20:23Z] push: done branch=ticket/T194-t194-project-bootstrap-must-inject-agent-onboardin
+[2026-06-22T06:23:55Z] human-approval: request-plan-fix — PLAN_REVIEW_NEEDED → PLAN_FIX_REQUIRED

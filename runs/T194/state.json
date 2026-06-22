@@ -1,7 +1,7 @@
 {
   "ticket_id": "T194",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_FIX_REQUIRED",
   "branch": "ticket/T194-t194-project-bootstrap-must-inject-agent-onboardin",
   "issue_number": 241,
-  "updated_at": "2026-06-19T10:20:21Z"
+  "updated_at": "2026-06-22T06:23:55Z"
 }
