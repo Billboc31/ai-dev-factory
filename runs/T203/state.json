@@ -1,7 +1,7 @@
 {
   "ticket_id": "T203",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T203-t203-add-stuck-ticket-diagnostics-and-recommended",
   "issue_number": 262,
-  "updated_at": "2026-06-22T14:03:56Z"
+  "updated_at": "2026-06-22T14:06:39Z"
 }
