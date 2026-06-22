@@ -359,3 +359,12 @@
 [2026-06-22T13:34:18Z] compose: skill=ai/skills/debugging.md
 [2026-06-22T13:34:18Z] compose: task (canonical prompt)
 [2026-06-22T13:34:18Z] snapshot: runtime-prompt=runs/T201/prompts/tester-attempt-1.md
+[2026-06-22T13:51:44Z] auto-run: step=tester done rc=0
+[2026-06-22T13:51:44Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-22T13:51:44Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-22T13:51:45Z] commit-checkpoint: unstaged runtime garbage: ['runs/T201/runtime.log']
+[2026-06-22T13:51:45Z] commit-checkpoint: sha=c307fa5d files=4 title='test(T201/dashboard,workflow): tester — update 4 file(s)'
+[2026-06-22T13:51:45Z] auto-run: auto-push triggered
+[2026-06-22T13:51:45Z] push: tolerating runtime dirty files (not blocking): ['runs/T201/runtime.log']
+[2026-06-22T13:51:45Z] push: pushing branch=ticket/T201-t201-add-execution-rules-engine-and-policy-based-t
+[2026-06-22T13:51:47Z] push: done branch=ticket/T201-t201-add-execution-rules-engine-and-policy-based-t
