@@ -1,14 +1,12 @@
-# T201 Execution Rules Engine
-
 ## Objective
 
-Introduce a project-level Execution Rules Engine that evaluates configurable policies against a ticket and emits an `eligible` or `blocked` decision with explicit reasons. The engine is advisory: it persists evaluations and exposes them via API and UI, but it does not start execution, dispatch workers, reserve workers, reorder queues, or change the scheduler.
+Introduce a project-level Execution Rules Engine that evaluates configurable policies against a ticket and emits an `eligible` or `blocked` decision with explicit reasons. The engine is advisory: it persists evaluations and exposes them via the existing Control API and dashboard, but it does not start execution, dispatch workers, reserve workers, reorder queues, or change scheduler/daemon behavior.
 
 ## Included
 
 ### Database
 
-- Extend `tools/agent_runner/runtime_db.py` to create the table `project_execution_rules` in both the SQLite and PostgreSQL initialisation paths, with columns:
+- Extend `tools/agent_runner/runtime_db.py` and `tools/agent_runner/runtime_db_pg.py` to create the table `project_execution_rules` in both the SQLite and PostgreSQL initialisation paths, with columns:
   - `project_id TEXT NOT NULL`
   - `rule_key TEXT NOT NULL`
   - `enabled INTEGER NOT NULL` (boolean in PG)
@@ -16,7 +14,7 @@ Introduce a project-level Execution Rules Engine that evaluates configurable pol
   - `created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP`
   - `updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP`
   - PRIMARY KEY `(project_id, rule_key)`
-- Extend the same module to create `ticket_rule_evaluation` with columns:
+- Extend the same modules to create `ticket_rule_evaluation` with columns:
   - `ticket_id TEXT NOT NULL`
   - `project_id TEXT NOT NULL`
   - `eligibility_status TEXT NOT NULL` (`eligible` or `blocked`)
@@ -27,13 +25,13 @@ Introduce a project-level Execution Rules Engine that evaluates configurable pol
   - `created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP`
   - `updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP`
   - PRIMARY KEY `(ticket_id)`
-- Add to `tools/agent_runner/runtime_db.py` (or a sibling helper module if the file is becoming too long):
+- Add to `tools/agent_runner/runtime_db.py` (and PG equivalents in `runtime_db_pg.py`):
   - `list_project_rules(db_path, project_id) -> list[dict]`
   - `upsert_project_rule(db_path, project_id, rule_key, enabled, configuration)` — upserts one row.
   - `replace_project_rules(db_path, project_id, rules: list[dict])` — atomically replaces the project's rule set; used by `PUT /projects/{project_id}/rules`.
   - `get_ticket_rule_evaluation(db_path, ticket_id) -> dict | None`
   - `upsert_ticket_rule_evaluation(db_path, ticket_id, project_id, eligibility_status, passed_rules, failed_rules, warnings, evaluated_at)` — overwrites the row keyed by `ticket_id`.
-- All helpers accept both SQLite and PostgreSQL `db_path`/DSN via the existing connection abstraction in `runtime_db.py`; JSON columns are read back as Python lists/dicts.
+- All helpers accept both SQLite and PostgreSQL `db_path`/DSN via the existing connection abstraction; JSON columns are read back as Python lists/dicts.
 
 ### Rules engine
 
@@ -51,9 +49,9 @@ Create `tools/agent_runner/execution_rules_engine.py` containing:
   - `configuration` (the rule's own JSON configuration)
   - `intelligence` (the Ticket Intelligence record, or `None`)
   - `readiness` (the Readiness record, or `None`)
-  - `approval_state` (the canonical execution eligibility string, see below)
+  - `approval_state` (the canonical execution eligibility string returned by `compute_execution_eligibility`)
 - A `RuleResult` dataclass: `passed: bool`, `reason: str`, optional `warnings: list[str]`.
-- `get_execution_approval_state(db_path, ticket_id) -> str` — wrapper that calls `compute_execution_eligibility(db_path, ticket_id)` from the T199 module and returns the canonical string (`ready_candidate`, `ready_to_take`, etc.). This is the *only* place in the engine that resolves the approval state. Rule evaluators receive the resulting string through `RuleContext.approval_state`.
+- `get_execution_approval_state(db_path, ticket_id) -> str` — wrapper that calls `compute_execution_eligibility(db_path, ticket_id)` imported from `tools/agent_runner/ticket_approval_service.py` and returns the canonical string (`ready_candidate`, `ready_to_take`, `blocked`, `not_started`, etc.). This wrapper is the **only** place in the engine that resolves the approval state. Rule evaluators receive the resulting string through `RuleContext.approval_state`. The file must not import or reference `ticket_approvals` or `approval_status` directly.
 - `evaluate_ticket(db_path, project_id, ticket_id) -> dict` that:
   1. Loads project rules via `list_project_rules`. If a registered rule has no row for the project, fall back to its registry defaults (default policy below).
   2. Loads Ticket Intelligence for `ticket_id` from the existing analysis tables.
@@ -97,34 +95,40 @@ Default policy disables:
 
 `PUT /projects/{project_id}/rules` with no body OR with the special action `reset_defaults` resets the project to this exact policy by calling `replace_project_rules` with the registry defaults serialised out.
 
-### API
+### Control API
 
-Wire the following endpoints into the existing FastAPI app under `tools/api/` (place handlers in `tools/api/rules.py` and register the router in `tools/api/main.py`):
+Wire the following endpoints into the existing Control API. Place handlers in `services/control_api/routes/rules.py`, register the router in `services/control_api/main.py` next to the existing `intelligence`, `readiness`, and `approvals` routers, and add request/response schemas to `services/control_api/models/schemas.py`. Follow the conventions established by `services/control_api/routes/intelligence.py`, `routes/readiness.py`, and `routes/approvals.py`.
 
 - `GET /projects/{project_id}/rules` — returns `{"rules": [{"rule_key", "enabled", "configuration", "description", "default_enabled", "default_configuration"}]}`. Rules without a stored row are returned with their registry defaults so the UI always sees the full set.
 - `PUT /projects/{project_id}/rules` — body `{"rules": [{"rule_key", "enabled", "configuration"}]}`. Validates that every `rule_key` exists in `RULE_REGISTRY` and that `configuration` matches the rule's schema (e.g. `max_cost_usd` must be a non-negative number). Calls `replace_project_rules`. Returns the updated set in the same shape as the GET.
 - `GET /tickets/{ticket_id}/rule-evaluation` — returns the persisted evaluation row (parsed JSON arrays). Returns `404` if none exists.
-- `POST /tickets/{ticket_id}/evaluate-rules` — schedules `evaluate_ticket` on a `BackgroundTasks` queue and immediately responds with HTTP `202 Accepted` and body `{"status": "scheduled", "ticket_id": ...}`. The background task writes the result via `upsert_ticket_rule_evaluation`; clients poll the GET endpoint to read it.
+- `POST /tickets/{ticket_id}/evaluate-rules` — schedules `evaluate_ticket` on a FastAPI `BackgroundTasks` queue and immediately responds with HTTP `202 Accepted` and body `{"status": "scheduled", "ticket_id": ...}`. The background task writes the result via `upsert_ticket_rule_evaluation`; clients poll the GET endpoint to read it.
 
 No changes are made to existing scheduler/queue endpoints.
 
-### Frontend
+### Frontend (dashboard)
 
-In `web/` (the existing Next.js/React dashboard):
+All UI work targets the existing dashboard under `apps/dashboard/src/` (React + React Router). No file is created under `web/` and no Next.js conventions are used.
 
-- Add an API client helper module `web/lib/api/rules.ts` exposing `getProjectRules`, `putProjectRules`, `getTicketRuleEvaluation`, `postEvaluateTicketRules`.
-- Add a **Project Rules page** at `web/app/projects/[project_id]/rules/page.tsx`:
+- Extend the existing API client at `apps/dashboard/src/api/tickets.js` (or add a sibling file `apps/dashboard/src/api/rules.js` if isolation is preferred) with:
+  - `getProjectRules(projectId)`
+  - `putProjectRules(projectId, rules)`
+  - `getTicketRuleEvaluation(ticketId)`
+  - `postEvaluateTicketRules(ticketId)`
+- Add a **Project Rules panel** at `apps/dashboard/src/components/ProjectRulesPanel.jsx`:
   - Lists every rule from the registry with its description.
   - Each row has an enable/disable toggle.
   - Threshold rules (`max_estimated_cost_usd`, `max_difficulty`) expose an inline editable numeric field.
   - "Reset to defaults" button calls `PUT` with the default payload.
   - "Save" button calls `PUT` with the current state.
-- Add a **Ticket Rule Evaluation panel** component `web/components/TicketRuleEvaluation.tsx`, embedded in the existing ticket detail page:
+- Add a **Project Rules page** at `apps/dashboard/src/pages/ProjectRulesPage.jsx` that hosts `ProjectRulesPanel` and is wired into the existing React Router route table next to the other project pages.
+- Add a **Ticket Rule Evaluation panel** at `apps/dashboard/src/components/TicketRuleEvaluationPanel.jsx`, following the visual conventions of `TicketIntelligencePanel.jsx`, `TicketReadinessPanel.jsx`, and `HumanApprovalPanel.jsx`:
   - Displays `eligibility_status` with a coloured badge (`eligible` = green, `blocked` = red).
   - Lists failed rules with their human-readable reasons.
   - Lists warnings.
   - Shows `evaluated_at` formatted as local datetime.
   - "Re-evaluate" button calls the POST endpoint, then polls the GET endpoint until `evaluated_at` changes.
+- Embed `TicketRuleEvaluationPanel` into `apps/dashboard/src/pages/TicketDetailPage.jsx` next to the existing intelligence, readiness, and approval panels.
 
 ### Tests
 
@@ -134,12 +138,17 @@ Add the following Python test files under `tests/`:
 - `tests/test_execution_rules_engine.py` — for each of the six rules: one case where the rule passes and one where it fails, asserting the reason string. The `require_human_approval` cases must drive the result by setting `RuleContext.approval_state` to `"ready_to_take"` (pass) vs `"ready_candidate"` (fail). The `max_estimated_cost_usd` and `max_difficulty` cases cover both enabled and disabled configurations.
 - `tests/test_execution_rules_default_policy.py` — when no rows exist in `project_execution_rules`, `evaluate_ticket` applies the four `require_*` / `block_when_*` rules with `enabled=true` and the two threshold rules with `enabled=false`.
 - `tests/test_execution_rules_approval_isolation.py` — static grep test asserting that `tools/agent_runner/execution_rules_engine.py` does NOT contain the substrings `ticket_approvals` or `approval_status` outside of comments. The only allowed approval lookup path is `compute_execution_eligibility` via `get_execution_approval_state`.
-- `tests/test_execution_rules_api.py` — FastAPI `TestClient` exercising `GET`/`PUT /projects/{project_id}/rules`, `GET /tickets/{ticket_id}/rule-evaluation`, and `POST /tickets/{ticket_id}/evaluate-rules` (asserting HTTP `202` and eventual persistence).
-- `tests/test_execution_rules_pipeline_untouched.py` — asserts via file hashes or static greps that `tools/agent_runner/run_daemon.py`, `tools/agent_runner/run_ticket.py`, and the scheduler module are not modified to invoke the rules engine: no import of `execution_rules_engine` from these files.
+- `tests/test_execution_rules_api.py` — FastAPI `TestClient` against `services/control_api/main.py` exercising `GET`/`PUT /projects/{project_id}/rules`, `GET /tickets/{ticket_id}/rule-evaluation`, and `POST /tickets/{ticket_id}/evaluate-rules` (asserting HTTP `202` and eventual persistence after the background task runs).
+- `tests/test_execution_rules_pipeline_untouched.py` — asserts via static greps that `tools/agent_runner/run_daemon.py`, `tools/agent_runner/run_ticket.py`, and the scheduler module do not import `execution_rules_engine` and contain no call sites for `evaluate_ticket`.
+
+Add the following frontend tests under `apps/dashboard/tests/` (matching the existing dashboard test setup):
+
+- `apps/dashboard/tests/TicketRuleEvaluationPanel.test.jsx` — renders the panel with eligible/blocked fixtures, asserts the badge colour, failed-rule list, warnings list, and that clicking "Re-evaluate" calls the POST endpoint and re-fetches the GET endpoint.
+- `apps/dashboard/tests/ProjectRulesPanel.test.jsx` — renders the panel with a mixed-rules fixture, asserts toggles and numeric inputs render, and that "Save" / "Reset to defaults" call the PUT endpoint with the expected payload.
 
 ## Excluded
 
-- Any automatic gating of execution: the scheduler, worker dispatch, queue ordering, and `run_daemon.py` / `run_ticket.py` remain untouched and continue to schedule tickets exactly as before.
+- Any automatic gating of execution: the scheduler, worker dispatch, queue ordering, and `tools/agent_runner/run_daemon.py` / `tools/agent_runner/run_ticket.py` remain untouched and continue to schedule tickets exactly as before.
 - Worker reservation, retry logic, or any change to the existing execution pipeline.
 - New rules beyond the six listed above.
 - Migration of historical tickets to populate `ticket_rule_evaluation` retroactively.
@@ -147,17 +156,19 @@ Add the following Python test files under `tests/`:
 - Frontend visualisation of rule evaluation history (only the latest evaluation per ticket is stored and displayed).
 - Notifications, webhooks, or alerts triggered by `blocked` evaluations.
 - Refactors of the T198 Ticket Intelligence schema or the T199 approval lifecycle beyond reading their existing canonical state.
+- Any work under `tools/api/` or `web/` — these paths are not used in T201.
 
 ## Acceptance criteria
 
-1. Tables `project_execution_rules` and `ticket_rule_evaluation` are created in both SQLite and PostgreSQL by the runtime DB initialiser, with the columns specified above.
-2. Project rules are configurable through `GET` / `PUT /projects/{project_id}/rules`, and the stored set is returned merged with registry defaults.
-3. `POST /tickets/{ticket_id}/evaluate-rules` returns HTTP `202 Accepted`, runs `evaluate_ticket` asynchronously, and the resulting row is retrievable via `GET /tickets/{ticket_id}/rule-evaluation`.
+1. Tables `project_execution_rules` and `ticket_rule_evaluation` are created in both SQLite (`tools/agent_runner/runtime_db.py`) and PostgreSQL (`tools/agent_runner/runtime_db_pg.py`) by the runtime DB initialiser, with the columns specified above.
+2. Project rules are configurable through `GET` / `PUT /projects/{project_id}/rules` served by `services/control_api/routes/rules.py`, and the stored set is returned merged with registry defaults.
+3. `POST /tickets/{ticket_id}/evaluate-rules` returns HTTP `202 Accepted`, runs `evaluate_ticket` asynchronously via FastAPI `BackgroundTasks`, and the resulting row is retrievable via `GET /tickets/{ticket_id}/rule-evaluation`.
 4. `evaluate_ticket` returns `eligibility_status = "blocked"` whenever at least one enabled rule fails, and `"eligible"` only when all enabled rules pass.
 5. Every failed rule in the persisted evaluation includes a human-readable reason; warnings are persisted in the `warnings_json` column.
-6. The `require_human_approval` rule passes if and only if `compute_execution_eligibility(db_path, ticket_id) == "ready_to_take"`, and is wired through `get_execution_approval_state`. The static test `tests/test_execution_rules_approval_isolation.py` confirms `execution_rules_engine.py` never references `ticket_approvals` or `approval_status` directly.
+6. The `require_human_approval` rule passes if and only if `compute_execution_eligibility(db_path, ticket_id) == "ready_to_take"`, and is wired through `get_execution_approval_state`, which is the sole bridge between the engine and `tools/agent_runner/ticket_approval_service.py`. The static test `tests/test_execution_rules_approval_isolation.py` confirms `execution_rules_engine.py` never references `ticket_approvals` or `approval_status` directly.
 7. With no rows in `project_execution_rules`, the default policy enables `require_ticket_intelligence`, `require_readiness_candidate`, `require_human_approval`, `block_when_human_review_required`, and disables `max_estimated_cost_usd` and `max_difficulty`.
 8. The threshold rules `max_estimated_cost_usd` and `max_difficulty` block tickets that exceed their configured limits, and are inert when disabled.
-9. The Project Rules page allows toggling each rule and editing thresholds; the Ticket Rule Evaluation panel displays eligibility status, failed rules with reasons, warnings, and evaluation date, and exposes a "Re-evaluate" action.
+9. The Project Rules panel and page (`apps/dashboard/src/components/ProjectRulesPanel.jsx`, `apps/dashboard/src/pages/ProjectRulesPage.jsx`) allow toggling each rule and editing thresholds; the Ticket Rule Evaluation panel (`apps/dashboard/src/components/TicketRuleEvaluationPanel.jsx`) embedded in `apps/dashboard/src/pages/TicketDetailPage.jsx` displays eligibility status, failed rules with reasons, warnings, and evaluation date, and exposes a "Re-evaluate" action.
 10. `tools/agent_runner/run_daemon.py`, `tools/agent_runner/run_ticket.py`, and the scheduler module contain no import of `execution_rules_engine` and no behavioural change; this is enforced by `tests/test_execution_rules_pipeline_untouched.py`.
-11. The full existing test suite continues to pass alongside the new tests added under `tests/`.
+11. No file is created under `tools/api/` and no file is created under `web/` for T201. The new API routes live under `services/control_api/routes/rules.py`, are registered in `services/control_api/main.py`, and their schemas live in `services/control_api/models/schemas.py`. All dashboard work lives under `apps/dashboard/src/`.
+12. The full existing test suite continues to pass alongside the new Python tests under `tests/` and the new dashboard tests under `apps/dashboard/tests/`.
