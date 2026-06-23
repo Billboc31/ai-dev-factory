@@ -431,6 +431,29 @@ def test_delegated_completion_visible_via_get(tmp_path, monkeypatch):
     assert body["difficulty_score"] == 8
 
 
+def test_bg_thread_crash_persists_failed(tmp_path):
+    """If run_analysis itself raises before persisting anything, the _bg wrapper must persist failed."""
+    _make_ticket(tmp_path, "T001")
+    app = _make_app(tmp_path)
+    db = app.state.db_path
+
+    def _explode(*args, **kwargs):  # noqa: ARG001
+        raise RuntimeError("simulated bg crash")
+
+    with patch("ticket_intelligence_analyzer.run_analysis", side_effect=_explode):
+        client = TestClient(app)
+        client.post("/tickets/T001/intelligence/analyze")
+        # Allow the daemon thread to run.
+        time.sleep(0.2)
+
+    r = client.get("/tickets/T001/intelligence")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["analysis_status"] == "failed"
+    assert "background thread crashed" in (body["analysis_summary"] or "").lower()
+    assert body["failure_origin"] == "bg_thread_crash"
+
+
 def test_post_analyze_persists_failure_on_supervisor_unreachable(tmp_path, monkeypatch):
     """When delegation raises, the project DB row exists with analysis_status='failed'."""
     monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path))

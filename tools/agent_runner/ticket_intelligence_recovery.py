@@ -49,8 +49,16 @@ def _parse_iso(value: str | None) -> datetime.datetime | None:
     return dt
 
 
+def _now_iso() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def _scan_stale_rows(db_path: Path) -> list[dict[str, Any]]:
-    """Return the rows currently in ``queued``/``running`` (with ``updated_at``).
+    """Return the rows currently in ``queued``/``running``.
+
+    Reads ``analysis_summary`` and ``failure_origin`` alongside the lifecycle
+    fields so the reaper can preserve them when the worker already persisted a
+    real failure cause before the row's ``updated_at`` froze.
 
     Reads through a plain ``sqlite3`` connection so the function works on a
     raw DB path without requiring ``runtime_db`` row-decoding helpers.
@@ -62,7 +70,8 @@ def _scan_stale_rows(db_path: Path) -> list[dict[str, Any]]:
     with sqlite3.connect(str(db_path)) as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
-            "SELECT ticket_id, analysis_status, updated_at "
+            "SELECT ticket_id, analysis_status, updated_at, "
+            "       analysis_summary, failure_origin "
             "FROM ticket_intelligence "
             "WHERE analysis_status IN ('queued', 'running')"
         ).fetchall()
@@ -101,15 +110,33 @@ def reap_stale_intelligence(
             continue
 
         ticket_id = row["ticket_id"]
-        summary = (
-            f"Analysis stuck in {status!r} for {int(age)}s "
-            "— auto-recovered by reaper."
-        )
+        prior_summary = (row.get("analysis_summary") or "").strip()
+        prior_origin = (row.get("failure_origin") or "").strip()
+
+        # Preserve an existing failure cause when the worker already wrote one
+        # before stalling: the reaper used to overwrite the real "AI call
+        # failed (rc=2): …" message with the generic stuck-in-running text,
+        # hiding the actual root cause from the UI.
+        if prior_summary and prior_origin:
+            summary = f"{prior_summary} (reaper-confirmed after {int(age)}s)"
+            origin = "reaper-confirmed"
+        elif prior_summary:
+            summary = f"{prior_summary} (reaper-confirmed after {int(age)}s)"
+            origin = "reaper-confirmed"
+        else:
+            summary = (
+                f"Analysis stuck in {status!r} for {int(age)}s "
+                "— auto-recovered by reaper."
+            )
+            origin = "reaper-stale"
+
         runtime_db.upsert_ticket_intelligence(
             db_path,
             ticket_id,
             analysis_status="failed",
             analysis_summary=summary,
+            failed_at=_now_iso(),
+            failure_origin=origin,
         )
         recovered.append(
             {

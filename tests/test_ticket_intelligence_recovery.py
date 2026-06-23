@@ -132,6 +132,42 @@ def test_reaper_ignores_completed_and_failed(db: Path) -> None:
     assert recovered == []
 
 
+def test_reaper_preserves_existing_summary(db: Path) -> None:
+    """A row that already has a real failure cause must not be overwritten by the generic reaper text."""
+    now = datetime.datetime(2026, 6, 23, 10, 0, 0, tzinfo=datetime.timezone.utc)
+    _db.upsert_ticket_intelligence(
+        db, "T001",
+        analysis_status="running",
+        analysis_summary="AI call failed (rc=2): out of memory",
+        failure_origin="exception",
+    )
+    _set_updated_at(db, "T001", _iso(now - datetime.timedelta(seconds=901)))
+
+    recovered = _recovery.reap_stale_intelligence(db, now=now)
+    assert len(recovered) == 1
+
+    row = _db.get_ticket_intelligence(db, "T001")
+    assert row["analysis_status"] == "failed"
+    # The real cause survives; only the suffix is appended.
+    assert "out of memory" in (row["analysis_summary"] or "")
+    assert "reaper-confirmed after" in (row["analysis_summary"] or "")
+    assert row["failure_origin"] == "reaper-confirmed"
+
+
+def test_reaper_writes_failed_at(db: Path) -> None:
+    """The reaper records failed_at uniformly so dashboards can show when a stuck row was reaped."""
+    now = datetime.datetime(2026, 6, 23, 10, 0, 0, tzinfo=datetime.timezone.utc)
+    _db.upsert_ticket_intelligence(db, "T001", analysis_status="running")
+    _set_updated_at(db, "T001", _iso(now - datetime.timedelta(seconds=901)))
+
+    _recovery.reap_stale_intelligence(db, now=now)
+
+    row = _db.get_ticket_intelligence(db, "T001")
+    assert row["failed_at"] is not None
+    # No prior summary → reaper writes the generic message with reaper-stale origin.
+    assert row["failure_origin"] == "reaper-stale"
+
+
 def test_reaper_skips_rows_with_unparseable_updated_at(db: Path) -> None:
     now = datetime.datetime(2026, 6, 23, 10, 0, 0, tzinfo=datetime.timezone.utc)
     _db.upsert_ticket_intelligence(db, "T001", analysis_status="queued")

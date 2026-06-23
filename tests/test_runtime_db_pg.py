@@ -220,3 +220,43 @@ def test_events_filter_by_project_and_ticket(captured):
     sql, params = calls[-1]
     assert "project_id = %s AND ticket_id = %s" in sql
     assert params == ("proj-c", "T9", 5)
+
+
+# ── T208 — ticket_intelligence lifecycle column parity with SQLite ────────────
+
+
+def test_ticket_intelligence_ddl_declares_lifecycle_columns():
+    """A freshly created ticket_intelligence table must carry the four lifecycle columns."""
+    for col in ("started_at", "completed_at", "failed_at", "failure_origin"):
+        # Each appears at least once in the CREATE TABLE block.
+        assert col in pg._DDL
+
+
+def test_ticket_intelligence_lifecycle_migration_is_idempotent_alter():
+    """The migration block uses ADD COLUMN IF NOT EXISTS for every new column."""
+    migration = pg._TICKET_INTELLIGENCE_LIFECYCLE_MIGRATION
+    for col in ("started_at", "completed_at", "failed_at", "failure_origin"):
+        # Each column has an ALTER ... ADD COLUMN IF NOT EXISTS entry.
+        needle = f"ADD COLUMN IF NOT EXISTS {col}"
+        assert needle in migration, f"missing idempotent ALTER for {col}"
+
+
+def test_init_runtime_db_runs_lifecycle_migration(monkeypatch):
+    """init_runtime_db must execute both the DDL and the lifecycle migration."""
+    executed: list[str] = []
+
+    class _Conn:
+        def execute(self, sql, params=None):  # noqa: ARG002
+            executed.append(sql)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):  # noqa: D401
+            return False
+
+    monkeypatch.setattr(pg, "_connect", lambda handle: _Conn())
+    pg.init_runtime_db(pg.get_handle("proj-x"))
+
+    assert any("CREATE TABLE IF NOT EXISTS ticket_intelligence" in s for s in executed)
+    assert any("ADD COLUMN IF NOT EXISTS started_at" in s for s in executed)

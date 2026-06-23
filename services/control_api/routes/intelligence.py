@@ -223,6 +223,10 @@ def _parse_row(row: dict) -> TicketIntelligence:
         human_code_review_reason=row.get("human_code_review_reason"),
         autonomous_execution_recommendation=row.get("autonomous_execution_recommendation"),
         analysis_summary=row.get("analysis_summary"),
+        started_at=row.get("started_at"),
+        completed_at=row.get("completed_at"),
+        failed_at=row.get("failed_at"),
+        failure_origin=row.get("failure_origin"),
         created_at=row.get("created_at"),
         updated_at=row.get("updated_at"),
     )
@@ -356,8 +360,26 @@ def analyze_intelligence(
                 db, ticket_id, ticket_content, exec_cmd, project_root,
                 project_id=project_id,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("intelligence analysis background error for %s", ticket_id)
+            # ``run_analysis`` is supposed to swallow + persist its own
+            # exceptions. If something still escapes (programmer error, ImportError,
+            # SystemExit subclass, etc.), persist failed here so the row never
+            # stays in ``queued`` / ``running``.
+            try:
+                from datetime import datetime, timezone
+                runtime_db.upsert_ticket_intelligence(
+                    db, ticket_id,
+                    analysis_status="failed",
+                    analysis_summary=f"Background thread crashed: {exc}",
+                    failed_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    failure_origin="bg_thread_crash",
+                )
+            except Exception:
+                logger.exception(
+                    "intelligence: failed to persist bg-thread crash for %s",
+                    ticket_id,
+                )
 
     t = threading.Thread(target=_bg, daemon=True)
     t.start()

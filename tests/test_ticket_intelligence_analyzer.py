@@ -1,4 +1,4 @@
-"""Tests for ticket_intelligence_analyzer subprocess failure handling (T206)."""
+"""Tests for ticket_intelligence_analyzer subprocess failure handling (T206, T208)."""
 
 from __future__ import annotations
 
@@ -55,12 +55,69 @@ def db(tmp_path: Path) -> Path:
     return db_path
 
 
-def test_subprocess_timeout_persists_failed(db: Path, tmp_path: Path) -> None:
-    def _raise_timeout(*args, **kwargs):
-        raise subprocess.TimeoutExpired(cmd=args[0] if args else "claude", timeout=120)
+# Minimal stand-in for ``subprocess.Popen``. The analyzer drives it via
+# ``Popen(...).communicate(input=..., timeout=...)`` then reads ``returncode``,
+# so the fake only has to honour that small contract.
+class _FakePopen:
+    def __init__(
+        self,
+        *,
+        returncode: int = 0,
+        stdout: str = "",
+        stderr: str = "",
+        raise_timeout: bool = False,
+        record_kill: list | None = None,
+    ) -> None:
+        self._returncode = returncode
+        self._stdout = stdout
+        self._stderr = stderr
+        self._raise_timeout = raise_timeout
+        self._communicate_calls = 0
+        self._record_kill = record_kill if record_kill is not None else []
+        self.returncode = None
 
-    with patch.object(_analyzer.subprocess, "run", side_effect=_raise_timeout):
-        _analyzer.run_analysis(db, "T001", "ticket body", "claude --skip", tmp_path)
+    def communicate(self, input=None, timeout=None):  # noqa: A002, ARG002
+        self._communicate_calls += 1
+        if self._raise_timeout and self._communicate_calls == 1:
+            raise subprocess.TimeoutExpired(cmd="claude", timeout=timeout or 0)
+        # Post-kill drain returns whatever we were configured with.
+        self.returncode = self._returncode
+        return self._stdout, self._stderr
+
+    def kill(self) -> None:
+        self._record_kill.append(True)
+
+
+def _patch_popen(monkeypatch, *, popen):
+    """Patch the analyzer's Popen so tests don't spawn real processes."""
+    monkeypatch.setattr(_analyzer.subprocess, "Popen", lambda *a, **kw: popen)
+
+
+_OK_JSON = (
+    '{"difficulty_score": 5, "difficulty_label": "medium", '
+    '"risk_score": 4, "risk_label": "moderate", '
+    '"complexity_factors": [], "recommended_model": "balanced-code-model", '
+    '"recommended_model_reason": "ok", '
+    '"estimated_input_tokens": 1000, "estimated_output_tokens": 500, '
+    '"estimated_cost_min": 0.01, "estimated_cost_max": 0.02, '
+    '"cost_currency": "USD", "cost_estimate_status": "estimated", '
+    '"queue_rank": 50, "queue_reason": "", "dependency_hints": [], '
+    '"parallel_safe_candidate": false, '
+    '"requires_human_plan_review": false, "human_plan_review_reason": null, '
+    '"requires_human_code_review": false, "human_code_review_reason": null, '
+    '"autonomous_execution_recommendation": "safe", '
+    '"analysis_summary": "ok"}'
+)
+
+
+# ── T206 cases retained — now over the Popen-based path ──────────────────────
+
+
+def test_subprocess_timeout_persists_failed(db: Path, tmp_path: Path, monkeypatch) -> None:
+    fake = _FakePopen(raise_timeout=True, returncode=-9)
+    _patch_popen(monkeypatch, popen=fake)
+
+    _analyzer.run_analysis(db, "T001", "ticket body", "claude --skip", tmp_path)
 
     row = _db.get_ticket_intelligence(db, "T001")
     assert row is not None
@@ -68,41 +125,110 @@ def test_subprocess_timeout_persists_failed(db: Path, tmp_path: Path) -> None:
     assert "timed out" in (row["analysis_summary"] or "").lower()
 
 
-def test_subprocess_nonzero_rc_persists_failed(db: Path, tmp_path: Path) -> None:
-    fake_proc = subprocess.CompletedProcess(
-        args=["claude"], returncode=2, stdout="", stderr="boom"
-    )
-    with patch.object(_analyzer.subprocess, "run", return_value=fake_proc):
-        _analyzer.run_analysis(db, "T001", "ticket body", "claude --skip", tmp_path)
+def test_subprocess_nonzero_rc_persists_failed(db: Path, tmp_path: Path, monkeypatch) -> None:
+    fake = _FakePopen(returncode=2, stdout="", stderr="boom")
+    _patch_popen(monkeypatch, popen=fake)
+
+    _analyzer.run_analysis(db, "T001", "ticket body", "claude --skip", tmp_path)
 
     row = _db.get_ticket_intelligence(db, "T001")
     assert row is not None
     assert row["analysis_status"] == "failed"
     assert "rc=2" in (row["analysis_summary"] or "")
+    assert row["failure_origin"] == "nonzero_rc"
 
 
-def test_subprocess_invalid_json_persists_failed(db: Path, tmp_path: Path) -> None:
-    fake_proc = subprocess.CompletedProcess(
-        args=["claude"], returncode=0, stdout="not a json blob at all", stderr=""
-    )
-    with patch.object(_analyzer.subprocess, "run", return_value=fake_proc):
-        _analyzer.run_analysis(db, "T001", "ticket body", "claude --skip", tmp_path)
+def test_subprocess_invalid_json_persists_failed(db: Path, tmp_path: Path, monkeypatch) -> None:
+    fake = _FakePopen(returncode=0, stdout="not a json blob at all", stderr="")
+    _patch_popen(monkeypatch, popen=fake)
+
+    _analyzer.run_analysis(db, "T001", "ticket body", "claude --skip", tmp_path)
 
     row = _db.get_ticket_intelligence(db, "T001")
     assert row is not None
     assert row["analysis_status"] == "failed"
     assert "json parse" in (row["analysis_summary"] or "").lower()
+    assert row["failure_origin"] == "json_parse"
 
 
-def test_run_analysis_accepts_project_id_kwarg(db: Path, tmp_path: Path) -> None:
-    """project_id is accepted (for log correlation) without changing behavior."""
-    fake_proc = subprocess.CompletedProcess(
-        args=["claude"], returncode=1, stdout="", stderr="forced fail"
+def test_run_analysis_accepts_project_id_kwarg(db: Path, tmp_path: Path, monkeypatch) -> None:
+    fake = _FakePopen(returncode=1, stdout="", stderr="forced fail")
+    _patch_popen(monkeypatch, popen=fake)
+
+    _analyzer.run_analysis(
+        db, "T001", "ticket body", "claude --skip", tmp_path,
+        project_id="P1",
     )
-    with patch.object(_analyzer.subprocess, "run", return_value=fake_proc):
-        _analyzer.run_analysis(
-            db, "T001", "ticket body", "claude --skip", tmp_path,
-            project_id="P1",
-        )
     row = _db.get_ticket_intelligence(db, "T001")
     assert row["analysis_status"] == "failed"
+
+
+# ── T208 — new lifecycle / hardening cases ──────────────────────────────────
+
+
+def test_completed_persists_completed_at(db: Path, tmp_path: Path, monkeypatch) -> None:
+    fake = _FakePopen(returncode=0, stdout=_OK_JSON, stderr="")
+    _patch_popen(monkeypatch, popen=fake)
+
+    _analyzer.run_analysis(db, "T001", "ticket body", "claude --skip", tmp_path)
+
+    row = _db.get_ticket_intelligence(db, "T001")
+    assert row is not None
+    assert row["analysis_status"] == "completed"
+    assert row["completed_at"] is not None
+    # started_at set when the row transitioned to running.
+    assert row["started_at"] is not None
+    assert row["failed_at"] is None
+    assert row["failure_origin"] is None
+
+
+def test_timeout_uses_kill_and_persists_failed_at(db: Path, tmp_path: Path, monkeypatch) -> None:
+    record_kill: list = []
+    fake = _FakePopen(raise_timeout=True, returncode=-9, record_kill=record_kill)
+    _patch_popen(monkeypatch, popen=fake)
+
+    _analyzer.run_analysis(db, "T001", "ticket body", "claude --skip", tmp_path)
+
+    assert record_kill == [True]
+    row = _db.get_ticket_intelligence(db, "T001")
+    assert row is not None
+    assert row["analysis_status"] == "failed"
+    assert row["failure_origin"] == "timeout"
+    assert row["failed_at"] is not None
+
+
+def test_unexpected_exception_in_extract_persists_failed(db: Path, tmp_path: Path, monkeypatch) -> None:
+    def _boom(*args, **kwargs):  # noqa: ARG001
+        raise RuntimeError("extract_signals exploded")
+
+    monkeypatch.setattr(_analyzer, "extract_signals", _boom)
+
+    _analyzer.run_analysis(db, "T001", "ticket body", "claude --skip", tmp_path)
+
+    row = _db.get_ticket_intelligence(db, "T001")
+    assert row is not None
+    assert row["analysis_status"] == "failed"
+    assert row["failure_origin"] == "exception"
+    assert "extract_signals exploded" in (row["analysis_summary"] or "")
+    assert row["failed_at"] is not None
+
+
+def test_finally_guard_marks_running_row_failed(db: Path, tmp_path: Path, monkeypatch) -> None:
+    """A BaseException escaping the inner try/except must still leave a terminal row."""
+    fake = _FakePopen(returncode=0, stdout=_OK_JSON, stderr="")
+    _patch_popen(monkeypatch, popen=fake)
+
+    def _explode(*args, **kwargs):  # noqa: ARG001
+        # KeyboardInterrupt is a BaseException — bypasses the broad except clause.
+        raise KeyboardInterrupt("simulated interruption inside _normalize")
+
+    monkeypatch.setattr(_analyzer, "_normalize", _explode)
+
+    with pytest.raises(KeyboardInterrupt):
+        _analyzer.run_analysis(db, "T001", "ticket body", "claude --skip", tmp_path)
+
+    row = _db.get_ticket_intelligence(db, "T001")
+    assert row is not None
+    assert row["analysis_status"] == "failed"
+    assert row["failure_origin"] == "finally_guard"
+    assert "without terminal status" in (row["analysis_summary"] or "")
