@@ -1,7 +1,7 @@
 {
   "ticket_id": "T210",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_APPROVED",
   "branch": "ticket/T210-improve-ticket-intelligence-observability-to-diagn",
   "issue_number": 276,
-  "updated_at": "2026-06-23T20:44:25Z"
+  "updated_at": "2026-06-23T21:30:39Z"
 }
