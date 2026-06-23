@@ -50,9 +50,18 @@ function renderPage(id = 'T028', projectId = 'test-project') {
 
 describe('TicketDetailPage', () => {
   beforeEach(() => {
+    vi.clearAllMocks()
     ticketsApi.getTicket.mockResolvedValue({ data: MOCK_TICKET })
     ticketsApi.getTicketState.mockResolvedValue({ data: MOCK_STATE })
     ticketsApi.getTicketTimeline.mockResolvedValue({ data: MOCK_TIMELINE })
+    // Workflow timeline panels each poll their own endpoints; provide empty
+    // defaults so they don't crash when mounted as expanded step children.
+    ticketsApi.getTicketIntelligence.mockResolvedValue({ data: null })
+    ticketsApi.getTicketReadiness.mockResolvedValue({ data: null })
+    ticketsApi.getTicketApprovals.mockResolvedValue({ data: { approvals: [] } })
+    ticketsApi.getTicketRuleEvaluation.mockResolvedValue({ data: null })
+    ticketsApi.getTicketDiagnostics.mockResolvedValue({ data: null })
+    ticketsApi.listTicketOperations.mockResolvedValue({ data: { operations: [] } })
   })
 
   it('displays the ticket ID and state', async () => {

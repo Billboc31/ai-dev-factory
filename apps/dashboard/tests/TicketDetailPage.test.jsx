@@ -45,16 +45,31 @@ function renderPage(id = 'T028', projectId = 'test-project') {
 }
 
 describe('TicketDetailPage — runtime state change', () => {
+  // The page's first `usePolling` invocation is the ticket fetch (called on
+  // initial render, before any per-panel poller mounts). Capture only that
+  // first registration so subsequent panel registrations don't clobber it.
   let simulatePoll
 
   beforeEach(() => {
     vi.clearAllMocks()
-    // Capture the polling callback without calling it — avoids calling it on every re-render
-    usePolling.mockImplementation((callback) => { simulatePoll = callback })
+    simulatePoll = undefined
+    usePolling.mockImplementation((callback) => {
+      if (simulatePoll === undefined) {
+        simulatePoll = callback
+      }
+    })
     ticketsApi.getTicketState.mockResolvedValue({ data: MOCK_STATE })
     ticketsApi.getTicketLogs.mockResolvedValue({ data: 'line 1\nline 2' })
     ticketsApi.getTicketTimeline.mockResolvedValue({ data: MOCK_TIMELINE })
     ticketsApi.getTicketPlan.mockResolvedValue({ data: '# Plan content' })
+    // The page-level workflow fetch and each step's expanded panel call these
+    // endpoints; provide empty defaults so panels don't crash on render.
+    ticketsApi.getTicketIntelligence.mockResolvedValue({ data: null })
+    ticketsApi.getTicketReadiness.mockResolvedValue({ data: null })
+    ticketsApi.getTicketApprovals.mockResolvedValue({ data: { approvals: [] } })
+    ticketsApi.getTicketRuleEvaluation.mockResolvedValue({ data: null })
+    ticketsApi.getTicketDiagnostics.mockResolvedValue({ data: null })
+    ticketsApi.listTicketOperations.mockResolvedValue({ data: { operations: [] } })
   })
 
   it('invalidates tab content when ticket state changes', async () => {
@@ -100,6 +115,15 @@ describe('TicketDetailPage — runtime state change', () => {
 
     // tabContent preserved — plan not re-fetched
     expect(ticketsApi.getTicketPlan.mock.calls.length).toBe(callsBefore)
+  })
+
+  it('renders the workflow timeline global summary block', async () => {
+    ticketsApi.getTicket.mockResolvedValue({ data: MOCK_TICKET })
+
+    renderPage()
+
+    await act(async () => { simulatePoll() })
+    expect(await screen.findByTestId('ticket-workflow-global-summary')).toBeInTheDocument()
   })
 
   it('re-fetches logs on each poll when logs tab is active', async () => {

@@ -1,0 +1,43 @@
+[2026-06-23T14:59:21Z] auto-run start: state=INIT
+[2026-06-23T14:59:21Z] auto-run: running step=planner
+[2026-06-23T14:59:21Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-23T14:59:21Z] prompt: generic fallback — injecting runs/T209/ticket.md
+[2026-06-23T14:59:21Z] compose: global-context=docs/ai/global-context.md
+[2026-06-23T14:59:21Z] compose: role=ai/roles/planner.md
+[2026-06-23T14:59:21Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-23T14:59:21Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-23T14:59:21Z] compose: skill=ai/skills/documentation.md
+[2026-06-23T14:59:21Z] compose: task (canonical prompt)
+[2026-06-23T14:59:21Z] snapshot: runtime-prompt=runs/T209/prompts/planner-attempt-1.md
+[2026-06-23T15:01:21Z] auto-run: step=planner done rc=0
+[2026-06-23T15:01:23Z] planner checkpoint: committed
+[2026-06-23T15:01:23Z] planner checkpoint: pushed
+[2026-06-23T15:01:23Z] planner validation success
+[2026-06-23T15:01:23Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-23T15:01:23Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-23T15:01:23Z] commit-checkpoint: unstaged runtime garbage: ['runs/T209/runtime.log']
+[2026-06-23T15:01:23Z] commit-checkpoint: sha=5a4de024 files=2 title='docs(T209/workflow): planner — update 2 file(s)'
+[2026-06-23T15:01:23Z] auto-run: auto-push triggered
+[2026-06-23T15:01:23Z] push: tolerating runtime dirty files (not blocking): ['runs/T209/runtime.log']
+[2026-06-23T15:01:23Z] push: pushing branch=ticket/T209-add-visual-ticket-workflow-timeline-with-expandabl
+[2026-06-23T15:01:25Z] push: done branch=ticket/T209-add-visual-ticket-workflow-timeline-with-expandabl
+[2026-06-23T16:21:04Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-23T16:21:04Z] auto-run: running step=tester
+[2026-06-23T16:21:04Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-23T16:21:04Z] prompt: generic fallback — injecting runs/T209/ticket.md
+[2026-06-23T16:21:04Z] compose: global-context=docs/ai/global-context.md
+[2026-06-23T16:21:04Z] compose: role=ai/roles/tester.md
+[2026-06-23T16:21:04Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-23T16:21:04Z] compose: skill=ai/skills/testing.md
+[2026-06-23T16:21:04Z] compose: skill=ai/skills/debugging.md
+[2026-06-23T16:21:04Z] compose: task (canonical prompt)
+[2026-06-23T16:21:04Z] snapshot: runtime-prompt=runs/T209/prompts/tester-attempt-1.md
+[2026-06-23T16:31:36Z] auto-run: step=tester done rc=0
+[2026-06-23T16:31:36Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-23T16:31:36Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-23T16:31:36Z] commit-checkpoint: unstaged runtime garbage: ['runs/T209/runtime.log']
+[2026-06-23T16:31:36Z] commit-checkpoint: sha=ca123a0d files=5 title='test(T209/dashboard,workflow): tester — update 5 file(s)'
+[2026-06-23T16:31:36Z] auto-run: auto-push triggered
+[2026-06-23T16:31:36Z] push: tolerating runtime dirty files (not blocking): ['runs/T209/runtime.log']
+[2026-06-23T16:31:36Z] push: pushing branch=ticket/T209-add-visual-ticket-workflow-timeline-with-expandabl
+[2026-06-23T16:31:38Z] push: done branch=ticket/T209-add-visual-ticket-workflow-timeline-with-expandabl

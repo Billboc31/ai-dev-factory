@@ -1,0 +1,1 @@
+The background ProjectDashboardPage test finished — that was the leftover task from my earlier debugging. No further action needed; the implementation is complete and all 82 ticket-detail/workflow tests pass.
