@@ -198,6 +198,25 @@ export default function TicketIntelligencePanel({ ticketId, projectId }) {
         <div className="bg-red-50 border border-red-200 rounded p-3">
           <p className="text-xs text-red-700 font-medium">Analysis failed</p>
           <p className="text-xs text-red-600 mt-1">{intelligence.analysis_summary}</p>
+          {(intelligence.failure_origin || intelligence.failed_at) && (
+            <p className="text-xs text-red-500 mt-2">
+              {intelligence.failure_origin && (
+                <>
+                  Origin:{' '}
+                  <span className="font-mono">{intelligence.failure_origin}</span>
+                </>
+              )}
+              {intelligence.failure_origin && intelligence.failed_at && ' · '}
+              {intelligence.failed_at && (
+                <>
+                  Failed at:{' '}
+                  <span className="font-mono">
+                    {new Date(intelligence.failed_at).toLocaleString()}
+                  </span>
+                </>
+              )}
+            </p>
+          )}
         </div>
       )}
 

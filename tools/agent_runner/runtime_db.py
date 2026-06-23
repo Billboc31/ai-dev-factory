@@ -91,6 +91,10 @@ CREATE TABLE IF NOT EXISTS ticket_intelligence (
     human_code_review_reason            TEXT,
     autonomous_execution_recommendation TEXT,
     analysis_summary                    TEXT,
+    started_at                          TEXT,
+    completed_at                        TEXT,
+    failed_at                           TEXT,
+    failure_origin                      TEXT,
     created_at                          TEXT NOT NULL,
     updated_at                          TEXT NOT NULL
 );
@@ -249,6 +253,27 @@ def resolve_db_path_for_project(
     return get_db_path()
 
 
+_TICKET_INTELLIGENCE_LIFECYCLE_COLUMNS = (
+    ("started_at", "TEXT"),
+    ("completed_at", "TEXT"),
+    ("failed_at", "TEXT"),
+    ("failure_origin", "TEXT"),
+)
+
+
+def _ensure_ticket_intelligence_lifecycle_columns(conn: sqlite3.Connection) -> None:
+    """Idempotent migration: add lifecycle columns to ticket_intelligence if missing.
+
+    Pre-existing databases created before T208 lack started_at/completed_at/
+    failed_at/failure_origin. Introspect PRAGMA table_info and ALTER only what's
+    missing so re-running init_runtime_db never duplicates a column.
+    """
+    existing = {row[1] for row in conn.execute("PRAGMA table_info('ticket_intelligence')")}
+    for name, sql_type in _TICKET_INTELLIGENCE_LIFECYCLE_COLUMNS:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE ticket_intelligence ADD COLUMN {name} {sql_type}")
+
+
 def init_runtime_db(db_path: Path) -> None:
     """Create the DB file and tables if they don't exist. Safe to call multiple times."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -257,6 +282,7 @@ def init_runtime_db(db_path: Path) -> None:
         conn.execute("PRAGMA busy_timeout=5000")
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(_SCHEMA)
+        _ensure_ticket_intelligence_lifecycle_columns(conn)
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:

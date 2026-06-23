@@ -12,6 +12,7 @@ AI subprocess timeout: 120 seconds. Failures are persisted, never swallowed.
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import os
@@ -19,6 +20,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 _TOOLS_DIR = Path(__file__).resolve().parent
@@ -29,9 +31,16 @@ import runtime_db  # noqa: E402
 from model_catalog import estimate_cost  # noqa: E402
 from ticket_intelligence_extractor import extract as extract_signals  # noqa: E402
 
-_ANALYSIS_TIMEOUT = 120
+# Upper bound on the AI subprocess. Tunable via env so operators can extend the
+# window for slower local models without editing code; default 120 s matches the
+# reaper's STALE_RUNNING_SECONDS budget by a wide margin.
+_ANALYSIS_TIMEOUT = int(os.environ.get("AI_DEV_FACTORY_INTEL_TIMEOUT", "120"))
 
 _intel_log = logging.getLogger("intel")
+
+
+def _now_iso() -> str:
+    return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
 def _truncate(value: str | None, limit: int = 500) -> str:
@@ -233,6 +242,43 @@ Return exactly this structure (no extra fields, no missing fields):
 """
 
 
+def _run_ai_subprocess(
+    command: list[str],
+    prompt: str,
+    env: dict,
+    timeout: int,
+) -> tuple[int, str, str, bool, int]:
+    """Run the AI subprocess with an enforced upper bound on wall-clock time.
+
+    Uses Popen + communicate(timeout=…) and, on TimeoutExpired, kills the child
+    then drains its pipes. Returns ``(rc, stdout, stderr, timed_out, duration_ms)``.
+    A zombie child would otherwise pin the background thread to ``running``
+    forever — the reason the analyzer was getting stuck.
+    """
+    proc = subprocess.Popen(
+        command,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        env=env,
+    )
+    t0 = time.monotonic()
+    timed_out = False
+    try:
+        stdout, stderr = proc.communicate(input=prompt, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        proc.kill()
+        try:
+            stdout, stderr = proc.communicate()
+        except Exception:
+            stdout, stderr = "", ""
+    rc = proc.returncode if proc.returncode is not None else -1
+    duration_ms = int((time.monotonic() - t0) * 1000)
+    return rc, stdout or "", stderr or "", timed_out, duration_ms
+
+
 def run_analysis(
     db_path,
     ticket_id: str,
@@ -243,120 +289,166 @@ def run_analysis(
 ) -> None:
     """Run hybrid ticket intelligence analysis and persist the result.
 
-    Designed to run in a background thread. Updates analysis_status through:
-    running → completed | failed.
-    Never raises — failures are persisted to DB.
+    Designed to run in a background thread. Drives analysis_status through:
+    ``running`` → ``completed`` | ``failed``. Never leaves a row in
+    ``queued``/``running``: every failure path persists ``failed_at`` +
+    ``failure_origin``, and a top-level ``finally`` re-checks the row to force
+    a terminal status if any code escaped without writing one.
     """
-    runtime_db.upsert_ticket_intelligence(db_path, ticket_id, analysis_status="running")
     _intel_log.info(
         "intel.started project_id=%s ticket_id=%s db_path=%s",
         project_id, ticket_id, db_path,
     )
 
     try:
-        computed_signals = extract_signals(ticket_content)
-        computed_signals_json = json.dumps(computed_signals)
-
-        template = _load_prompt_template(project_root)
-        prompt = _fill_template(template, ticket_content, computed_signals_json)
-
-        command = shlex.split(exec_cmd)
-        if not command:
-            raise ValueError("exec_cmd is empty")
-
-        env = dict(os.environ)
-        env["PYTHONDONTWRITEBYTECODE"] = "1"
-
         try:
-            proc = subprocess.run(
-                command,
-                input=prompt,
-                text=True,
-                capture_output=True,
-                shell=False,
-                check=False,
-                env=env,
-                timeout=_ANALYSIS_TIMEOUT,
-            )
-        except subprocess.TimeoutExpired:
-            _intel_log.info(
-                "intel.subprocess project_id=%s ticket_id=%s exec_cmd=%s timeout=%ds rc=timeout",
-                project_id, ticket_id, _truncate(exec_cmd, 200), _ANALYSIS_TIMEOUT,
-            )
             runtime_db.upsert_ticket_intelligence(
-                db_path,
-                ticket_id,
-                analysis_status="failed",
-                analysis_summary="Analysis timed out after 120 seconds.",
+                db_path, ticket_id,
+                analysis_status="running",
+                started_at=_now_iso(),
+            )
+
+            computed_signals = extract_signals(ticket_content)
+            computed_signals_json = json.dumps(computed_signals)
+            _intel_log.info(
+                "intel.step.signals_extracted ticket_id=%s signals_count=%d",
+                ticket_id, len(computed_signals) if isinstance(computed_signals, dict) else 0,
+            )
+
+            template = _load_prompt_template(project_root)
+            prompt = _fill_template(template, ticket_content, computed_signals_json)
+            _intel_log.info(
+                "intel.step.prompt_built ticket_id=%s prompt_len=%d",
+                ticket_id, len(prompt),
+            )
+
+            command = shlex.split(exec_cmd)
+            if not command:
+                raise ValueError("exec_cmd is empty")
+
+            env = dict(os.environ)
+            env["PYTHONDONTWRITEBYTECODE"] = "1"
+
+            _intel_log.info(
+                "intel.ai_request.started project_id=%s ticket_id=%s exec_cmd=%s "
+                "timeout=%ds prompt_size=%d",
+                project_id, ticket_id, _truncate(exec_cmd, 200),
+                _ANALYSIS_TIMEOUT, len(prompt),
+            )
+
+            rc, stdout, stderr, timed_out, duration_ms = _run_ai_subprocess(
+                command, prompt, env, _ANALYSIS_TIMEOUT,
+            )
+
+            _intel_log.info(
+                "intel.ai_request.completed project_id=%s ticket_id=%s rc=%s "
+                "stdout_len=%d stderr_len=%d duration_ms=%d timed_out=%s",
+                project_id, ticket_id, rc, len(stdout), len(stderr),
+                duration_ms, timed_out,
+            )
+
+            if timed_out:
+                runtime_db.upsert_ticket_intelligence(
+                    db_path, ticket_id,
+                    analysis_status="failed",
+                    analysis_summary=f"Analysis timed out after {_ANALYSIS_TIMEOUT} seconds.",
+                    computed_signals_json=computed_signals_json,
+                    failed_at=_now_iso(),
+                    failure_origin="timeout",
+                )
+                _intel_log.info(
+                    "intel.persisted project_id=%s ticket_id=%s status=failed db_path=%s reason=timeout",
+                    project_id, ticket_id, db_path,
+                )
+                return
+
+            if rc != 0 or not stdout.strip():
+                summary = f"AI call failed (rc={rc})"
+                if stderr:
+                    summary += f": {stderr[:500]}"
+                runtime_db.upsert_ticket_intelligence(
+                    db_path, ticket_id,
+                    analysis_status="failed",
+                    analysis_summary=summary,
+                    computed_signals_json=computed_signals_json,
+                    failed_at=_now_iso(),
+                    failure_origin="nonzero_rc",
+                )
+                _intel_log.info(
+                    "intel.persisted project_id=%s ticket_id=%s status=failed db_path=%s reason=nonzero_rc rc=%s",
+                    project_id, ticket_id, db_path, rc,
+                )
+                return
+
+            try:
+                raw = _extract_json(stdout)
+            except ValueError as exc:
+                runtime_db.upsert_ticket_intelligence(
+                    db_path, ticket_id,
+                    analysis_status="failed",
+                    analysis_summary=f"JSON parse error: {exc}",
+                    computed_signals_json=computed_signals_json,
+                    failed_at=_now_iso(),
+                    failure_origin="json_parse",
+                )
+                _intel_log.info(
+                    "intel.persisted project_id=%s ticket_id=%s status=failed db_path=%s reason=json_parse",
+                    project_id, ticket_id, db_path,
+                )
+                return
+
+            _intel_log.info(
+                "intel.step.json_parsed ticket_id=%s fields=%d",
+                ticket_id, len(raw) if isinstance(raw, dict) else 0,
+            )
+
+            normalized = _normalize(raw, computed_signals)
+
+            runtime_db.upsert_ticket_intelligence(
+                db_path, ticket_id,
+                analysis_status="completed",
                 computed_signals_json=computed_signals_json,
+                completed_at=_now_iso(),
+                **normalized,
             )
             _intel_log.info(
-                "intel.failed project_id=%s ticket_id=%s db_path=%s reason=timeout",
+                "intel.persisted project_id=%s ticket_id=%s status=completed db_path=%s",
                 project_id, ticket_id, db_path,
             )
-            return
 
-        _intel_log.info(
-            "intel.subprocess project_id=%s ticket_id=%s exec_cmd=%s rc=%d stderr=%s",
-            project_id, ticket_id, _truncate(exec_cmd, 200), proc.returncode,
-            _truncate(proc.stderr, 500),
-        )
-
-        if proc.returncode != 0 or not proc.stdout.strip():
-            summary = f"AI call failed (rc={proc.returncode})"
-            if proc.stderr:
-                summary += f": {proc.stderr[:500]}"
+        except Exception as exc:
             runtime_db.upsert_ticket_intelligence(
-                db_path,
-                ticket_id,
+                db_path, ticket_id,
                 analysis_status="failed",
-                analysis_summary=summary,
-                computed_signals_json=computed_signals_json,
+                analysis_summary=f"Unexpected error: {exc}",
+                failed_at=_now_iso(),
+                failure_origin="exception",
             )
             _intel_log.info(
-                "intel.failed project_id=%s ticket_id=%s db_path=%s reason=nonzero_rc rc=%d",
-                project_id, ticket_id, db_path, proc.returncode,
+                "intel.persisted project_id=%s ticket_id=%s status=failed db_path=%s reason=exception detail=%s",
+                project_id, ticket_id, db_path, _truncate(str(exc), 200),
             )
-            return
-
+    finally:
+        # Last-chance guard: if any code path escaped above (BaseException, or
+        # the except branch's persistence itself raised) without writing a
+        # terminal status, force the row to ``failed`` so no analysis stays in
+        # ``queued`` / ``running``.
         try:
-            raw = _extract_json(proc.stdout)
-        except ValueError as exc:
-            runtime_db.upsert_ticket_intelligence(
-                db_path,
-                ticket_id,
-                analysis_status="failed",
-                analysis_summary=f"JSON parse error: {exc}",
-                computed_signals_json=computed_signals_json,
+            row = runtime_db.get_ticket_intelligence(db_path, ticket_id)
+            if row and row.get("analysis_status") in ("queued", "running"):
+                runtime_db.upsert_ticket_intelligence(
+                    db_path, ticket_id,
+                    analysis_status="failed",
+                    analysis_summary="Analyzer exited without terminal status",
+                    failed_at=_now_iso(),
+                    failure_origin="finally_guard",
+                )
+                _intel_log.info(
+                    "intel.persisted project_id=%s ticket_id=%s status=failed db_path=%s reason=finally_guard",
+                    project_id, ticket_id, db_path,
+                )
+        except Exception:
+            _intel_log.exception(
+                "intel.finally_guard failed project_id=%s ticket_id=%s",
+                project_id, ticket_id,
             )
-            _intel_log.info(
-                "intel.failed project_id=%s ticket_id=%s db_path=%s reason=json_parse",
-                project_id, ticket_id, db_path,
-            )
-            return
-
-        normalized = _normalize(raw, computed_signals)
-
-        runtime_db.upsert_ticket_intelligence(
-            db_path,
-            ticket_id,
-            analysis_status="completed",
-            computed_signals_json=computed_signals_json,
-            **normalized,
-        )
-        _intel_log.info(
-            "intel.completed project_id=%s ticket_id=%s db_path=%s",
-            project_id, ticket_id, db_path,
-        )
-
-    except Exception as exc:
-        runtime_db.upsert_ticket_intelligence(
-            db_path,
-            ticket_id,
-            analysis_status="failed",
-            analysis_summary=f"Unexpected error: {exc}",
-        )
-        _intel_log.info(
-            "intel.failed project_id=%s ticket_id=%s db_path=%s reason=exception detail=%s",
-            project_id, ticket_id, db_path, _truncate(str(exc), 200),
-        )

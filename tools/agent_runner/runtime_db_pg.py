@@ -124,6 +124,14 @@ CREATE TABLE IF NOT EXISTS ticket_intelligence (
     human_code_review_reason            TEXT,
     autonomous_execution_recommendation TEXT,
     analysis_summary                    TEXT,
+    -- Lifecycle timestamps + origin. ISO-8601 in TEXT to match the rest of this
+    -- module's convention; columns mirror runtime_db.py (SQLite) so the public
+    -- shape stays backend-agnostic. Idempotent ALTERs further down handle
+    -- pre-existing databases.
+    started_at                          TEXT,
+    completed_at                        TEXT,
+    failed_at                           TEXT,
+    failure_origin                      TEXT,
     created_at                          TEXT NOT NULL,
     updated_at                          TEXT NOT NULL,
     PRIMARY KEY (project_id, ticket_id)
@@ -218,6 +226,18 @@ CREATE TABLE IF NOT EXISTS ticket_operation_audit (
 
 CREATE INDEX IF NOT EXISTS ix_ticket_operation_audit_lookup
     ON ticket_operation_audit (project_id, ticket_id, id);
+"""
+
+
+# Idempotent migration block for ticket_intelligence lifecycle columns. Kept
+# alongside _DDL so the migration is co-located with the canonical schema. The
+# columns mirror runtime_db.py (SQLite) so the API TicketIntelligence response
+# is identical regardless of backend — see T208 plan §4.
+_TICKET_INTELLIGENCE_LIFECYCLE_MIGRATION = """
+ALTER TABLE ticket_intelligence ADD COLUMN IF NOT EXISTS started_at TEXT;
+ALTER TABLE ticket_intelligence ADD COLUMN IF NOT EXISTS completed_at TEXT;
+ALTER TABLE ticket_intelligence ADD COLUMN IF NOT EXISTS failed_at TEXT;
+ALTER TABLE ticket_intelligence ADD COLUMN IF NOT EXISTS failure_origin TEXT;
 """
 
 
@@ -318,12 +338,14 @@ def init_runtime_db(handle: PgHandle) -> None:
     try:
         with _connect(handle) as conn:
             conn.execute(_DDL)
+            conn.execute(_TICKET_INTELLIGENCE_LIFECYCLE_MIGRATION)
     except Exception:
         # Database may not exist yet (fresh server without POSTGRES_DB) — create
         # it once, then retry the DDL.
         ensure_database()
         with _connect(handle) as conn:
             conn.execute(_DDL)
+            conn.execute(_TICKET_INTELLIGENCE_LIFECYCLE_MIGRATION)
 
 
 def check_and_recover_db(handle: PgHandle) -> bool:

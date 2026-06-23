@@ -2342,8 +2342,25 @@ def project_ticket_intelligence_analyze(
                 db, ticket_id, ticket_content, body.exec_cmd, project_root,
                 project_id=project_id,
             )
-        except Exception:
+        except Exception as exc:
             logger.exception("supervisor: intelligence analysis failed for %s", ticket_id)
+            # ``run_analysis`` is meant to persist its own failures. If something
+            # still escapes (programmer error, BaseException, etc.), persist
+            # failed here so the row never stays in ``queued`` / ``running``.
+            try:
+                from datetime import datetime, timezone
+                runtime_db.upsert_ticket_intelligence(
+                    db, ticket_id,
+                    analysis_status="failed",
+                    analysis_summary=f"Background thread crashed: {exc}",
+                    failed_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    failure_origin="bg_thread_crash",
+                )
+            except Exception:
+                logger.exception(
+                    "supervisor: failed to persist bg-thread crash for %s",
+                    ticket_id,
+                )
 
     threading.Thread(target=_bg, daemon=True).start()
     logger.info(

@@ -464,6 +464,10 @@ class TicketIntelligence(BaseModel):
     human_code_review_reason: str | None = None
     autonomous_execution_recommendation: str | None = None
     analysis_summary: str | None = None
+    started_at: str | None = None
+    completed_at: str | None = None
+    failed_at: str | None = None
+    failure_origin: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
