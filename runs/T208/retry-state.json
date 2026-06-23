@@ -1,5 +1,5 @@
 {
   "failure_class": "provider_error",
-  "retry_count": 1,
-  "cooldown_until": "2026-06-23T14:34:52Z"
+  "retry_count": 2,
+  "cooldown_until": "2026-06-23T14:37:02Z"
 }
