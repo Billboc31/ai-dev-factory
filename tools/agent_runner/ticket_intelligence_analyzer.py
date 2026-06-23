@@ -13,6 +13,7 @@ AI subprocess timeout: 120 seconds. Failures are persisted, never swallowed.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shlex
@@ -29,6 +30,14 @@ from model_catalog import estimate_cost  # noqa: E402
 from ticket_intelligence_extractor import extract as extract_signals  # noqa: E402
 
 _ANALYSIS_TIMEOUT = 120
+
+_intel_log = logging.getLogger("intel")
+
+
+def _truncate(value: str | None, limit: int = 500) -> str:
+    if not value:
+        return ""
+    return value if len(value) <= limit else value[:limit] + "…"
 
 _DIFFICULTY_BANDS = [
     (1, 2, "trivial"),
@@ -230,6 +239,7 @@ def run_analysis(
     ticket_content: str,
     exec_cmd: str,
     project_root: Path,
+    project_id: str | None = None,
 ) -> None:
     """Run hybrid ticket intelligence analysis and persist the result.
 
@@ -238,6 +248,10 @@ def run_analysis(
     Never raises — failures are persisted to DB.
     """
     runtime_db.upsert_ticket_intelligence(db_path, ticket_id, analysis_status="running")
+    _intel_log.info(
+        "intel.started project_id=%s ticket_id=%s db_path=%s",
+        project_id, ticket_id, db_path,
+    )
 
     try:
         computed_signals = extract_signals(ticket_content)
@@ -265,6 +279,10 @@ def run_analysis(
                 timeout=_ANALYSIS_TIMEOUT,
             )
         except subprocess.TimeoutExpired:
+            _intel_log.info(
+                "intel.subprocess project_id=%s ticket_id=%s exec_cmd=%s timeout=%ds rc=timeout",
+                project_id, ticket_id, _truncate(exec_cmd, 200), _ANALYSIS_TIMEOUT,
+            )
             runtime_db.upsert_ticket_intelligence(
                 db_path,
                 ticket_id,
@@ -272,7 +290,17 @@ def run_analysis(
                 analysis_summary="Analysis timed out after 120 seconds.",
                 computed_signals_json=computed_signals_json,
             )
+            _intel_log.info(
+                "intel.failed project_id=%s ticket_id=%s db_path=%s reason=timeout",
+                project_id, ticket_id, db_path,
+            )
             return
+
+        _intel_log.info(
+            "intel.subprocess project_id=%s ticket_id=%s exec_cmd=%s rc=%d stderr=%s",
+            project_id, ticket_id, _truncate(exec_cmd, 200), proc.returncode,
+            _truncate(proc.stderr, 500),
+        )
 
         if proc.returncode != 0 or not proc.stdout.strip():
             summary = f"AI call failed (rc={proc.returncode})"
@@ -284,6 +312,10 @@ def run_analysis(
                 analysis_status="failed",
                 analysis_summary=summary,
                 computed_signals_json=computed_signals_json,
+            )
+            _intel_log.info(
+                "intel.failed project_id=%s ticket_id=%s db_path=%s reason=nonzero_rc rc=%d",
+                project_id, ticket_id, db_path, proc.returncode,
             )
             return
 
@@ -297,6 +329,10 @@ def run_analysis(
                 analysis_summary=f"JSON parse error: {exc}",
                 computed_signals_json=computed_signals_json,
             )
+            _intel_log.info(
+                "intel.failed project_id=%s ticket_id=%s db_path=%s reason=json_parse",
+                project_id, ticket_id, db_path,
+            )
             return
 
         normalized = _normalize(raw, computed_signals)
@@ -308,6 +344,10 @@ def run_analysis(
             computed_signals_json=computed_signals_json,
             **normalized,
         )
+        _intel_log.info(
+            "intel.completed project_id=%s ticket_id=%s db_path=%s",
+            project_id, ticket_id, db_path,
+        )
 
     except Exception as exc:
         runtime_db.upsert_ticket_intelligence(
@@ -315,4 +355,8 @@ def run_analysis(
             ticket_id,
             analysis_status="failed",
             analysis_summary=f"Unexpected error: {exc}",
+        )
+        _intel_log.info(
+            "intel.failed project_id=%s ticket_id=%s db_path=%s reason=exception detail=%s",
+            project_id, ticket_id, db_path, _truncate(str(exc), 200),
         )

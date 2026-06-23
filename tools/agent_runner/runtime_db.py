@@ -187,14 +187,25 @@ def _now_iso() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def get_db_path() -> Path | None:
+def get_db_path(project_id: str | None = None) -> Path | None:
     """Resolve the SQLite DB path.
 
-    When AI_DEV_FACTORY_RUNTIME_ROOT is set (Docker/runtime), returns RUNTIME_ROOT/.runtime/...
-    Dev fallback: use git rev-parse --git-common-dir so all worktrees share one DB even when
-    this module is loaded from a worktree copy (where __file__-based paths point to the worktree).
+    When ``project_id`` is provided and a runtime root is configured, the DB is
+    scoped to ``{root}/{project_id}/.runtime/...`` so each project owns its own
+    file. RUNTIME_BASE_ROOT takes precedence when set; otherwise we honor
+    AI_DEV_FACTORY_RUNTIME_ROOT as the parent directory (multi-project
+    deployments register each project under its own subdirectory there).
+
+    Without ``project_id`` the legacy resolution is preserved so single-project
+    setups and existing callers keep working unchanged.
     """
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+    runtime_base_root = os.environ.get("RUNTIME_BASE_ROOT")
+    if project_id:
+        if runtime_base_root:
+            return Path(runtime_base_root).expanduser() / project_id / _DB_FILENAME
+        if runtime_root:
+            return Path(runtime_root) / project_id / _DB_FILENAME
     if runtime_root:
         return Path(runtime_root) / _DB_FILENAME
     # Dev fallback: git common-dir points to the main repo's .git regardless of which
@@ -217,6 +228,25 @@ def get_db_path() -> Path | None:
         pass
     # Last resort: module-location path (valid only when invoked from the main clone).
     return Path(__file__).resolve().parent.parent.parent / _DB_FILENAME
+
+
+def resolve_db_path_for_project(
+    project_id: str | None,
+    project_runtime_root: Path | None = None,
+) -> Path | None:
+    """Resolve the per-project DB path, mirroring ``runtime_resolver`` precedence.
+
+    Precedence:
+      1. Explicit ``project_runtime_root`` (persisted at bootstrap) — DB is
+         ``{project_runtime_root}/.runtime/ai-dev-factory.sqlite``.
+      2. Env-derived per-project path via :func:`get_db_path` with ``project_id``.
+      3. Legacy global path via :func:`get_db_path` (no project scoping).
+    """
+    if project_runtime_root is not None:
+        return Path(project_runtime_root) / _DB_FILENAME
+    if project_id:
+        return get_db_path(project_id=project_id)
+    return get_db_path()
 
 
 def init_runtime_db(db_path: Path) -> None:
@@ -1004,6 +1034,14 @@ if _RUNTIME_DB_BACKEND == "postgres":
         ) from exc
     # get_db_path(project_id=None) → Postgres handle (single 'adf' DB, project-scoped rows).
     get_db_path = _pg.get_handle  # type: ignore[assignment]
+
+    def _resolve_pg_handle(project_id, project_runtime_root=None):  # noqa: ARG001
+        # Postgres ignores per-project filesystem roots — the project_id alone
+        # picks the right row scope. ``project_runtime_root`` is accepted for
+        # API symmetry with SQLite and is intentionally ignored here.
+        return _pg.get_handle(project_id)
+
+    resolve_db_path_for_project = _resolve_pg_handle  # type: ignore[assignment]
     init_runtime_db = _pg.init_runtime_db  # type: ignore[assignment]
     check_and_recover_db = _pg.check_and_recover_db  # type: ignore[assignment]
     verify_backend_available = _pg.verify_backend_available  # type: ignore[assignment]
