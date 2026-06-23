@@ -10,3 +10,14 @@
 [2026-06-23T20:40:36Z] compose: task (canonical prompt)
 [2026-06-23T20:40:36Z] snapshot: runtime-prompt=runs/T210/prompts/planner-attempt-1.md
 [2026-06-23T20:44:23Z] auto-run: step=planner done rc=0
+[2026-06-23T20:44:25Z] planner checkpoint: committed
+[2026-06-23T20:44:25Z] planner checkpoint: pushed
+[2026-06-23T20:44:25Z] planner validation success
+[2026-06-23T20:44:25Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-23T20:44:25Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-23T20:44:25Z] commit-checkpoint: unstaged runtime garbage: ['runs/T210/runtime.log']
+[2026-06-23T20:44:25Z] commit-checkpoint: sha=c68ed061 files=2 title='docs(T210/workflow): planner — update 2 file(s)'
+[2026-06-23T20:44:25Z] auto-run: auto-push triggered
+[2026-06-23T20:44:25Z] push: tolerating runtime dirty files (not blocking): ['runs/T210/runtime.log']
+[2026-06-23T20:44:25Z] push: pushing branch=ticket/T210-improve-ticket-intelligence-observability-to-diagn
+[2026-06-23T20:44:27Z] push: done branch=ticket/T210-improve-ticket-intelligence-observability-to-diagn
