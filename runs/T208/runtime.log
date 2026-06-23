@@ -49,3 +49,23 @@
 [2026-06-23T13:57:26Z] push: tolerating runtime dirty files (not blocking): ['runs/T208/runtime.log']
 [2026-06-23T13:57:26Z] push: pushing branch=ticket/T208-fix-ticket-intelligence-analysis-stuck-in-running
 [2026-06-23T13:57:28Z] push: done branch=ticket/T208-fix-ticket-intelligence-analysis-stuck-in-running
+[2026-06-23T14:49:40Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-23T14:49:40Z] auto-run: running step=tester
+[2026-06-23T14:49:40Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-23T14:49:40Z] prompt: generic fallback — injecting runs/T208/ticket.md
+[2026-06-23T14:49:40Z] compose: global-context=docs/ai/global-context.md
+[2026-06-23T14:49:40Z] compose: role=ai/roles/tester.md
+[2026-06-23T14:49:40Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-23T14:49:40Z] compose: skill=ai/skills/testing.md
+[2026-06-23T14:49:40Z] compose: skill=ai/skills/debugging.md
+[2026-06-23T14:49:40Z] compose: task (canonical prompt)
+[2026-06-23T14:49:40Z] snapshot: runtime-prompt=runs/T208/prompts/tester-attempt-5.md
+[2026-06-23T14:52:15Z] auto-run: step=tester done rc=0
+[2026-06-23T14:52:15Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-23T14:52:15Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-23T14:52:15Z] commit-checkpoint: unstaged runtime garbage: ['runs/T208/runtime.log']
+[2026-06-23T14:52:15Z] commit-checkpoint: sha=aaa8de07 files=4 title='test(T208/workflow): tester — update 4 file(s)'
+[2026-06-23T14:52:15Z] auto-run: auto-push triggered
+[2026-06-23T14:52:15Z] push: tolerating runtime dirty files (not blocking): ['runs/T208/runtime.log']
+[2026-06-23T14:52:15Z] push: pushing branch=ticket/T208-fix-ticket-intelligence-analysis-stuck-in-running
+[2026-06-23T14:52:18Z] push: done branch=ticket/T208-fix-ticket-intelligence-analysis-stuck-in-running
