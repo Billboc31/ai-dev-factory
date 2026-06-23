@@ -139,13 +139,47 @@ describe('TicketIntelligencePanel', () => {
     expect(rank.closest('details').open).toBe(true)
   })
 
-  it('shows running state with animation text', async () => {
+  it('shows running state with current stage label', async () => {
+    ticketsApi.getTicketIntelligence.mockResolvedValue({
+      data: {
+        ticket_id: TICKET_ID,
+        analysis_status: 'running',
+        stage: 'waiting_ai',
+        started_at: '2026-06-23T15:00:00Z',
+      }
+    })
+    renderPanel()
+    await waitFor(() => {
+      expect(screen.getByText(/Current stage: Waiting for AI response/)).toBeInTheDocument()
+      expect(screen.getByText(/Started:/)).toBeInTheDocument()
+      expect(screen.getByText(/Running for:/)).toBeInTheDocument()
+    })
+  })
+
+  it('falls back to "Running" when stage missing on a running analysis', async () => {
     ticketsApi.getTicketIntelligence.mockResolvedValue({
       data: { ticket_id: TICKET_ID, analysis_status: 'running' }
     })
     renderPanel()
     await waitFor(() => {
-      expect(screen.getByText(/Analysis in progress/)).toBeInTheDocument()
+      expect(screen.getByText(/Current stage: Running/)).toBeInTheDocument()
+    })
+  })
+
+  it('shows failed-during stage line when analysis failed mid-pipeline', async () => {
+    ticketsApi.getTicketIntelligence.mockResolvedValue({
+      data: {
+        ticket_id: TICKET_ID,
+        analysis_status: 'failed',
+        analysis_summary: 'AI call failed (rc=2): boom',
+        stage: 'waiting_ai',
+        failure_origin: 'nonzero_rc',
+      }
+    })
+    renderPanel()
+    await waitFor(() => {
+      expect(screen.getByText(/Failed during:/)).toBeInTheDocument()
+      expect(screen.getByText(/Waiting for AI response/)).toBeInTheDocument()
     })
   })
 
