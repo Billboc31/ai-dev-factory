@@ -1,11 +1,15 @@
-## Review summary — T205
+## Review summary — T205 (attempt 2)
 
-I wrote `runs/T205/reviews/implementation-review.md` and the decision is **IMPLEMENTATION_FIX_REQUIRED**.
+Decision: **IMPLEMENTATION_APPROVED**.
 
-The UI refactor itself (compact grid, clamped summary, `<details>`-based `Show detailed analysis` / `Show raw intelligence data` disclosures, warning border) matches the ticket and the approved plan, and the 25 panel tests pass.
+The compact/expandable refactor of `TicketIntelligencePanel.jsx` matches every ticket requirement: 10-field grid, clamped `analysis_summary`, `<details>`-based `Show detailed analysis` and `Show raw intelligence data` disclosures collapsed by default, warning border for high-risk/human-review tickets, and unchanged analyze/re-analyze behavior. Scope is strictly frontend (2 files).
 
-**Blocking regression**: the implementation silently deleted the polling-halt safety mechanism that T206 added on `main` last commit — `MAX_CONSECUTIVE_POLL_ERRORS`, `pollErrorCount`, the `pollingHalted` gate on `isActive`, and the user-facing `"Polling halted — server unreachable…"` banner. This reopens the exact bug T206 closed (infinite 5xx loop when the supervisor is unreachable), and it contradicts both the ticket's "improves usability only" constraint and the plan's explicit "Behavior preserved: `usePolling` interval, `ACTIVE_STATUSES` set, error display, 404 → null intelligence — all unchanged".
+Attempt 1's blocker — the silent deletion of T206's polling-halt safety — is fully reversed. Verified the constant, state, derivation, `useEffect` reset, inline comment, and banner JSX are byte-identical to `main`.
 
-The fix is a straightforward restore of four pieces (constant, state, derivation/guard, banner JSX) — no test churn required. Also flagged non-blocking: the committed `node_modules/.vite/vitest/results.json` cache file should be dropped, and `Show detailed analysis` could be hidden when every sub-field is empty.
+Tests: 25/25 panel tests pass, 7/7 `usePolling` tests pass. Wider dashboard suite has heap-OOM failures in `TicketDetail.test.jsx`, but that file auto-mocks `api/tickets` without return values and was already loading `TicketIntelligencePanel` from `main` — pre-existing, unrelated to T205, worth a follow-up ticket.
 
-IMPLEMENTATION_FIX_REQUIRED
+Non-blocking nits (committed `node_modules/.vite/vitest/results.json` already tracked on main; minor duplication of `dependency_hints` in compact vs detailed; empty `Show detailed analysis` when all sub-fields are null) are not regressions.
+
+Review written to `runs/T205/reviews/implementation-review.md`.
+
+IMPLEMENTATION_APPROVED
