@@ -3,5 +3,7 @@
   "state": "TEST_COMPLETE",
   "branch": "ticket/T208-fix-ticket-intelligence-analysis-stuck-in-running",
   "issue_number": 272,
-  "updated_at": "2026-06-23T14:52:15Z"
+  "updated_at": "2026-06-23T14:52:54Z",
+  "pr_number": 273,
+  "pr_synced": true
 }
