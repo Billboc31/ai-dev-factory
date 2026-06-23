@@ -279,6 +279,35 @@ def test_project_post_analyze_delegates_to_supervisor_in_docker(tmp_path, monkey
     mock_run.assert_not_called()
 
 
+def test_resolve_db_for_project_maps_registry_runtime_root_in_docker(tmp_path, monkeypatch):
+    """Docker API must not open /runtime/{project_id}/.runtime when DB lives at /runtime/.runtime."""
+    from services.control_api.routes import intelligence as intel
+    from services.control_api.services.project_registry import ProjectEntry, ProjectRegistry
+
+    host_runtime = tmp_path / "host" / "ai-dev-factory"
+    container_runtime = tmp_path / "container"
+    db_file = container_runtime / ".runtime" / "ai-dev-factory.sqlite"
+    _sqlite_db.init_runtime_db(db_file)
+
+    monkeypatch.setenv("AI_DEV_FACTORY_API_IN_DOCKER", "1")
+    monkeypatch.setenv("HOST_RUNTIME_ROOT", str(host_runtime))
+    monkeypatch.setenv("CONTAINER_RUNTIME_ROOT", str(container_runtime))
+
+    registry = ProjectRegistry(
+        _entries=[ProjectEntry(id="ai-dev-factory", root=tmp_path, project_runtime_root=host_runtime)]
+    )
+
+    class _State:
+        project_registry = registry
+        db_path = tmp_path / "fallback.sqlite"
+
+    class _Request:
+        app = type("App", (), {"state": _State()})()
+
+    resolved = intel._resolve_db_for_project(_Request(), "ai-dev-factory")
+    assert resolved == db_file
+
+
 def test_post_analyze_idempotency_guard(tmp_path):
     """Second POST while status is queued/running must return 202 without a new thread."""
     _make_ticket(tmp_path, "T001")
