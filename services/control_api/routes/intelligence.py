@@ -314,14 +314,9 @@ def analyze_intelligence(
                     "use the project-scoped analyze endpoint"
                 ),
             )
-        # Persist `queued` to the per-project DB *before* delegating so the very
-        # first dashboard poll observes a real row instead of a 404, and the
-        # reaper has something to recover if delegation silently fails later.
-        runtime_db.upsert_ticket_intelligence(db, ticket_id, analysis_status="queued")
-        _intel_log.info(
-            "intel.queued project_id=%s ticket_id=%s db_path=%s",
-            project_id, ticket_id, db,
-        )
+        # Do not write `queued` from the Docker API process — concurrent SQLite
+        # access on the bind-mounted runtime DB causes disk I/O errors on macOS.
+        # The host supervisor persists `queued` and starts the analyzer thread.
 
         url = f"{_supervisor_url()}/projects/{project_id}/tickets/{ticket_id}/intelligence/analyze"
         _intel_log.info(

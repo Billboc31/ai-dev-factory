@@ -2290,7 +2290,7 @@ def project_ticket_intelligence_analyze(
 
     try:
         existing = runtime_db.get_ticket_intelligence(db, ticket_id)
-        if existing and existing.get("analysis_status") in {"queued", "running"}:
+        if existing and existing.get("analysis_status") == "running":
             return {"ticket_id": ticket_id, "analysis_status": existing["analysis_status"]}
 
         try:

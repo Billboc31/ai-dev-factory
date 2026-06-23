@@ -370,7 +370,13 @@ def test_project_post_analyze_writes_queued_to_project_db(tmp_path, monkeypatch)
     expected_db.parent.mkdir(parents=True, exist_ok=True)
     _sqlite_db.init_runtime_db(expected_db)
 
-    with patch("services.control_api.routes.intelligence._delegate_analyze_to_supervisor") as mock_delegate:
+    def _delegate_writes_queued(project_id, ticket_id, exec_cmd):
+        _sqlite_db.upsert_ticket_intelligence(expected_db, ticket_id, analysis_status="queued")
+
+    with patch(
+        "services.control_api.routes.intelligence._delegate_analyze_to_supervisor",
+        side_effect=_delegate_writes_queued,
+    ) as mock_delegate:
         client = TestClient(app)
         r = client.post("/projects/P1/tickets/T001/intelligence/analyze")
 
