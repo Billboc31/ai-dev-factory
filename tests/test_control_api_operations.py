@@ -154,7 +154,7 @@ def test_post_archive_ticket_writes_archive_metadata(tmp_path):
     assert state["state"] == "PLAN_APPROVED"
 
 
-def test_post_reset_to_planning_writes_plan_fix_required(tmp_path):
+def test_post_reset_to_planning_writes_init(tmp_path):
     run_dir = _make_ticket(tmp_path, "T001", state="PLAN_APPROVED")
     (run_dir / "plan.md").write_text("p", encoding="utf-8")
     app, _ = _make_app(tmp_path)
@@ -165,7 +165,24 @@ def test_post_reset_to_planning_writes_plan_fix_required(tmp_path):
     )
     assert r.status_code == 200
     state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
-    assert state["state"] == "PLAN_FIX_REQUIRED"
+    assert state["state"] == "INIT"
+
+
+def test_post_reset_to_coding_writes_plan_approved(tmp_path):
+    run_dir = _make_ticket(tmp_path, "T001", state="IMPLEMENTATION_APPROVED")
+    (run_dir / "plan.md").write_text("p", encoding="utf-8")
+    (run_dir / "implementation-output.md").write_text("i", encoding="utf-8")
+    app, _ = _make_app(tmp_path)
+    client = TestClient(app)
+    r = client.post(
+        "/tickets/T001/operations/reset_to_coding",
+        json={"reason": "regen impl", "typed_ticket_id": "T001"},
+    )
+    assert r.status_code == 200
+    state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert state["state"] == "PLAN_APPROVED"
+    assert (run_dir / "plan.md").exists()
+    assert not (run_dir / "implementation-output.md").exists()
 
 
 def test_post_rerun_diagnostics_low_safety_succeeds(tmp_path, monkeypatch):

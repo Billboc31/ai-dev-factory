@@ -1,0 +1,43 @@
+[2026-06-23T12:46:07Z] auto-run start: state=INIT
+[2026-06-23T12:46:07Z] auto-run: running step=planner
+[2026-06-23T12:46:07Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-23T12:46:07Z] prompt: generic fallback — injecting runs/T207/ticket.md
+[2026-06-23T12:46:07Z] compose: global-context=docs/ai/global-context.md
+[2026-06-23T12:46:07Z] compose: role=ai/roles/planner.md
+[2026-06-23T12:46:07Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-23T12:46:07Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-23T12:46:07Z] compose: skill=ai/skills/documentation.md
+[2026-06-23T12:46:07Z] compose: task (canonical prompt)
+[2026-06-23T12:46:07Z] snapshot: runtime-prompt=runs/T207/prompts/planner-attempt-1.md
+[2026-06-23T12:48:37Z] auto-run: step=planner done rc=0
+[2026-06-23T12:48:40Z] planner checkpoint: committed
+[2026-06-23T12:48:40Z] planner checkpoint: pushed
+[2026-06-23T12:48:40Z] planner validation success
+[2026-06-23T12:48:40Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-23T12:48:40Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-23T12:48:40Z] commit-checkpoint: unstaged runtime garbage: ['runs/T207/runtime.log']
+[2026-06-23T12:48:40Z] commit-checkpoint: sha=5098b81c files=2 title='docs(T207/workflow): planner — update 2 file(s)'
+[2026-06-23T12:48:40Z] auto-run: auto-push triggered
+[2026-06-23T12:48:40Z] push: tolerating runtime dirty files (not blocking): ['runs/T207/runtime.log']
+[2026-06-23T12:48:40Z] push: pushing branch=ticket/T207-fix-reset-to-planning-workflow-to-correctly-restar
+[2026-06-23T12:48:42Z] push: done branch=ticket/T207-fix-reset-to-planning-workflow-to-correctly-restar
+[2026-06-23T13:01:57Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-23T13:01:57Z] auto-run: running step=tester
+[2026-06-23T13:01:57Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-23T13:01:57Z] prompt: generic fallback — injecting runs/T207/ticket.md
+[2026-06-23T13:01:57Z] compose: global-context=docs/ai/global-context.md
+[2026-06-23T13:01:57Z] compose: role=ai/roles/tester.md
+[2026-06-23T13:01:57Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-23T13:01:57Z] compose: skill=ai/skills/testing.md
+[2026-06-23T13:01:57Z] compose: skill=ai/skills/debugging.md
+[2026-06-23T13:01:57Z] compose: task (canonical prompt)
+[2026-06-23T13:01:57Z] snapshot: runtime-prompt=runs/T207/prompts/tester-attempt-1.md
+[2026-06-23T13:06:50Z] auto-run: step=tester done rc=0
+[2026-06-23T13:06:50Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-23T13:06:50Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-23T13:06:50Z] commit-checkpoint: unstaged runtime garbage: ['runs/T207/runtime.log']
+[2026-06-23T13:06:50Z] commit-checkpoint: sha=84b8cc3e files=5 title='test(T207/workflow): tester — update 5 file(s)'
+[2026-06-23T13:06:50Z] auto-run: auto-push triggered
+[2026-06-23T13:06:51Z] push: tolerating runtime dirty files (not blocking): ['runs/T207/runtime.log']
+[2026-06-23T13:06:51Z] push: pushing branch=ticket/T207-fix-reset-to-planning-workflow-to-correctly-restar
+[2026-06-23T13:06:53Z] push: done branch=ticket/T207-fix-reset-to-planning-workflow-to-correctly-restar

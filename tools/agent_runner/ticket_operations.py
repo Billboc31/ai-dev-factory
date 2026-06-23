@@ -360,7 +360,7 @@ def _handle_reset_to_planning(ctx: OperationContext) -> dict:
     state_data = _read_state(run_dir)
     previous_state = state_data.get("state")
     archive_root, moved = _archive_artifacts(run_dir, _RESET_TO_PLANNING_ARTIFACTS)
-    new_state = "PLAN_FIX_REQUIRED"
+    new_state = "INIT"
     _write_reset_metadata(
         archive_root, "reset_to_planning", ctx.ticket_id, ctx.requested_by,
         reason, previous_state, new_state,
@@ -382,7 +382,13 @@ def _handle_reset_to_planning(ctx: OperationContext) -> dict:
     }
 
 
-_RESET_TO_CODING_ARTIFACTS = ("reviews", "tests", "conflict", "retry-state.json")
+_RESET_TO_CODING_ARTIFACTS = (
+    "implementation-output.md",
+    "reviews",
+    "tests",
+    "conflict",
+    "retry-state.json",
+)
 
 
 def _handle_reset_to_coding(ctx: OperationContext) -> dict:
@@ -395,7 +401,7 @@ def _handle_reset_to_coding(ctx: OperationContext) -> dict:
     state_data = _read_state(run_dir)
     previous_state = state_data.get("state")
     archive_root, moved = _archive_artifacts(run_dir, _RESET_TO_CODING_ARTIFACTS)
-    new_state = "IMPLEMENTATION_FIX_REQUIRED"
+    new_state = "PLAN_APPROVED"
     _write_reset_metadata(
         archive_root, "reset_to_coding", ctx.ticket_id, ctx.requested_by,
         reason, previous_state, new_state,
