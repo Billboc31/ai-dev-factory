@@ -38,3 +38,14 @@
 [2026-06-23T09:48:29Z] compose: extra-context=runs/T205/fixes/context-20260623T094829Z.md
 [2026-06-23T09:48:29Z] snapshot: runtime-prompt=runs/T205/prompts/planner-attempt-2.md
 [2026-06-23T09:50:34Z] auto-run: step=planner done rc=0
+[2026-06-23T09:50:36Z] planner checkpoint: committed
+[2026-06-23T09:50:36Z] planner checkpoint: pushed
+[2026-06-23T09:50:36Z] planner validation success
+[2026-06-23T09:50:36Z] auto-run: transition PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED
+[2026-06-23T09:50:36Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-23T09:50:37Z] commit-checkpoint: unstaged runtime garbage: ['runs/T205/runtime.log']
+[2026-06-23T09:50:37Z] commit-checkpoint: sha=5092f235 files=2 title='docs(T205/workflow): planner — update 2 file(s)'
+[2026-06-23T09:50:37Z] auto-run: auto-push triggered
+[2026-06-23T09:50:37Z] push: tolerating runtime dirty files (not blocking): ['runs/T205/runtime.log']
+[2026-06-23T09:50:37Z] push: pushing branch=ticket/T205-t205-compact-ticket-intelligence-ui-with-expandabl
+[2026-06-23T09:50:39Z] push: done branch=ticket/T205-t205-compact-ticket-intelligence-ui-with-expandabl
