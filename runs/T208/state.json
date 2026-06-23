@@ -1,7 +1,7 @@
 {
   "ticket_id": "T208",
-  "state": "PLAN_FIX_REQUIRED",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T208-fix-ticket-intelligence-analysis-stuck-in-running",
   "issue_number": 272,
-  "updated_at": "2026-06-23T13:54:58Z"
+  "updated_at": "2026-06-23T13:57:26Z"
 }
