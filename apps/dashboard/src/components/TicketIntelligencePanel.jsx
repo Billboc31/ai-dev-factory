@@ -6,6 +6,29 @@ const ACTIVE_STATUSES = new Set(['queued', 'running'])
 const POLL_INTERVAL = 4000
 const MAX_CONSECUTIVE_POLL_ERRORS = 5
 
+const STAGE_LABELS = {
+  queued: 'Queued',
+  starting: 'Starting…',
+  building_prompt: 'Building prompt',
+  waiting_ai: 'Waiting for AI response',
+  parsing_result: 'Parsing AI response',
+  persisting: 'Saving results',
+  completed: 'Completed',
+  failed: 'Failed',
+}
+
+function stageLabel(stage) {
+  if (!stage) return 'Running'
+  return STAGE_LABELS[stage] ?? stage
+}
+
+function elapsedSeconds(startedAt) {
+  if (!startedAt) return null
+  const started = new Date(startedAt).getTime()
+  if (Number.isNaN(started)) return null
+  return Math.max(0, Math.floor((Date.now() - started) / 1000))
+}
+
 function StatusBadge({ status }) {
   const colors = {
     not_started: 'bg-gray-100 text-gray-600',
@@ -191,13 +214,31 @@ export default function TicketIntelligencePanel({ ticketId, projectId }) {
       )}
 
       {isActive && (
-        <p className="text-blue-600 text-sm animate-pulse">Analysis in progress…</p>
+        <div className="text-blue-600 text-sm space-y-0.5">
+          <p className="animate-pulse">Current stage: {stageLabel(intelligence?.stage)}</p>
+          {intelligence?.started_at && (
+            <p className="text-xs text-blue-500">
+              Started: <span className="font-mono">{new Date(intelligence.started_at).toLocaleString()}</span>
+            </p>
+          )}
+          {elapsedSeconds(intelligence?.started_at) != null && (
+            <p className="text-xs text-blue-500">
+              Running for: <span className="font-mono">{elapsedSeconds(intelligence.started_at)}s</span>
+            </p>
+          )}
+        </div>
       )}
 
       {status === 'failed' && intelligence?.analysis_summary && (
         <div className="bg-red-50 border border-red-200 rounded p-3">
           <p className="text-xs text-red-700 font-medium">Analysis failed</p>
           <p className="text-xs text-red-600 mt-1">{intelligence.analysis_summary}</p>
+          {intelligence.stage && intelligence.stage !== 'failed' && (
+            <p className="text-xs text-red-500 mt-1">
+              Failed during:{' '}
+              <span className="font-mono">{stageLabel(intelligence.stage)}</span>
+            </p>
+          )}
           {(intelligence.failure_origin || intelligence.failed_at) && (
             <p className="text-xs text-red-500 mt-2">
               {intelligence.failure_origin && (

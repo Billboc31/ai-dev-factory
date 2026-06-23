@@ -15,6 +15,7 @@ no scheduler, no daemon.
 from __future__ import annotations
 
 import datetime
+import logging
 import sqlite3
 import sys
 from pathlib import Path
@@ -25,6 +26,9 @@ if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
 import runtime_db  # noqa: E402
+from ticket_intelligence_stages import STAGE_FAILED  # noqa: E402
+
+_reaper_log = logging.getLogger("intel")
 
 STALE_QUEUED_SECONDS = 10 * 60
 STALE_RUNNING_SECONDS = 15 * 60
@@ -137,7 +141,28 @@ def reap_stale_intelligence(
             analysis_summary=summary,
             failed_at=_now_iso(),
             failure_origin=origin,
+            stage=STAGE_FAILED,
         )
+        try:
+            runtime_db.append_runtime_event(
+                db_path,
+                ticket_id,
+                "ticket_intelligence_analysis_failed",
+                f"ticket_intelligence reaped ticket_id={ticket_id} previous_status={status}",
+                metadata={
+                    "stage": STAGE_FAILED,
+                    "failure_origin": origin,
+                    "reason": "reaper",
+                    "previous_status": status,
+                    "age_seconds": int(age),
+                    "analysis_summary": summary[:500],
+                },
+            )
+        except Exception:
+            _reaper_log.exception(
+                "intel.reaper_event_failed ticket_id=%s previous_status=%s",
+                ticket_id, status,
+            )
         recovered.append(
             {
                 "ticket_id": ticket_id,

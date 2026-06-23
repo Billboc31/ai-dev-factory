@@ -2343,22 +2343,52 @@ def project_ticket_intelligence_analyze(
                 project_id=project_id,
             )
         except Exception as exc:
-            logger.exception("supervisor: intelligence analysis failed for %s", ticket_id)
+            logger.exception(
+                "supervisor: intelligence analysis failed for project_id=%s ticket_id=%s stage=bg_thread",
+                project_id, ticket_id,
+            )
+            intel_log.exception(
+                "intel.bg_thread_crash project_id=%s ticket_id=%s db_path=%s detail=%s",
+                project_id, ticket_id, db, exc,
+            )
             # ``run_analysis`` is meant to persist its own failures. If something
             # still escapes (programmer error, BaseException, etc.), persist
             # failed here so the row never stays in ``queued`` / ``running``.
+            import traceback as _traceback
+            from datetime import datetime, timezone
+            failed_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            tb = _traceback.format_exc()
             try:
-                from datetime import datetime, timezone
                 runtime_db.upsert_ticket_intelligence(
                     db, ticket_id,
                     analysis_status="failed",
                     analysis_summary=f"Background thread crashed: {exc}",
-                    failed_at=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+                    failed_at=failed_at,
                     failure_origin="bg_thread_crash",
+                    stage="failed",
                 )
             except Exception:
                 logger.exception(
                     "supervisor: failed to persist bg-thread crash for %s",
+                    ticket_id,
+                )
+            try:
+                runtime_db.append_runtime_event(
+                    db,
+                    ticket_id,
+                    "ticket_intelligence_analysis_failed",
+                    f"ticket_intelligence bg-thread crashed ticket_id={ticket_id}",
+                    metadata={
+                        "project_id": project_id,
+                        "stage": "failed",
+                        "failure_origin": "bg_thread_crash",
+                        "analysis_summary": f"Background thread crashed: {exc}",
+                        "traceback": tb[-2048:] if tb else "",
+                    },
+                )
+            except Exception:
+                logger.exception(
+                    "supervisor: failed to append bg-thread crash event for %s",
                     ticket_id,
                 )
 

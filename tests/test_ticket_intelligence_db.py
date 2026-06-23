@@ -134,3 +134,51 @@ def test_multiple_tickets_isolated(db: Path) -> None:
     row2 = get_ticket_intelligence(db, "T002")
     assert row1["difficulty_score"] == 3
     assert row2["difficulty_score"] == 8
+
+
+# ── T210: stage column ────────────────────────────────────────────────────────
+
+
+def test_upsert_persists_stage(db: Path) -> None:
+    upsert_ticket_intelligence(db, "T001", analysis_status="running", stage="waiting_ai")
+    row = get_ticket_intelligence(db, "T001")
+    assert row is not None
+    assert row["stage"] == "waiting_ai"
+
+    upsert_ticket_intelligence(db, "T001", analysis_status="completed", stage="completed")
+    row = get_ticket_intelligence(db, "T001")
+    assert row["stage"] == "completed"
+
+
+def test_migration_adds_stage_column_to_existing_db(tmp_path: Path) -> None:
+    """An older DB without the stage column gets it on the next init_runtime_db()."""
+    import sqlite3
+    db_path = tmp_path / ".runtime" / "legacy.sqlite"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    # Create the pre-T210 schema (no stage column).
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE ticket_intelligence (
+                ticket_id           TEXT PRIMARY KEY,
+                analysis_status     TEXT NOT NULL DEFAULT 'not_started',
+                created_at          TEXT NOT NULL,
+                updated_at          TEXT NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "INSERT INTO ticket_intelligence (ticket_id, analysis_status, created_at, updated_at) "
+            "VALUES ('T_legacy', 'completed', '2026-01-01T00:00:00Z', '2026-01-01T00:00:00Z')"
+        )
+
+    _db.init_runtime_db(db_path)
+
+    with sqlite3.connect(str(db_path)) as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info('ticket_intelligence')")}
+    assert "stage" in cols
+
+    row = get_ticket_intelligence(db_path, "T_legacy")
+    assert row is not None
+    assert row["analysis_status"] == "completed"
+    assert row["stage"] is None
