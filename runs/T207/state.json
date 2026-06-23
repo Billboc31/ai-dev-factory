@@ -1,7 +1,7 @@
 {
   "ticket_id": "T207",
-  "state": "IMPLEMENTATION_APPROVED",
+  "state": "TEST_COMPLETE",
   "branch": "ticket/T207-fix-reset-to-planning-workflow-to-correctly-restar",
   "issue_number": 270,
-  "updated_at": "2026-06-23T13:01:22Z"
+  "updated_at": "2026-06-23T13:06:50Z"
 }
