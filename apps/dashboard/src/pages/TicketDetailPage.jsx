@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import * as api from '../api/tickets'
 import ActionButton from '../components/ActionButton'
@@ -10,8 +10,10 @@ import TicketIntelligencePanel from '../components/TicketIntelligencePanel'
 import TicketOperationsPanel from '../components/TicketOperationsPanel'
 import TicketReadinessPanel from '../components/TicketReadinessPanel'
 import TicketRuleEvaluationPanel from '../components/TicketRuleEvaluationPanel'
+import TicketWorkflowTimeline from '../components/TicketWorkflowTimeline'
 import WorkflowTimeline from '../components/WorkflowTimeline'
 import usePolling from '../hooks/usePolling'
+import { deriveGlobalSummary, deriveStepStatuses } from '../lib/ticketWorkflowStatus'
 
 const CONFLICT_PANEL_STATES = new Set([
   'CONFLICT_RESOLUTION_NEEDED',
@@ -142,6 +144,35 @@ function ConflictResolutionPanel({ ticket, projectId, onRefresh }) {
   )
 }
 
+const READY_TO_TAKE_GATES = [
+  { key: 'intelligence', label: 'Intelligence analysis' },
+  { key: 'readiness',    label: 'Readiness evaluation' },
+  { key: 'rules',        label: 'Rule evaluation' },
+  { key: 'approval',     label: 'Human approval' },
+]
+
+function ReadyToTakeChecklist({ stepStatuses }) {
+  return (
+    <ul className="space-y-1 text-sm">
+      {READY_TO_TAKE_GATES.map(({ key, label }) => {
+        const status = stepStatuses?.[key]?.status ?? 'pending'
+        const icon = status === 'done' ? '✓' : status === 'blocked' ? '✗' : '○'
+        const color = status === 'done'
+          ? 'text-green-700'
+          : status === 'blocked'
+            ? 'text-red-700'
+            : 'text-gray-500'
+        return (
+          <li key={key} className={`flex items-center gap-2 ${color}`}>
+            <span className="font-mono">{icon}</span>
+            <span>{label}</span>
+          </li>
+        )
+      })}
+    </ul>
+  )
+}
+
 function OverviewTab({ timeline }) {
   if (!timeline) return <p className="text-gray-500 text-sm">No data available.</p>
   const ri = timeline.retry_info
@@ -173,6 +204,24 @@ function OverviewTab({ timeline }) {
   )
 }
 
+function safeFetch(call) {
+  try {
+    const result = call()
+    if (result && typeof result.then === 'function') {
+      return result.then(
+        r => r?.data ?? null,
+        e => {
+          if (e?.response?.status === 404) return null
+          return null
+        }
+      )
+    }
+    return Promise.resolve(null)
+  } catch (e) {
+    return Promise.resolve(null)
+  }
+}
+
 export default function TicketDetailPage() {
   const { id, projectId } = useParams()
   const [ticket, setTicket] = useState(null)
@@ -181,6 +230,12 @@ export default function TicketDetailPage() {
   const [tab, setTab] = useState('timeline')
   const [tabContent, setTabContent] = useState({})
   const [tabLoading, setTabLoading] = useState(false)
+  const [workflowData, setWorkflowData] = useState({
+    intelligence: null,
+    readiness: null,
+    approvals: [],
+    ruleEvaluation: null,
+  })
   const prevStateRef = useRef(null)
   const activeTabRef = useRef(tab)
 
@@ -191,6 +246,7 @@ export default function TicketDetailPage() {
     setError(null)
     setTab('timeline')
     setTabContent({})
+    setWorkflowData({ intelligence: null, readiness: null, approvals: [], ruleEvaluation: null })
     prevStateRef.current = null
   }, [id])
 
@@ -216,6 +272,24 @@ export default function TicketDetailPage() {
   // Restart polling and fetch immediately when id changes
   usePolling(fetchTicket, 5000, id)
 
+  const fetchWorkflowData = useCallback(() => {
+    Promise.all([
+      safeFetch(() => api.getTicketIntelligence(id, projectId)),
+      safeFetch(() => api.getTicketReadiness(id, projectId)),
+      safeFetch(() => api.getTicketApprovals(id, projectId)),
+      safeFetch(() => api.getTicketRuleEvaluation(id, projectId)),
+    ]).then(([intelligence, readiness, approvalsResp, ruleEvaluation]) => {
+      setWorkflowData({
+        intelligence,
+        readiness,
+        approvals: approvalsResp?.approvals ?? [],
+        ruleEvaluation,
+      })
+    })
+  }, [id, projectId])
+
+  usePolling(fetchWorkflowData, 5000, `${id}-workflow`)
+
   useEffect(() => {
     if (tabContent[tab] !== undefined) return
 
@@ -239,6 +313,18 @@ export default function TicketDetailPage() {
       .then(res => setTicket(res.data))
       .catch(err => setError(err.response?.data?.detail || err.message))
   }, [id, projectId])
+
+  const stepStatuses = useMemo(() => deriveStepStatuses({
+    intelligence: workflowData.intelligence,
+    readiness: workflowData.readiness,
+    approval: workflowData.approvals.length
+      ? workflowData.approvals[workflowData.approvals.length - 1]
+      : null,
+    ruleEvaluation: workflowData.ruleEvaluation,
+    ticket,
+  }), [workflowData, ticket])
+
+  const globalSummary = useMemo(() => deriveGlobalSummary(stepStatuses), [stepStatuses])
 
   if (loading) return <p className="text-gray-500">Loading…</p>
 
@@ -269,20 +355,30 @@ export default function TicketDetailPage() {
 
       <ErrorBanner message={error} onClose={() => setError(null)} />
 
-      {ticket && CONFLICT_PANEL_STATES.has(ticket.state) && (
-        <ConflictResolutionPanel
-          ticket={ticket}
-          projectId={projectId}
-          onRefresh={refreshTicket}
-        />
-      )}
-
-      <TicketIntelligencePanel ticketId={id} projectId={projectId} />
-      <TicketReadinessPanel ticketId={id} projectId={projectId} />
-      <HumanApprovalPanel ticketId={id} projectId={projectId} />
-      <TicketRuleEvaluationPanel ticketId={id} projectId={projectId} />
-      <TicketDiagnosticsPanel ticketId={id} projectId={projectId} />
-      <TicketOperationsPanel ticketId={id} projectId={projectId} />
+      <TicketWorkflowTimeline
+        stepStatuses={stepStatuses}
+        globalSummary={globalSummary}
+        stepContent={{
+          intelligence: <TicketIntelligencePanel ticketId={id} projectId={projectId} />,
+          readiness:    <TicketReadinessPanel ticketId={id} projectId={projectId} />,
+          rules:        <TicketRuleEvaluationPanel ticketId={id} projectId={projectId} />,
+          approval:     <HumanApprovalPanel ticketId={id} projectId={projectId} />,
+          readyToTake:  <ReadyToTakeChecklist stepStatuses={stepStatuses} />,
+          execution: (
+            <div className="space-y-4">
+              {ticket && CONFLICT_PANEL_STATES.has(ticket.state) && (
+                <ConflictResolutionPanel
+                  ticket={ticket}
+                  projectId={projectId}
+                  onRefresh={refreshTicket}
+                />
+              )}
+              <TicketDiagnosticsPanel ticketId={id} projectId={projectId} />
+              <TicketOperationsPanel ticketId={id} projectId={projectId} />
+            </div>
+          ),
+        }}
+      />
 
       <div className="flex border-b border-gray-200 mb-4">
         {TABS.map(t => (

@@ -1,7 +1,7 @@
 {
   "ticket_id": "T209",
-  "state": "PLAN_APPROVED",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T209-add-visual-ticket-workflow-timeline-with-expandabl",
   "issue_number": 274,
-  "updated_at": "2026-06-23T15:02:15Z"
+  "updated_at": "2026-06-23T15:59:59Z"
 }
