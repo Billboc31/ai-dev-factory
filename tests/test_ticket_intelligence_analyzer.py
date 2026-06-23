@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 import subprocess
 import sys
@@ -123,6 +124,15 @@ def test_subprocess_timeout_persists_failed(db: Path, tmp_path: Path, monkeypatc
     assert row is not None
     assert row["analysis_status"] == "failed"
     assert "timed out" in (row["analysis_summary"] or "").lower()
+    assert row["stage"] == "failed"
+    failed_events = [
+        e for e in _db.list_runtime_events(db, ticket_id="T001")
+        if e["event_type"] == "ticket_intelligence_analysis_failed"
+    ]
+    assert failed_events, "expected a ticket_intelligence_analysis_failed runtime event"
+    metadata = json.loads(failed_events[0]["metadata_json"])
+    assert metadata.get("stage") == "waiting_ai"
+    assert metadata.get("failure_origin") == "timeout"
 
 
 def test_subprocess_nonzero_rc_persists_failed(db: Path, tmp_path: Path, monkeypatch) -> None:
@@ -136,6 +146,15 @@ def test_subprocess_nonzero_rc_persists_failed(db: Path, tmp_path: Path, monkeyp
     assert row["analysis_status"] == "failed"
     assert "rc=2" in (row["analysis_summary"] or "")
     assert row["failure_origin"] == "nonzero_rc"
+    assert row["stage"] == "failed"
+    failed_events = [
+        e for e in _db.list_runtime_events(db, ticket_id="T001")
+        if e["event_type"] == "ticket_intelligence_analysis_failed"
+    ]
+    assert failed_events
+    metadata = json.loads(failed_events[0]["metadata_json"])
+    assert metadata.get("stage") == "waiting_ai"
+    assert metadata.get("failure_origin") == "nonzero_rc"
 
 
 def test_subprocess_invalid_json_persists_failed(db: Path, tmp_path: Path, monkeypatch) -> None:
@@ -149,6 +168,15 @@ def test_subprocess_invalid_json_persists_failed(db: Path, tmp_path: Path, monke
     assert row["analysis_status"] == "failed"
     assert "json parse" in (row["analysis_summary"] or "").lower()
     assert row["failure_origin"] == "json_parse"
+    assert row["stage"] == "failed"
+    failed_events = [
+        e for e in _db.list_runtime_events(db, ticket_id="T001")
+        if e["event_type"] == "ticket_intelligence_analysis_failed"
+    ]
+    assert failed_events
+    metadata = json.loads(failed_events[0]["metadata_json"])
+    assert metadata.get("stage") == "parsing_result"
+    assert metadata.get("failure_origin") == "json_parse"
 
 
 def test_run_analysis_accepts_project_id_kwarg(db: Path, tmp_path: Path, monkeypatch) -> None:
@@ -211,6 +239,18 @@ def test_unexpected_exception_in_extract_persists_failed(db: Path, tmp_path: Pat
     assert row["failure_origin"] == "exception"
     assert "extract_signals exploded" in (row["analysis_summary"] or "")
     assert row["failed_at"] is not None
+    assert row["stage"] == "failed"
+    failed_events = [
+        e for e in _db.list_runtime_events(db, ticket_id="T001")
+        if e["event_type"] == "ticket_intelligence_analysis_failed"
+    ]
+    assert failed_events
+    metadata = json.loads(failed_events[0]["metadata_json"])
+    # extract_signals runs before any explicit stage transition, while
+    # current_stage is still STAGE_STARTING.
+    assert metadata.get("stage") == "starting"
+    assert metadata.get("failure_origin") == "exception"
+    assert "traceback" in metadata
 
 
 def test_finally_guard_marks_running_row_failed(db: Path, tmp_path: Path, monkeypatch) -> None:
@@ -232,3 +272,42 @@ def test_finally_guard_marks_running_row_failed(db: Path, tmp_path: Path, monkey
     assert row["analysis_status"] == "failed"
     assert row["failure_origin"] == "finally_guard"
     assert "without terminal status" in (row["analysis_summary"] or "")
+    assert row["stage"] == "failed"
+
+
+def test_stage_progresses_through_lifecycle_on_success(
+    db: Path, tmp_path: Path, monkeypatch
+) -> None:
+    """A successful run records stage transitions in runtime_events and ends with stage=completed."""
+    fake = _FakePopen(returncode=0, stdout=_OK_JSON, stderr="")
+    _patch_popen(monkeypatch, popen=fake)
+
+    _analyzer.run_analysis(db, "T001", "ticket body", "claude --skip", tmp_path)
+
+    row = _db.get_ticket_intelligence(db, "T001")
+    assert row is not None
+    assert row["analysis_status"] == "completed"
+    assert row["stage"] == "completed"
+
+    events = _db.list_runtime_events(db, ticket_id="T001")
+    # list_runtime_events returns most-recent-first; reverse to get insertion order.
+    stage_transitions = [
+        json.loads(e["metadata_json"])["to"]
+        for e in reversed(events)
+        if e["event_type"] == "ticket_intelligence_stage_changed"
+    ]
+    expected = [
+        "starting",
+        "building_prompt",
+        "waiting_ai",
+        "parsing_result",
+        "persisting",
+        "completed",
+    ]
+    assert stage_transitions == expected
+
+    event_types_in_order = [e["event_type"] for e in reversed(events)]
+    assert "ticket_intelligence_analysis_started" in event_types_in_order
+    assert "ticket_intelligence_ai_process_started" in event_types_in_order
+    assert "ticket_intelligence_ai_process_completed" in event_types_in_order
+    assert "ticket_intelligence_analysis_completed" in event_types_in_order

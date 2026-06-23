@@ -95,6 +95,7 @@ CREATE TABLE IF NOT EXISTS ticket_intelligence (
     completed_at                        TEXT,
     failed_at                           TEXT,
     failure_origin                      TEXT,
+    stage                               TEXT,
     created_at                          TEXT NOT NULL,
     updated_at                          TEXT NOT NULL
 );
@@ -258,6 +259,7 @@ _TICKET_INTELLIGENCE_LIFECYCLE_COLUMNS = (
     ("completed_at", "TEXT"),
     ("failed_at", "TEXT"),
     ("failure_origin", "TEXT"),
+    ("stage", "TEXT"),
 )
 
 

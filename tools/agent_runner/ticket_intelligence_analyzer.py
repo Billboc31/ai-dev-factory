@@ -21,6 +21,7 @@ import shlex
 import subprocess
 import sys
 import time
+import traceback
 from pathlib import Path
 
 _TOOLS_DIR = Path(__file__).resolve().parent
@@ -30,6 +31,15 @@ if str(_TOOLS_DIR) not in sys.path:
 import runtime_db  # noqa: E402
 from model_catalog import estimate_cost  # noqa: E402
 from ticket_intelligence_extractor import extract as extract_signals  # noqa: E402
+from ticket_intelligence_stages import (  # noqa: E402
+    STAGE_BUILDING_PROMPT,
+    STAGE_COMPLETED,
+    STAGE_FAILED,
+    STAGE_PARSING_RESULT,
+    STAGE_PERSISTING,
+    STAGE_STARTING,
+    STAGE_WAITING_AI,
+)
 
 # Upper bound on the AI subprocess. Tunable via env so operators can extend the
 # window for slower local models without editing code; default 120 s matches the
@@ -279,6 +289,91 @@ def _run_ai_subprocess(
     return rc, stdout or "", stderr or "", timed_out, duration_ms
 
 
+def _truncate_traceback(limit: int = 2048) -> str:
+    """Return the current exception's traceback, truncated to ``limit`` chars."""
+    tb = traceback.format_exc()
+    if len(tb) <= limit:
+        return tb
+    return tb[-limit:]
+
+
+def _set_stage(
+    db_path,
+    ticket_id: str,
+    stage: str,
+    *,
+    project_id: str | None,
+    previous_stage: str | None,
+    extra_fields: dict | None = None,
+) -> None:
+    """Persist a stage transition + append a runtime event + log it.
+
+    Uses this module's ``runtime_db`` binding so tests that monkey-patch
+    ``_analyzer.runtime_db`` to a SQLite-only module continue to work.
+    """
+    fields: dict = {"stage": stage}
+    if extra_fields:
+        fields.update(extra_fields)
+    runtime_db.upsert_ticket_intelligence(db_path, ticket_id, **fields)
+
+    try:
+        runtime_db.append_runtime_event(
+            db_path,
+            ticket_id,
+            "ticket_intelligence_stage_changed",
+            f"ticket_intelligence stage {previous_stage or '-'} -> {stage}",
+            metadata={
+                "project_id": project_id,
+                "from": previous_stage,
+                "to": stage,
+            },
+        )
+    except Exception:
+        _intel_log.exception(
+            "intel.stage_event_failed project_id=%s ticket_id=%s stage=%s",
+            project_id, ticket_id, stage,
+        )
+
+    _intel_log.info(
+        "intel.stage project_id=%s ticket_id=%s stage=%s previous=%s",
+        project_id, ticket_id, stage, previous_stage,
+    )
+
+
+def _emit_failure_event(
+    db_path,
+    ticket_id: str,
+    *,
+    project_id: str | None,
+    stage: str,
+    failure_origin: str,
+    analysis_summary: str,
+    include_traceback: bool,
+) -> None:
+    """Best-effort runtime-event emission for a failure branch."""
+    metadata: dict = {
+        "project_id": project_id,
+        "stage": stage,
+        "failure_origin": failure_origin,
+        "analysis_summary": _truncate(analysis_summary, 500),
+    }
+    if include_traceback:
+        metadata["traceback"] = _truncate_traceback()
+    try:
+        runtime_db.append_runtime_event(
+            db_path,
+            ticket_id,
+            "ticket_intelligence_analysis_failed",
+            f"ticket_intelligence failed at stage={stage} origin={failure_origin}",
+            metadata=metadata,
+        )
+    except Exception:
+        _intel_log.exception(
+            "intel.failure_event_failed project_id=%s ticket_id=%s stage=%s",
+            project_id, ticket_id, stage,
+        )
+
+
 def run_analysis(
     db_path,
     ticket_id: str,
@@ -294,32 +389,59 @@ def run_analysis(
     ``queued``/``running``: every failure path persists ``failed_at`` +
     ``failure_origin``, and a top-level ``finally`` re-checks the row to force
     a terminal status if any code escaped without writing one.
+
+    Every persisted row carries a ``stage`` value naming the exact pipeline
+    position (T210) so a stuck analysis can be diagnosed from the DB alone.
     """
     _intel_log.info(
-        "intel.started project_id=%s ticket_id=%s db_path=%s",
-        project_id, ticket_id, db_path,
+        "intel.started project_id=%s ticket_id=%s db_path=%s stage=%s",
+        project_id, ticket_id, db_path, STAGE_STARTING,
     )
+
+    # ``current_stage`` mirrors what's currently persisted, so every failure
+    # branch can carry the precise stage at which the failure occurred.
+    current_stage = STAGE_STARTING
+    computed_signals_json: str | None = None
 
     try:
         try:
-            runtime_db.upsert_ticket_intelligence(
-                db_path, ticket_id,
-                analysis_status="running",
-                started_at=_now_iso(),
+            _set_stage(
+                db_path, ticket_id, STAGE_STARTING,
+                project_id=project_id,
+                previous_stage=None,
+                extra_fields={
+                    "analysis_status": "running",
+                    "started_at": _now_iso(),
+                },
+            )
+            runtime_db.append_runtime_event(
+                db_path,
+                ticket_id,
+                "ticket_intelligence_analysis_started",
+                f"ticket_intelligence analysis started ticket_id={ticket_id}",
+                metadata={"project_id": project_id, "stage": STAGE_STARTING},
             )
 
             computed_signals = extract_signals(ticket_content)
             computed_signals_json = json.dumps(computed_signals)
             _intel_log.info(
-                "intel.step.signals_extracted ticket_id=%s signals_count=%d",
-                ticket_id, len(computed_signals) if isinstance(computed_signals, dict) else 0,
+                "intel.step.signals_extracted ticket_id=%s stage=%s signals_count=%d",
+                ticket_id, current_stage,
+                len(computed_signals) if isinstance(computed_signals, dict) else 0,
             )
+
+            _set_stage(
+                db_path, ticket_id, STAGE_BUILDING_PROMPT,
+                project_id=project_id,
+                previous_stage=current_stage,
+            )
+            current_stage = STAGE_BUILDING_PROMPT
 
             template = _load_prompt_template(project_root)
             prompt = _fill_template(template, ticket_content, computed_signals_json)
             _intel_log.info(
-                "intel.step.prompt_built ticket_id=%s prompt_len=%d",
-                ticket_id, len(prompt),
+                "intel.step.prompt_built ticket_id=%s stage=%s prompt_len=%d",
+                ticket_id, current_stage, len(prompt),
             )
 
             command = shlex.split(exec_cmd)
@@ -329,11 +451,30 @@ def run_analysis(
             env = dict(os.environ)
             env["PYTHONDONTWRITEBYTECODE"] = "1"
 
+            _set_stage(
+                db_path, ticket_id, STAGE_WAITING_AI,
+                project_id=project_id,
+                previous_stage=current_stage,
+            )
+            current_stage = STAGE_WAITING_AI
+
             _intel_log.info(
-                "intel.ai_request.started project_id=%s ticket_id=%s exec_cmd=%s "
+                "intel.ai_request.started project_id=%s ticket_id=%s stage=%s exec_cmd=%s "
                 "timeout=%ds prompt_size=%d",
-                project_id, ticket_id, _truncate(exec_cmd, 200),
+                project_id, ticket_id, current_stage, _truncate(exec_cmd, 200),
                 _ANALYSIS_TIMEOUT, len(prompt),
+            )
+            runtime_db.append_runtime_event(
+                db_path,
+                ticket_id,
+                "ticket_intelligence_ai_process_started",
+                f"ticket_intelligence AI subprocess started ticket_id={ticket_id}",
+                metadata={
+                    "project_id": project_id,
+                    "stage": current_stage,
+                    "timeout": _ANALYSIS_TIMEOUT,
+                    "prompt_size": len(prompt),
+                },
             )
 
             rc, stdout, stderr, timed_out, duration_ms = _run_ai_subprocess(
@@ -341,24 +482,51 @@ def run_analysis(
             )
 
             _intel_log.info(
-                "intel.ai_request.completed project_id=%s ticket_id=%s rc=%s "
+                "intel.ai_request.completed project_id=%s ticket_id=%s stage=%s rc=%s "
                 "stdout_len=%d stderr_len=%d duration_ms=%d timed_out=%s",
-                project_id, ticket_id, rc, len(stdout), len(stderr),
+                project_id, ticket_id, current_stage, rc, len(stdout), len(stderr),
                 duration_ms, timed_out,
+            )
+            runtime_db.append_runtime_event(
+                db_path,
+                ticket_id,
+                "ticket_intelligence_ai_process_completed",
+                f"ticket_intelligence AI subprocess completed ticket_id={ticket_id} rc={rc}",
+                metadata={
+                    "project_id": project_id,
+                    "stage": current_stage,
+                    "rc": rc,
+                    "duration_ms": duration_ms,
+                    "timed_out": timed_out,
+                },
             )
 
             if timed_out:
-                runtime_db.upsert_ticket_intelligence(
-                    db_path, ticket_id,
-                    analysis_status="failed",
-                    analysis_summary=f"Analysis timed out after {_ANALYSIS_TIMEOUT} seconds.",
-                    computed_signals_json=computed_signals_json,
-                    failed_at=_now_iso(),
-                    failure_origin="timeout",
+                summary = f"Analysis timed out after {_ANALYSIS_TIMEOUT} seconds."
+                _set_stage(
+                    db_path, ticket_id, STAGE_FAILED,
+                    project_id=project_id,
+                    previous_stage=current_stage,
+                    extra_fields={
+                        "analysis_status": "failed",
+                        "analysis_summary": summary,
+                        "computed_signals_json": computed_signals_json,
+                        "failed_at": _now_iso(),
+                        "failure_origin": "timeout",
+                    },
                 )
-                _intel_log.info(
-                    "intel.persisted project_id=%s ticket_id=%s status=failed db_path=%s reason=timeout",
-                    project_id, ticket_id, db_path,
+                _intel_log.error(
+                    "intel.failed project_id=%s ticket_id=%s stage=%s db_path=%s "
+                    "reason=timeout duration_ms=%d",
+                    project_id, ticket_id, current_stage, db_path, duration_ms,
+                )
+                _emit_failure_event(
+                    db_path, ticket_id,
+                    project_id=project_id,
+                    stage=current_stage,
+                    failure_origin="timeout",
+                    analysis_summary=summary,
+                    include_traceback=False,
                 )
                 return
 
@@ -366,67 +534,141 @@ def run_analysis(
                 summary = f"AI call failed (rc={rc})"
                 if stderr:
                     summary += f": {stderr[:500]}"
-                runtime_db.upsert_ticket_intelligence(
-                    db_path, ticket_id,
-                    analysis_status="failed",
-                    analysis_summary=summary,
-                    computed_signals_json=computed_signals_json,
-                    failed_at=_now_iso(),
-                    failure_origin="nonzero_rc",
+                _set_stage(
+                    db_path, ticket_id, STAGE_FAILED,
+                    project_id=project_id,
+                    previous_stage=current_stage,
+                    extra_fields={
+                        "analysis_status": "failed",
+                        "analysis_summary": summary,
+                        "computed_signals_json": computed_signals_json,
+                        "failed_at": _now_iso(),
+                        "failure_origin": "nonzero_rc",
+                    },
                 )
-                _intel_log.info(
-                    "intel.persisted project_id=%s ticket_id=%s status=failed db_path=%s reason=nonzero_rc rc=%s",
-                    project_id, ticket_id, db_path, rc,
+                _intel_log.error(
+                    "intel.failed project_id=%s ticket_id=%s stage=%s db_path=%s "
+                    "reason=nonzero_rc rc=%s stderr=%s",
+                    project_id, ticket_id, current_stage, db_path, rc, _truncate(stderr, 200),
+                )
+                _emit_failure_event(
+                    db_path, ticket_id,
+                    project_id=project_id,
+                    stage=current_stage,
+                    failure_origin="nonzero_rc",
+                    analysis_summary=summary,
+                    include_traceback=False,
                 )
                 return
+
+            _set_stage(
+                db_path, ticket_id, STAGE_PARSING_RESULT,
+                project_id=project_id,
+                previous_stage=current_stage,
+            )
+            current_stage = STAGE_PARSING_RESULT
 
             try:
                 raw = _extract_json(stdout)
             except ValueError as exc:
-                runtime_db.upsert_ticket_intelligence(
-                    db_path, ticket_id,
-                    analysis_status="failed",
-                    analysis_summary=f"JSON parse error: {exc}",
-                    computed_signals_json=computed_signals_json,
-                    failed_at=_now_iso(),
-                    failure_origin="json_parse",
+                summary = f"JSON parse error: {exc}"
+                _set_stage(
+                    db_path, ticket_id, STAGE_FAILED,
+                    project_id=project_id,
+                    previous_stage=current_stage,
+                    extra_fields={
+                        "analysis_status": "failed",
+                        "analysis_summary": summary,
+                        "computed_signals_json": computed_signals_json,
+                        "failed_at": _now_iso(),
+                        "failure_origin": "json_parse",
+                    },
                 )
-                _intel_log.info(
-                    "intel.persisted project_id=%s ticket_id=%s status=failed db_path=%s reason=json_parse",
-                    project_id, ticket_id, db_path,
+                _intel_log.exception(
+                    "intel.failed project_id=%s ticket_id=%s stage=%s db_path=%s "
+                    "reason=json_parse",
+                    project_id, ticket_id, current_stage, db_path,
+                )
+                _emit_failure_event(
+                    db_path, ticket_id,
+                    project_id=project_id,
+                    stage=current_stage,
+                    failure_origin="json_parse",
+                    analysis_summary=summary,
+                    include_traceback=True,
                 )
                 return
 
             _intel_log.info(
-                "intel.step.json_parsed ticket_id=%s fields=%d",
-                ticket_id, len(raw) if isinstance(raw, dict) else 0,
+                "intel.step.json_parsed ticket_id=%s stage=%s fields=%d",
+                ticket_id, current_stage,
+                len(raw) if isinstance(raw, dict) else 0,
             )
 
             normalized = _normalize(raw, computed_signals)
 
-            runtime_db.upsert_ticket_intelligence(
-                db_path, ticket_id,
-                analysis_status="completed",
-                computed_signals_json=computed_signals_json,
-                completed_at=_now_iso(),
-                **normalized,
+            _set_stage(
+                db_path, ticket_id, STAGE_PERSISTING,
+                project_id=project_id,
+                previous_stage=current_stage,
             )
+            current_stage = STAGE_PERSISTING
+
+            _set_stage(
+                db_path, ticket_id, STAGE_COMPLETED,
+                project_id=project_id,
+                previous_stage=current_stage,
+                extra_fields={
+                    "analysis_status": "completed",
+                    "computed_signals_json": computed_signals_json,
+                    "completed_at": _now_iso(),
+                    **normalized,
+                },
+            )
+            current_stage = STAGE_COMPLETED
             _intel_log.info(
-                "intel.persisted project_id=%s ticket_id=%s status=completed db_path=%s",
-                project_id, ticket_id, db_path,
+                "intel.persisted project_id=%s ticket_id=%s stage=%s status=completed db_path=%s",
+                project_id, ticket_id, current_stage, db_path,
+            )
+            runtime_db.append_runtime_event(
+                db_path,
+                ticket_id,
+                "ticket_intelligence_analysis_completed",
+                f"ticket_intelligence analysis completed ticket_id={ticket_id}",
+                metadata={"project_id": project_id, "stage": current_stage},
             )
 
         except Exception as exc:
-            runtime_db.upsert_ticket_intelligence(
-                db_path, ticket_id,
-                analysis_status="failed",
-                analysis_summary=f"Unexpected error: {exc}",
-                failed_at=_now_iso(),
-                failure_origin="exception",
+            summary = f"Unexpected error: {exc}"
+            try:
+                _set_stage(
+                    db_path, ticket_id, STAGE_FAILED,
+                    project_id=project_id,
+                    previous_stage=current_stage,
+                    extra_fields={
+                        "analysis_status": "failed",
+                        "analysis_summary": summary,
+                        "failed_at": _now_iso(),
+                        "failure_origin": "exception",
+                    },
+                )
+            except Exception:
+                _intel_log.exception(
+                    "intel.persist_failure_failed project_id=%s ticket_id=%s stage=%s",
+                    project_id, ticket_id, current_stage,
+                )
+            _intel_log.exception(
+                "intel.failed project_id=%s ticket_id=%s stage=%s db_path=%s "
+                "reason=exception detail=%s",
+                project_id, ticket_id, current_stage, db_path, _truncate(str(exc), 200),
             )
-            _intel_log.info(
-                "intel.persisted project_id=%s ticket_id=%s status=failed db_path=%s reason=exception detail=%s",
-                project_id, ticket_id, db_path, _truncate(str(exc), 200),
+            _emit_failure_event(
+                db_path, ticket_id,
+                project_id=project_id,
+                stage=current_stage,
+                failure_origin="exception",
+                analysis_summary=summary,
+                include_traceback=True,
             )
     finally:
         # Last-chance guard: if any code path escaped above (BaseException, or
@@ -436,19 +678,38 @@ def run_analysis(
         try:
             row = runtime_db.get_ticket_intelligence(db_path, ticket_id)
             if row and row.get("analysis_status") in ("queued", "running"):
-                runtime_db.upsert_ticket_intelligence(
-                    db_path, ticket_id,
-                    analysis_status="failed",
-                    analysis_summary="Analyzer exited without terminal status",
-                    failed_at=_now_iso(),
-                    failure_origin="finally_guard",
+                try:
+                    _set_stage(
+                        db_path, ticket_id, STAGE_FAILED,
+                        project_id=project_id,
+                        previous_stage=current_stage,
+                        extra_fields={
+                            "analysis_status": "failed",
+                            "analysis_summary": "Analyzer exited without terminal status",
+                            "failed_at": _now_iso(),
+                            "failure_origin": "finally_guard",
+                        },
+                    )
+                except Exception:
+                    _intel_log.exception(
+                        "intel.finally_guard_persist_failed project_id=%s ticket_id=%s stage=%s",
+                        project_id, ticket_id, current_stage,
+                    )
+                _intel_log.error(
+                    "intel.persisted project_id=%s ticket_id=%s stage=%s status=failed "
+                    "db_path=%s reason=finally_guard",
+                    project_id, ticket_id, STAGE_FAILED, db_path,
                 )
-                _intel_log.info(
-                    "intel.persisted project_id=%s ticket_id=%s status=failed db_path=%s reason=finally_guard",
-                    project_id, ticket_id, db_path,
+                _emit_failure_event(
+                    db_path, ticket_id,
+                    project_id=project_id,
+                    stage=current_stage,
+                    failure_origin="finally_guard",
+                    analysis_summary="Analyzer exited without terminal status",
+                    include_traceback=False,
                 )
         except Exception:
             _intel_log.exception(
-                "intel.finally_guard failed project_id=%s ticket_id=%s",
-                project_id, ticket_id,
+                "intel.finally_guard failed project_id=%s ticket_id=%s stage=%s",
+                project_id, ticket_id, current_stage,
             )

@@ -468,6 +468,7 @@ class TicketIntelligence(BaseModel):
     completed_at: str | None = None
     failed_at: str | None = None
     failure_origin: str | None = None
+    stage: str | None = None
     created_at: str | None = None
     updated_at: str | None = None
 

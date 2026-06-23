@@ -132,6 +132,7 @@ CREATE TABLE IF NOT EXISTS ticket_intelligence (
     completed_at                        TEXT,
     failed_at                           TEXT,
     failure_origin                      TEXT,
+    stage                               TEXT,
     created_at                          TEXT NOT NULL,
     updated_at                          TEXT NOT NULL,
     PRIMARY KEY (project_id, ticket_id)
@@ -238,6 +239,7 @@ ALTER TABLE ticket_intelligence ADD COLUMN IF NOT EXISTS started_at TEXT;
 ALTER TABLE ticket_intelligence ADD COLUMN IF NOT EXISTS completed_at TEXT;
 ALTER TABLE ticket_intelligence ADD COLUMN IF NOT EXISTS failed_at TEXT;
 ALTER TABLE ticket_intelligence ADD COLUMN IF NOT EXISTS failure_origin TEXT;
+ALTER TABLE ticket_intelligence ADD COLUMN IF NOT EXISTS stage TEXT;
 """
 
 

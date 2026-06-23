@@ -454,6 +454,56 @@ def test_bg_thread_crash_persists_failed(tmp_path):
     assert body["failure_origin"] == "bg_thread_crash"
 
 
+def test_get_intelligence_returns_stage_field(tmp_path):
+    """The GET endpoint exposes the new `stage` column to the dashboard (T210)."""
+    _make_ticket(tmp_path, "T001")
+    app = _make_app(tmp_path)
+    db = app.state.db_path
+
+    _sqlite_db.upsert_ticket_intelligence(
+        db, "T001",
+        analysis_status="completed",
+        stage="completed",
+        analysis_summary="done",
+    )
+
+    client = TestClient(app)
+    r = client.get("/tickets/T001/intelligence")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["stage"] == "completed"
+
+
+def test_bg_thread_crash_writes_stage_failed_and_runtime_event(tmp_path):
+    """The bg-thread crash handler persists stage=failed and appends a runtime event (T210)."""
+    _make_ticket(tmp_path, "T001")
+    app = _make_app(tmp_path)
+    db = app.state.db_path
+
+    def _explode(*args, **kwargs):  # noqa: ARG001
+        raise RuntimeError("simulated bg crash")
+
+    with patch("ticket_intelligence_analyzer.run_analysis", side_effect=_explode):
+        client = TestClient(app)
+        client.post("/tickets/T001/intelligence/analyze")
+        time.sleep(0.2)
+
+    row = _sqlite_db.get_ticket_intelligence(db, "T001")
+    assert row is not None
+    assert row["stage"] == "failed"
+
+    events = _sqlite_db.list_runtime_events(db, ticket_id="T001")
+    failed_events = [
+        e for e in events
+        if e["event_type"] == "ticket_intelligence_analysis_failed"
+    ]
+    assert failed_events, "expected ticket_intelligence_analysis_failed runtime event"
+    metadata = json.loads(failed_events[0]["metadata_json"])
+    assert metadata.get("failure_origin") == "bg_thread_crash"
+    assert metadata.get("stage") == "failed"
+    assert "traceback" in metadata
+
+
 def test_post_analyze_persists_failure_on_supervisor_unreachable(tmp_path, monkeypatch):
     """When delegation raises, the project DB row exists with analysis_status='failed'."""
     monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path))

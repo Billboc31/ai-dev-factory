@@ -168,6 +168,31 @@ def test_reaper_writes_failed_at(db: Path) -> None:
     assert row["failure_origin"] == "reaper-stale"
 
 
+def test_reaper_sets_stage_failed_and_emits_event(db: Path) -> None:
+    """The reaper records stage=failed and appends a ticket_intelligence_analysis_failed event (T210)."""
+    import json
+    now = datetime.datetime(2026, 6, 23, 10, 0, 0, tzinfo=datetime.timezone.utc)
+    _db.upsert_ticket_intelligence(db, "T001", analysis_status="running")
+    _set_updated_at(db, "T001", _iso(now - datetime.timedelta(seconds=901)))
+
+    _recovery.reap_stale_intelligence(db, now=now)
+
+    row = _db.get_ticket_intelligence(db, "T001")
+    assert row["stage"] == "failed"
+
+    events = _db.list_runtime_events(db, ticket_id="T001")
+    failed_events = [
+        e for e in events
+        if e["event_type"] == "ticket_intelligence_analysis_failed"
+    ]
+    assert failed_events
+    metadata = json.loads(failed_events[0]["metadata_json"])
+    assert metadata.get("reason") == "reaper"
+    assert metadata.get("previous_status") == "running"
+    assert metadata.get("stage") == "failed"
+    assert metadata.get("age_seconds") >= 900
+
+
 def test_reaper_skips_rows_with_unparseable_updated_at(db: Path) -> None:
     now = datetime.datetime(2026, 6, 23, 10, 0, 0, tzinfo=datetime.timezone.utc)
     _db.upsert_ticket_intelligence(db, "T001", analysis_status="queued")
