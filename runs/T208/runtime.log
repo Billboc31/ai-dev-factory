@@ -38,3 +38,14 @@
 [2026-06-23T13:55:46Z] compose: extra-context=runs/T208/fixes/context-20260623T135546Z.md
 [2026-06-23T13:55:46Z] snapshot: runtime-prompt=runs/T208/prompts/planner-attempt-2.md
 [2026-06-23T13:57:24Z] auto-run: step=planner done rc=0
+[2026-06-23T13:57:26Z] planner checkpoint: committed
+[2026-06-23T13:57:26Z] planner checkpoint: pushed
+[2026-06-23T13:57:26Z] planner validation success
+[2026-06-23T13:57:26Z] auto-run: transition PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED
+[2026-06-23T13:57:26Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-23T13:57:26Z] commit-checkpoint: unstaged runtime garbage: ['runs/T208/runtime.log']
+[2026-06-23T13:57:26Z] commit-checkpoint: sha=07ad65fe files=2 title='docs(T208/workflow): planner — update 2 file(s)'
+[2026-06-23T13:57:26Z] auto-run: auto-push triggered
+[2026-06-23T13:57:26Z] push: tolerating runtime dirty files (not blocking): ['runs/T208/runtime.log']
+[2026-06-23T13:57:26Z] push: pushing branch=ticket/T208-fix-ticket-intelligence-analysis-stuck-in-running
+[2026-06-23T13:57:28Z] push: done branch=ticket/T208-fix-ticket-intelligence-analysis-stuck-in-running
