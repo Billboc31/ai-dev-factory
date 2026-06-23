@@ -29,8 +29,10 @@ if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 import runtime_db  # noqa: E402
 import ticket_intelligence_analyzer as _analyzer  # noqa: E402
+import ticket_intelligence_recovery as _recovery  # noqa: E402
 
 logger = logging.getLogger("control-api")
+_intel_log = logging.getLogger("intel")
 router = APIRouter(prefix="/tickets", tags=["intelligence"])
 project_router = APIRouter(prefix="/projects", tags=["intelligence"])
 
@@ -65,6 +67,33 @@ def _needs_host_exec(request: Request) -> bool:
     return shutil.which(parts[0]) is None
 
 
+def _resolve_db_for_project(request: Request, project_id: str | None):
+    """Return the project-scoped DB handle, falling back to the global one.
+
+    A single shared resolver guarantees that the project GET and POST handlers
+    target the same file/handle — the root cause behind the symptom T206 was
+    filed for (API reading a different DB than the supervisor wrote to).
+
+    The override only kicks in when a runtime root is actually configured
+    (``RUNTIME_BASE_ROOT`` or ``AI_DEV_FACTORY_RUNTIME_ROOT``). Without one
+    we keep using the explicit ``app.state.db_path`` so single-project and
+    test setups remain unchanged.
+    """
+    if project_id:
+        runtime_configured = bool(
+            os.environ.get("RUNTIME_BASE_ROOT")
+            or os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
+        )
+        if runtime_configured:
+            try:
+                db = runtime_db.resolve_db_path_for_project(project_id)
+            except Exception:
+                db = None
+            if db is not None:
+                return db
+    return _db_path(request)
+
+
 def _delegate_analyze_to_supervisor(project_id: str, ticket_id: str, exec_cmd: str) -> None:
     """Run ticket intelligence on the host supervisor where claude is installed."""
     url = f"{_supervisor_url()}/projects/{project_id}/tickets/{ticket_id}/intelligence/analyze"
@@ -86,6 +115,42 @@ def _delegate_analyze_to_supervisor(project_id: str, ticket_id: str, exec_cmd: s
         except Exception:
             detail = resp.text[:300]
         raise HTTPException(status_code=503, detail=f"supervisor analyze failed: {detail}")
+
+
+def _persist_delegation_failure(db, ticket_id: str, summary: str) -> None:
+    """Best-effort: ensure a row exists in ``failed`` after delegation fails.
+
+    The reaper covers cases where the row was never written, but writing here
+    too lets the next poll return ``failed`` immediately instead of waiting for
+    the stale threshold.
+    """
+    if db is None:
+        return
+    try:
+        runtime_db.upsert_ticket_intelligence(
+            db, ticket_id,
+            analysis_status="failed",
+            analysis_summary=summary,
+        )
+    except Exception:
+        logger.exception("intel: failed to persist delegation failure for %s", ticket_id)
+
+
+def _try_reap(db, *, project_id: str | None, ticket_id: str | None) -> None:
+    """Run the stale-analysis reaper without ever raising into the caller."""
+    if db is None:
+        return
+    try:
+        recovered = _recovery.reap_stale_intelligence(db)
+    except Exception:
+        logger.exception("intel: reaper failed for %s", ticket_id)
+        return
+    for row in recovered:
+        _intel_log.info(
+            "intel.reaped project_id=%s ticket_id=%s db_path=%s previous_status=%s age_seconds=%d",
+            project_id, row.get("ticket_id"), db,
+            row.get("previous_status"), row.get("age_seconds"),
+        )
 
 
 def _parse_row(row: dict) -> TicketIntelligence:
@@ -159,7 +224,11 @@ def _read_ticket_content(project_root: Path, ticket_id: str, worktrees_dir: Path
 
 
 @router.get("/{ticket_id}/intelligence", response_model=TicketIntelligence)
-def get_intelligence(ticket_id: str, request: Request) -> TicketIntelligence:
+def get_intelligence(
+    ticket_id: str,
+    request: Request,
+    project_id: str | None = None,
+) -> TicketIntelligence:
     logger.info("api: GET /tickets/%s/intelligence", ticket_id)
     project_root = _root(request)
     wt_dir = _worktrees_dir(request)
@@ -168,9 +237,13 @@ def get_intelligence(ticket_id: str, request: Request) -> TicketIntelligence:
     if ticket is None:
         raise HTTPException(status_code=404, detail=f"ticket {ticket_id} not found")
 
-    db = _db_path(request)
+    db = _resolve_db_for_project(request, project_id)
     if db is None:
         raise HTTPException(status_code=503, detail="database not available")
+
+    # Opportunistic stale-analysis recovery — runs on every GET, but only
+    # rewrites rows past STALE_QUEUED_SECONDS / STALE_RUNNING_SECONDS.
+    _try_reap(db, project_id=project_id, ticket_id=ticket_id)
 
     row = runtime_db.get_ticket_intelligence(db, ticket_id)
     if row is None:
@@ -200,9 +273,13 @@ def analyze_intelligence(
     if ticket is None:
         raise HTTPException(status_code=404, detail=f"ticket {ticket_id} not found")
 
-    db = _db_path(request)
+    db = _resolve_db_for_project(request, project_id)
     if db is None:
         raise HTTPException(status_code=503, detail="database not available")
+
+    # Clear out any prior stuck row before the idempotency guard so a manual
+    # re-analyze on a stale ticket is not silently swallowed.
+    _try_reap(db, project_id=project_id, ticket_id=ticket_id)
 
     existing = runtime_db.get_ticket_intelligence(db, ticket_id)
     if existing and existing.get("analysis_status") in {"queued", "running"}:
@@ -219,21 +296,53 @@ def analyze_intelligence(
                     "use the project-scoped analyze endpoint"
                 ),
             )
+        # Persist `queued` to the per-project DB *before* delegating so the very
+        # first dashboard poll observes a real row instead of a 404, and the
+        # reaper has something to recover if delegation silently fails later.
+        runtime_db.upsert_ticket_intelligence(db, ticket_id, analysis_status="queued")
+        _intel_log.info(
+            "intel.queued project_id=%s ticket_id=%s db_path=%s",
+            project_id, ticket_id, db,
+        )
+
+        url = f"{_supervisor_url()}/projects/{project_id}/tickets/{ticket_id}/intelligence/analyze"
+        _intel_log.info(
+            "intel.delegated project_id=%s ticket_id=%s db_path=%s supervisor_url=%s",
+            project_id, ticket_id, db, url,
+        )
         logger.info(
             "api: delegating ticket intelligence %s/%s to supervisor (claude not available in API process)",
             project_id,
             ticket_id,
         )
-        _delegate_analyze_to_supervisor(project_id, ticket_id, exec_cmd)
+        try:
+            _delegate_analyze_to_supervisor(project_id, ticket_id, exec_cmd)
+        except HTTPException as exc:
+            _persist_delegation_failure(
+                db, ticket_id,
+                f"Supervisor delegation failed: {exc.detail}",
+            )
+            _intel_log.info(
+                "intel.failed project_id=%s ticket_id=%s db_path=%s reason=delegation status=%d",
+                project_id, ticket_id, db, exc.status_code,
+            )
+            raise
         return TicketIntelligenceQueued(ticket_id=ticket_id, analysis_status="queued")
 
     ticket_content = _read_ticket_content(project_root, ticket_id, wt_dir)
 
     runtime_db.upsert_ticket_intelligence(db, ticket_id, analysis_status="queued")
+    _intel_log.info(
+        "intel.queued project_id=%s ticket_id=%s db_path=%s",
+        project_id, ticket_id, db,
+    )
 
     def _bg() -> None:
         try:
-            _analyzer.run_analysis(db, ticket_id, ticket_content, exec_cmd, project_root)
+            _analyzer.run_analysis(
+                db, ticket_id, ticket_content, exec_cmd, project_root,
+                project_id=project_id,
+            )
         except Exception:
             logger.exception("intelligence analysis background error for %s", ticket_id)
 
@@ -245,7 +354,7 @@ def analyze_intelligence(
 
 @project_router.get("/{project_id}/tickets/{ticket_id}/intelligence", response_model=TicketIntelligence)
 def get_intelligence_project(project_id: str, ticket_id: str, request: Request) -> TicketIntelligence:
-    return get_intelligence(ticket_id, request)
+    return get_intelligence(ticket_id, request, project_id=project_id)
 
 
 @project_router.post(

@@ -4,6 +4,7 @@ import usePolling from '../hooks/usePolling'
 
 const ACTIVE_STATUSES = new Set(['queued', 'running'])
 const POLL_INTERVAL = 4000
+const MAX_CONSECUTIVE_POLL_ERRORS = 5
 
 function StatusBadge({ status }) {
   const colors = {
@@ -65,21 +66,26 @@ export default function TicketIntelligencePanel({ ticketId, projectId }) {
   const [loading, setLoading] = useState(true)
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState(null)
+  const [pollErrorCount, setPollErrorCount] = useState(0)
 
   const status = intelligence?.analysis_status ?? 'not_started'
-  const isActive = ACTIVE_STATUSES.has(status)
+  const pollingHalted = pollErrorCount >= MAX_CONSECUTIVE_POLL_ERRORS
+  const isActive = ACTIVE_STATUSES.has(status) && !pollingHalted
 
   const fetchIntelligence = useCallback(() => {
     api.getTicketIntelligence(ticketId, projectId)
       .then(res => {
         setIntelligence(res.data)
         setErr(null)
+        setPollErrorCount(0)
       })
       .catch(e => {
         if (e.response?.status === 404) {
           setIntelligence(null)
+          setPollErrorCount(0)
         } else {
           setErr(e.response?.data?.detail || e.message)
+          setPollErrorCount(c => c + 1)
         }
       })
       .finally(() => setLoading(false))
@@ -89,10 +95,12 @@ export default function TicketIntelligencePanel({ ticketId, projectId }) {
     setLoading(true)
     setIntelligence(null)
     setErr(null)
+    setPollErrorCount(0)
     fetchIntelligence()
   }, [ticketId, projectId]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Poll while analysis is active
+  // Poll while analysis is active; stop after MAX_CONSECUTIVE_POLL_ERRORS to
+  // avoid an infinite 5xx loop when the server is unreachable.
   usePolling(fetchIntelligence, isActive ? POLL_INTERVAL : null, ticketId)
 
   const triggerAnalysis = () => {
@@ -132,6 +140,12 @@ export default function TicketIntelligencePanel({ ticketId, projectId }) {
       </div>
 
       {err && <p className="text-red-600 text-xs">{err}</p>}
+
+      {pollingHalted && (
+        <p className="text-red-700 text-xs font-medium">
+          Polling halted — server unreachable after {MAX_CONSECUTIVE_POLL_ERRORS} consecutive failures.
+        </p>
+      )}
 
       {loading && (
         <p className="text-gray-400 text-sm">Loading…</p>

@@ -2216,10 +2216,19 @@ def project_ticket_intelligence_analyze(
 ):
     from fastapi.responses import JSONResponse
 
+    intel_log = logging.getLogger("intel")
+
     if body is None:
         body = TicketIntelligenceAnalyzeRequest(exec_cmd=_default_exec_cmd())
     elif body.exec_cmd == "claude --dangerously-skip-permissions":
         body.exec_cmd = _default_exec_cmd()
+
+    tools_dir = _project_root_dir / "tools" / "agent_runner"
+    if str(tools_dir) not in sys.path:
+        sys.path.insert(0, str(tools_dir))
+    import runtime_db  # noqa: E402
+    import ticket_intelligence_analyzer as analyzer  # noqa: E402
+    import ticket_intelligence_recovery as recovery  # noqa: E402
 
     project_root_str = _lookup_project_root_from_control_api(project_id)
     if project_root_str is None:
@@ -2232,43 +2241,107 @@ def project_ticket_intelligence_analyze(
     project_runtime_root = _project_runtime_root(project_id)
     worktrees_dir = _project_worktrees_dir(project_id)
 
-    tools_dir = _project_root_dir / "tools" / "agent_runner"
-    if str(tools_dir) not in sys.path:
-        sys.path.insert(0, str(tools_dir))
-    import runtime_db  # noqa: E402
-    import ticket_intelligence_analyzer as analyzer  # noqa: E402
-
     from services.control_api.services.runtime_resolver import (  # noqa: E402
         resolve_runs_dir,
         resolve_ticket_run_dir,
     )
 
-    db = runtime_db.get_db_path()
+    try:
+        db = runtime_db.resolve_db_path_for_project(
+            project_id,
+            project_runtime_root=project_runtime_root,
+        )
+    except Exception as exc:
+        logger.exception(
+            "supervisor: failed to resolve DB for project_id=%s ticket_id=%s",
+            project_id, ticket_id,
+        )
+        return JSONResponse(
+            status_code=503,
+            content={"error": f"failed to resolve runtime DB: {exc}"},
+        )
     if db is None:
         return JSONResponse(status_code=503, content={"error": "database not available"})
 
-    existing = runtime_db.get_ticket_intelligence(db, ticket_id)
-    if existing and existing.get("analysis_status") in {"queued", "running"}:
-        return {"ticket_id": ticket_id, "analysis_status": existing["analysis_status"]}
+    # Per-project DB may not exist yet — initialize before any read/write.
+    try:
+        runtime_db.init_runtime_db(db)
+    except Exception as exc:
+        logger.exception(
+            "supervisor: init_runtime_db failed for %s/%s db=%s",
+            project_id, ticket_id, db,
+        )
+        return JSONResponse(
+            status_code=503,
+            content={"error": f"runtime DB unavailable: {exc}"},
+        )
+
+    # Reap any stale row so the idempotency guard below does not block a manual
+    # re-analyze on a ticket whose previous run died silently.
+    try:
+        for reaped in recovery.reap_stale_intelligence(db):
+            intel_log.info(
+                "intel.reaped project_id=%s ticket_id=%s db_path=%s previous_status=%s age_seconds=%d",
+                project_id, reaped.get("ticket_id"), db,
+                reaped.get("previous_status"), reaped.get("age_seconds"),
+            )
+    except Exception:
+        logger.exception("supervisor: reaper failed before analyze for %s", ticket_id)
 
     try:
-        runs_dir = resolve_runs_dir(
-            project_root,
-            project_id=project_id,
-            project_runtime_root=project_runtime_root,
-        )
-        run_dir = resolve_ticket_run_dir(ticket_id, runs_dir, worktrees_dir)
-        ticket_path = run_dir / "ticket.md"
-        ticket_content = ticket_path.read_text(encoding="utf-8") if ticket_path.exists() else ""
-    except Exception as exc:
-        logger.warning("supervisor: could not read ticket.md for %s: %s", ticket_id, exc)
-        ticket_content = ""
+        existing = runtime_db.get_ticket_intelligence(db, ticket_id)
+        if existing and existing.get("analysis_status") in {"queued", "running"}:
+            return {"ticket_id": ticket_id, "analysis_status": existing["analysis_status"]}
 
-    runtime_db.upsert_ticket_intelligence(db, ticket_id, analysis_status="queued")
+        try:
+            runs_dir = resolve_runs_dir(
+                project_root,
+                project_id=project_id,
+                project_runtime_root=project_runtime_root,
+            )
+            run_dir = resolve_ticket_run_dir(ticket_id, runs_dir, worktrees_dir)
+            ticket_path = run_dir / "ticket.md"
+            ticket_content = ticket_path.read_text(encoding="utf-8") if ticket_path.exists() else ""
+        except Exception as exc:
+            logger.warning("supervisor: could not read ticket.md for %s: %s", ticket_id, exc)
+            ticket_content = ""
+
+        runtime_db.upsert_ticket_intelligence(db, ticket_id, analysis_status="queued")
+        intel_log.info(
+            "intel.queued project_id=%s ticket_id=%s db_path=%s",
+            project_id, ticket_id, db,
+        )
+    except Exception as exc:
+        logger.exception(
+            "supervisor: pre-thread failure for %s/%s — persisting failed",
+            project_id, ticket_id,
+        )
+        try:
+            runtime_db.upsert_ticket_intelligence(
+                db, ticket_id,
+                analysis_status="failed",
+                analysis_summary=f"Supervisor pre-thread error: {exc}",
+            )
+            intel_log.info(
+                "intel.failed project_id=%s ticket_id=%s db_path=%s reason=pre_thread",
+                project_id, ticket_id, db,
+            )
+        except Exception:
+            logger.exception(
+                "supervisor: failed to persist pre-thread failure for %s",
+                ticket_id,
+            )
+        return JSONResponse(
+            status_code=503,
+            content={"error": f"pre-thread failure: {exc}"},
+        )
 
     def _bg() -> None:
         try:
-            analyzer.run_analysis(db, ticket_id, ticket_content, body.exec_cmd, project_root)
+            analyzer.run_analysis(
+                db, ticket_id, ticket_content, body.exec_cmd, project_root,
+                project_id=project_id,
+            )
         except Exception:
             logger.exception("supervisor: intelligence analysis failed for %s", ticket_id)
 

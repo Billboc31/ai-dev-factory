@@ -41,8 +41,9 @@ _sqlite_db = _load_sqlite_db_module()
 
 @pytest.fixture(autouse=True)
 def _isolate_env(monkeypatch):
-    """Remove AI_DEV_FACTORY_RUNTIME_ROOT so routes resolve tickets via project_root/runs."""
+    """Remove runtime-root env vars so routes resolve via project_root and app.state.db_path."""
     monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    monkeypatch.delenv("RUNTIME_BASE_ROOT", raising=False)
 
 
 def _make_app(tmp_path: Path):
@@ -203,7 +204,7 @@ def test_completed_analysis_readable_after_analyze(tmp_path):
     app = _make_app(tmp_path)
     db = app.state.db_path
 
-    def _fake_run(db_path, ticket_id, ticket_content, exec_cmd, project_root):
+    def _fake_run(db_path, ticket_id, ticket_content, exec_cmd, project_root, project_id=None):
         _sqlite_db.upsert_ticket_intelligence(
             db_path, ticket_id,
             analysis_status="completed",
@@ -302,7 +303,7 @@ def test_failed_analysis_persisted(tmp_path):
     app = _make_app(tmp_path)
     db = app.state.db_path
 
-    def _fake_fail(db_path, ticket_id, ticket_content, exec_cmd, project_root):
+    def _fake_fail(db_path, ticket_id, ticket_content, exec_cmd, project_root, project_id=None):
         _sqlite_db.upsert_ticket_intelligence(
             db_path, ticket_id,
             analysis_status="failed",
@@ -319,3 +320,114 @@ def test_failed_analysis_persisted(tmp_path):
     body = r.json()
     assert body["analysis_status"] == "failed"
     assert "timed out" in (body["analysis_summary"] or "").lower()
+
+
+# ── T206: project-scoped DB, delegated completion, persisted delegation failures
+
+
+def test_project_post_analyze_writes_queued_to_project_db(tmp_path, monkeypatch):
+    """POST /projects/{pid}/.../analyze writes 'queued' to the per-project DB."""
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path))
+    monkeypatch.setenv("AI_DEV_FACTORY_API_IN_DOCKER", "1")
+    _make_ticket(tmp_path, "T001")
+
+    from services.control_api.main import create_app
+    import services.control_api.routes.intelligence as _intel_route
+
+    app = create_app(project_root=tmp_path)
+    _intel_route.runtime_db = _sqlite_db
+
+    expected_db = tmp_path / "P1" / ".runtime" / "ai-dev-factory.sqlite"
+    expected_db.parent.mkdir(parents=True, exist_ok=True)
+    _sqlite_db.init_runtime_db(expected_db)
+
+    with patch("services.control_api.routes.intelligence._delegate_analyze_to_supervisor") as mock_delegate:
+        client = TestClient(app)
+        r = client.post("/projects/P1/tickets/T001/intelligence/analyze")
+
+    assert r.status_code == 202
+    mock_delegate.assert_called_once()
+
+    row = _sqlite_db.get_ticket_intelligence(expected_db, "T001")
+    assert row is not None, f"expected queued row at {expected_db}"
+    assert row["analysis_status"] == "queued"
+
+
+def test_delegated_completion_visible_via_get(tmp_path, monkeypatch):
+    """A row written by the supervisor's analyzer is visible on a subsequent GET."""
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path))
+    monkeypatch.setenv("AI_DEV_FACTORY_API_IN_DOCKER", "1")
+    _make_ticket(tmp_path, "T001")
+
+    from services.control_api.main import create_app
+    import services.control_api.routes.intelligence as _intel_route
+
+    app = create_app(project_root=tmp_path)
+    _intel_route.runtime_db = _sqlite_db
+
+    expected_db = tmp_path / "P1" / ".runtime" / "ai-dev-factory.sqlite"
+    expected_db.parent.mkdir(parents=True, exist_ok=True)
+    _sqlite_db.init_runtime_db(expected_db)
+
+    def _fake_delegate(project_id, ticket_id, exec_cmd):
+        # Simulate the supervisor's analyzer writing the completed row to the
+        # same per-project DB the API just persisted 'queued' into.
+        _sqlite_db.upsert_ticket_intelligence(
+            expected_db, ticket_id,
+            analysis_status="completed",
+            difficulty_score=8,
+            difficulty_label="complex",
+            risk_score=6,
+            risk_label="high",
+            analysis_summary="Delegated analysis completed.",
+        )
+
+    with patch(
+        "services.control_api.routes.intelligence._delegate_analyze_to_supervisor",
+        side_effect=_fake_delegate,
+    ):
+        client = TestClient(app)
+        client.post("/projects/P1/tickets/T001/intelligence/analyze")
+
+    r = client.get("/projects/P1/tickets/T001/intelligence")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["analysis_status"] == "completed"
+    assert body["difficulty_score"] == 8
+
+
+def test_post_analyze_persists_failure_on_supervisor_unreachable(tmp_path, monkeypatch):
+    """When delegation raises, the project DB row exists with analysis_status='failed'."""
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_ROOT", str(tmp_path))
+    monkeypatch.setenv("AI_DEV_FACTORY_API_IN_DOCKER", "1")
+    _make_ticket(tmp_path, "T001")
+
+    from services.control_api.main import create_app
+    import services.control_api.routes.intelligence as _intel_route
+
+    app = create_app(project_root=tmp_path)
+    _intel_route.runtime_db = _sqlite_db
+
+    expected_db = tmp_path / "P1" / ".runtime" / "ai-dev-factory.sqlite"
+    expected_db.parent.mkdir(parents=True, exist_ok=True)
+    _sqlite_db.init_runtime_db(expected_db)
+
+    from fastapi import HTTPException
+
+    def _fail(project_id, ticket_id, exec_cmd):
+        raise HTTPException(status_code=503, detail="supervisor unreachable — test")
+
+    with patch(
+        "services.control_api.routes.intelligence._delegate_analyze_to_supervisor",
+        side_effect=_fail,
+    ):
+        client = TestClient(app)
+        r = client.post("/projects/P1/tickets/T001/intelligence/analyze")
+
+    # The POST still surfaces the 503 to the caller…
+    assert r.status_code == 503
+    # …but the DB row must be 'failed' so the polling UI escapes "queued".
+    row = _sqlite_db.get_ticket_intelligence(expected_db, "T001")
+    assert row is not None
+    assert row["analysis_status"] == "failed"
+    assert "supervisor" in (row["analysis_summary"] or "").lower()
