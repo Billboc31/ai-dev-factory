@@ -21,3 +21,20 @@
 [2026-06-23T13:39:39Z] push: tolerating runtime dirty files (not blocking): ['runs/T208/runtime.log']
 [2026-06-23T13:39:39Z] push: pushing branch=ticket/T208-fix-ticket-intelligence-analysis-stuck-in-running
 [2026-06-23T13:39:41Z] push: done branch=ticket/T208-fix-ticket-intelligence-analysis-stuck-in-running
+[2026-06-23T13:55:46Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-06-23T13:55:46Z] auto-run: running step=planner
+[2026-06-23T13:55:46Z] auto-run: fix context: previous_output=runs/T208/plan.md
+[2026-06-23T13:55:46Z] auto-run: fix context: review=runs/T208/reviews/plan-review-postgres-runtime-db-coverage.md
+[2026-06-23T13:55:46Z] auto-run: fix context: fix_instructions=runs/T208/fixes/plan-fix-postgres-runtime-db-coverage.md
+[2026-06-23T13:55:46Z] auto-run: fix context: context_file=runs/T208/fixes/context-20260623T135546Z.md
+[2026-06-23T13:55:46Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-23T13:55:46Z] prompt: generic fallback — injecting runs/T208/ticket.md
+[2026-06-23T13:55:46Z] compose: global-context=docs/ai/global-context.md
+[2026-06-23T13:55:46Z] compose: role=ai/roles/planner.md
+[2026-06-23T13:55:46Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-23T13:55:46Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-23T13:55:46Z] compose: skill=ai/skills/documentation.md
+[2026-06-23T13:55:46Z] compose: task (canonical prompt)
+[2026-06-23T13:55:46Z] compose: extra-context=runs/T208/fixes/context-20260623T135546Z.md
+[2026-06-23T13:55:46Z] snapshot: runtime-prompt=runs/T208/prompts/planner-attempt-2.md
+[2026-06-23T13:57:24Z] auto-run: step=planner done rc=0
