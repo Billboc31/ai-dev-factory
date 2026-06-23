@@ -234,7 +234,7 @@ def test_reset_to_planning_archives_and_sets_state(tmp_path, db):
     assert result["status"] == "completed"
 
     state_data = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
-    assert state_data["state"] == "PLAN_FIX_REQUIRED"
+    assert state_data["state"] == "INIT"
 
     archive_root = Path(result["details"]["archive_dir"])
     assert archive_root.exists()
@@ -242,7 +242,7 @@ def test_reset_to_planning_archives_and_sets_state(tmp_path, db):
     assert (archive_root / "reviews").exists()
     assert not (run_dir / "plan.md").exists()
     meta = json.loads((archive_root / "reset.json").read_text(encoding="utf-8"))
-    assert meta["new_state"] == "PLAN_FIX_REQUIRED"
+    assert meta["new_state"] == "INIT"
     assert meta["previous_state"] == "PLAN_APPROVED"
     assert meta["operation"] == "reset_to_planning"
     assert meta["requested_by"] == "alice"
@@ -266,6 +266,7 @@ def test_reset_to_planning_never_writes_planning_state(tmp_path, db):
 def test_reset_to_coding_preserves_plan(tmp_path, db):
     run_dir = _write_ticket(tmp_path, "T001", state="IMPLEMENTATION_APPROVED")
     (run_dir / "plan.md").write_text("# plan", encoding="utf-8")
+    (run_dir / "implementation-output.md").write_text("# impl", encoding="utf-8")
     (run_dir / "reviews").mkdir()
     (run_dir / "tests").mkdir()
     result = _ops.execute_operation(
@@ -279,15 +280,78 @@ def test_reset_to_coding_preserves_plan(tmp_path, db):
     assert (run_dir / "plan.md").exists()
 
     state_data = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
-    assert state_data["state"] == "IMPLEMENTATION_FIX_REQUIRED"
+    assert state_data["state"] == "PLAN_APPROVED"
     assert state_data["state"] != "CODING"
 
     archive_root = Path(result["details"]["archive_dir"])
     assert (archive_root / "reviews").exists()
     assert (archive_root / "tests").exists()
+    assert (archive_root / "implementation-output.md").exists()
     assert not (archive_root / "plan.md").exists()
+    assert not (run_dir / "implementation-output.md").exists()
     meta = json.loads((archive_root / "reset.json").read_text(encoding="utf-8"))
-    assert meta["new_state"] == "IMPLEMENTATION_FIX_REQUIRED"
+    assert meta["new_state"] == "PLAN_APPROVED"
+
+
+# ── Lifecycle regression coverage (T207) ─────────────────────────────────────
+
+def test_reset_to_planning_restarts_planner_lifecycle(tmp_path, db):
+    run_dir = _write_ticket(tmp_path, "T001", state="PLAN_APPROVED")
+    (run_dir / "plan.md").write_text("# plan", encoding="utf-8")
+    _ops.execute_operation(
+        db, tmp_path, "T001", "reset_to_planning",
+        payload={"reason": "restart planning", "typed_ticket_id": "T001"},
+        requested_by="alice",
+    )
+    state_data = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert state_data["state"] == "INIT"
+    assert not (run_dir / "plan.md").exists()
+
+    import run_ticket
+    assert run_ticket.TRANSITIONS["INIT"] == ("planner", True, ["PLAN_REVIEW_NEEDED"])
+
+
+def test_reset_to_coding_restarts_coder_lifecycle(tmp_path, db):
+    run_dir = _write_ticket(tmp_path, "T001", state="IMPLEMENTATION_APPROVED")
+    (run_dir / "plan.md").write_text("# plan", encoding="utf-8")
+    (run_dir / "implementation-output.md").write_text("# impl", encoding="utf-8")
+    _ops.execute_operation(
+        db, tmp_path, "T001", "reset_to_coding",
+        payload={"reason": "restart coding", "typed_ticket_id": "T001"},
+        requested_by="alice",
+    )
+    state_data = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert state_data["state"] == "PLAN_APPROVED"
+    assert (run_dir / "plan.md").exists()
+    assert not (run_dir / "implementation-output.md").exists()
+
+    import run_ticket
+    assert run_ticket.TRANSITIONS["PLAN_APPROVED"] == ("coder", True, ["IMPLEMENTATION_REVIEW_NEEDED"])
+
+
+def test_plan_fix_required_still_works_when_artifacts_exist(tmp_path):
+    import run_ticket
+
+    ticket_id = "T002"
+    run_dir = tmp_path / "runs" / ticket_id
+    (run_dir / "reviews").mkdir(parents=True)
+    (run_dir / "fixes").mkdir(parents=True)
+    (run_dir / "plan.md").write_text("# plan", encoding="utf-8")
+    (run_dir / "reviews" / "plan-review-1.md").write_text("review", encoding="utf-8")
+    (run_dir / "fixes" / "plan-fix-1.md").write_text("fix", encoding="utf-8")
+
+    cwd = os.getcwd()
+    os.chdir(tmp_path)
+    try:
+        artifacts = run_ticket._collect_fix_artifacts(
+            ticket_id, {"state": "PLAN_FIX_REQUIRED"}
+        )
+    finally:
+        os.chdir(cwd)
+
+    assert artifacts["previous_output"].name == "plan.md"
+    assert artifacts["review"].name == "plan-review-1.md"
+    assert artifacts["fix_instructions"].name == "plan-fix-1.md"
 
 
 # ── archive_ticket ───────────────────────────────────────────────────────────
