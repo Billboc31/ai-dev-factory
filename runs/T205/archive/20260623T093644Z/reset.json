@@ -1,0 +1,9 @@
+{
+  "operation": "reset_to_planning",
+  "ticket_id": "T205",
+  "requested_by": "operator",
+  "reason": "main change",
+  "previous_state": "PLAN_REVIEW_NEEDED",
+  "new_state": "PLAN_FIX_REQUIRED",
+  "created_at": "2026-06-23T09:36:44Z"
+}
