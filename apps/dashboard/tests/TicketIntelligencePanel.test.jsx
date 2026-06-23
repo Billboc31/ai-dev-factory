@@ -37,8 +37,18 @@ const COMPLETED_INTELLIGENCE = {
   updated_at: '2026-06-20T10:00:00Z',
 }
 
+const COMPLETED_INTELLIGENCE_WITH_SIGNALS = {
+  ...COMPLETED_INTELLIGENCE,
+  computed_signals_json: { foo: 'bar', n: 3 },
+}
+
 function renderPanel() {
   return render(<TicketIntelligencePanel ticketId={TICKET_ID} projectId={PROJECT_ID} />)
+}
+
+async function expandDetailedAnalysis(user) {
+  const summary = await screen.findByText('Show detailed analysis')
+  await user.click(summary)
 }
 
 describe('TicketIntelligencePanel', () => {
@@ -71,14 +81,13 @@ describe('TicketIntelligencePanel', () => {
     })
   })
 
-  it('shows completed analysis fields', async () => {
+  it('shows completed analysis compact fields', async () => {
     ticketsApi.getTicketIntelligence.mockResolvedValue({ data: COMPLETED_INTELLIGENCE })
     renderPanel()
     await waitFor(() => {
       expect(screen.getAllByText(/medium/).length).toBeGreaterThan(0)
       expect(screen.getAllByText(/moderate/).length).toBeGreaterThan(0)
       expect(screen.getByText('advanced-reasoning-model')).toBeInTheDocument()
-      expect(screen.getByText(/Requires architecture reasoning/)).toBeInTheDocument()
     })
   })
 
@@ -86,7 +95,7 @@ describe('TicketIntelligencePanel', () => {
     ticketsApi.getTicketIntelligence.mockResolvedValue({ data: COMPLETED_INTELLIGENCE })
     renderPanel()
     await waitFor(() => {
-      expect(screen.getByText(/medium difficulty and moderate risk/)).toBeInTheDocument()
+      expect(screen.getAllByText(/medium difficulty and moderate risk/).length).toBeGreaterThan(0)
     })
   })
 
@@ -98,29 +107,36 @@ describe('TicketIntelligencePanel', () => {
     })
   })
 
-  it('shows human plan review recommendation', async () => {
+  it('shows human plan review recommendation (reason behind detailed disclosure)', async () => {
+    const user = userEvent.setup()
     ticketsApi.getTicketIntelligence.mockResolvedValue({ data: COMPLETED_INTELLIGENCE })
     renderPanel()
     await waitFor(() => {
       expect(screen.getByText('Required')).toBeInTheDocument()
-      expect(screen.getByText(/DB schema change/)).toBeInTheDocument()
     })
+    const reason = screen.getByText(/DB schema change/)
+    expect(reason.closest('details').open).toBe(false)
+    await expandDetailedAnalysis(user)
+    expect(reason.closest('details').open).toBe(true)
   })
 
-  it('shows dependency hints', async () => {
+  it('shows dependency hints in compact view', async () => {
     ticketsApi.getTicketIntelligence.mockResolvedValue({ data: COMPLETED_INTELLIGENCE })
     renderPanel()
     await waitFor(() => {
-      expect(screen.getByText('T001')).toBeInTheDocument()
+      expect(screen.getAllByText('T001').length).toBeGreaterThan(0)
     })
   })
 
-  it('shows queue rank', async () => {
+  it('shows queue rank behind detailed analysis disclosure', async () => {
+    const user = userEvent.setup()
     ticketsApi.getTicketIntelligence.mockResolvedValue({ data: COMPLETED_INTELLIGENCE })
     renderPanel()
-    await waitFor(() => {
-      expect(screen.getByText(/#20/)).toBeInTheDocument()
-    })
+    await waitFor(() => screen.getByText('Show detailed analysis'))
+    const rank = screen.getByText(/#20/)
+    expect(rank.closest('details').open).toBe(false)
+    await expandDetailedAnalysis(user)
+    expect(rank.closest('details').open).toBe(true)
   })
 
   it('shows running state with animation text', async () => {
@@ -209,5 +225,97 @@ describe('TicketIntelligencePanel', () => {
     await waitFor(() => {
       expect(screen.getByText(/\$0.050.*\$0.350/)).toBeInTheDocument()
     })
+  })
+
+  it('compact view shows key fields without expanding', async () => {
+    ticketsApi.getTicketIntelligence.mockResolvedValue({ data: COMPLETED_INTELLIGENCE })
+    renderPanel()
+    await waitFor(() => {
+      expect(screen.getByText('Difficulty')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Risk')).toBeInTheDocument()
+    expect(screen.getByText('Estimated cost')).toBeInTheDocument()
+    expect(screen.getByText('Recommended model')).toBeInTheDocument()
+    expect(screen.getByText('Plan review')).toBeInTheDocument()
+    expect(screen.getByText('Code review')).toBeInTheDocument()
+    expect(screen.getByText('Dependencies')).toBeInTheDocument()
+    expect(screen.getByText('Parallel safe')).toBeInTheDocument()
+    expect(screen.getByText('Autonomous execution')).toBeInTheDocument()
+    expect(screen.getByText('Last analyzed')).toBeInTheDocument()
+    expect(screen.getByText('Difficulty').closest('details')).toBeNull()
+  })
+
+  it('detailed analysis is collapsed by default', async () => {
+    ticketsApi.getTicketIntelligence.mockResolvedValue({ data: COMPLETED_INTELLIGENCE })
+    renderPanel()
+    const summary = await screen.findByText('Show detailed analysis')
+    expect(summary).toBeInTheDocument()
+    const details = summary.closest('details')
+    expect(details.open).toBe(false)
+    expect(screen.getByText('Requires architecture reasoning.').closest('details')).toBe(details)
+    expect(screen.getByText('DB schema change.').closest('details')).toBe(details)
+    expect(screen.getByText(/#20/).closest('details')).toBe(details)
+  })
+
+  it('clicking Show detailed analysis reveals verbose fields', async () => {
+    const user = userEvent.setup()
+    ticketsApi.getTicketIntelligence.mockResolvedValue({ data: COMPLETED_INTELLIGENCE })
+    renderPanel()
+    await expandDetailedAnalysis(user)
+    expect(screen.getByText('Requires architecture reasoning.')).toBeInTheDocument()
+    expect(screen.getByText('DB schema change.')).toBeInTheDocument()
+    expect(screen.getByText(/#20/)).toBeInTheDocument()
+  })
+
+  it('raw intelligence section is absent when computed_signals_json missing', async () => {
+    ticketsApi.getTicketIntelligence.mockResolvedValue({ data: COMPLETED_INTELLIGENCE })
+    renderPanel()
+    await waitFor(() => screen.getByText('Show detailed analysis'))
+    expect(screen.queryByText('Show raw intelligence data')).not.toBeInTheDocument()
+  })
+
+  it('raw intelligence section is collapsed by default when present', async () => {
+    ticketsApi.getTicketIntelligence.mockResolvedValue({ data: COMPLETED_INTELLIGENCE_WITH_SIGNALS })
+    renderPanel()
+    const summary = await screen.findByText('Show raw intelligence data')
+    const details = summary.closest('details')
+    expect(details.open).toBe(false)
+    expect(screen.getByText(/"foo": "bar"/).closest('details')).toBe(details)
+  })
+
+  it('clicking Show raw intelligence data reveals JSON', async () => {
+    const user = userEvent.setup()
+    ticketsApi.getTicketIntelligence.mockResolvedValue({ data: COMPLETED_INTELLIGENCE_WITH_SIGNALS })
+    renderPanel()
+    const summary = await screen.findByText('Show raw intelligence data')
+    await user.click(summary)
+    expect(screen.getByText(/"foo": "bar"/)).toBeInTheDocument()
+  })
+
+  it('missing optional fields do not crash', async () => {
+    ticketsApi.getTicketIntelligence.mockResolvedValue({
+      data: { ticket_id: TICKET_ID, analysis_status: 'completed' }
+    })
+    renderPanel()
+    await waitFor(() => {
+      expect(screen.getByText('Difficulty')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Risk')).toBeInTheDocument()
+    expect(screen.getByText('Recommended model')).toBeInTheDocument()
+  })
+
+  it('high risk applies warning border', async () => {
+    ticketsApi.getTicketIntelligence.mockResolvedValue({
+      data: {
+        ticket_id: TICKET_ID,
+        analysis_status: 'completed',
+        risk_score: 9,
+      }
+    })
+    const { container } = renderPanel()
+    await waitFor(() => {
+      expect(screen.getByText('Difficulty')).toBeInTheDocument()
+    })
+    expect(container.firstChild.className).toMatch(/border-orange-300/)
   })
 })
