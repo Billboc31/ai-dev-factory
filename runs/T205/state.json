@@ -1,7 +1,7 @@
 {
   "ticket_id": "T205",
-  "state": "IMPLEMENTATION_REVIEW_NEEDED",
+  "state": "IMPLEMENTATION_FIX_REQUIRED",
   "branch": "ticket/T205-t205-compact-ticket-intelligence-ui-with-expandabl",
   "issue_number": 266,
-  "updated_at": "2026-06-23T10:15:28Z"
+  "updated_at": "2026-06-23T10:20:37Z"
 }
