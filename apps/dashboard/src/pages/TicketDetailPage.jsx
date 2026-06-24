@@ -408,11 +408,12 @@ export default function TicketDetailPage() {
                 />
               )}
               <TicketDiagnosticsPanel ticketId={id} projectId={projectId} />
-              <TicketOperationsPanel ticketId={id} projectId={projectId} />
             </div>
           ),
         }}
       />
+
+      <TicketOperationsPanel ticketId={id} projectId={projectId} />
 
       <div className="flex border-b border-gray-200 mb-4">
         {TABS.map(t => (
