@@ -188,9 +188,9 @@ export default function TicketReadinessPanel({ ticketId, projectId }) {
           </Field>
           <Field label="Approval">
             <SubCheckBadge status={readiness.approval_check_status} />
-            {readiness.human_approval_required && !readiness.human_approval_present && (
-              <p className="text-xs text-amber-700 mt-0.5">Human plan review may be required later</p>
-            )}
+            {/* Advisory copy is rendered from the payload-driven warnings
+                list above so the same source of truth feeds plan-review and
+                execution-approval messages. No hardcoded copy here. */}
           </Field>
           <Field label="Context freshness">
             <SubCheckBadge status={readiness.context_freshness_status} />

@@ -1,4 +1,12 @@
-"""Ticket Readiness routes — GET /readiness + POST /evaluate-readiness."""
+"""Ticket Readiness routes — GET /readiness + POST /evaluate-readiness.
+
+Readiness answers only: *can this ticket ENTER the workflow now?* These
+endpoints surface ``blocking_reasons`` (workflow-entry blockers only) and
+``warnings`` (advisory, non-blocking — including future plan/execution
+approvals). They never feed plan-approval, execution-approval, planner-review
+or rule-engine state back into the evaluator. See
+``tools/agent_runner/ticket_readiness_evaluator.py`` for the contract.
+"""
 
 from __future__ import annotations
 

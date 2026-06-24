@@ -1,14 +1,20 @@
 """Ticket Readiness Evaluator.
 
-Advisory pipeline step that decides whether a ticket is eligible to ENTER the
-development pipeline. Independent of execution: the evaluator persists a
-readiness verdict per ticket but does not start, queue, or block runs.
+Readiness answers only: *can this ticket ENTER the workflow now?* It must
+never block on plan approval, execution approval, planner review states,
+execution rules, or ready-to-take. Those gates belong to later workflow
+stages — the plan-review state machine, ``ticket_execution_eligibility``,
+``ticket_approval_service``, and ``execution_rules_engine``.
 
-Readiness evaluates only workflow-entry prerequisites. Downstream gates
-(human plan approval, execution approval, execution rules) are NOT evaluated
-here — they live in the plan-review state machine, ``ticket_execution_eligibility``,
-and ``execution_rules_engine``. The presence of a future human-plan-review
-requirement is surfaced as a non-blocking advisory warning only.
+Workflow-entry prerequisites evaluated here:
+
+  * Ticket Intelligence analysis is completed.
+  * All dependency tickets are merged.
+
+Anything beyond those two checks is a non-blocking advisory warning. A
+runtime guard (``_is_entry_prerequisite_reason``) drops — and logs — any
+blocker that mentions ``approval``, ``plan review``, ``execution rule``, or
+``ready_to_take``.
 
 Designed to run in a background thread. ``run_evaluation`` never raises:
 unexpected errors are persisted as ``readiness_status="failed"`` with the
@@ -22,6 +28,7 @@ Status enum (canonical, lowercase snake_case — UI labels live elsewhere):
 from __future__ import annotations
 
 import json
+import logging
 import re
 import subprocess
 import sys
@@ -35,7 +42,31 @@ import runtime_db  # noqa: E402
 from ticket_merge_state import is_ticket_merged  # noqa: E402
 
 
+logger = logging.getLogger("ticket_readiness_evaluator")
+
 _GIT_TIMEOUT = 10
+
+# Substrings that must NEVER appear in a readiness blocker — these all refer
+# to later-stage gates (plan/execution approval, planner review states,
+# execution rules, ready-to-take) and are owned by other components.
+_FORBIDDEN_BLOCKER_SUBSTRINGS = (
+    "approval",
+    "plan review",
+    "execution rule",
+    "ready_to_take",
+)
+
+
+def _is_entry_prerequisite_reason(reason: str) -> bool:
+    """True iff ``reason`` is a legitimate workflow-entry blocker.
+
+    A workflow-entry blocker must not mention any later-stage gate. This is
+    the runtime contract enforcement for the readiness scope.
+    """
+    if not reason:
+        return False
+    lowered = reason.lower()
+    return not any(token in lowered for token in _FORBIDDEN_BLOCKER_SUBSTRINGS)
 
 # Case-insensitive dependency markers.
 _DEPENDENCY_RE = re.compile(
@@ -110,7 +141,14 @@ def _has_plan_approved_marker(project_root: Path, ticket_id: str) -> bool:
 
 
 def _state_implies_plan_approved(project_root: Path, ticket_id: str) -> bool:
-    """Treat the ticket's runtime ``state`` at or beyond PLAN_APPROVED as an approval signal."""
+    """Treat the ticket's runtime ``state`` at or beyond PLAN_APPROVED as an approval signal.
+
+    This is consulted *only* to promote ``ready_candidate`` → ``ready_to_take``
+    when a downstream approval already exists. The planner-review states
+    (``PLAN_REVIEW_NEEDED``, ``PLAN_FIX_REQUIRED``, ``PLAN_APPROVED``) must
+    never influence the ``blocked`` status — readiness only cares about
+    workflow-entry prerequisites.
+    """
     state_path = project_root / "runs" / ticket_id / "state.json"
     if not state_path.is_file():
         return False
@@ -122,31 +160,49 @@ def _state_implies_plan_approved(project_root: Path, ticket_id: str) -> bool:
     return state in _PLAN_APPROVED_OR_LATER
 
 
-def _check_human_plan_review_advisory(
+def _collect_future_approval_warnings(
     intelligence_row: dict | None,
     project_root: Path,
     ticket_id: str,
-) -> tuple[str, str | None, int, int]:
-    """Returns (status, warning_or_None, required_flag, present_flag).
+) -> tuple[str, list[str], int, int]:
+    """Return (status, warnings, required_flag, present_flag) for downstream approvals.
 
-    Required = 1 only when intelligence requested a human plan review. This
-    function never produces a blocking reason — human plan approval is a
-    downstream gate, not a workflow-entry prerequisite. When a review is
-    required but not yet on file, the result is an advisory warning, and the
-    sub-check status is ``"advisory"`` (never ``"failed"``).
+    Emits *non-blocking* advisory warnings when intelligence indicates a
+    human plan review or execution approval may be required later in the
+    workflow. Never produces a blocking reason — those gates are owned by
+    the plan-review state machine and ``ticket_approval_service``.
+
+    ``required_flag`` and ``present_flag`` track the plan-review approval
+    specifically (preserving the existing schema columns
+    ``human_approval_required`` / ``human_approval_present``).
     """
-    required = bool(intelligence_row and intelligence_row.get("requires_human_plan_review"))
-    if not required:
-        return "passed", None, 0, 0
-
-    present = (
-        _has_plan_approved_marker(project_root, ticket_id)
-        or _state_implies_plan_approved(project_root, ticket_id)
+    plan_required = bool(
+        intelligence_row and intelligence_row.get("requires_human_plan_review")
     )
-    present_flag = 1 if present else 0
-    if present:
-        return "passed", None, 1, present_flag
-    return "advisory", "Human plan review may be required later", 1, present_flag
+    execution_required = bool(
+        intelligence_row and intelligence_row.get("requires_human_execution_approval")
+    )
+
+    if not plan_required and not execution_required:
+        return "passed", [], 0, 0
+
+    plan_present = False
+    if plan_required:
+        plan_present = (
+            _has_plan_approved_marker(project_root, ticket_id)
+            or _state_implies_plan_approved(project_root, ticket_id)
+        )
+
+    warnings: list[str] = []
+    if plan_required and not plan_present:
+        warnings.append("Human plan review may be required later")
+    if execution_required:
+        warnings.append("Human execution approval may be required later")
+
+    status = "advisory" if warnings else "passed"
+    required_flag = 1 if plan_required else 0
+    present_flag = 1 if (plan_required and plan_present) else 0
+    return status, warnings, required_flag, present_flag
 
 
 def _check_context_freshness(project_root: Path) -> tuple[str, str | None]:
@@ -196,19 +252,33 @@ def run_evaluation(
 
         intel_status, intel_reason = _check_intelligence(db_path, ticket_id)
         dep_status, dep_reasons = _check_dependencies(ticket_content, project_root)
-        approval_status, approval_warning, approval_required, approval_present = (
-            _check_human_plan_review_advisory(intelligence_row, project_root, ticket_id)
+        approval_status, approval_warnings, approval_required, approval_present = (
+            _collect_future_approval_warnings(intelligence_row, project_root, ticket_id)
         )
         freshness_status, main_sha = _check_context_freshness(project_root)
 
-        blocking_reasons: list[str] = []
+        # Blockers come *only* from intelligence + dependency checks. The
+        # ``_is_entry_prerequisite_reason`` guard enforces this contract at
+        # runtime: any blocker that slips through referring to a later-stage
+        # gate is dropped and logged. See module docstring for the contract.
+        candidate_blockers: list[str] = []
         if intel_reason:
-            blocking_reasons.append(intel_reason)
-        blocking_reasons.extend(dep_reasons)
+            candidate_blockers.append(intel_reason)
+        candidate_blockers.extend(dep_reasons)
 
-        warnings: list[str] = []
-        if approval_warning:
-            warnings.append(approval_warning)
+        blocking_reasons: list[str] = []
+        for reason in candidate_blockers:
+            if _is_entry_prerequisite_reason(reason):
+                blocking_reasons.append(reason)
+            else:
+                logger.error(
+                    "readiness blocker violates entry-prerequisite contract "
+                    "and was dropped: ticket=%s reason=%r",
+                    ticket_id,
+                    reason,
+                )
+
+        warnings: list[str] = list(approval_warnings)
 
         all_passed = (
             intel_status == "passed"

@@ -57,3 +57,16 @@
 [2026-06-24T21:40:45Z] push: tolerating runtime dirty files (not blocking): ['runs/T213/runtime.log']
 [2026-06-24T21:40:45Z] push: pushing branch=ticket/T213-fix-ticket-readiness-to-evaluate-only-workflow-ent
 [2026-06-24T21:40:49Z] push: done branch=ticket/T213-fix-ticket-readiness-to-evaluate-only-workflow-ent
+[2026-06-24T21:46:56Z] auto-run start: state=PLAN_APPROVED
+[2026-06-24T21:46:56Z] auto-run: running step=coder
+[2026-06-24T21:46:56Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-06-24T21:46:56Z] prompt: generic fallback — injecting runs/T213/ticket.md
+[2026-06-24T21:46:56Z] compose: global-context=docs/ai/global-context.md
+[2026-06-24T21:46:56Z] compose: role=ai/roles/coder.md
+[2026-06-24T21:46:56Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-24T21:46:56Z] compose: skill=ai/skills/git-discipline.md
+[2026-06-24T21:46:56Z] compose: skill=ai/skills/code-quality.md
+[2026-06-24T21:46:56Z] compose: skill=ai/skills/refactor-safety.md
+[2026-06-24T21:46:56Z] compose: skill=ai/skills/security.md
+[2026-06-24T21:46:56Z] compose: task (canonical prompt)
+[2026-06-24T21:46:56Z] snapshot: runtime-prompt=runs/T213/prompts/coder-attempt-2.md

@@ -96,13 +96,49 @@ function intelligenceStep(intelligence) {
   }
 }
 
-function readinessStep(readiness) {
+// Workflow states at or beyond PLAN_APPROVED — once the ticket has crossed
+// into planner-approved territory, readiness is a historical entry gate, not
+// a live re-evaluation target. The timeline renders it as passed.
+const POST_READINESS_TICKET_STATES = new Set([
+  'PLAN_APPROVED',
+  'IMPLEMENTING',
+  'IMPLEMENTATION_REVIEW_NEEDED',
+  'IMPLEMENTATION_FIX_REQUIRED',
+  'IMPLEMENTATION_APPROVED',
+  'TESTING',
+  'TEST_COMPLETE',
+  'REVIEWING',
+  'CONFLICT_RESOLVING',
+  'CONFLICT_RESOLUTION_NEEDED',
+  'CONFLICT_RESOLVED_REVIEW_NEEDED',
+  'COMPLETE',
+  'COMPLETED',
+  'MERGED',
+  'ARCHIVED',
+])
+
+function readinessStep(readiness, ticket) {
   const status = readiness?.readiness_status
+  // Readiness blockers come from the API's ``blocking_reasons`` only.
+  // ``warnings`` are advisory and must never demote the step to ``blocked``.
   const reasons = readiness?.blocking_reasons ?? []
-  if (status === 'ready_candidate') {
+
+  // Downstream workflow already past readiness → render as passed, do not
+  // re-evaluate readiness as the gate. This keeps completed tickets coherent
+  // even if their persisted readiness row is stale.
+  if (ticket?.state && POST_READINESS_TICKET_STATES.has(ticket.state)) {
     return {
       status: 'done',
-      summary: 'Ready candidate',
+      summary: 'Already past readiness',
+      blockingReason: null,
+      nextAction: null,
+    }
+  }
+
+  if (status === 'ready_candidate' || status === 'ready_to_take') {
+    return {
+      status: 'done',
+      summary: status === 'ready_to_take' ? 'Ready to take' : 'Ready candidate',
       blockingReason: null,
       nextAction: null,
     }
@@ -115,11 +151,29 @@ function readinessStep(readiness) {
       nextAction: 'Wait for readiness evaluation',
     }
   }
-  if (status === 'blocked' || status === 'failed') {
+  if (status === 'failed') {
     return {
       status: 'blocked',
-      summary: status === 'failed' ? 'Evaluation failed' : 'Blocked',
-      blockingReason: reasons[0] ?? (status === 'failed' ? 'Evaluation failed' : 'Readiness blocked'),
+      summary: 'Evaluation failed',
+      blockingReason: reasons[0] ?? 'Evaluation failed',
+      nextAction: 'Resolve readiness blockers',
+    }
+  }
+  if (status === 'blocked') {
+    // Only treat as blocked when concrete entry-prerequisite blockers exist.
+    // Without blockers there is nothing to act on at the readiness gate.
+    if (reasons.length === 0) {
+      return {
+        status: 'done',
+        summary: 'Ready candidate',
+        blockingReason: null,
+        nextAction: null,
+      }
+    }
+    return {
+      status: 'blocked',
+      summary: 'Blocked',
+      blockingReason: reasons[0],
       nextAction: 'Resolve readiness blockers',
     }
   }
@@ -265,7 +319,7 @@ function executionStep(ticket) {
 export function deriveStepStatuses({ intelligence, readiness, approval, ruleEvaluation, ticket } = {}) {
   const steps = {
     intelligence: intelligenceStep(intelligence),
-    readiness:    readinessStep(readiness),
+    readiness:    readinessStep(readiness, ticket),
     rules:        rulesStep(ruleEvaluation),
     approval:     approvalStep(approval, readiness),
   }

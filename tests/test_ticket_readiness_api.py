@@ -161,6 +161,62 @@ def test_get_readiness_returns_warnings(tmp_path):
     assert "Human plan review may be required later" in body["warnings"]
 
 
+def test_readiness_returns_warnings_not_blockers_when_approvals_pending(tmp_path):
+    """T213: future approvals are warnings only — never blockers — in the payload."""
+    _make_ticket(tmp_path, "T010")
+    app = _make_app(tmp_path)
+    db = app.state.db_path
+
+    _sqlite_db.upsert_ticket_readiness(
+        db, "T010",
+        readiness_status="ready_candidate",
+        ready_candidate=1,
+        blocking_reasons_json=[],
+        warnings_json=[
+            "Human plan review may be required later",
+            "Human execution approval may be required later",
+        ],
+        approval_check_status="advisory",
+        human_approval_required=1,
+        human_approval_present=0,
+    )
+    client = TestClient(app)
+    r = client.get("/tickets/T010/readiness")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["blocking_reasons"] == []
+    # The contract: no later-stage gate appears as a blocker.
+    forbidden = ("approval", "plan review", "execution rule", "ready_to_take")
+    for reason in body["blocking_reasons"]:
+        for tok in forbidden:
+            assert tok not in reason.lower()
+    assert "Human plan review may be required later" in body["warnings"]
+    assert "Human execution approval may be required later" in body["warnings"]
+
+
+def test_readiness_status_ready_candidate_with_advisory_warnings_is_not_blocked(tmp_path):
+    """T213: ready_candidate stays ready_candidate even with advisory warnings."""
+    _make_ticket(tmp_path, "T011")
+    app = _make_app(tmp_path)
+    db = app.state.db_path
+
+    _sqlite_db.upsert_ticket_readiness(
+        db, "T011",
+        readiness_status="ready_candidate",
+        ready_candidate=1,
+        blocking_reasons_json=[],
+        warnings_json=["Human plan review may be required later"],
+        approval_check_status="advisory",
+    )
+    client = TestClient(app)
+    r = client.get("/tickets/T011/readiness")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["readiness_status"] == "ready_candidate"
+    assert body["ready_candidate"] is True
+    assert body["blocking_reasons"] == []
+
+
 # ── POST /tickets/{id}/evaluate-readiness ────────────────────────────────────
 
 def test_post_evaluate_404_when_ticket_missing(tmp_path):
