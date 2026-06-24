@@ -81,3 +81,12 @@
 [2026-06-24T22:17:26Z] compose: skill=ai/skills/debugging.md
 [2026-06-24T22:17:26Z] compose: task (canonical prompt)
 [2026-06-24T22:17:26Z] snapshot: runtime-prompt=runs/T213/prompts/tester-attempt-1.md
+[2026-06-24T22:27:28Z] auto-run: step=tester done rc=0
+[2026-06-24T22:27:28Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-24T22:27:28Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-24T22:27:28Z] commit-checkpoint: unstaged runtime garbage: ['runs/T213/runtime.log']
+[2026-06-24T22:27:28Z] commit-checkpoint: sha=57e86619 files=3 title='test(T213/workflow): tester — update 3 file(s)'
+[2026-06-24T22:27:28Z] auto-run: auto-push triggered
+[2026-06-24T22:27:28Z] push: tolerating runtime dirty files (not blocking): ['runs/T213/runtime.log']
+[2026-06-24T22:27:28Z] push: pushing branch=ticket/T213-fix-ticket-readiness-to-evaluate-only-workflow-ent
+[2026-06-24T22:27:32Z] push: done branch=ticket/T213-fix-ticket-readiness-to-evaluate-only-workflow-ent
