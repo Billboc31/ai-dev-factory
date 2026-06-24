@@ -274,6 +274,25 @@ export function deriveStepStatuses({ intelligence, readiness, approval, ruleEval
   return steps
 }
 
+// Server-side eligibility status → existing UI badge label.
+const ELIGIBILITY_STATUS_TO_LABEL = {
+  READY_TO_TAKE:        'READY TO TAKE',
+  BLOCKED:              'BLOCKED',
+  WAITING_HUMAN_ACTION: 'WAITING HUMAN ACTION',
+  DEPENDENCY_BLOCKED:   'DEPENDENCY BLOCKED',
+  UNKNOWN:              'UNKNOWN',
+}
+
+export function eligibilityToGlobalSummary(eligibility) {
+  if (!eligibility) return null
+  const label = ELIGIBILITY_STATUS_TO_LABEL[eligibility.status] ?? 'UNKNOWN'
+  return {
+    status: label,
+    reason: eligibility.reason ?? null,
+    nextAction: eligibility.next_action ?? null,
+  }
+}
+
 export function deriveGlobalSummary(stepStatuses) {
   if (!stepStatuses) {
     return { status: 'UNKNOWN', reason: 'No data', nextAction: null }

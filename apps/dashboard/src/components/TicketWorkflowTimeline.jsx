@@ -2,12 +2,14 @@ import { STEP_KEYS, STEP_LABELS } from '../lib/ticketWorkflowStatus'
 import TicketWorkflowStep from './TicketWorkflowStep'
 
 const GLOBAL_STATUS_STYLES = {
-  'COMPLETE':       'bg-green-100 text-green-800 border-green-200',
-  'READY TO TAKE':  'bg-emerald-100 text-emerald-800 border-emerald-200',
-  'BLOCKED':        'bg-red-100 text-red-800 border-red-200',
-  'IN PROGRESS':    'bg-blue-100 text-blue-800 border-blue-200',
-  'PENDING':        'bg-gray-100 text-gray-700 border-gray-200',
-  'UNKNOWN':        'bg-gray-100 text-gray-700 border-gray-200',
+  'COMPLETE':              'bg-green-100 text-green-800 border-green-200',
+  'READY TO TAKE':         'bg-emerald-100 text-emerald-800 border-emerald-200',
+  'BLOCKED':               'bg-red-100 text-red-800 border-red-200',
+  'WAITING HUMAN ACTION':  'bg-amber-100 text-amber-800 border-amber-200',
+  'DEPENDENCY BLOCKED':    'bg-orange-100 text-orange-800 border-orange-200',
+  'IN PROGRESS':           'bg-blue-100 text-blue-800 border-blue-200',
+  'PENDING':               'bg-gray-100 text-gray-700 border-gray-200',
+  'UNKNOWN':               'bg-gray-100 text-gray-700 border-gray-200',
 }
 
 function GlobalSummary({ summary }) {

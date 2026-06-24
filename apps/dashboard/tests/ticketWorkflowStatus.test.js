@@ -3,6 +3,7 @@ import {
   STEP_KEYS,
   deriveGlobalSummary,
   deriveStepStatuses,
+  eligibilityToGlobalSummary,
 } from '../src/lib/ticketWorkflowStatus'
 
 describe('deriveStepStatuses', () => {
@@ -164,6 +165,42 @@ describe('deriveGlobalSummary', () => {
     })
     const summary = deriveGlobalSummary(steps)
     expect(summary.status).toBe('IN PROGRESS')
+  })
+
+  it('eligibilityToGlobalSummary returns null when payload is missing', () => {
+    expect(eligibilityToGlobalSummary(null)).toBeNull()
+    expect(eligibilityToGlobalSummary(undefined)).toBeNull()
+  })
+
+  it('eligibilityToGlobalSummary maps READY_TO_TAKE to the UI badge label', () => {
+    const out = eligibilityToGlobalSummary({
+      status: 'READY_TO_TAKE',
+      reason: 'All eligibility checks passed.',
+      next_action: 'Ticket can be taken by a worker',
+    })
+    expect(out).toEqual({
+      status: 'READY TO TAKE',
+      reason: 'All eligibility checks passed.',
+      nextAction: 'Ticket can be taken by a worker',
+    })
+  })
+
+  it('eligibilityToGlobalSummary maps WAITING_HUMAN_ACTION / DEPENDENCY_BLOCKED labels', () => {
+    expect(eligibilityToGlobalSummary({
+      status: 'WAITING_HUMAN_ACTION',
+      reason: 'Human plan approval required',
+      next_action: 'Approve plan review',
+    }).status).toBe('WAITING HUMAN ACTION')
+
+    expect(eligibilityToGlobalSummary({
+      status: 'DEPENDENCY_BLOCKED',
+      reason: 'Dependency T001 not merged',
+      next_action: 'Wait for T001 to be merged',
+    }).status).toBe('DEPENDENCY BLOCKED')
+  })
+
+  it('eligibilityToGlobalSummary falls back to UNKNOWN for unrecognised status', () => {
+    expect(eligibilityToGlobalSummary({ status: 'NOT_A_REAL_STATUS' }).status).toBe('UNKNOWN')
   })
 
   it('returns COMPLETE when execution is done', () => {

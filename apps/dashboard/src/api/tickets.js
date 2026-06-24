@@ -39,6 +39,7 @@ export const getProjectRules = (projectId) => client.get(`/projects/${projectId}
 export const putProjectRules = (projectId, payload) => client.put(`/projects/${projectId}/rules`, payload)
 export const getTicketRuleEvaluation = (id, projectId) => client.get(`${_pfx(projectId)}/tickets/${id}/rule-evaluation`)
 export const postEvaluateTicketRules = (id, projectId) => client.post(`${_pfx(projectId)}/tickets/${id}/evaluate-rules`)
+export const getTicketEligibility = (id, projectId) => client.get(`${_pfx(projectId)}/tickets/${id}/eligibility`)
 export const getTicketDiagnostics = (id, projectId) => client.get(`${_pfx(projectId)}/tickets/${id}/diagnostics`)
 export const runTicketDiagnostics = (id, projectId) => client.post(`${_pfx(projectId)}/tickets/${id}/diagnostics/run`)
 export const listTicketOperations = (id, projectId) => client.get(`${_pfx(projectId)}/tickets/${id}/operations`)

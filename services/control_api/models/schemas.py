@@ -574,6 +574,31 @@ class TicketRuleEvaluationQueued(BaseModel):
     ticket_id: str
 
 
+class TicketExecutionEligibilityCheck(BaseModel):
+    status: Literal["passed", "pending", "failed", "unknown"]
+    detail: str | None = None
+    unmet: list[str] | None = None
+
+
+class TicketExecutionEligibility(BaseModel):
+    ticket_id: str
+    ready_to_take: bool
+    status: Literal[
+        "READY_TO_TAKE",
+        "BLOCKED",
+        "WAITING_HUMAN_ACTION",
+        "DEPENDENCY_BLOCKED",
+        "UNKNOWN",
+    ]
+    reason: str | None = None
+    next_action: str | None = None
+    blocking_step: Literal[
+        "intelligence", "dependencies", "readiness", "rules", "approval"
+    ] | None = None
+    checks: dict[str, TicketExecutionEligibilityCheck] = {}
+    evaluated_at: str | None = None
+
+
 class DiagnosticCheck(BaseModel):
     key: str
     status: str
