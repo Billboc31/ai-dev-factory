@@ -13,7 +13,7 @@ import TicketRuleEvaluationPanel from '../components/TicketRuleEvaluationPanel'
 import TicketWorkflowTimeline from '../components/TicketWorkflowTimeline'
 import WorkflowTimeline from '../components/WorkflowTimeline'
 import usePolling from '../hooks/usePolling'
-import { deriveGlobalSummary, deriveStepStatuses } from '../lib/ticketWorkflowStatus'
+import { deriveGlobalSummary, deriveStepStatuses, eligibilityToGlobalSummary } from '../lib/ticketWorkflowStatus'
 
 const CONFLICT_PANEL_STATES = new Set([
   'CONFLICT_RESOLUTION_NEEDED',
@@ -151,25 +151,50 @@ const READY_TO_TAKE_GATES = [
   { key: 'approval',     label: 'Human approval' },
 ]
 
-function ReadyToTakeChecklist({ stepStatuses }) {
+function ReadyToTakeChecklist({ stepStatuses, eligibility }) {
   return (
-    <ul className="space-y-1 text-sm">
-      {READY_TO_TAKE_GATES.map(({ key, label }) => {
-        const status = stepStatuses?.[key]?.status ?? 'pending'
-        const icon = status === 'done' ? '✓' : status === 'blocked' ? '✗' : '○'
-        const color = status === 'done'
-          ? 'text-green-700'
-          : status === 'blocked'
-            ? 'text-red-700'
-            : 'text-gray-500'
-        return (
-          <li key={key} className={`flex items-center gap-2 ${color}`}>
-            <span className="font-mono">{icon}</span>
-            <span>{label}</span>
-          </li>
-        )
-      })}
-    </ul>
+    <div className="space-y-3">
+      {eligibility && (
+        <div
+          data-testid="ticket-eligibility-summary"
+          className="text-xs border border-gray-200 rounded p-2 bg-gray-50"
+        >
+          <div>
+            <span className="font-medium">Eligibility:</span>{' '}
+            <span className="font-mono">{eligibility.status}</span>
+          </div>
+          {eligibility.reason && (
+            <div className="mt-0.5"><span className="font-medium">Reason: </span>{eligibility.reason}</div>
+          )}
+          {eligibility.next_action && (
+            <div className="mt-0.5"><span className="font-medium">Next action: </span>{eligibility.next_action}</div>
+          )}
+          {eligibility.blocking_step && (
+            <div className="mt-0.5">
+              <span className="font-medium">Blocking step: </span>
+              <span className="font-mono">{eligibility.blocking_step}</span>
+            </div>
+          )}
+        </div>
+      )}
+      <ul className="space-y-1 text-sm">
+        {READY_TO_TAKE_GATES.map(({ key, label }) => {
+          const status = stepStatuses?.[key]?.status ?? 'pending'
+          const icon = status === 'done' ? '✓' : status === 'blocked' ? '✗' : '○'
+          const color = status === 'done'
+            ? 'text-green-700'
+            : status === 'blocked'
+              ? 'text-red-700'
+              : 'text-gray-500'
+          return (
+            <li key={key} className={`flex items-center gap-2 ${color}`}>
+              <span className="font-mono">{icon}</span>
+              <span>{label}</span>
+            </li>
+          )
+        })}
+      </ul>
+    </div>
   )
 }
 
@@ -235,6 +260,7 @@ export default function TicketDetailPage() {
     readiness: null,
     approvals: [],
     ruleEvaluation: null,
+    eligibility: null,
   })
   const prevStateRef = useRef(null)
   const activeTabRef = useRef(tab)
@@ -246,7 +272,7 @@ export default function TicketDetailPage() {
     setError(null)
     setTab('timeline')
     setTabContent({})
-    setWorkflowData({ intelligence: null, readiness: null, approvals: [], ruleEvaluation: null })
+    setWorkflowData({ intelligence: null, readiness: null, approvals: [], ruleEvaluation: null, eligibility: null })
     prevStateRef.current = null
   }, [id])
 
@@ -278,12 +304,14 @@ export default function TicketDetailPage() {
       safeFetch(() => api.getTicketReadiness(id, projectId)),
       safeFetch(() => api.getTicketApprovals(id, projectId)),
       safeFetch(() => api.getTicketRuleEvaluation(id, projectId)),
-    ]).then(([intelligence, readiness, approvalsResp, ruleEvaluation]) => {
+      safeFetch(() => api.getTicketEligibility(id, projectId)),
+    ]).then(([intelligence, readiness, approvalsResp, ruleEvaluation, eligibility]) => {
       setWorkflowData({
         intelligence,
         readiness,
         approvals: approvalsResp?.approvals ?? [],
         ruleEvaluation,
+        eligibility,
       })
     })
   }, [id, projectId])
@@ -324,7 +352,13 @@ export default function TicketDetailPage() {
     ticket,
   }), [workflowData, ticket])
 
-  const globalSummary = useMemo(() => deriveGlobalSummary(stepStatuses), [stepStatuses])
+  const globalSummary = useMemo(() => {
+    // Prefer the server-side eligibility decision when available — the page
+    // falls back to the offline client-side derivation while the eligibility
+    // endpoint is loading or returns 404.
+    return eligibilityToGlobalSummary(workflowData.eligibility)
+      ?? deriveGlobalSummary(stepStatuses)
+  }, [workflowData.eligibility, stepStatuses])
 
   if (loading) return <p className="text-gray-500">Loading…</p>
 
@@ -363,7 +397,7 @@ export default function TicketDetailPage() {
           readiness:    <TicketReadinessPanel ticketId={id} projectId={projectId} />,
           rules:        <TicketRuleEvaluationPanel ticketId={id} projectId={projectId} />,
           approval:     <HumanApprovalPanel ticketId={id} projectId={projectId} />,
-          readyToTake:  <ReadyToTakeChecklist stepStatuses={stepStatuses} />,
+          readyToTake:  <ReadyToTakeChecklist stepStatuses={stepStatuses} eligibility={workflowData.eligibility} />,
           execution: (
             <div className="space-y-4">
               {ticket && CONFLICT_PANEL_STATES.has(ticket.state) && (

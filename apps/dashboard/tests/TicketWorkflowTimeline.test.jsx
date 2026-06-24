@@ -88,6 +88,41 @@ describe('TicketWorkflowTimeline', () => {
     expect(screen.getByText('INTEL_DETAILS')).toBeInTheDocument()
   })
 
+  it('renders DEPENDENCY BLOCKED summary with reason and next action', () => {
+    const steps = deriveStepStatuses(ALL_DONE_FIXTURE)
+    render(
+      <TicketWorkflowTimeline
+        stepStatuses={steps}
+        globalSummary={{
+          status: 'DEPENDENCY BLOCKED',
+          reason: 'Dependency T001 not merged',
+          nextAction: 'Wait for T001 to be merged',
+        }}
+      />
+    )
+    const block = screen.getByTestId('ticket-workflow-global-summary')
+    expect(block).toHaveTextContent('DEPENDENCY BLOCKED')
+    expect(block).toHaveTextContent('Dependency T001 not merged')
+    expect(block).toHaveTextContent('Wait for T001 to be merged')
+  })
+
+  it('renders WAITING HUMAN ACTION summary with the dedicated style', () => {
+    const steps = deriveStepStatuses(APPROVAL_PENDING_FIXTURE)
+    render(
+      <TicketWorkflowTimeline
+        stepStatuses={steps}
+        globalSummary={{
+          status: 'WAITING HUMAN ACTION',
+          reason: 'Human plan approval required',
+          nextAction: 'Approve plan review',
+        }}
+      />
+    )
+    const block = screen.getByTestId('ticket-workflow-global-summary')
+    expect(block).toHaveTextContent('WAITING HUMAN ACTION')
+    expect(block.className).toMatch(/amber/)
+  })
+
   it('shows the blocking reason on the corresponding step', () => {
     const fixture = {
       ...APPROVAL_PENDING_FIXTURE,
