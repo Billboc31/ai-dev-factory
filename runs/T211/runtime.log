@@ -34,3 +34,12 @@
 [2026-06-24T13:35:10Z] compose: skill=ai/skills/security.md
 [2026-06-24T13:35:10Z] compose: task (canonical prompt)
 [2026-06-24T13:35:10Z] snapshot: runtime-prompt=runs/T211/prompts/coder-attempt-1.md
+[2026-06-24T14:31:08Z] auto-run: step=tester done rc=0
+[2026-06-24T14:31:08Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-24T14:31:08Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-24T14:31:08Z] commit-checkpoint: unstaged runtime garbage: ['runs/T211/runtime.log']
+[2026-06-24T14:31:08Z] commit-checkpoint: sha=ed0c00d8 files=3 title='test(T211/workflow): tester — update 3 file(s)'
+[2026-06-24T14:31:08Z] auto-run: auto-push triggered
+[2026-06-24T14:31:08Z] push: tolerating runtime dirty files (not blocking): ['runs/T211/runtime.log']
+[2026-06-24T14:31:08Z] push: pushing branch=ticket/T211-add-ready-to-take-eligibility-service-and-unified
+[2026-06-24T14:31:10Z] push: done branch=ticket/T211-add-ready-to-take-eligibility-service-and-unified
