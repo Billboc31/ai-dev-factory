@@ -70,3 +70,14 @@
 [2026-06-24T21:46:56Z] compose: skill=ai/skills/security.md
 [2026-06-24T21:46:56Z] compose: task (canonical prompt)
 [2026-06-24T21:46:56Z] snapshot: runtime-prompt=runs/T213/prompts/coder-attempt-2.md
+[2026-06-24T22:17:26Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-24T22:17:26Z] auto-run: running step=tester
+[2026-06-24T22:17:26Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-24T22:17:26Z] prompt: generic fallback — injecting runs/T213/ticket.md
+[2026-06-24T22:17:26Z] compose: global-context=docs/ai/global-context.md
+[2026-06-24T22:17:26Z] compose: role=ai/roles/tester.md
+[2026-06-24T22:17:26Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-24T22:17:26Z] compose: skill=ai/skills/testing.md
+[2026-06-24T22:17:26Z] compose: skill=ai/skills/debugging.md
+[2026-06-24T22:17:26Z] compose: task (canonical prompt)
+[2026-06-24T22:17:26Z] snapshot: runtime-prompt=runs/T213/prompts/tester-attempt-1.md
