@@ -24,11 +24,12 @@ const STATUS_COLORS = {
 }
 
 const SUBCHECK_COLORS = {
-  passed:  'bg-green-100 text-green-800',
-  failed:  'bg-red-100 text-red-800',
-  unknown: 'bg-gray-100 text-gray-600',
-  fresh:   'bg-green-100 text-green-800',
-  stale:   'bg-orange-100 text-orange-800',
+  passed:   'bg-green-100 text-green-800',
+  failed:   'bg-red-100 text-red-800',
+  advisory: 'bg-amber-100 text-amber-800',
+  unknown:  'bg-gray-100 text-gray-600',
+  fresh:    'bg-green-100 text-green-800',
+  stale:    'bg-orange-100 text-orange-800',
 }
 
 function StatusBadge({ status }) {
@@ -187,9 +188,9 @@ export default function TicketReadinessPanel({ ticketId, projectId }) {
           </Field>
           <Field label="Approval">
             <SubCheckBadge status={readiness.approval_check_status} />
-            {readiness.human_approval_required && !readiness.human_approval_present && (
-              <p className="text-xs text-gray-500 mt-0.5">Human plan approval missing</p>
-            )}
+            {/* Advisory copy is rendered from the payload-driven warnings
+                list above so the same source of truth feeds plan-review and
+                execution-approval messages. No hardcoded copy here. */}
           </Field>
           <Field label="Context freshness">
             <SubCheckBadge status={readiness.context_freshness_status} />

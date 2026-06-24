@@ -41,11 +41,61 @@ describe('deriveStepStatuses', () => {
     const steps = deriveStepStatuses({
       readiness: {
         readiness_status: 'blocked',
-        blocking_reasons: ['missing approval', 'stale context'],
+        blocking_reasons: ['Dependency T999 not merged', 'stale context'],
       },
     })
     expect(steps.readiness.status).toBe('blocked')
-    expect(steps.readiness.blockingReason).toBe('missing approval')
+    expect(steps.readiness.blockingReason).toBe('Dependency T999 not merged')
+  })
+
+  // ── T213 entry-prerequisite contract ──────────────────────────────────────
+
+  it('keeps readiness as done when ready_candidate carries only advisory warnings', () => {
+    const steps = deriveStepStatuses({
+      readiness: {
+        readiness_status: 'ready_candidate',
+        blocking_reasons: [],
+        warnings: ['Human plan review may be required later'],
+      },
+    })
+    expect(steps.readiness.status).toBe('done')
+    expect(steps.readiness.blockingReason).toBeNull()
+  })
+
+  it('treats ready_to_take as done in the readiness step', () => {
+    const steps = deriveStepStatuses({
+      readiness: { readiness_status: 'ready_to_take' },
+    })
+    expect(steps.readiness.status).toBe('done')
+    expect(steps.readiness.summary).toMatch(/ready to take/i)
+  })
+
+  it('does not flip readiness to blocked when blocked status has no concrete blockers', () => {
+    // Defensive: stale persisted row claims "blocked" but provides no
+    // entry-prerequisite blocker. The step must not surface as BLOCKED.
+    const steps = deriveStepStatuses({
+      readiness: {
+        readiness_status: 'blocked',
+        blocking_reasons: [],
+      },
+    })
+    expect(steps.readiness.status).toBe('done')
+  })
+
+  it('renders readiness as done for completed tickets regardless of payload', () => {
+    // Completed ticket (downstream state ≥ PLAN_APPROVED) → readiness is a
+    // historical entry gate, not a live re-evaluation target.
+    for (const state of ['PLAN_APPROVED', 'IMPLEMENTATION_APPROVED', 'MERGED']) {
+      const steps = deriveStepStatuses({
+        readiness: {
+          readiness_status: 'blocked',
+          blocking_reasons: ['stale blocker'],
+        },
+        ticket: { state },
+      })
+      expect(steps.readiness.status).toBe('done')
+      expect(steps.readiness.blockingReason).toBeNull()
+    }
   })
 
   it('marks rules as blocked with the first failed-rule reason', () => {

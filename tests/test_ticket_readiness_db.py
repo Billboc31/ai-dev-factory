@@ -82,14 +82,14 @@ def test_round_trip_json_list_fields(db: Path) -> None:
         db,
         "T001",
         readiness_status="blocked",
-        blocking_reasons_json=["Dependency T010 not merged", "Human plan approval missing"],
+        blocking_reasons_json=["Dependency T010 not merged", "Missing Ticket Intelligence analysis"],
         warnings_json=["context freshness unknown"],
     )
     row = get_ticket_readiness(db, "T001")
     assert row is not None
     assert row["blocking_reasons_json"] == [
         "Dependency T010 not merged",
-        "Human plan approval missing",
+        "Missing Ticket Intelligence analysis",
     ]
     assert row["warnings_json"] == ["context freshness unknown"]
 

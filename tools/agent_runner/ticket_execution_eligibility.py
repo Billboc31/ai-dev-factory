@@ -207,6 +207,10 @@ def _eval_approval(
         return {"status": "passed", "detail": "Plan approval recorded."}
     if plan_status == "rejected":
         return {"status": "failed", "detail": "Plan approval was rejected."}
+    # This belongs to Eligibility, not Readiness. Readiness must never
+    # surface this message as a blocker — see
+    # ``tools/agent_runner/ticket_readiness_evaluator.py`` (the
+    # ``_is_entry_prerequisite_reason`` guard would drop it).
     return {"status": "failed", "detail": "Human plan approval required"}
 
 

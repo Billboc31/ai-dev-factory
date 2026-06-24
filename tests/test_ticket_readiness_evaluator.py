@@ -137,13 +137,21 @@ def test_dependency_unknown_blocks(evaluator, db, git_repo, monkeypatch):
     assert row["dependency_check_status"] == "failed"
 
 
-def test_missing_human_approval_blocks(evaluator, db, git_repo):
+def test_missing_human_approval_emits_warning_not_block(evaluator, db, git_repo):
+    """Readiness must not block on a future human plan approval.
+
+    A ticket whose intelligence flags ``requires_human_plan_review`` but has
+    no approval marker yet is still ``ready_candidate``. The pending review is
+    surfaced as a non-blocking advisory warning only.
+    """
     _set_completed_intelligence(db, "T004", requires_human_plan_review=1)
     evaluator.run_evaluation(db, "T004", "no dependencies", git_repo)
     row = _db.get_ticket_readiness(db, "T004")
-    assert row["readiness_status"] == "blocked"
-    assert "Human plan approval missing" in row["blocking_reasons_json"]
-    assert row["approval_check_status"] == "failed"
+    assert row["readiness_status"] == "ready_candidate"
+    assert row["ready_candidate"] == 1
+    assert "Human plan approval missing" not in row["blocking_reasons_json"]
+    assert "Human plan review may be required later" in row["warnings_json"]
+    assert row["approval_check_status"] == "advisory"
     assert row["human_approval_required"] == 1
     assert row["human_approval_present"] == 0
 
@@ -156,8 +164,48 @@ def test_human_approval_present_via_marker_file_passes(evaluator, db, git_repo):
 
     evaluator.run_evaluation(db, "T005", "no dependencies", git_repo)
     row = _db.get_ticket_readiness(db, "T005")
+    assert row["readiness_status"] == "ready_candidate"
     assert row["approval_check_status"] == "passed"
     assert row["human_approval_present"] == 1
+    assert "Human plan review may be required later" not in row["warnings_json"]
+
+
+def test_intelligence_missing_still_blocks(evaluator, db, git_repo):
+    """Regression guard: missing intelligence is a workflow-entry blocker."""
+    evaluator.run_evaluation(db, "T009", "no deps", git_repo)
+    row = _db.get_ticket_readiness(db, "T009")
+    assert row["readiness_status"] == "blocked"
+    assert "Missing Ticket Intelligence analysis" in row["blocking_reasons_json"]
+    assert row["ready_candidate"] == 0
+
+
+def test_dependency_missing_still_blocks(evaluator, db, git_repo, monkeypatch):
+    """Regression guard: an unmerged dependency is a workflow-entry blocker."""
+    _set_completed_intelligence(db, "T010")
+    monkeypatch.setattr(
+        evaluator,
+        "is_ticket_merged",
+        lambda root, dep: _MergeResult(status="not_merged", source="runtime_db"),
+    )
+    evaluator.run_evaluation(
+        db, "T010",
+        "depends on T100 before we can ship.",
+        git_repo,
+    )
+    row = _db.get_ticket_readiness(db, "T010")
+    assert row["readiness_status"] == "blocked"
+    assert "Dependency T100 not merged" in row["blocking_reasons_json"]
+
+
+def test_warnings_persist_alongside_ready_candidate(evaluator, db, git_repo):
+    """A ticket can be ready_candidate AND carry advisory warnings."""
+    _set_completed_intelligence(db, "T011", requires_human_plan_review=1)
+    evaluator.run_evaluation(db, "T011", "no deps", git_repo)
+    row = _db.get_ticket_readiness(db, "T011")
+    assert row["readiness_status"] == "ready_candidate"
+    assert row["ready_candidate"] == 1
+    assert row["warnings_json"]
+    assert "Human plan review may be required later" in row["warnings_json"]
 
 
 def test_all_checks_pass_yields_ready_candidate(evaluator, db, git_repo, monkeypatch):
@@ -202,3 +250,132 @@ def test_evaluator_persists_failed_on_unexpected_error(evaluator, db, git_repo, 
     row = _db.get_ticket_readiness(db, "T008")
     assert row["readiness_status"] == "failed"
     assert any("simulated crash" in w for w in row["warnings_json"])
+
+
+# ── T213 entry-prerequisite contract guarantees ──────────────────────────────
+
+
+_FORBIDDEN_BLOCKER_TOKENS = ("approval", "plan review", "execution rule", "ready_to_take")
+
+
+def _assert_no_forbidden_blocker_tokens(blocking_reasons: list[str]) -> None:
+    """Assert that every blocker passes the entry-prerequisite contract."""
+    for reason in blocking_reasons:
+        lowered = reason.lower()
+        for token in _FORBIDDEN_BLOCKER_TOKENS:
+            assert token not in lowered, (
+                f"blocker {reason!r} contains forbidden token {token!r} — "
+                "it belongs to a later workflow stage"
+            )
+
+
+def test_missing_human_execution_approval_does_not_block(
+    evaluator, db, git_repo, monkeypatch
+):
+    """A pending future execution approval is a warning, not a blocker."""
+    _set_completed_intelligence(db, "T020")
+
+    original_get = evaluator.runtime_db.get_ticket_intelligence
+
+    def _fake_get(db_path, ticket_id):
+        row = original_get(db_path, ticket_id)
+        if row is not None and ticket_id == "T020":
+            row = dict(row)
+            row["requires_human_execution_approval"] = 1
+        return row
+
+    monkeypatch.setattr(evaluator.runtime_db, "get_ticket_intelligence", _fake_get)
+
+    evaluator.run_evaluation(db, "T020", "no deps", git_repo)
+    row = _db.get_ticket_readiness(db, "T020")
+    assert row["readiness_status"] == "ready_candidate"
+    assert row["ready_candidate"] == 1
+    assert row["blocking_reasons_json"] == []
+    assert "Human execution approval may be required later" in row["warnings_json"]
+    assert row["approval_check_status"] == "advisory"
+
+
+@pytest.mark.parametrize(
+    "downstream_state",
+    ["PLAN_REVIEW_NEEDED", "PLAN_FIX_REQUIRED", "PLAN_APPROVED"],
+)
+def test_planner_review_states_do_not_block_readiness(
+    evaluator, db, git_repo, downstream_state
+):
+    """Planner-review states never produce readiness blockers."""
+    _set_completed_intelligence(db, "T021", requires_human_plan_review=1)
+
+    run_dir = git_repo / "runs" / "T021"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(
+        f'{{"ticket_id": "T021", "state": "{downstream_state}"}}',
+        encoding="utf-8",
+    )
+
+    evaluator.run_evaluation(db, "T021", "no deps", git_repo)
+    row = _db.get_ticket_readiness(db, "T021")
+    assert row["readiness_status"] in {"ready_candidate", "ready_to_take"}
+    _assert_no_forbidden_blocker_tokens(row["blocking_reasons_json"])
+
+
+def test_execution_rules_state_does_not_block_readiness(
+    evaluator, db, git_repo, monkeypatch
+):
+    """Even if execution rules would deny later, readiness ignores them."""
+    _set_completed_intelligence(db, "T022")
+
+    # Force a synthetic rule-evaluation row that, if consulted, would
+    # forbid execution. Readiness must remain ready_candidate.
+    def _denied_rule_evaluation(*_args, **_kwargs):
+        return {
+            "eligibility_status": "blocked",
+            "failed_rules_json": [{"rule_key": "deny-all", "reason": "denied"}],
+        }
+
+    if hasattr(evaluator.runtime_db, "get_ticket_rule_evaluation"):
+        monkeypatch.setattr(
+            evaluator.runtime_db, "get_ticket_rule_evaluation", _denied_rule_evaluation
+        )
+
+    evaluator.run_evaluation(db, "T022", "no deps", git_repo)
+    row = _db.get_ticket_readiness(db, "T022")
+    assert row["readiness_status"] == "ready_candidate"
+    _assert_no_forbidden_blocker_tokens(row["blocking_reasons_json"])
+
+
+def test_blocking_reasons_only_from_entry_prerequisites(
+    evaluator, db, git_repo, monkeypatch
+):
+    """Every blocker passes ``_is_entry_prerequisite_reason``."""
+    # Force a forbidden blocker to slip in upstream and verify the guard
+    # drops it rather than letting it block readiness.
+    monkeypatch.setattr(
+        evaluator,
+        "_check_intelligence",
+        lambda *_a, **_k: ("failed", "Human plan approval missing"),
+    )
+    monkeypatch.setattr(
+        evaluator,
+        "_check_dependencies",
+        lambda *_a, **_k: ("passed", []),
+    )
+
+    evaluator.run_evaluation(db, "T023", "no deps", git_repo)
+    row = _db.get_ticket_readiness(db, "T023")
+    # The forbidden blocker is dropped, so nothing remains in blockers.
+    assert row["blocking_reasons_json"] == []
+    _assert_no_forbidden_blocker_tokens(row["blocking_reasons_json"])
+
+
+def test_is_entry_prerequisite_reason_accepts_valid_blockers(evaluator):
+    assert evaluator._is_entry_prerequisite_reason("Missing Ticket Intelligence analysis")
+    assert evaluator._is_entry_prerequisite_reason("Dependency T010 not merged")
+    assert evaluator._is_entry_prerequisite_reason("Dependency T010 merge state unknown")
+
+
+def test_is_entry_prerequisite_reason_rejects_later_stage_blockers(evaluator):
+    assert not evaluator._is_entry_prerequisite_reason("Human plan approval missing")
+    assert not evaluator._is_entry_prerequisite_reason("Human execution approval required")
+    assert not evaluator._is_entry_prerequisite_reason("Plan review pending")
+    assert not evaluator._is_entry_prerequisite_reason("Blocked by execution rule deny-all")
+    assert not evaluator._is_entry_prerequisite_reason("Awaiting ready_to_take promotion")
