@@ -15,7 +15,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .routes import approvals, auto_fix, daemon, deployer, diagnostics, eligibility, environments, health, intelligence, issues, operations, project_map, projects, providers, readiness, rules, runtime_dashboard, sandbox, tickets
+from .routes import approvals, auto_fix, daemon, deployer, diagnostics, dispatcher, eligibility, environments, health, intelligence, issues, operations, project_map, projects, providers, readiness, rules, runtime_dashboard, sandbox, tickets
 from .services.project_registry import ProjectRegistry
 from .services.runtime_resolver import resolve_worktrees_dir
 
@@ -218,6 +218,9 @@ def create_app(
     # T211: /tickets/{id}/eligibility — unified READY_TO_TAKE decision aggregator.
     app.include_router(eligibility.router)
     app.include_router(eligibility.project_router)
+    # T212: /dispatcher/* — advisory next-ticket dispatcher (read-only).
+    app.include_router(dispatcher.router)
+    app.include_router(dispatcher.project_router)
 
     return app
 

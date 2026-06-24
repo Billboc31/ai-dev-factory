@@ -1,7 +1,7 @@
 {
   "ticket_id": "T212",
-  "state": "PLAN_APPROVED",
+  "state": "IMPLEMENTATION_REVIEW_NEEDED",
   "branch": "ticket/T212-add-advisory-ticket-dispatcher-service-with-option",
   "issue_number": 280,
-  "updated_at": "2026-06-24T15:00:02Z"
+  "updated_at": "2026-06-24T15:09:14Z"
 }

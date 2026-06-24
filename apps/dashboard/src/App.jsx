@@ -19,6 +19,7 @@ import ProjectWorktreesPage from './pages/ProjectWorktreesPage'
 import ProjectLogsPage from './pages/ProjectLogsPage'
 import ProjectAgentLayoutPage from './pages/ProjectAgentLayoutPage'
 import ProjectRulesPage from './pages/ProjectRulesPage'
+import DispatcherPage from './pages/DispatcherPage'
 import useProjects from './hooks/useProjects'
 
 export const ActiveProjectContext = createContext(null)
@@ -90,6 +91,7 @@ function AppLayout() {
             <Route path="/projects/:projectId/daemon" element={<ProjectDaemonPage />} />
             <Route path="/projects/:projectId/agent-layout" element={<ProjectAgentLayoutPage />} />
             <Route path="/projects/:projectId/rules" element={<ProjectRulesPage />} />
+            <Route path="/projects/:projectId/dispatcher" element={<DispatcherPage />} />
             {/* Legacy routes not yet migrated to project-scoped URLs */}
             <Route path="/project-map" element={<ProjectMapPage projectId={activeProject} />} />
             <Route path="/mapper-activity" element={<IssueMapperActivityPage projectId={activeProject} />} />
