@@ -10,3 +10,14 @@
 [2026-06-24T12:38:10Z] compose: task (canonical prompt)
 [2026-06-24T12:38:10Z] snapshot: runtime-prompt=runs/T211/prompts/planner-attempt-1.md
 [2026-06-24T12:41:20Z] auto-run: step=planner done rc=0
+[2026-06-24T12:41:22Z] planner checkpoint: committed
+[2026-06-24T12:41:22Z] planner checkpoint: pushed
+[2026-06-24T12:41:22Z] planner validation success
+[2026-06-24T12:41:22Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-24T12:41:22Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-24T12:41:22Z] commit-checkpoint: unstaged runtime garbage: ['runs/T211/runtime.log']
+[2026-06-24T12:41:22Z] commit-checkpoint: sha=36d4f563 files=2 title='docs(T211/workflow): planner — update 2 file(s)'
+[2026-06-24T12:41:22Z] auto-run: auto-push triggered
+[2026-06-24T12:41:22Z] push: tolerating runtime dirty files (not blocking): ['runs/T211/runtime.log']
+[2026-06-24T12:41:22Z] push: pushing branch=ticket/T211-add-ready-to-take-eligibility-service-and-unified
+[2026-06-24T12:41:24Z] push: done branch=ticket/T211-add-ready-to-take-eligibility-service-and-unified
