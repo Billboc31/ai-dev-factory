@@ -3,5 +3,7 @@
   "state": "TEST_COMPLETE",
   "branch": "ticket/T212-add-advisory-ticket-dispatcher-service-with-option",
   "issue_number": 280,
-  "updated_at": "2026-06-24T15:57:44Z"
+  "updated_at": "2026-06-24T15:58:23Z",
+  "pr_number": 281,
+  "pr_synced": true
 }
