@@ -21,3 +21,14 @@
 [2026-06-24T14:47:08Z] push: tolerating runtime dirty files (not blocking): ['runs/T212/runtime.log']
 [2026-06-24T14:47:08Z] push: pushing branch=ticket/T212-add-advisory-ticket-dispatcher-service-with-option
 [2026-06-24T14:47:10Z] push: done branch=ticket/T212-add-advisory-ticket-dispatcher-service-with-option
+[2026-06-24T15:23:05Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-24T15:23:05Z] auto-run: running step=tester
+[2026-06-24T15:23:05Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-24T15:23:05Z] prompt: generic fallback — injecting runs/T212/ticket.md
+[2026-06-24T15:23:05Z] compose: global-context=docs/ai/global-context.md
+[2026-06-24T15:23:05Z] compose: role=ai/roles/tester.md
+[2026-06-24T15:23:05Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-24T15:23:05Z] compose: skill=ai/skills/testing.md
+[2026-06-24T15:23:05Z] compose: skill=ai/skills/debugging.md
+[2026-06-24T15:23:05Z] compose: task (canonical prompt)
+[2026-06-24T15:23:05Z] snapshot: runtime-prompt=runs/T212/prompts/tester-attempt-1.md
