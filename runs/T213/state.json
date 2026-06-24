@@ -1,7 +1,7 @@
 {
   "ticket_id": "T213",
-  "state": "PLAN_APPROVED",
+  "state": "INIT",
   "branch": "ticket/T213-fix-ticket-readiness-to-evaluate-only-workflow-ent",
   "issue_number": 282,
-  "updated_at": "2026-06-24T17:38:45Z"
+  "updated_at": "2026-06-24T21:34:23Z"
 }

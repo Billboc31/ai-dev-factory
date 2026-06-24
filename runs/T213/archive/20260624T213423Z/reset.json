@@ -1,0 +1,9 @@
+{
+  "operation": "reset_to_planning",
+  "ticket_id": "T213",
+  "requested_by": "operator",
+  "reason": "blocked",
+  "previous_state": "PLAN_APPROVED",
+  "new_state": "INIT",
+  "created_at": "2026-06-24T21:34:23Z"
+}
