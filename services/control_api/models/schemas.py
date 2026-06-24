@@ -660,3 +660,45 @@ class OperationResult(BaseModel):
     status: Literal["completed", "rejected", "error"]
     message: str
     details: dict = {}
+
+
+# T212 — Dispatcher service schemas.
+
+class DispatcherStatus(BaseModel):
+    mode: Literal["off", "advisory", "manual", "auto"]
+    available_modes: list[str]
+    auto_enabled: bool = False
+
+
+class DispatcherRecommendationIntelligence(BaseModel):
+    difficulty_score: int | None = None
+    difficulty_label: str | None = None
+    queue_rank: int | None = None
+
+
+class DispatcherRecommendation(BaseModel):
+    ticket_id: str
+    rank: int
+    score: int
+    ready_to_take: bool = True
+    intelligence: DispatcherRecommendationIntelligence = (
+        DispatcherRecommendationIntelligence()
+    )
+    reason: str | None = None
+
+
+class DispatcherBlockedTicket(BaseModel):
+    ticket_id: str
+    ready_to_take: bool = False
+    status: str | None = None
+    blocking_step: str | None = None
+    reason: str | None = None
+
+
+class DispatcherResponse(BaseModel):
+    mode: Literal["off", "advisory", "manual", "auto"]
+    project_id: str | None = None
+    evaluated_at: str | None = None
+    recommendations: list[DispatcherRecommendation] = []
+    blocked: list[DispatcherBlockedTicket] = []
+    not_implemented: bool | None = None
