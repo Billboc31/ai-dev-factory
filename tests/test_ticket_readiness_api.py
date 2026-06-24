@@ -125,10 +125,10 @@ def test_get_readiness_returns_blocking_reasons(tmp_path):
         ready_candidate=0,
         blocking_reasons_json=[
             "Dependency T001 not merged",
-            "Human plan approval missing",
         ],
+        warnings_json=["Human plan review may be required later"],
         dependency_check_status="failed",
-        approval_check_status="failed",
+        approval_check_status="advisory",
     )
     client = TestClient(app)
     r = client.get("/tickets/T002/readiness")
@@ -137,7 +137,28 @@ def test_get_readiness_returns_blocking_reasons(tmp_path):
     assert body["readiness_status"] == "blocked"
     assert body["ready_candidate"] is False
     assert "Dependency T001 not merged" in body["blocking_reasons"]
-    assert "Human plan approval missing" in body["blocking_reasons"]
+    assert "Human plan approval missing" not in body["blocking_reasons"]
+    assert "Human plan review may be required later" in body["warnings"]
+
+
+def test_get_readiness_returns_warnings(tmp_path):
+    _make_ticket(tmp_path, "T003")
+    app = _make_app(tmp_path)
+    db = app.state.db_path
+
+    _sqlite_db.upsert_ticket_readiness(
+        db, "T003",
+        readiness_status="ready_candidate",
+        ready_candidate=1,
+        blocking_reasons_json=[],
+        warnings_json=["Human plan review may be required later"],
+        approval_check_status="advisory",
+    )
+    client = TestClient(app)
+    r = client.get("/tickets/T003/readiness")
+    assert r.status_code == 200
+    body = r.json()
+    assert "Human plan review may be required later" in body["warnings"]
 
 
 # ── POST /tickets/{id}/evaluate-readiness ────────────────────────────────────

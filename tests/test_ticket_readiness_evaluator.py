@@ -137,13 +137,21 @@ def test_dependency_unknown_blocks(evaluator, db, git_repo, monkeypatch):
     assert row["dependency_check_status"] == "failed"
 
 
-def test_missing_human_approval_blocks(evaluator, db, git_repo):
+def test_missing_human_approval_emits_warning_not_block(evaluator, db, git_repo):
+    """Readiness must not block on a future human plan approval.
+
+    A ticket whose intelligence flags ``requires_human_plan_review`` but has
+    no approval marker yet is still ``ready_candidate``. The pending review is
+    surfaced as a non-blocking advisory warning only.
+    """
     _set_completed_intelligence(db, "T004", requires_human_plan_review=1)
     evaluator.run_evaluation(db, "T004", "no dependencies", git_repo)
     row = _db.get_ticket_readiness(db, "T004")
-    assert row["readiness_status"] == "blocked"
-    assert "Human plan approval missing" in row["blocking_reasons_json"]
-    assert row["approval_check_status"] == "failed"
+    assert row["readiness_status"] == "ready_candidate"
+    assert row["ready_candidate"] == 1
+    assert "Human plan approval missing" not in row["blocking_reasons_json"]
+    assert "Human plan review may be required later" in row["warnings_json"]
+    assert row["approval_check_status"] == "advisory"
     assert row["human_approval_required"] == 1
     assert row["human_approval_present"] == 0
 
@@ -156,8 +164,48 @@ def test_human_approval_present_via_marker_file_passes(evaluator, db, git_repo):
 
     evaluator.run_evaluation(db, "T005", "no dependencies", git_repo)
     row = _db.get_ticket_readiness(db, "T005")
+    assert row["readiness_status"] == "ready_candidate"
     assert row["approval_check_status"] == "passed"
     assert row["human_approval_present"] == 1
+    assert "Human plan review may be required later" not in row["warnings_json"]
+
+
+def test_intelligence_missing_still_blocks(evaluator, db, git_repo):
+    """Regression guard: missing intelligence is a workflow-entry blocker."""
+    evaluator.run_evaluation(db, "T009", "no deps", git_repo)
+    row = _db.get_ticket_readiness(db, "T009")
+    assert row["readiness_status"] == "blocked"
+    assert "Missing Ticket Intelligence analysis" in row["blocking_reasons_json"]
+    assert row["ready_candidate"] == 0
+
+
+def test_dependency_missing_still_blocks(evaluator, db, git_repo, monkeypatch):
+    """Regression guard: an unmerged dependency is a workflow-entry blocker."""
+    _set_completed_intelligence(db, "T010")
+    monkeypatch.setattr(
+        evaluator,
+        "is_ticket_merged",
+        lambda root, dep: _MergeResult(status="not_merged", source="runtime_db"),
+    )
+    evaluator.run_evaluation(
+        db, "T010",
+        "depends on T100 before we can ship.",
+        git_repo,
+    )
+    row = _db.get_ticket_readiness(db, "T010")
+    assert row["readiness_status"] == "blocked"
+    assert "Dependency T100 not merged" in row["blocking_reasons_json"]
+
+
+def test_warnings_persist_alongside_ready_candidate(evaluator, db, git_repo):
+    """A ticket can be ready_candidate AND carry advisory warnings."""
+    _set_completed_intelligence(db, "T011", requires_human_plan_review=1)
+    evaluator.run_evaluation(db, "T011", "no deps", git_repo)
+    row = _db.get_ticket_readiness(db, "T011")
+    assert row["readiness_status"] == "ready_candidate"
+    assert row["ready_candidate"] == 1
+    assert row["warnings_json"]
+    assert "Human plan review may be required later" in row["warnings_json"]
 
 
 def test_all_checks_pass_yields_ready_candidate(evaluator, db, git_repo, monkeypatch):

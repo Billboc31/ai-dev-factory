@@ -1,8 +1,14 @@
 """Ticket Readiness Evaluator.
 
-Advisory pipeline step that decides whether a ticket is eligible to enter the
+Advisory pipeline step that decides whether a ticket is eligible to ENTER the
 development pipeline. Independent of execution: the evaluator persists a
 readiness verdict per ticket but does not start, queue, or block runs.
+
+Readiness evaluates only workflow-entry prerequisites. Downstream gates
+(human plan approval, execution approval, execution rules) are NOT evaluated
+here — they live in the plan-review state machine, ``ticket_execution_eligibility``,
+and ``execution_rules_engine``. The presence of a future human-plan-review
+requirement is surfaced as a non-blocking advisory warning only.
 
 Designed to run in a background thread. ``run_evaluation`` never raises:
 unexpected errors are persisted as ``readiness_status="failed"`` with the
@@ -116,14 +122,18 @@ def _state_implies_plan_approved(project_root: Path, ticket_id: str) -> bool:
     return state in _PLAN_APPROVED_OR_LATER
 
 
-def _check_human_approval(
+def _check_human_plan_review_advisory(
     intelligence_row: dict | None,
     project_root: Path,
     ticket_id: str,
 ) -> tuple[str, str | None, int, int]:
-    """Returns (status, blocking_reason, required_flag, present_flag).
+    """Returns (status, warning_or_None, required_flag, present_flag).
 
-    Required = 1 only when intelligence requested a human plan review.
+    Required = 1 only when intelligence requested a human plan review. This
+    function never produces a blocking reason — human plan approval is a
+    downstream gate, not a workflow-entry prerequisite. When a review is
+    required but not yet on file, the result is an advisory warning, and the
+    sub-check status is ``"advisory"`` (never ``"failed"``).
     """
     required = bool(intelligence_row and intelligence_row.get("requires_human_plan_review"))
     if not required:
@@ -136,7 +146,7 @@ def _check_human_approval(
     present_flag = 1 if present else 0
     if present:
         return "passed", None, 1, present_flag
-    return "failed", "Human plan approval missing", 1, present_flag
+    return "advisory", "Human plan review may be required later", 1, present_flag
 
 
 def _check_context_freshness(project_root: Path) -> tuple[str, str | None]:
@@ -186,8 +196,8 @@ def run_evaluation(
 
         intel_status, intel_reason = _check_intelligence(db_path, ticket_id)
         dep_status, dep_reasons = _check_dependencies(ticket_content, project_root)
-        approval_status, approval_reason, approval_required, approval_present = (
-            _check_human_approval(intelligence_row, project_root, ticket_id)
+        approval_status, approval_warning, approval_required, approval_present = (
+            _check_human_plan_review_advisory(intelligence_row, project_root, ticket_id)
         )
         freshness_status, main_sha = _check_context_freshness(project_root)
 
@@ -195,13 +205,14 @@ def run_evaluation(
         if intel_reason:
             blocking_reasons.append(intel_reason)
         blocking_reasons.extend(dep_reasons)
-        if approval_reason:
-            blocking_reasons.append(approval_reason)
+
+        warnings: list[str] = []
+        if approval_warning:
+            warnings.append(approval_warning)
 
         all_passed = (
             intel_status == "passed"
             and dep_status == "passed"
-            and approval_status == "passed"
         )
         readiness_status = "ready_candidate" if all_passed else "blocked"
         ready_candidate = 1 if all_passed else 0
@@ -225,7 +236,7 @@ def run_evaluation(
             readiness_status=readiness_status,
             ready_candidate=ready_candidate,
             blocking_reasons_json=blocking_reasons,
-            warnings_json=[],
+            warnings_json=warnings,
             dependency_check_status=dep_status,
             approval_check_status=approval_status,
             context_freshness_status=freshness_status,
