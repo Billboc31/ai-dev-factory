@@ -2208,6 +2208,55 @@ def _default_exec_cmd() -> str:
     return os.environ.get("DAEMON_EXEC_CMD", "claude --dangerously-skip-permissions")
 
 
+
+
+@app.get("/projects/{project_id}/tickets/{ticket_id}/intelligence")
+def project_ticket_intelligence_get(project_id: str, ticket_id: str):
+    """Return ticket intelligence from the host-owned runtime store."""
+    from fastapi.responses import JSONResponse
+
+    tools_dir = _project_root_dir / "tools" / "agent_runner"
+    if str(tools_dir) not in sys.path:
+        sys.path.insert(0, str(tools_dir))
+    import runtime_db  # noqa: E402
+    import ticket_intelligence_recovery as recovery  # noqa: E402
+
+    project_runtime_root = _project_runtime_root(project_id)
+    try:
+        db = runtime_db.resolve_db_path_for_project(
+            project_id,
+            project_runtime_root=project_runtime_root,
+        )
+    except Exception as exc:
+        return JSONResponse(status_code=503, content={"error": f"failed to resolve runtime DB: {exc}"})
+    if db is None:
+        return JSONResponse(status_code=503, content={"error": "database not available"})
+
+    try:
+        runtime_db.init_runtime_db(db)
+    except Exception as exc:
+        return JSONResponse(status_code=503, content={"error": f"runtime DB unavailable: {exc}"})
+
+    try:
+        for _reaped in recovery.reap_stale_intelligence(db):
+            pass
+    except Exception:
+        logger.exception("supervisor: reaper failed on GET for %s", ticket_id)
+
+    try:
+        row = runtime_db.get_ticket_intelligence(db, ticket_id)
+    except Exception as exc:
+        return JSONResponse(status_code=503, content={"error": f"failed to read intelligence: {exc}"})
+    if row is None:
+        return JSONResponse(
+            status_code=404,
+            content={"detail": f"no intelligence analysis found for ticket {ticket_id}"},
+        )
+    if isinstance(row, dict):
+        row = {k: v for k, v in row.items() if k != "project_id"}
+    return row
+
+
 @app.post("/projects/{project_id}/tickets/{ticket_id}/intelligence/analyze")
 def project_ticket_intelligence_analyze(
     project_id: str,

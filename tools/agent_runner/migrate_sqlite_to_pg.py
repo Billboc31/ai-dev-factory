@@ -53,7 +53,13 @@ def migrate(sqlite_path: Path, project_id: str | None) -> dict[str, int]:
     pg.init_runtime_db(handle)
 
     src = sqlite3.connect(str(sqlite_path))
-    counts = {"issue_intake": 0, "ticket_runtime": 0, "workers": 0, "runtime_events": 0}
+    counts = {
+        "issue_intake": 0,
+        "ticket_runtime": 0,
+        "workers": 0,
+        "ticket_intelligence": 0,
+        "runtime_events": 0,
+    }
 
     for row in _rows(src, "issue_intake"):
         pg.record_issue_intake(
@@ -79,6 +85,15 @@ def migrate(sqlite_path: Path, project_id: str | None) -> dict[str, int]:
             worktree_path=row.get("worktree_path") or "",
         )
         counts["workers"] += 1
+
+    for row in _rows(src, "ticket_intelligence"):
+        fields = {
+            k: v for k, v in row.items()
+            if k not in ("ticket_id", "project_id", "created_at", "updated_at") and v is not None
+        }
+        pg.upsert_ticket_intelligence(handle, row["ticket_id"], **fields)
+        counts.setdefault("ticket_intelligence", 0)
+        counts["ticket_intelligence"] += 1
 
     # Append-only: only migrate when the target is empty (avoid duplicates).
     if not pg.list_runtime_events(handle, limit=1):

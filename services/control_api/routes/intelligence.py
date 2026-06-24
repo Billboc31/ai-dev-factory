@@ -112,6 +112,52 @@ def _resolve_db_for_project(request: Request, project_id: str | None):
     return _db_path(request)
 
 
+
+
+def _sqlite_bind_mount_unsafe() -> bool:
+    """True when the Docker API must not open the bind-mounted SQLite runtime file.
+
+    Concurrent container + host access to WAL-mode SQLite on macOS bind mounts
+    causes intermittent disk I/O errors and ``database disk image is malformed``.
+    In that mode all intelligence DB reads/writes go through the host supervisor.
+    Postgres uses a networked store and is safe from the API container.
+
+  Only active when ``HOST_RUNTIME_ROOT`` is configured (production Docker stack).
+    Unit tests may set ``AI_DEV_FACTORY_API_IN_DOCKER`` without a bind mount.
+    """
+    if not _api_in_docker():
+        return False
+    if os.environ.get("RUNTIME_DB_BACKEND", "sqlite").strip().lower() == "postgres":
+        return False
+    return bool(os.environ.get("HOST_RUNTIME_ROOT", "").strip())
+
+
+def _delegate_get_intelligence_from_supervisor(project_id: str, ticket_id: str) -> TicketIntelligence:
+    """Read ticket intelligence from the host supervisor (host-owned SQLite)."""
+    url = f"{_supervisor_url()}/projects/{project_id}/tickets/{ticket_id}/intelligence"
+    try:
+        with httpx.Client(timeout=15.0) as client:
+            resp = client.get(url)
+    except httpx.ConnectError:
+        raise HTTPException(
+            status_code=503,
+            detail="supervisor unreachable — cannot read ticket intelligence from host DB",
+        ) from None
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=503, detail="supervisor timed out reading ticket intelligence") from None
+
+    if resp.status_code == 404:
+        raise HTTPException(status_code=404, detail=f"no intelligence analysis found for ticket {ticket_id}")
+    if resp.status_code >= 400:
+        try:
+            payload = resp.json()
+            detail = payload.get("detail") or payload.get("error") or resp.text[:300]
+        except Exception:
+            detail = resp.text[:300]
+        raise HTTPException(status_code=503, detail=f"supervisor intelligence read failed: {detail}")
+    return _parse_row(resp.json())
+
+
 def _delegate_analyze_to_supervisor(project_id: str, ticket_id: str, exec_cmd: str) -> None:
     """Run ticket intelligence on the host supervisor where claude is installed."""
     url = f"{_supervisor_url()}/projects/{project_id}/tickets/{ticket_id}/intelligence/analyze"
@@ -260,6 +306,14 @@ def get_intelligence(
     if ticket is None:
         raise HTTPException(status_code=404, detail=f"ticket {ticket_id} not found")
 
+    if _sqlite_bind_mount_unsafe():
+        if not project_id:
+            raise HTTPException(
+                status_code=503,
+                detail="ticket intelligence must be read on the host; use the project-scoped endpoint",
+            )
+        return _delegate_get_intelligence_from_supervisor(project_id, ticket_id)
+
     db = _resolve_db_for_project(request, project_id)
     if db is None:
         raise HTTPException(status_code=503, detail="database not available")
@@ -296,18 +350,6 @@ def analyze_intelligence(
     if ticket is None:
         raise HTTPException(status_code=404, detail=f"ticket {ticket_id} not found")
 
-    db = _resolve_db_for_project(request, project_id)
-    if db is None:
-        raise HTTPException(status_code=503, detail="database not available")
-
-    # Clear out any prior stuck row before the idempotency guard so a manual
-    # re-analyze on a stale ticket is not silently swallowed.
-    _try_reap(db, project_id=project_id, ticket_id=ticket_id)
-
-    existing = runtime_db.get_ticket_intelligence(db, ticket_id)
-    if existing and existing.get("analysis_status") in {"queued", "running"}:
-        return TicketIntelligenceQueued(ticket_id=ticket_id, analysis_status=existing["analysis_status"])
-
     exec_cmd = _exec_cmd(request)
 
     if _needs_host_exec(request):
@@ -319,11 +361,21 @@ def analyze_intelligence(
                     "use the project-scoped analyze endpoint"
                 ),
             )
-        # Do not write `queued` from the Docker API process — concurrent SQLite
-        # access on the bind-mounted runtime DB causes disk I/O errors on macOS.
-        # The host supervisor persists `queued` and starts the analyzer thread.
 
         url = f"{_supervisor_url()}/projects/{project_id}/tickets/{ticket_id}/intelligence/analyze"
+        db = None
+        if not _sqlite_bind_mount_unsafe():
+            db = _resolve_db_for_project(request, project_id)
+            if db is None:
+                raise HTTPException(status_code=503, detail="database not available")
+            _try_reap(db, project_id=project_id, ticket_id=ticket_id)
+            existing = runtime_db.get_ticket_intelligence(db, ticket_id)
+            if existing and existing.get("analysis_status") in {"queued", "running"}:
+                return TicketIntelligenceQueued(
+                    ticket_id=ticket_id,
+                    analysis_status=existing["analysis_status"],
+                )
+
         _intel_log.info(
             "intel.delegated project_id=%s ticket_id=%s db_path=%s supervisor_url=%s",
             project_id, ticket_id, db, url,
@@ -336,16 +388,27 @@ def analyze_intelligence(
         try:
             _delegate_analyze_to_supervisor(project_id, ticket_id, exec_cmd)
         except HTTPException as exc:
-            _persist_delegation_failure(
-                db, ticket_id,
-                f"Supervisor delegation failed: {exc.detail}",
-            )
+            if db is not None:
+                _persist_delegation_failure(
+                    db, ticket_id,
+                    f"Supervisor delegation failed: {exc.detail}",
+                )
             _intel_log.info(
-                "intel.failed project_id=%s ticket_id=%s db_path=%s reason=delegation status=%d",
-                project_id, ticket_id, db, exc.status_code,
+                "intel.failed project_id=%s ticket_id=%s reason=delegation status=%d",
+                project_id, ticket_id, exc.status_code,
             )
             raise
         return TicketIntelligenceQueued(ticket_id=ticket_id, analysis_status="queued")
+
+    db = _resolve_db_for_project(request, project_id)
+    if db is None:
+        raise HTTPException(status_code=503, detail="database not available")
+
+    _try_reap(db, project_id=project_id, ticket_id=ticket_id)
+
+    existing = runtime_db.get_ticket_intelligence(db, ticket_id)
+    if existing and existing.get("analysis_status") in {"queued", "running"}:
+        return TicketIntelligenceQueued(ticket_id=ticket_id, analysis_status=existing["analysis_status"])
 
     ticket_content = _read_ticket_content(project_root, ticket_id, wt_dir)
 
