@@ -3,5 +3,7 @@
   "state": "TEST_COMPLETE",
   "branch": "ticket/T211-add-ready-to-take-eligibility-service-and-unified",
   "issue_number": 278,
-  "updated_at": "2026-06-24T14:31:08Z"
+  "updated_at": "2026-06-24T14:31:47Z",
+  "pr_number": 279,
+  "pr_synced": true
 }
