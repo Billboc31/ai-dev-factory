@@ -58,7 +58,6 @@ def _make_app(tmp_path: Path):
     for name in (
         "get_ticket_intelligence",
         "get_ticket_readiness",
-        "get_ticket_rule_evaluation",
         "get_latest_ticket_approval",
     ):
         setattr(live_db, name, getattr(_sqlite_db, name))
@@ -81,16 +80,6 @@ def _seed_all_green(db_path, ticket_id: str) -> None:
         db_path, ticket_id, analysis_status="completed", requires_human_plan_review=0
     )
     _sqlite_db.upsert_ticket_readiness(db_path, ticket_id, readiness_status="ready_candidate")
-    _sqlite_db.upsert_ticket_rule_evaluation(
-        db_path,
-        ticket_id=ticket_id,
-        project_id="proj-a",
-        eligibility_status="eligible",
-        passed_rules=[],
-        failed_rules=[],
-        warnings=[],
-        evaluated_at="2026-06-24T00:00:00Z",
-    )
 
 
 # ── Happy path ────────────────────────────────────────────────────────────
@@ -109,7 +98,7 @@ def test_eligibility_returns_ready_to_take_when_all_pass(tmp_path):
     assert body["status"] == "READY_TO_TAKE"
     assert body["blocking_step"] is None
     assert set(body["checks"].keys()) == {
-        "intelligence", "dependencies", "readiness", "rules", "approval",
+        "intelligence", "dependencies", "readiness", "approval",
     }
 
 
@@ -131,16 +120,6 @@ def test_eligibility_blocked_by_plan_approval(tmp_path):
         db, "T002", analysis_status="completed", requires_human_plan_review=1
     )
     _sqlite_db.upsert_ticket_readiness(db, "T002", readiness_status="ready_candidate")
-    _sqlite_db.upsert_ticket_rule_evaluation(
-        db,
-        ticket_id="T002",
-        project_id="proj-a",
-        eligibility_status="eligible",
-        passed_rules=[],
-        failed_rules=[],
-        warnings=[],
-        evaluated_at="2026-06-24T00:00:00Z",
-    )
 
     client = TestClient(app)
     r = client.get("/tickets/T002/eligibility")

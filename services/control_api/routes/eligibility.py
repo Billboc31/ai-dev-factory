@@ -1,7 +1,7 @@
 """Ticket Execution Eligibility routes (T211).
 
-Single read-only endpoint that aggregates Intelligence + Readiness + Rules +
-Approval + dependency state into one ``READY_TO_TAKE`` decision per ticket.
+Single read-only endpoint that aggregates Intelligence + Readiness + Approval
++ dependency state into one ``READY_TO_TAKE`` decision per ticket.
 
 The endpoint never writes to the DB, never starts a worker, and never imports
 the scheduler/daemon code paths.

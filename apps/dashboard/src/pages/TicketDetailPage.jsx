@@ -9,7 +9,6 @@ import TicketDiagnosticsPanel from '../components/TicketDiagnosticsPanel'
 import TicketIntelligencePanel from '../components/TicketIntelligencePanel'
 import TicketOperationsPanel from '../components/TicketOperationsPanel'
 import TicketReadinessPanel from '../components/TicketReadinessPanel'
-import TicketRuleEvaluationPanel from '../components/TicketRuleEvaluationPanel'
 import TicketWorkflowTimeline from '../components/TicketWorkflowTimeline'
 import WorkflowTimeline from '../components/WorkflowTimeline'
 import usePolling from '../hooks/usePolling'
@@ -147,7 +146,6 @@ function ConflictResolutionPanel({ ticket, projectId, onRefresh }) {
 const READY_TO_TAKE_GATES = [
   { key: 'intelligence', label: 'Intelligence analysis' },
   { key: 'readiness',    label: 'Readiness evaluation' },
-  { key: 'rules',        label: 'Rule evaluation' },
   { key: 'approval',     label: 'Human approval' },
 ]
 
@@ -259,7 +257,6 @@ export default function TicketDetailPage() {
     intelligence: null,
     readiness: null,
     approvals: [],
-    ruleEvaluation: null,
     eligibility: null,
   })
   const prevStateRef = useRef(null)
@@ -272,7 +269,7 @@ export default function TicketDetailPage() {
     setError(null)
     setTab('timeline')
     setTabContent({})
-    setWorkflowData({ intelligence: null, readiness: null, approvals: [], ruleEvaluation: null, eligibility: null })
+    setWorkflowData({ intelligence: null, readiness: null, approvals: [], eligibility: null })
     prevStateRef.current = null
   }, [id])
 
@@ -303,14 +300,12 @@ export default function TicketDetailPage() {
       safeFetch(() => api.getTicketIntelligence(id, projectId)),
       safeFetch(() => api.getTicketReadiness(id, projectId)),
       safeFetch(() => api.getTicketApprovals(id, projectId)),
-      safeFetch(() => api.getTicketRuleEvaluation(id, projectId)),
       safeFetch(() => api.getTicketEligibility(id, projectId)),
-    ]).then(([intelligence, readiness, approvalsResp, ruleEvaluation, eligibility]) => {
+    ]).then(([intelligence, readiness, approvalsResp, eligibility]) => {
       setWorkflowData({
         intelligence,
         readiness,
         approvals: approvalsResp?.approvals ?? [],
-        ruleEvaluation,
         eligibility,
       })
     })
@@ -348,7 +343,6 @@ export default function TicketDetailPage() {
     approval: workflowData.approvals.length
       ? workflowData.approvals[workflowData.approvals.length - 1]
       : null,
-    ruleEvaluation: workflowData.ruleEvaluation,
     ticket,
   }), [workflowData, ticket])
 
@@ -395,7 +389,6 @@ export default function TicketDetailPage() {
         stepContent={{
           intelligence: <TicketIntelligencePanel ticketId={id} projectId={projectId} />,
           readiness:    <TicketReadinessPanel ticketId={id} projectId={projectId} />,
-          rules:        <TicketRuleEvaluationPanel ticketId={id} projectId={projectId} />,
           approval:     <HumanApprovalPanel ticketId={id} projectId={projectId} />,
           readyToTake:  <ReadyToTakeChecklist stepStatuses={stepStatuses} eligibility={workflowData.eligibility} />,
           execution: (

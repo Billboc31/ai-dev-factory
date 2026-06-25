@@ -12,7 +12,6 @@ describe('deriveStepStatuses', () => {
     expect(Object.keys(steps).sort()).toEqual([...STEP_KEYS].sort())
     expect(steps.intelligence.status).toBe('pending')
     expect(steps.readiness.status).toBe('pending')
-    expect(steps.rules.status).toBe('pending')
     expect(steps.approval.status).toBe('pending')
     expect(steps.readyToTake.status).toBe('pending')
     expect(steps.execution.status).toBe('pending')
@@ -98,20 +97,6 @@ describe('deriveStepStatuses', () => {
     }
   })
 
-  it('marks rules as blocked with the first failed-rule reason', () => {
-    const steps = deriveStepStatuses({
-      ruleEvaluation: {
-        eligibility_status: 'blocked',
-        failed_rules: [
-          { rule_key: 'no-foo', reason: 'foo is forbidden' },
-          { rule_key: 'no-bar', reason: 'bar is forbidden' },
-        ],
-      },
-    })
-    expect(steps.rules.status).toBe('blocked')
-    expect(steps.rules.blockingReason).toBe('foo is forbidden')
-  })
-
   it('marks approval as current when readiness is ready_candidate and no approval yet', () => {
     const steps = deriveStepStatuses({
       readiness: { readiness_status: 'ready_candidate' },
@@ -134,7 +119,6 @@ describe('deriveStepStatuses', () => {
     const steps = deriveStepStatuses({
       intelligence: { analysis_status: 'completed' },
       readiness: { readiness_status: 'ready_candidate' },
-      ruleEvaluation: { eligibility_status: 'eligible' },
       approval: { approval_status: 'approved' },
     })
     expect(steps.readyToTake.status).toBe('done')
@@ -144,7 +128,6 @@ describe('deriveStepStatuses', () => {
     const steps = deriveStepStatuses({
       intelligence: { analysis_status: 'completed' },
       readiness: { readiness_status: 'blocked', blocking_reasons: ['x'] },
-      ruleEvaluation: { eligibility_status: 'eligible' },
       approval: { approval_status: 'approved' },
     })
     expect(steps.readyToTake.status).toBe('blocked')
@@ -172,7 +155,6 @@ describe('deriveGlobalSummary', () => {
     const steps = deriveStepStatuses({
       intelligence: { analysis_status: 'completed' },
       readiness: { readiness_status: 'ready_candidate' },
-      ruleEvaluation: { eligibility_status: 'eligible' },
       approval: null,
     })
     const summary = deriveGlobalSummary(steps)
@@ -185,7 +167,6 @@ describe('deriveGlobalSummary', () => {
     const steps = deriveStepStatuses({
       intelligence: { analysis_status: 'completed' },
       readiness: { readiness_status: 'ready_candidate' },
-      ruleEvaluation: { eligibility_status: 'eligible' },
       approval: { approval_status: 'approved' },
       ticket: { state: 'QUEUED' },
     })
@@ -209,7 +190,6 @@ describe('deriveGlobalSummary', () => {
     const steps = deriveStepStatuses({
       intelligence: { analysis_status: 'completed' },
       readiness: { readiness_status: 'ready_candidate' },
-      ruleEvaluation: { eligibility_status: 'eligible' },
       approval: { approval_status: 'approved' },
       ticket: { state: 'PLAN_APPROVED' },
     })
@@ -257,7 +237,6 @@ describe('deriveGlobalSummary', () => {
     const steps = deriveStepStatuses({
       intelligence: { analysis_status: 'completed' },
       readiness: { readiness_status: 'ready_candidate' },
-      ruleEvaluation: { eligibility_status: 'eligible' },
       approval: { approval_status: 'approved' },
       ticket: { state: 'MERGED' },
     })

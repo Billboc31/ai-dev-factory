@@ -7,7 +7,6 @@
 export const STEP_KEYS = [
   'intelligence',
   'readiness',
-  'rules',
   'approval',
   'readyToTake',
   'execution',
@@ -16,7 +15,6 @@ export const STEP_KEYS = [
 export const STEP_LABELS = {
   intelligence: 'Intelligence',
   readiness:    'Readiness',
-  rules:        'Rules',
   approval:     'Human Approval',
   readyToTake:  'Ready To Take',
   execution:    'Execution',
@@ -185,35 +183,6 @@ function readinessStep(readiness, ticket) {
   }
 }
 
-function rulesStep(ruleEvaluation) {
-  const status = ruleEvaluation?.eligibility_status
-  const failedRules = ruleEvaluation?.failed_rules ?? []
-  if (status === 'eligible') {
-    return {
-      status: 'done',
-      summary: 'All rules passed',
-      blockingReason: null,
-      nextAction: null,
-    }
-  }
-  if (status === 'blocked') {
-    return {
-      status: 'blocked',
-      summary: failedRules.length > 0
-        ? `${failedRules.length} rule${failedRules.length === 1 ? '' : 's'} failed`
-        : 'Blocked by rules',
-      blockingReason: failedRules[0]?.reason ?? 'Rule evaluation blocked',
-      nextAction: 'Fix failing rules',
-    }
-  }
-  return {
-    status: 'pending',
-    summary: 'No rule evaluation yet',
-    blockingReason: null,
-    nextAction: 'Evaluate rules',
-  }
-}
-
 function approvalStep(approval, readiness) {
   const status = approval?.approval_status
   if (status === 'approved') {
@@ -249,7 +218,7 @@ function approvalStep(approval, readiness) {
 }
 
 function readyToTakeStep(stepsSoFar) {
-  const upstream = [stepsSoFar.intelligence, stepsSoFar.readiness, stepsSoFar.rules, stepsSoFar.approval]
+  const upstream = [stepsSoFar.intelligence, stepsSoFar.readiness, stepsSoFar.approval]
   if (upstream.some(s => s.status === 'blocked')) {
     return {
       status: 'blocked',
@@ -316,11 +285,10 @@ function executionStep(ticket) {
   }
 }
 
-export function deriveStepStatuses({ intelligence, readiness, approval, ruleEvaluation, ticket } = {}) {
+export function deriveStepStatuses({ intelligence, readiness, approval, ticket } = {}) {
   const steps = {
     intelligence: intelligenceStep(intelligence),
     readiness:    readinessStep(readiness, ticket),
-    rules:        rulesStep(ruleEvaluation),
     approval:     approvalStep(approval, readiness),
   }
   steps.readyToTake = readyToTakeStep(steps)
@@ -361,7 +329,7 @@ export function deriveGlobalSummary(stepStatuses) {
   // Walk pre-execution steps in order, surfacing the first one that blocks or is
   // actively waiting on something (a `current` upstream step is what the user
   // needs to act on next).
-  const PRE_EXECUTION = ['intelligence', 'readiness', 'rules', 'approval']
+  const PRE_EXECUTION = ['intelligence', 'readiness', 'approval']
   for (const key of PRE_EXECUTION) {
     const step = stepStatuses[key]
     if (step?.status === 'blocked' || step?.status === 'current') {

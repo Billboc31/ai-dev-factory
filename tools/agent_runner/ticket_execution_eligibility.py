@@ -2,14 +2,14 @@
 
 Read-only aggregator that produces a single ``READY_TO_TAKE`` decision for a
 ticket by combining the existing — and intentionally untouched — Intelligence,
-Readiness, Rules, Approval and dependency systems.
+Readiness, Approval and dependency systems.
 
 The service never writes to the runtime DB and never touches the scheduler or
 worker. It returns a structured payload that the API and UI can consume
 directly. The first failing check (in a fixed order) becomes the
 ``blocking_step``; the status is derived from which step failed.
 
-Check order: intelligence → dependencies → readiness → rules → approval.
+Check order: intelligence → dependencies → readiness → approval.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ from ticket_merge_state import is_ticket_merged  # noqa: E402
 from ticket_readiness_evaluator import _extract_dependencies  # noqa: E402
 
 
-CHECK_ORDER = ("intelligence", "dependencies", "readiness", "rules", "approval")
+CHECK_ORDER = ("intelligence", "dependencies", "readiness", "approval")
 
 _READY_READINESS_STATES = frozenset({"ready_candidate", "ready_to_take"})
 
@@ -148,26 +148,6 @@ def _eval_readiness(readiness: dict | None) -> dict:
     return {"status": "failed", "detail": f"Readiness status is '{status}'."}
 
 
-def _eval_rules(rule_evaluation: dict | None) -> dict:
-    if rule_evaluation is None:
-        return {
-            "status": "unknown",
-            "detail": "No rule evaluation has been recorded.",
-        }
-    status = (rule_evaluation.get("eligibility_status") or "").strip()
-    if status == "eligible":
-        return {"status": "passed", "detail": "All rules passed."}
-    if status == "blocked":
-        failed = rule_evaluation.get("failed_rules_json") or rule_evaluation.get("failed_rules") or []
-        first_reason = None
-        if isinstance(failed, list) and failed:
-            entry = failed[0]
-            if isinstance(entry, dict):
-                first_reason = entry.get("reason") or entry.get("rule_key")
-        return {"status": "failed", "detail": first_reason or "Blocked by execution rules."}
-    return {"status": "unknown", "detail": f"Rule eligibility_status='{status or 'unknown'}'."}
-
-
 def _eval_approval(
     intelligence: dict | None,
     approval_plan: dict | None,
@@ -226,8 +206,6 @@ def _next_action_for(blocking_step: str, checks: dict) -> str | None:
         return "Resolve dependency state"
     if blocking_step == "readiness":
         return "Run readiness evaluation and resolve blockers"
-    if blocking_step == "rules":
-        return "Fix failing execution rules"
     if blocking_step == "approval":
         return "Approve plan review"
     return None
@@ -258,7 +236,7 @@ def evaluate_eligibility(
     """Return the aggregated execution-eligibility payload for ``ticket_id``.
 
     Pure read: never writes to the DB. Inputs are read from the existing
-    Intelligence/Readiness/Rules/Approval tables plus the ticket's runtime
+    Intelligence/Readiness/Approval tables plus the ticket's runtime
     ``state.json``. The first failing check (in ``CHECK_ORDER``) becomes the
     ``blocking_step``.
     """
@@ -266,7 +244,6 @@ def evaluate_eligibility(
 
     intelligence = _safe_get(runtime_db.get_ticket_intelligence, db_path, ticket_id)
     readiness = _safe_get(runtime_db.get_ticket_readiness, db_path, ticket_id)
-    rule_evaluation = _safe_get(runtime_db.get_ticket_rule_evaluation, db_path, ticket_id)
     approval_plan = _safe_get(runtime_db.get_latest_ticket_approval, db_path, ticket_id, "plan")
 
     state_value = None
@@ -287,7 +264,6 @@ def evaluate_eligibility(
         "intelligence": _eval_intelligence(intelligence),
         "dependencies": _eval_dependencies(ticket_content, project_root),
         "readiness": _eval_readiness(readiness),
-        "rules": _eval_rules(rule_evaluation),
         "approval": _eval_approval(
             intelligence,
             approval_plan,

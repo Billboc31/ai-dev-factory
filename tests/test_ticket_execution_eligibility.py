@@ -83,19 +83,6 @@ def _seed_ready_candidate(db_path, ticket_id: str) -> None:
     )
 
 
-def _seed_rules_eligible(db_path, ticket_id: str, project_id: str = "proj-a") -> None:
-    _sqlite_db.upsert_ticket_rule_evaluation(
-        db_path,
-        ticket_id=ticket_id,
-        project_id=project_id,
-        eligibility_status="eligible",
-        passed_rules=[],
-        failed_rules=[],
-        warnings=[],
-        evaluated_at="2026-06-24T00:00:00Z",
-    )
-
-
 @pytest.fixture
 def env(tmp_path, monkeypatch):
     monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
@@ -108,7 +95,6 @@ def env(tmp_path, monkeypatch):
     for name in (
         "get_ticket_intelligence",
         "get_ticket_readiness",
-        "get_ticket_rule_evaluation",
         "get_latest_ticket_approval",
     ):
         monkeypatch.setattr(live_db, name, getattr(_sqlite_db, name))
@@ -146,15 +132,15 @@ def test_ready_to_take_when_all_checks_pass(env, monkeypatch):
     _write_ticket_md(root, "T100")
     _seed_complete_intelligence(db, "T100")
     _seed_ready_candidate(db, "T100")
-    _seed_rules_eligible(db, "T100")
 
     result = eligibility.evaluate_eligibility(db, root, "T100", ticket_content="")
     assert result["ready_to_take"] is True
     assert result["status"] == "READY_TO_TAKE"
     assert result["blocking_step"] is None
     assert result["next_action"] == "Ticket can be taken by a worker"
-    for key in ("intelligence", "dependencies", "readiness", "rules", "approval"):
+    for key in ("intelligence", "dependencies", "readiness", "approval"):
         assert result["checks"][key]["status"] == "passed", key
+    assert "rules" not in result["checks"]
 
 
 # ── Scenario: plan approval pending → WAITING_HUMAN_ACTION ──────────────────
@@ -164,7 +150,6 @@ def test_waiting_human_action_when_plan_approval_missing(env, monkeypatch):
     _write_ticket_md(root, "T101")
     _seed_complete_intelligence(db, "T101", requires_review=True)
     _seed_ready_candidate(db, "T101")
-    _seed_rules_eligible(db, "T101")
     # No state.json with PLAN_APPROVED, no plan-approved.md marker.
 
     result = eligibility.evaluate_eligibility(db, root, "T101", ticket_content="")
@@ -180,7 +165,6 @@ def test_waiting_human_clears_when_state_reaches_plan_approved(env, monkeypatch)
     _write_ticket_md(root, "T102")
     _seed_complete_intelligence(db, "T102", requires_review=True)
     _seed_ready_candidate(db, "T102")
-    _seed_rules_eligible(db, "T102")
     _write_state(root, "T102", "PLAN_APPROVED")
 
     result = eligibility.evaluate_eligibility(db, root, "T102", ticket_content="")
@@ -195,7 +179,6 @@ def test_dependency_blocked_when_dep_not_merged(env, monkeypatch):
     _write_ticket_md(root, "T103", body="Depends on T001.")
     _seed_complete_intelligence(db, "T103")
     _seed_ready_candidate(db, "T103")
-    _seed_rules_eligible(db, "T103")
     _stub_deps(monkeypatch, {"T001": "not_merged"})
 
     result = eligibility.evaluate_eligibility(
@@ -223,9 +206,13 @@ def test_blocked_when_intelligence_missing(env):
     assert result["checks"]["intelligence"]["status"] == "failed"
 
 
-# ── Scenario: rules blocked → BLOCKED at rules ─────────────────────────────
+# ── Scenario: rules engine no longer gates eligibility ─────────────────────
 
-def test_blocked_when_rules_blocked(env):
+def test_rules_blocked_no_longer_gates_eligibility(env):
+    """Even when the rules engine records a 'blocked' evaluation, the ticket
+    must still progress through the eligibility checks. The rules step has
+    been removed from CHECK_ORDER (T214); policy enforcement is deferred to
+    the future Dispatcher."""
     db, root = env["db"], env["root"]
     _write_ticket_md(root, "T105")
     _seed_complete_intelligence(db, "T105")
@@ -242,10 +229,9 @@ def test_blocked_when_rules_blocked(env):
     )
 
     result = eligibility.evaluate_eligibility(db, root, "T105", ticket_content="")
-    assert result["status"] == "BLOCKED"
-    assert result["blocking_step"] == "rules"
-    assert "Difficulty 9 > 7" in result["reason"]
-    assert result["next_action"] == "Fix failing execution rules"
+    assert "rules" not in result["checks"]
+    assert result["blocking_step"] is None
+    assert result["status"] == "READY_TO_TAKE"
 
 
 # ── Scenario: nothing computed yet → UNKNOWN ──────────────────────────────
@@ -275,17 +261,14 @@ def test_aggregator_does_not_write_to_db(env):
     _write_ticket_md(root, "T107")
     _seed_complete_intelligence(db, "T107")
     _seed_ready_candidate(db, "T107")
-    _seed_rules_eligible(db, "T107")
 
     before_readiness = _sqlite_db.get_ticket_readiness(db, "T107")
     before_intel = _sqlite_db.get_ticket_intelligence(db, "T107")
-    before_rules = _sqlite_db.get_ticket_rule_evaluation(db, "T107")
 
     eligibility.evaluate_eligibility(db, root, "T107", ticket_content="")
 
     assert _sqlite_db.get_ticket_readiness(db, "T107") == before_readiness
     assert _sqlite_db.get_ticket_intelligence(db, "T107") == before_intel
-    assert _sqlite_db.get_ticket_rule_evaluation(db, "T107") == before_rules
 
 
 # ── Check-order assertion ─────────────────────────────────────────────────
