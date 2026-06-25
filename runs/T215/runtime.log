@@ -59,3 +59,12 @@
 [2026-06-25T21:31:18Z] compose: skill=ai/skills/debugging.md
 [2026-06-25T21:31:18Z] compose: task (canonical prompt)
 [2026-06-25T21:31:18Z] snapshot: runtime-prompt=runs/T215/prompts/tester-attempt-1.md
+[2026-06-25T21:56:34Z] auto-run: step=tester done rc=0
+[2026-06-25T21:56:34Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-25T21:56:34Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-25T21:56:35Z] commit-checkpoint: unstaged runtime garbage: ['runs/T215/runtime.log']
+[2026-06-25T21:56:35Z] commit-checkpoint: sha=780f243e files=4 title='test(T215/workflow): tester — update 4 file(s)'
+[2026-06-25T21:56:35Z] auto-run: auto-push triggered
+[2026-06-25T21:56:35Z] push: tolerating runtime dirty files (not blocking): ['runs/T215/runtime.log']
+[2026-06-25T21:56:35Z] push: pushing branch=ticket/T215-add-global-runtime-settings-page-backed-by-databas
+[2026-06-25T21:56:37Z] push: done branch=ticket/T215-add-global-runtime-settings-page-backed-by-databas
