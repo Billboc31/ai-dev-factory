@@ -21,3 +21,16 @@
 [2026-06-25T17:29:32Z] push: tolerating runtime dirty files (not blocking): ['runs/T215/runtime.log']
 [2026-06-25T17:29:32Z] push: pushing branch=ticket/T215-add-global-runtime-settings-page-backed-by-databas
 [2026-06-25T17:29:34Z] push: done branch=ticket/T215-add-global-runtime-settings-page-backed-by-databas
+[2026-06-25T20:46:55Z] auto-run start: state=PLAN_APPROVED
+[2026-06-25T20:46:55Z] auto-run: running step=coder
+[2026-06-25T20:46:55Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-06-25T20:46:55Z] prompt: generic fallback — injecting runs/T215/ticket.md
+[2026-06-25T20:46:55Z] compose: global-context=docs/ai/global-context.md
+[2026-06-25T20:46:55Z] compose: role=ai/roles/coder.md
+[2026-06-25T20:46:55Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-25T20:46:55Z] compose: skill=ai/skills/git-discipline.md
+[2026-06-25T20:46:55Z] compose: skill=ai/skills/code-quality.md
+[2026-06-25T20:46:55Z] compose: skill=ai/skills/refactor-safety.md
+[2026-06-25T20:46:55Z] compose: skill=ai/skills/security.md
+[2026-06-25T20:46:55Z] compose: task (canonical prompt)
+[2026-06-25T20:46:55Z] snapshot: runtime-prompt=runs/T215/prompts/coder-attempt-1.md

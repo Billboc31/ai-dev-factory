@@ -185,6 +185,18 @@ CREATE TABLE IF NOT EXISTS ticket_operation_audit (
 
 CREATE INDEX IF NOT EXISTS ix_ticket_operation_audit_ticket
     ON ticket_operation_audit(ticket_id, id);
+
+CREATE TABLE IF NOT EXISTS runtime_settings (
+    key              TEXT PRIMARY KEY,
+    value            TEXT NOT NULL,
+    value_type       TEXT NOT NULL,
+    scope            TEXT NOT NULL DEFAULT 'global',
+    description      TEXT,
+    is_sensitive     INTEGER NOT NULL DEFAULT 0,
+    requires_restart INTEGER NOT NULL DEFAULT 0,
+    updated_at       TEXT NOT NULL,
+    updated_by       TEXT
+);
 """
 
 
@@ -276,6 +288,31 @@ def _ensure_ticket_intelligence_lifecycle_columns(conn: sqlite3.Connection) -> N
             conn.execute(f"ALTER TABLE ticket_intelligence ADD COLUMN {name} {sql_type}")
 
 
+def _ensure_runtime_settings_table(conn: sqlite3.Connection) -> None:
+    """Idempotent migration: create runtime_settings if missing.
+
+    Pre-existing databases created before T215 lack this table. The CREATE
+    statement also lives in ``_SCHEMA`` so fresh DBs are covered there; this
+    helper exists so callers that bypass ``executescript`` (or run after a
+    targeted PRAGMA inspection) still get the table.
+    """
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS runtime_settings (
+            key              TEXT PRIMARY KEY,
+            value            TEXT NOT NULL,
+            value_type       TEXT NOT NULL,
+            scope            TEXT NOT NULL DEFAULT 'global',
+            description      TEXT,
+            is_sensitive     INTEGER NOT NULL DEFAULT 0,
+            requires_restart INTEGER NOT NULL DEFAULT 0,
+            updated_at       TEXT NOT NULL,
+            updated_by       TEXT
+        )
+        """
+    )
+
+
 def init_runtime_db(db_path: Path) -> None:
     """Create the DB file and tables if they don't exist. Safe to call multiple times."""
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -285,6 +322,7 @@ def init_runtime_db(db_path: Path) -> None:
         conn.execute("PRAGMA synchronous=NORMAL")
         conn.executescript(_SCHEMA)
         _ensure_ticket_intelligence_lifecycle_columns(conn)
+        _ensure_runtime_settings_table(conn)
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
@@ -992,6 +1030,85 @@ def list_ticket_operation_audit(
     return out
 
 
+# ── runtime_settings ──────────────────────────────────────────────────────────
+
+def _row_to_runtime_setting(row: sqlite3.Row) -> dict:
+    out = dict(row)
+    out["is_sensitive"] = bool(out.get("is_sensitive"))
+    out["requires_restart"] = bool(out.get("requires_restart"))
+    return out
+
+
+def list_runtime_settings(db_path: Path) -> list[dict]:
+    """Return every persisted setting row (global scope only in V1)."""
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT * FROM runtime_settings ORDER BY key"
+        ).fetchall()
+    return [_row_to_runtime_setting(r) for r in rows]
+
+
+def get_runtime_setting(db_path: Path, key: str) -> dict | None:
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM runtime_settings WHERE key = ?", (key,)
+        ).fetchone()
+    return _row_to_runtime_setting(row) if row else None
+
+
+def upsert_runtime_setting(
+    db_path: Path,
+    key: str,
+    *,
+    value: str,
+    value_type: str,
+    scope: str = "global",
+    description: str | None = None,
+    is_sensitive: bool = False,
+    requires_restart: bool = False,
+    updated_by: str | None = None,
+) -> dict:
+    """Insert or update a setting row. Returns the persisted dict."""
+    now = _now_iso()
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO runtime_settings
+                (key, value, value_type, scope, description,
+                 is_sensitive, requires_restart, updated_at, updated_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(key) DO UPDATE SET
+                value            = excluded.value,
+                value_type       = excluded.value_type,
+                scope            = excluded.scope,
+                description      = excluded.description,
+                is_sensitive     = excluded.is_sensitive,
+                requires_restart = excluded.requires_restart,
+                updated_at       = excluded.updated_at,
+                updated_by       = excluded.updated_by
+            """,
+            (
+                key,
+                value,
+                value_type,
+                scope,
+                description,
+                1 if is_sensitive else 0,
+                1 if requires_restart else 0,
+                now,
+                updated_by,
+            ),
+        )
+    row = get_runtime_setting(db_path, key)
+    assert row is not None
+    return row
+
+
+def delete_runtime_setting(db_path: Path, key: str) -> None:
+    with _connect(db_path) as conn:
+        conn.execute("DELETE FROM runtime_settings WHERE key = ?", (key,))
+
+
 # ── Backend selection ─────────────────────────────────────────────────────────
 # Everything above is the SQLite backend (the default). When
 # RUNTIME_DB_BACKEND=postgres the public API is rebound to the networked
@@ -1101,6 +1218,10 @@ if _RUNTIME_DB_BACKEND == "postgres":
     get_ticket_diagnostics = _pg.get_ticket_diagnostics  # type: ignore[assignment]
     append_ticket_operation_audit = _pg.append_ticket_operation_audit  # type: ignore[assignment]
     list_ticket_operation_audit = _pg.list_ticket_operation_audit  # type: ignore[assignment]
+    list_runtime_settings = _pg.list_runtime_settings  # type: ignore[assignment]
+    get_runtime_setting = _pg.get_runtime_setting  # type: ignore[assignment]
+    upsert_runtime_setting = _pg.upsert_runtime_setting  # type: ignore[assignment]
+    delete_runtime_setting = _pg.delete_runtime_setting  # type: ignore[assignment]
 elif _RUNTIME_DB_BACKEND not in ("", "sqlite"):
     raise RuntimeError(
         f"unknown RUNTIME_DB_BACKEND={_RUNTIME_DB_BACKEND!r} "

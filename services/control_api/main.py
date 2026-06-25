@@ -15,7 +15,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .routes import approvals, auto_fix, daemon, deployer, diagnostics, dispatcher, eligibility, environments, health, intelligence, issues, operations, project_map, projects, providers, readiness, rules, runtime_dashboard, sandbox, tickets
+from .routes import approvals, auto_fix, daemon, deployer, diagnostics, dispatcher, eligibility, environments, health, intelligence, issues, operations, project_map, projects, providers, readiness, rules, runtime_dashboard, sandbox, settings, tickets
 from .services.project_registry import ProjectRegistry
 from .services.runtime_resolver import resolve_worktrees_dir
 
@@ -88,6 +88,19 @@ def create_app(
                 _runtime_db.init_runtime_db(app.state.db_path)
             except Exception:
                 logger.exception("runtime_db: init/recover failed at startup — continuing")
+
+    # T215 — apply the persisted LOG_LEVEL (if any) after the DB exists. The
+    # registry falls back to env / hardcoded default so this is a no-op when no
+    # override is set. ``logging.getLogger().setLevel`` mutates the root
+    # logger's effective level live, so this is hot-reload safe.
+    if app.state.db_path is not None:
+        try:
+            import runtime_settings as _runtime_settings  # noqa: WPS433
+            _log_level = _runtime_settings.get_setting(app.state.db_path, "LOG_LEVEL")
+            if _log_level:
+                logging.getLogger().setLevel(_log_level)
+        except Exception:
+            logger.exception("runtime_settings: failed to apply LOG_LEVEL at startup")
 
     _runtime_root_env = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
     _runtime_root: Path | None = Path(_runtime_root_env).expanduser().resolve() if _runtime_root_env else None
@@ -221,6 +234,8 @@ def create_app(
     # T212: /dispatcher/* — advisory next-ticket dispatcher (read-only).
     app.include_router(dispatcher.router)
     app.include_router(dispatcher.project_router)
+    # T215: /api/settings/* — global runtime settings (DB-backed, env fallback).
+    app.include_router(settings.router)
 
     return app
 

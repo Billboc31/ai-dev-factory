@@ -227,6 +227,21 @@ CREATE TABLE IF NOT EXISTS ticket_operation_audit (
 
 CREATE INDEX IF NOT EXISTS ix_ticket_operation_audit_lookup
     ON ticket_operation_audit (project_id, ticket_id, id);
+
+-- T215: Global runtime settings. V1 supports scope='global' only and the table
+-- is keyed solely by `key` (no project_id column). All helpers operate without
+-- a project_id argument, matching the SQLite backend's semantics one-for-one.
+CREATE TABLE IF NOT EXISTS runtime_settings (
+    key              TEXT PRIMARY KEY,
+    value            TEXT NOT NULL,
+    value_type       TEXT NOT NULL,
+    scope            TEXT NOT NULL DEFAULT 'global',
+    description      TEXT,
+    is_sensitive     BOOLEAN NOT NULL DEFAULT FALSE,
+    requires_restart BOOLEAN NOT NULL DEFAULT FALSE,
+    updated_at       TEXT NOT NULL,
+    updated_by       TEXT
+);
 """
 
 
@@ -1049,3 +1064,80 @@ def list_ticket_operation_audit(
             item["details"] = None
         out.append(item)
     return out
+
+
+# ── runtime_settings (global only — no project_id) ────────────────────────────
+
+def _row_to_runtime_setting(row: dict) -> dict:
+    out = dict(row)
+    out["is_sensitive"] = bool(out.get("is_sensitive"))
+    out["requires_restart"] = bool(out.get("requires_restart"))
+    return out
+
+
+def list_runtime_settings(handle: PgHandle) -> list[dict]:
+    with _connect(handle) as conn:
+        rows = conn.execute(
+            "SELECT * FROM runtime_settings ORDER BY key"
+        ).fetchall()
+    return [_row_to_runtime_setting(r) for r in rows]
+
+
+def get_runtime_setting(handle: PgHandle, key: str) -> dict | None:
+    with _connect(handle) as conn:
+        row = conn.execute(
+            "SELECT * FROM runtime_settings WHERE key = %s", (key,)
+        ).fetchone()
+    return _row_to_runtime_setting(row) if row else None
+
+
+def upsert_runtime_setting(
+    handle: PgHandle,
+    key: str,
+    *,
+    value: str,
+    value_type: str,
+    scope: str = "global",
+    description: str | None = None,
+    is_sensitive: bool = False,
+    requires_restart: bool = False,
+    updated_by: str | None = None,
+) -> dict:
+    now = _now_iso()
+    with _connect(handle) as conn:
+        conn.execute(
+            """
+            INSERT INTO runtime_settings
+                (key, value, value_type, scope, description,
+                 is_sensitive, requires_restart, updated_at, updated_by)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (key) DO UPDATE SET
+                value            = EXCLUDED.value,
+                value_type       = EXCLUDED.value_type,
+                scope            = EXCLUDED.scope,
+                description      = EXCLUDED.description,
+                is_sensitive     = EXCLUDED.is_sensitive,
+                requires_restart = EXCLUDED.requires_restart,
+                updated_at       = EXCLUDED.updated_at,
+                updated_by       = EXCLUDED.updated_by
+            """,
+            (
+                key,
+                value,
+                value_type,
+                scope,
+                description,
+                bool(is_sensitive),
+                bool(requires_restart),
+                now,
+                updated_by,
+            ),
+        )
+    row = get_runtime_setting(handle, key)
+    assert row is not None
+    return row
+
+
+def delete_runtime_setting(handle: PgHandle, key: str) -> None:
+    with _connect(handle) as conn:
+        conn.execute("DELETE FROM runtime_settings WHERE key = %s", (key,))

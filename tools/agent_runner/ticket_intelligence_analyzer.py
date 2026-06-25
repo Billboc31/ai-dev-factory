@@ -29,6 +29,7 @@ if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
 import runtime_db  # noqa: E402
+import runtime_settings as _runtime_settings  # noqa: E402
 from model_catalog import estimate_cost  # noqa: E402
 from ticket_intelligence_extractor import extract as extract_signals  # noqa: E402
 from ticket_intelligence_stages import (  # noqa: E402
@@ -41,10 +42,21 @@ from ticket_intelligence_stages import (  # noqa: E402
     STAGE_WAITING_AI,
 )
 
-# Upper bound on the AI subprocess. Tunable via env so operators can extend the
-# window for slower local models without editing code; default 120 s matches the
-# reaper's STALE_RUNNING_SECONDS budget by a wide margin.
-_ANALYSIS_TIMEOUT = int(os.environ.get("AI_DEV_FACTORY_INTEL_TIMEOUT", "120"))
+
+def _resolve_analysis_timeout(db_path) -> int:
+    """Resolve the AI subprocess upper bound through the settings registry.
+
+    Re-read on each call so a DB override of INTELLIGENCE_TIMEOUT_SECONDS is
+    picked up by the next ticket without restarting the analyzer process.
+    """
+    try:
+        value = _runtime_settings.get_setting(db_path, "INTELLIGENCE_TIMEOUT_SECONDS")
+    except Exception:
+        value = None
+    try:
+        return int(value) if value is not None else 120
+    except (TypeError, ValueError):
+        return 120
 
 _intel_log = logging.getLogger("intel")
 
@@ -458,11 +470,14 @@ def run_analysis(
             )
             current_stage = STAGE_WAITING_AI
 
+            # Re-read every run so a DB override of INTELLIGENCE_TIMEOUT_SECONDS
+            # is picked up without restarting the analyzer process.
+            analysis_timeout = _resolve_analysis_timeout(db_path)
             _intel_log.info(
                 "intel.ai_request.started project_id=%s ticket_id=%s stage=%s exec_cmd=%s "
                 "timeout=%ds prompt_size=%d",
                 project_id, ticket_id, current_stage, _truncate(exec_cmd, 200),
-                _ANALYSIS_TIMEOUT, len(prompt),
+                analysis_timeout, len(prompt),
             )
             runtime_db.append_runtime_event(
                 db_path,
@@ -472,13 +487,13 @@ def run_analysis(
                 metadata={
                     "project_id": project_id,
                     "stage": current_stage,
-                    "timeout": _ANALYSIS_TIMEOUT,
+                    "timeout": analysis_timeout,
                     "prompt_size": len(prompt),
                 },
             )
 
             rc, stdout, stderr, timed_out, duration_ms = _run_ai_subprocess(
-                command, prompt, env, _ANALYSIS_TIMEOUT,
+                command, prompt, env, analysis_timeout,
             )
 
             _intel_log.info(
@@ -502,7 +517,7 @@ def run_analysis(
             )
 
             if timed_out:
-                summary = f"Analysis timed out after {_ANALYSIS_TIMEOUT} seconds."
+                summary = f"Analysis timed out after {analysis_timeout} seconds."
                 _set_stage(
                     db_path, ticket_id, STAGE_FAILED,
                     project_id=project_id,

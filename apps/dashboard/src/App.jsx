@@ -19,6 +19,7 @@ import ProjectWorktreesPage from './pages/ProjectWorktreesPage'
 import ProjectLogsPage from './pages/ProjectLogsPage'
 import ProjectAgentLayoutPage from './pages/ProjectAgentLayoutPage'
 import DispatcherPage from './pages/DispatcherPage'
+import GlobalSettingsPage from './pages/GlobalSettingsPage'
 import useProjects from './hooks/useProjects'
 
 export const ActiveProjectContext = createContext(null)
@@ -98,6 +99,7 @@ function AppLayout() {
             <Route path="/environments" element={<EnvironmentsPage projectId={activeProject} />} />
             <Route path="/auto-fix" element={<AutoFixPanel projectId={activeProject} />} />
             <Route path="/runtime-dashboard" element={<RuntimeDashboardPage />} />
+            <Route path="/settings" element={<GlobalSettingsPage />} />
             <Route path="/board" element={<BoardPage projectId={activeProject} />} />
           </Routes>
         </ActiveProjectContext.Provider>
