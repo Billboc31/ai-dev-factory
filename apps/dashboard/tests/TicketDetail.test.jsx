@@ -59,7 +59,6 @@ describe('TicketDetailPage', () => {
     ticketsApi.getTicketIntelligence.mockResolvedValue({ data: null })
     ticketsApi.getTicketReadiness.mockResolvedValue({ data: null })
     ticketsApi.getTicketApprovals.mockResolvedValue({ data: { approvals: [] } })
-    ticketsApi.getTicketRuleEvaluation.mockResolvedValue({ data: null })
     ticketsApi.getTicketDiagnostics.mockResolvedValue({ data: null })
     ticketsApi.listTicketOperations.mockResolvedValue({ data: { operations: [] } })
   })

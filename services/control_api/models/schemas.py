@@ -593,7 +593,7 @@ class TicketExecutionEligibility(BaseModel):
     reason: str | None = None
     next_action: str | None = None
     blocking_step: Literal[
-        "intelligence", "dependencies", "readiness", "rules", "approval"
+        "intelligence", "dependencies", "readiness", "approval"
     ] | None = None
     checks: dict[str, TicketExecutionEligibilityCheck] = {}
     evaluated_at: str | None = None

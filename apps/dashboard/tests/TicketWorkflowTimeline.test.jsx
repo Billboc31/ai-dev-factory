@@ -11,14 +11,12 @@ import {
 const APPROVAL_PENDING_FIXTURE = {
   intelligence: { analysis_status: 'completed', difficulty_score: 4, risk_score: 3 },
   readiness: { readiness_status: 'ready_candidate' },
-  ruleEvaluation: { eligibility_status: 'eligible' },
   approval: null,
 }
 
 const ALL_DONE_FIXTURE = {
   intelligence: { analysis_status: 'completed', difficulty_score: 2, risk_score: 1 },
   readiness: { readiness_status: 'ready_candidate' },
-  ruleEvaluation: { eligibility_status: 'eligible' },
   approval: { approval_status: 'approved', approved_by: 'alice' },
   ticket: { state: 'QUEUED' },
 }
@@ -36,7 +34,7 @@ function renderTimeline(fixture, content = {}) {
 }
 
 describe('TicketWorkflowTimeline', () => {
-  it('renders all six steps in workflow order', () => {
+  it('renders all five steps in workflow order', () => {
     renderTimeline(APPROVAL_PENDING_FIXTURE)
     for (const key of STEP_KEYS) {
       expect(screen.getByTestId(`workflow-step-${key}`)).toBeInTheDocument()
