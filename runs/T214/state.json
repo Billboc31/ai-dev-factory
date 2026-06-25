@@ -1,7 +1,7 @@
 {
   "ticket_id": "T214",
-  "state": "IMPLEMENTATION_APPROVED",
+  "state": "TEST_COMPLETE",
   "branch": "ticket/T214-simplify-ticket-workflow-by-removing-rules-as-a-ti",
   "issue_number": 284,
-  "updated_at": "2026-06-25T07:18:35Z"
+  "updated_at": "2026-06-25T07:42:45Z"
 }
