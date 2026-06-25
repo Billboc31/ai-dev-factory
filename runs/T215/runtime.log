@@ -34,3 +34,17 @@
 [2026-06-25T20:46:55Z] compose: skill=ai/skills/security.md
 [2026-06-25T20:46:55Z] compose: task (canonical prompt)
 [2026-06-25T20:46:55Z] snapshot: runtime-prompt=runs/T215/prompts/coder-attempt-1.md
+[2026-06-25T21:15:22Z] auto-run start: state=IMPLEMENTATION_REVIEW_NEEDED
+[2026-06-25T21:15:22Z] auto-run: running step=review
+[2026-06-25T21:15:22Z] auto-run: review decision context: context_file=runs/T215/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-06-25T21:15:22Z] prompt: resolved=prompts/generic/review.md source=generic
+[2026-06-25T21:15:22Z] prompt: generic fallback — injecting runs/T215/ticket.md
+[2026-06-25T21:15:22Z] compose: global-context=docs/ai/global-context.md
+[2026-06-25T21:15:22Z] compose: role=ai/roles/reviewer.md
+[2026-06-25T21:15:22Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-25T21:15:22Z] compose: skill=ai/skills/code-quality.md
+[2026-06-25T21:15:22Z] compose: skill=ai/skills/refactor-safety.md
+[2026-06-25T21:15:22Z] compose: skill=ai/skills/security.md
+[2026-06-25T21:15:22Z] compose: task (canonical prompt)
+[2026-06-25T21:15:22Z] compose: extra-context=runs/T215/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
+[2026-06-25T21:15:22Z] snapshot: runtime-prompt=runs/T215/prompts/review-attempt-1.md
