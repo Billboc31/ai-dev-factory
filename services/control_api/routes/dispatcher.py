@@ -54,8 +54,8 @@ def _compute(
 
 
 @router.get("/status", response_model=DispatcherStatus)
-def get_status() -> DispatcherStatus:
-    mode = _dispatcher.get_dispatcher_mode()
+def get_status(request: Request) -> DispatcherStatus:
+    mode = _dispatcher.get_dispatcher_mode(_db_path(request))
     logger.info("api: GET /dispatcher/status (mode=%s)", mode)
     return DispatcherStatus(
         mode=mode,

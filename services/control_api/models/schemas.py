@@ -702,3 +702,27 @@ class DispatcherResponse(BaseModel):
     recommendations: list[DispatcherRecommendation] = []
     blocked: list[DispatcherBlockedTicket] = []
     not_implemented: bool | None = None
+
+
+# T215 — Global runtime settings schemas.
+
+class RuntimeSetting(BaseModel):
+    key: str
+    value: Any
+    value_type: Literal["string", "int", "float", "bool", "secret"]
+    source: Literal["db", "env", "default"]
+    description: str | None = None
+    is_sensitive: bool = False
+    requires_restart: bool = False
+    editable: bool = True
+    updated_at: str | None = None
+    updated_by: str | None = None
+
+
+class RuntimeSettingsListResponse(BaseModel):
+    settings: list[RuntimeSetting] = []
+
+
+class RuntimeSettingUpdate(BaseModel):
+    value: Any
+    updated_by: str | None = None

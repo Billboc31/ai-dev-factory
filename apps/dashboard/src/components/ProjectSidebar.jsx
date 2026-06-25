@@ -14,6 +14,7 @@ const GLOBAL_NAV = [
   { label: 'Runtime', to: '/runtime-dashboard' },
   { label: 'Environments', to: '/environments' },
   { label: 'Sandboxes', to: '/sandboxes' },
+  { label: 'Global Settings', to: '/settings' },
 ]
 
 const navItemClass = ({ isActive }) =>

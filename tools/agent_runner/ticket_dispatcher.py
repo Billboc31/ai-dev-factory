@@ -34,6 +34,7 @@ if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
 import runtime_db  # noqa: E402
+import runtime_settings as _runtime_settings  # noqa: E402
 import ticket_execution_eligibility as _eligibility  # noqa: E402
 
 
@@ -60,22 +61,35 @@ def _now_iso() -> str:
     )
 
 
-def get_dispatcher_mode() -> str:
-    """Resolve the dispatcher mode from the environment.
+def get_dispatcher_mode(db_path=None) -> str:
+    """Resolve the dispatcher mode through the settings registry.
+
+    When ``db_path`` is provided the registry is consulted first, so a DB
+    override of ``DISPATCHER_ENABLED`` takes effect immediately. Without a
+    handle (or on any failure) we fall back to the legacy env-var read so
+    existing callers keep working.
 
     Returns one of ``DISPATCHER_MODES``. Unknown values silently fall back to
     ``"off"`` so a misconfigured deployment cannot accidentally enable the
     dispatcher.
     """
-    raw = (os.environ.get(_ENV_VAR) or "").strip().lower()
-    if raw in DISPATCHER_MODES:
-        return raw
+    raw: str | None = None
+    if db_path is not None:
+        try:
+            raw = _runtime_settings.get_setting(db_path, "DISPATCHER_ENABLED")
+        except Exception:
+            raw = None
+    if raw is None:
+        raw = os.environ.get(_ENV_VAR)
+    candidate = (raw or "").strip().lower()
+    if candidate in DISPATCHER_MODES:
+        return candidate
     return DEFAULT_DISPATCHER_MODE
 
 
-def _resolve_mode(mode: str | None) -> str:
+def _resolve_mode(mode: str | None, db_path=None) -> str:
     if mode is None:
-        return get_dispatcher_mode()
+        return get_dispatcher_mode(db_path)
     candidate = mode.strip().lower()
     if candidate in DISPATCHER_MODES:
         return candidate
@@ -208,7 +222,7 @@ def get_recommended_tickets(
     with an empty payload and does not call into the eligibility aggregator.
     """
     project_root = Path(project_root)
-    resolved_mode = _resolve_mode(mode)
+    resolved_mode = _resolve_mode(mode, db_path=db_path)
     evaluated_at = _now_iso()
 
     base_payload: dict = {
