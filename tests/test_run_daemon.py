@@ -394,6 +394,149 @@ def test_resolve_repo_root_uses_explicit_project_root(tmp_path, monkeypatch):
     assert _resolve_repo_root(args) == repo.resolve()
 
 
+# ── dispatcher-aware scheduling ───────────────────────────────────────────────
+
+def test_run_once_legacy_when_dispatcher_off(tmp_path, monkeypatch, capsys):
+    runs = tmp_path / "runs"
+    _write_state(runs, "T001", "PLAN_APPROVED")
+    _write_state(runs, "T002", "INIT")
+
+    import run_daemon
+    monkeypatch.setattr(run_daemon, "_get_dispatcher_mode", lambda _db: "off")
+    monkeypatch.setattr(run_daemon, "_ensure_db", lambda: tmp_path / "fake.sqlite")
+
+    spy_select = MagicMock()
+    monkeypatch.setattr(run_daemon, "_select_tickets_via_dispatcher", spy_select)
+
+    with patch("run_daemon.launch_ticket") as mock_launch:
+        run_once("test-cmd", False, runs)
+
+    assert mock_launch.call_count == 2
+    called_ids = [c.args[0] for c in mock_launch.call_args_list]
+    assert called_ids == ["T001", "T002"]
+    spy_select.assert_not_called()
+    assert "scheduling: legacy (dispatcher=off)" in capsys.readouterr().out
+
+
+def test_run_once_uses_dispatcher_when_enabled(tmp_path, monkeypatch, capsys):
+    runs = tmp_path / "runs"
+    # Legacy scan would sort as T001, T002 — dispatcher must override the order.
+    _write_state(runs, "T001", "PLAN_APPROVED")
+    _write_state(runs, "T002", "PLAN_APPROVED")
+
+    import run_daemon
+    monkeypatch.setattr(run_daemon, "_get_dispatcher_mode", lambda _db: "advisory")
+    monkeypatch.setattr(run_daemon, "_ensure_db", lambda: tmp_path / "fake.sqlite")
+    monkeypatch.setattr(
+        run_daemon,
+        "_get_recommended_tickets",
+        lambda _db, _root, **_kw: {
+            "mode": "advisory",
+            "recommendations": [
+                {"ticket_id": "T002", "rank": 1, "score": 80},
+                {"ticket_id": "T001", "rank": 2, "score": 70},
+            ],
+            "blocked": [],
+        },
+    )
+
+    with patch("run_daemon.launch_ticket") as mock_launch:
+        run_once("test-cmd", False, runs)
+
+    called_ids = [c.args[0] for c in mock_launch.call_args_list]
+    assert called_ids == ["T002", "T001"]
+    assert "scheduling: dispatcher (mode=advisory)" in capsys.readouterr().out
+
+
+def test_run_once_falls_back_to_legacy_when_dispatcher_empty(tmp_path, monkeypatch, capsys):
+    runs = tmp_path / "runs"
+    _write_state(runs, "T001", "PLAN_APPROVED")
+
+    import run_daemon
+    monkeypatch.setattr(run_daemon, "_get_dispatcher_mode", lambda _db: "advisory")
+    monkeypatch.setattr(run_daemon, "_ensure_db", lambda: tmp_path / "fake.sqlite")
+    monkeypatch.setattr(
+        run_daemon,
+        "_get_recommended_tickets",
+        lambda _db, _root, **_kw: {"mode": "advisory", "recommendations": [], "blocked": []},
+    )
+
+    with patch("run_daemon.launch_ticket") as mock_launch:
+        run_once("test-cmd", False, runs)
+
+    assert mock_launch.call_count == 1
+    assert mock_launch.call_args.args[0] == "T001"
+    out = capsys.readouterr().out
+    assert "scheduling: dispatcher (mode=advisory)" in out
+    assert "dispatcher returned no recommendations — falling back to legacy scan" in out
+
+
+def test_run_once_dispatcher_skips_when_state_not_auto_runnable(tmp_path, monkeypatch):
+    runs = tmp_path / "runs"
+    # Dispatcher recommends a ticket whose state is not in AUTO_RUNNABLE_STATES.
+    _write_state(runs, "T001", "TEST_COMPLETE")
+    _write_state(runs, "T002", "PLAN_APPROVED")
+
+    import run_daemon
+    monkeypatch.setattr(run_daemon, "_get_dispatcher_mode", lambda _db: "advisory")
+    monkeypatch.setattr(run_daemon, "_ensure_db", lambda: tmp_path / "fake.sqlite")
+    monkeypatch.setattr(
+        run_daemon,
+        "_get_recommended_tickets",
+        lambda _db, _root, **_kw: {
+            "mode": "advisory",
+            "recommendations": [
+                {"ticket_id": "T001", "rank": 1, "score": 80},
+                {"ticket_id": "T002", "rank": 2, "score": 70},
+            ],
+            "blocked": [],
+        },
+    )
+
+    with patch("run_daemon.launch_ticket") as mock_launch:
+        run_once("test-cmd", False, runs)
+
+    called_ids = [c.args[0] for c in mock_launch.call_args_list]
+    assert called_ids == ["T002"]
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("off", "scheduling: legacy (dispatcher=off)"),
+        ("advisory", "scheduling: dispatcher (mode=advisory)"),
+    ],
+)
+def test_run_once_logs_active_strategy(tmp_path, monkeypatch, capsys, mode, expected):
+    runs = tmp_path / "runs"
+    _write_state(runs, "T001", "PLAN_APPROVED")
+
+    import run_daemon
+    monkeypatch.setattr(run_daemon, "_get_dispatcher_mode", lambda _db: mode)
+    monkeypatch.setattr(run_daemon, "_ensure_db", lambda: tmp_path / "fake.sqlite")
+    monkeypatch.setattr(
+        run_daemon,
+        "_get_recommended_tickets",
+        lambda _db, _root, **_kw: {
+            "mode": mode,
+            "recommendations": [{"ticket_id": "T001", "rank": 1, "score": 80}],
+            "blocked": [],
+        },
+    )
+
+    with patch("run_daemon.launch_ticket"):
+        run_once("test-cmd", False, runs)
+
+    assert expected in capsys.readouterr().out
+
+
+def test_dispatcher_helper_returns_off_when_db_missing():
+    from run_daemon import _dispatcher_enabled
+    enabled, mode = _dispatcher_enabled(None)
+    assert enabled is False
+    assert mode == "off"
+
+
 def test_resolve_repo_root_uses_cwd_when_runtime_root_set(tmp_path, monkeypatch):
     from argparse import Namespace
     from run_daemon import _resolve_repo_root

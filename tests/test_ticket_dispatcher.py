@@ -320,6 +320,24 @@ def test_excluded_states_are_skipped(env):
     assert all(b["ticket_id"] != "T070" for b in result["blocked"])
 
 
+# ── is_dispatcher_enabled mirrors the resolved mode ─────────────────────
+
+def test_is_dispatcher_enabled_off(env, monkeypatch):
+    monkeypatch.delenv("AI_DEV_FACTORY_DISPATCHER_MODE", raising=False)
+    assert dispatcher.is_dispatcher_enabled() is False
+
+
+def test_is_dispatcher_enabled_unknown_falls_back_to_off(env, monkeypatch):
+    monkeypatch.setenv("AI_DEV_FACTORY_DISPATCHER_MODE", "bogus")
+    assert dispatcher.is_dispatcher_enabled() is False
+
+
+@pytest.mark.parametrize("mode", ["advisory", "manual", "auto"])
+def test_is_dispatcher_enabled_true_for_non_off_modes(env, monkeypatch, mode):
+    monkeypatch.setenv("AI_DEV_FACTORY_DISPATCHER_MODE", mode)
+    assert dispatcher.is_dispatcher_enabled() is True
+
+
 # ── manual returns same recommendations as advisory ──────────────────────
 
 def test_manual_mode_recommendations_match_advisory(env):
