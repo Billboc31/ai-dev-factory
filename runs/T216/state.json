@@ -1,7 +1,7 @@
 {
   "ticket_id": "T216",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_APPROVED",
   "branch": "ticket/T216-fix-global-settings-page-empty-when-no-runtime-set",
   "issue_number": 288,
-  "updated_at": "2026-06-26T07:53:32Z"
+  "updated_at": "2026-06-26T07:55:59Z"
 }
