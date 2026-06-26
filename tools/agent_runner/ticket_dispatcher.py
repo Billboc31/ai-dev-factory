@@ -87,6 +87,11 @@ def get_dispatcher_mode(db_path=None) -> str:
     return DEFAULT_DISPATCHER_MODE
 
 
+def is_dispatcher_enabled(db_path=None) -> bool:
+    """Return True when the resolved dispatcher mode is anything other than ``off``."""
+    return get_dispatcher_mode(db_path) != "off"
+
+
 def _resolve_mode(mode: str | None, db_path=None) -> str:
     if mode is None:
         return get_dispatcher_mode(db_path)
@@ -329,4 +334,5 @@ __all__ = [
     "DEFAULT_DISPATCHER_MODE",
     "get_dispatcher_mode",
     "get_recommended_tickets",
+    "is_dispatcher_enabled",
 ]

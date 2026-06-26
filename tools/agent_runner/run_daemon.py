@@ -106,6 +106,13 @@ _rr_resolve_state_dir = _rr_mod.resolve_state_dir
 _rr_resolve_logs_dir = _rr_mod.resolve_logs_dir
 del _rr_spec, _rr_mod
 
+_td_spec = importlib.util.spec_from_file_location("_ticket_dispatcher", ROOT / "ticket_dispatcher.py")
+_td_mod = importlib.util.module_from_spec(_td_spec)  # type: ignore[arg-type]
+_td_spec.loader.exec_module(_td_mod)  # type: ignore[union-attr]
+_get_dispatcher_mode = _td_mod.get_dispatcher_mode
+_get_recommended_tickets = _td_mod.get_recommended_tickets
+del _td_spec, _td_mod
+
 # SQLite path and init are cached so _rdb_get_db_path() (subprocess) runs only once per daemon process.
 _DB_PATH_RESOLVED: bool = False
 _DB_PATH_VALUE: "Path | None" = None
@@ -1625,6 +1632,57 @@ def _load_project_map(runs_dir: Path, worktrees_dir: "Path | None" = None) -> "d
         return None
 
 
+def _dispatcher_enabled(db_path: "Path | None") -> tuple[bool, str]:
+    """Return ``(enabled, mode)`` for the current dispatcher configuration.
+
+    Tolerates a missing DB by returning ``(False, "off")`` so callers can keep
+    using the legacy scheduling path without raising.
+    """
+    if db_path is None:
+        return False, "off"
+    try:
+        mode = _get_dispatcher_mode(db_path)
+    except Exception as exc:
+        _log(f"dispatcher mode resolution failed — defaulting to off: {exc}")
+        return False, "off"
+    return mode != "off", mode
+
+
+def _select_tickets_via_dispatcher(
+    db_path: "Path | None",
+    project_root: Path,
+    runs_dir: Path,
+    worktrees_dir: Path | None,
+    mode: str,
+) -> list[tuple[str, str]]:
+    """Return ``[(ticket_id, state), ...]`` ranked by the dispatcher.
+
+    Filters to states in ``AUTO_RUNNABLE_STATES`` so the caller's loop can run
+    the existing retry/cooldown/worker-registry logic untouched. Returns ``[]``
+    on any failure or when the dispatcher reports ``not_implemented`` — the
+    caller logs and falls back to the legacy scan.
+    """
+    if db_path is None:
+        return []
+    try:
+        payload = _get_recommended_tickets(db_path, project_root, mode=mode)
+    except Exception as exc:
+        _log(f"dispatcher get_recommended_tickets failed: {exc}")
+        return []
+    if payload.get("not_implemented"):
+        return []
+    selected: list[tuple[str, str]] = []
+    for rec in payload.get("recommendations", []):
+        ticket_id = rec.get("ticket_id")
+        if not ticket_id:
+            continue
+        run_dir = _get_run_dir(ticket_id, runs_dir, worktrees_dir)
+        ticket_state = _load_state_json(run_dir).get("state", "")
+        if ticket_state in AUTO_RUNNABLE_STATES:
+            selected.append((ticket_id, ticket_state))
+    return selected
+
+
 def run_once(
     exec_cmd: str,
     dry_run: bool,
@@ -1637,8 +1695,13 @@ def run_once(
     max_workers: int = 1,
     use_project_map: bool = False,
     state_dir: Path | None = None,
+    project_root: Path | None = None,
 ) -> None:
     """Scan all tickets and process auto-runnable ones."""
+    _state_dir = state_dir if state_dir is not None else runs_dir
+    _db_path = _ensure_db()
+    dispatcher_enabled, dispatcher_mode = _dispatcher_enabled(_db_path)
+
     all_tickets = sorted(scan_tickets(runs_dir, worktrees_dir), key=lambda t: ticket_sort_key(t[0]))
 
     if use_project_map:
@@ -1650,21 +1713,34 @@ def run_once(
                 reordered = [t for t in all_tickets if t[0] == next_recommended]
                 reordered += [t for t in all_tickets if t[0] != next_recommended]
                 _log(f"project-map scheduling: next_recommended={next_recommended}")
-                tickets = reordered
+                legacy_tickets = reordered
             else:
                 _log("project-map: no next_recommended — falling back to FIFO")
-                tickets = all_tickets
+                legacy_tickets = all_tickets
         else:
             _log("project-map: map absent — falling back to FIFO")
-            tickets = all_tickets
+            legacy_tickets = all_tickets
     else:
-        tickets = all_tickets
+        legacy_tickets = all_tickets
+
+    if dispatcher_enabled:
+        _log(f"scheduling: dispatcher (mode={dispatcher_mode})")
+        _resolved_project_root = project_root if project_root is not None else REPO_ROOT
+        dispatcher_tickets = _select_tickets_via_dispatcher(
+            _db_path, _resolved_project_root, runs_dir, worktrees_dir, dispatcher_mode,
+        )
+        if dispatcher_tickets:
+            tickets = dispatcher_tickets
+        else:
+            _log("dispatcher returned no recommendations — falling back to legacy scan")
+            tickets = legacy_tickets
+    else:
+        _log(f"scheduling: legacy (dispatcher={dispatcher_mode})")
+        tickets = legacy_tickets
+
     if not tickets:
         _log("no tickets found")
         return
-
-    _state_dir = state_dir if state_dir is not None else runs_dir
-    _db_path = _ensure_db()
 
     for ticket_id, state in tickets:
         run_dir = _get_run_dir(ticket_id, runs_dir, worktrees_dir)
@@ -1876,6 +1952,12 @@ def main(argv: list[str]) -> int:
     _log(f"  max-workers    = {args.max_workers}")
     if args.project:
         _log(f"  project_id     = {args.project}")
+    try:
+        _boot_db = _ensure_db()
+        _boot_mode = _get_dispatcher_mode(_boot_db) if _boot_db else "off"
+    except Exception:
+        _boot_mode = "off"
+    _log(f"  dispatcher_mode = {_boot_mode}")
     _log("=" * 60)
 
     # Strict refuse mode: if gh is missing while issue polling is requested,
@@ -1923,6 +2005,7 @@ def main(argv: list[str]) -> int:
             max_workers=args.max_workers,
             use_project_map=args.use_project_map,
             state_dir=state_dir,
+            project_root=REPO_ROOT,
         )
         return 0
 
