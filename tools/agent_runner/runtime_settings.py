@@ -18,6 +18,7 @@ scope for V1.
 
 from __future__ import annotations
 
+import logging
 import os
 import sys
 from dataclasses import dataclass, field
@@ -29,6 +30,14 @@ if str(_TOOLS_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_DIR))
 
 import runtime_db  # noqa: E402
+
+logger = logging.getLogger("runtime-settings")
+
+# Keys for which we have already logged a DB-read failure. The fallback to
+# env/default is by design (an empty/missing table is the steady state on a
+# fresh install), but the first failure per key should still be visible so a
+# broken DB isn't completely silent.
+_warned_db_failures: set[str] = set()
 
 
 SETTING_VALUE_TYPES = ("string", "int", "float", "bool", "secret")
@@ -268,7 +277,15 @@ def resolve_effective_setting(db_path, key: str) -> dict:
     if not spec.is_sensitive:
         try:
             db_row = runtime_db.get_runtime_setting(db_path, key)
-        except Exception:
+        except Exception as exc:
+            if key not in _warned_db_failures:
+                _warned_db_failures.add(key)
+                logger.warning(
+                    "runtime_settings: DB lookup failed for %r (%s); "
+                    "falling back to env/default",
+                    key,
+                    exc,
+                )
             db_row = None
     env_raw = _env_value(spec)
     source = _source_for(db_row, env_raw)

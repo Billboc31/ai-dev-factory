@@ -167,3 +167,117 @@ def test_router_smoke_registered(tmp_path):
     client = TestClient(_make_app(tmp_path))
     r = client.get("/api/settings")
     assert r.status_code == 200
+
+
+# ── T216: empty-table regression coverage ─────────────────────────────────────
+
+
+def _clear_all_spec_env_vars(monkeypatch):
+    """Unset every ``env_var`` declared in ``SETTING_SPECS`` so resolution
+    cannot accidentally pick up a value leaking from the test host's env."""
+    from services.control_api.routes import settings as _settings_route
+
+    for spec in _settings_route._runtime_settings.SETTING_SPECS.values():
+        if spec.env_var:
+            monkeypatch.delenv(spec.env_var, raising=False)
+
+
+def test_list_returns_all_settings_on_empty_table(tmp_path):
+    from services.control_api.routes import settings as _settings_route
+
+    specs = _settings_route._runtime_settings.SETTING_SPECS
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/api/settings")
+    assert r.status_code == 200
+    body = r.json()
+    rows = body["settings"]
+    assert len(rows) == len(specs)
+    assert {row["key"] for row in rows} == set(specs.keys())
+    for row in rows:
+        if row["is_sensitive"]:
+            continue
+        assert row["source"] in {"env", "default"}, row
+
+
+def test_list_source_is_default_when_no_env_no_db(tmp_path, monkeypatch):
+    from services.control_api.routes import settings as _settings_route
+
+    _clear_all_spec_env_vars(monkeypatch)
+    specs = _settings_route._runtime_settings.SETTING_SPECS
+
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/api/settings")
+    assert r.status_code == 200
+    rows = r.json()["settings"]
+    by_key = {row["key"]: row for row in rows}
+    for key, spec in specs.items():
+        row = by_key[key]
+        if spec.is_sensitive:
+            assert row["value"] == "not_configured"
+            assert row["source"] == "default"
+        else:
+            assert row["source"] == "default", row
+            assert row["value"] == spec.default, row
+
+
+def test_list_source_is_env_when_no_db(tmp_path, monkeypatch):
+    from services.control_api.routes import settings as _settings_route
+
+    _clear_all_spec_env_vars(monkeypatch)
+    monkeypatch.setenv("DAEMON_MAX_WORKERS", "4")
+    monkeypatch.setenv("DEFAULT_PLANNER_MODEL", "custom-planner")
+
+    specs = _settings_route._runtime_settings.SETTING_SPECS
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/api/settings")
+    assert r.status_code == 200
+    by_key = {row["key"]: row for row in r.json()["settings"]}
+
+    assert by_key["MAX_WORKERS"]["source"] == "env"
+    assert by_key["MAX_WORKERS"]["value"] == 4
+    assert by_key["DEFAULT_PLANNER_MODEL"]["source"] == "env"
+    assert by_key["DEFAULT_PLANNER_MODEL"]["value"] == "custom-planner"
+
+    for key, spec in specs.items():
+        if key in {"MAX_WORKERS", "DEFAULT_PLANNER_MODEL"} or spec.is_sensitive:
+            continue
+        row = by_key[key]
+        assert row["source"] == "default", row
+        assert row["value"] == spec.default, row
+
+
+def test_list_source_switches_to_db_after_put(tmp_path):
+    client = TestClient(_make_app(tmp_path))
+    put = client.put("/api/settings/MAX_WORKERS", json={"value": "7"})
+    assert put.status_code == 200
+
+    r = client.get("/api/settings")
+    assert r.status_code == 200
+    by_key = {row["key"]: row for row in r.json()["settings"]}
+    assert by_key["MAX_WORKERS"]["source"] == "db"
+    assert by_key["MAX_WORKERS"]["value"] == 7
+    for key, row in by_key.items():
+        if key == "MAX_WORKERS" or row["is_sensitive"]:
+            continue
+        assert row["source"] in {"env", "default"}, row
+
+
+def test_list_survives_missing_runtime_settings_table(tmp_path):
+    import sqlite3
+    from services.control_api.routes import settings as _settings_route
+
+    app = _make_app(tmp_path)
+    db_path = app.state.db_path
+    with sqlite3.connect(db_path) as conn:
+        conn.execute("DROP TABLE runtime_settings")
+
+    client = TestClient(app)
+    r = client.get("/api/settings")
+    assert r.status_code == 200
+    body = r.json()
+    specs = _settings_route._runtime_settings.SETTING_SPECS
+    assert {row["key"] for row in body["settings"]} == set(specs.keys())
+    for row in body["settings"]:
+        if row["is_sensitive"]:
+            continue
+        assert row["source"] in {"env", "default"}, row

@@ -52,9 +52,22 @@ def _row_to_model(row: dict) -> RuntimeSetting:
 
 @router.get("", response_model=RuntimeSettingsListResponse)
 def list_settings(request: Request) -> RuntimeSettingsListResponse:
+    """List every declared setting.
+
+    Invariant: always returns ``len(SETTING_SPECS)`` entries; the response is
+    never DB-filtered. An empty ``runtime_settings`` table is normal on a fresh
+    install — rows resolve through env / hardcoded defaults.
+    """
     logger.info("api: GET /api/settings")
     db = _db_path(request)
-    rows = _runtime_settings.list_effective_settings(db)
+    try:
+        rows = _runtime_settings.list_effective_settings(db)
+    except Exception:
+        # The resolver is supposed to swallow per-key DB failures and fall back
+        # to env/default. Anything reaching this point is a real bug — surface
+        # it (500) instead of silently returning {"settings": []}.
+        logger.exception("api: list_effective_settings failed")
+        raise HTTPException(status_code=500, detail="failed to list settings")
     return RuntimeSettingsListResponse(settings=[_row_to_model(r) for r in rows])
 
 
