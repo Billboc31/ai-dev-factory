@@ -59,3 +59,12 @@
 [2026-06-26T13:57:38Z] compose: skill=ai/skills/debugging.md
 [2026-06-26T13:57:38Z] compose: task (canonical prompt)
 [2026-06-26T13:57:38Z] snapshot: runtime-prompt=runs/T217/prompts/tester-attempt-1.md
+[2026-06-26T14:07:22Z] auto-run: step=tester done rc=0
+[2026-06-26T14:07:22Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-26T14:07:22Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-26T14:07:22Z] commit-checkpoint: unstaged runtime garbage: ['runs/T217/runtime.log']
+[2026-06-26T14:07:22Z] commit-checkpoint: sha=6dfd968a files=3 title='test(T217/workflow): tester — update 3 file(s)'
+[2026-06-26T14:07:22Z] auto-run: auto-push triggered
+[2026-06-26T14:07:22Z] push: tolerating runtime dirty files (not blocking): ['runs/T217/runtime.log']
+[2026-06-26T14:07:22Z] push: pushing branch=ticket/T217-fallback-to-legacy-daemon-scheduling-when-dispatch
+[2026-06-26T14:07:24Z] push: done branch=ticket/T217-fallback-to-legacy-daemon-scheduling-when-dispatch
