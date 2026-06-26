@@ -22,3 +22,14 @@
 [2026-06-26T07:49:33Z] compose: task (canonical prompt)
 [2026-06-26T07:49:33Z] snapshot: runtime-prompt=runs/T216/prompts/planner-attempt-2.md
 [2026-06-26T07:53:30Z] auto-run: step=planner done rc=0
+[2026-06-26T07:53:32Z] planner checkpoint: committed
+[2026-06-26T07:53:32Z] planner checkpoint: pushed
+[2026-06-26T07:53:32Z] planner validation success
+[2026-06-26T07:53:32Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-06-26T07:53:32Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-06-26T07:53:32Z] commit-checkpoint: unstaged runtime garbage: ['runs/T216/runtime.log']
+[2026-06-26T07:53:32Z] commit-checkpoint: sha=2fd9d6c9 files=2 title='docs(T216/workflow): planner — update 2 file(s)'
+[2026-06-26T07:53:32Z] auto-run: auto-push triggered
+[2026-06-26T07:53:33Z] push: tolerating runtime dirty files (not blocking): ['runs/T216/runtime.log']
+[2026-06-26T07:53:33Z] push: pushing branch=ticket/T216-fix-global-settings-page-empty-when-no-runtime-set
+[2026-06-26T07:53:34Z] push: done branch=ticket/T216-fix-global-settings-page-empty-when-no-runtime-set
