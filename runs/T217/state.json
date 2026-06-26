@@ -1,7 +1,7 @@
 {
   "ticket_id": "T217",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T217-fallback-to-legacy-daemon-scheduling-when-dispatch",
   "issue_number": 290,
-  "updated_at": "2026-06-26T13:37:12Z"
+  "updated_at": "2026-06-26T13:41:00Z"
 }
