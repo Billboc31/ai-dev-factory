@@ -111,7 +111,7 @@ def env(tmp_path, monkeypatch):
     return {"db": db_path, "root": tmp_path}
 
 
-def _raise_default_dep_stub(_project_root, ticket_id):
+def _raise_default_dep_stub(_project_root, ticket_id, **_kwargs):
     raise AssertionError(
         f"is_ticket_merged unexpectedly called for {ticket_id} — test fixture "
         "did not declare a dependency"
@@ -125,7 +125,7 @@ def _stub_deps(monkeypatch, mapping: dict[str, str]):
         def __init__(self, status):
             self.status = status
 
-    def _impl(_project_root, ticket_id):
+    def _impl(_project_root, ticket_id, **_kwargs):
         return _Res(mapping.get(ticket_id, "unknown"))
 
     monkeypatch.setattr(eligibility, "is_ticket_merged", _impl)

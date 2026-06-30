@@ -197,7 +197,9 @@ def evaluate_readiness(
 
     def _bg() -> None:
         try:
-            _evaluator.run_evaluation(db, ticket_id, ticket_content, root)
+            _evaluator.run_evaluation(
+                db, ticket_id, ticket_content, root, project_id=project_id
+            )
         except Exception:
             logger.exception("readiness evaluation background error for %s", ticket_id)
 

@@ -163,7 +163,7 @@ def test_eligibility_blocked_by_dependency(tmp_path, monkeypatch):
         def __init__(self, status):
             self.status = status
 
-    monkeypatch.setattr(_elig, "is_ticket_merged", lambda _r, t: _Res("not_merged"))
+    monkeypatch.setattr(_elig, "is_ticket_merged", lambda _r, t, **_kw: _Res("not_merged"))
 
     client = TestClient(app)
     r = client.get("/tickets/T003/eligibility")

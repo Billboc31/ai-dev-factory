@@ -1892,16 +1892,25 @@ def run_once(
         if _db_path:
             try:
                 ticket_data = _load_state_json(run_dir)
-                _rdb_upsert_ticket(
-                    _db_path, ticket_id,
-                    state=state,
-                    branch=ticket_data.get("branch"),
-                    issue_number=ticket_data.get("issue_number"),
-                    run_dir=str(run_dir),
-                    worktree_path=worktree_cwd,
-                    daemon_archived=int(bool(ticket_data.get("daemon_archived"))),
-                    pr_number=ticket_data.get("pr_number"),
-                )
+                upsert_fields: dict = {
+                    "state": state,
+                    "branch": ticket_data.get("branch"),
+                    "issue_number": ticket_data.get("issue_number"),
+                    "run_dir": str(run_dir),
+                    "worktree_path": worktree_cwd,
+                    "daemon_archived": int(bool(ticket_data.get("daemon_archived"))),
+                    "pr_number": ticket_data.get("pr_number"),
+                }
+                pr_number = ticket_data.get("pr_number")
+                if pr_number and not dry_run:
+                    from ticket_merge_state import fetch_github_pr_state_label
+
+                    gh_state = fetch_github_pr_state_label(
+                        REPO_ROOT, int(pr_number), repo=repo
+                    )
+                    if gh_state:
+                        upsert_fields["pr_state"] = gh_state
+                _rdb_upsert_ticket(_db_path, ticket_id, **upsert_fields)
             except Exception as exc:
                 _log(f"SQLite ticket sync failed for {ticket_id}: {exc}")
 

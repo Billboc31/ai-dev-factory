@@ -141,7 +141,7 @@ def _seed_full_ready(
     _seed_rules_eligible(db_path, ticket_id)
 
 
-def _raise_default_dep_stub(_project_root, ticket_id):
+def _raise_default_dep_stub(_project_root, ticket_id, **_kwargs):
     raise AssertionError(
         f"is_ticket_merged unexpectedly called for {ticket_id} — test fixture "
         "did not declare a dependency"
@@ -269,7 +269,7 @@ def test_dependency_blocked_from_markdown_section_in_worktree(env, monkeypatch):
     _seed_ready_candidate(db, "T070")
     _seed_rules_eligible(db, "T070")
 
-    def _dep_status(_project_root, dep_id):
+    def _dep_status(_project_root, dep_id, **_kwargs):
         from ticket_merge_state import MergeCheckResult
 
         return MergeCheckResult(status="not_merged", source="test")

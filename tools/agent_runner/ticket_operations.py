@@ -223,7 +223,9 @@ def _handle_rerun_readiness(ctx: OperationContext) -> dict:
     if not ticket_content:
         raise OperationError("ticket content not available")
     import ticket_readiness_evaluator as _evaluator
-    _evaluator.run_evaluation(ctx.db_path, ctx.ticket_id, ticket_content, ctx.project_root)
+    _evaluator.run_evaluation(
+        ctx.db_path, ctx.ticket_id, ticket_content, ctx.project_root, project_id=ctx.project_id
+    )
     return {"message": "Readiness evaluation re-run completed."}
 
 

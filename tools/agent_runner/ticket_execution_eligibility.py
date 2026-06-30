@@ -88,7 +88,13 @@ def _eval_intelligence(intelligence: dict | None) -> dict:
     }
 
 
-def _eval_dependencies(ticket_content: str | None, project_root: Path) -> dict:
+def _eval_dependencies(
+    ticket_content: str | None,
+    project_root: Path,
+    *,
+    project_id: str | None = None,
+    repo: str | None = None,
+) -> dict:
     deps = _extract_dependencies(ticket_content or "")
     if not deps:
         return {
@@ -102,7 +108,9 @@ def _eval_dependencies(ticket_content: str | None, project_root: Path) -> dict:
     for dep in deps:
         result = None
         try:
-            result = is_ticket_merged(project_root, dep)
+            result = is_ticket_merged(
+                project_root, dep, project_id=project_id, repo=None
+            )
         except Exception:
             unknown.append(dep)
             continue
@@ -247,7 +255,7 @@ def evaluate_eligibility(
     ticket_id: str,
     *,
     ticket_content: str | None = None,
-    project_id: str | None = None,  # noqa: ARG001 — accepted for future use
+    project_id: str | None = None,
 ) -> dict:
     """Return the aggregated execution-eligibility payload for ``ticket_id``.
 
@@ -263,7 +271,9 @@ def evaluate_eligibility(
 
     checks: dict[str, dict] = {
         "intelligence": _eval_intelligence(intelligence),
-        "dependencies": _eval_dependencies(ticket_content, project_root),
+        "dependencies": _eval_dependencies(
+            ticket_content, project_root, project_id=project_id
+        ),
         "readiness": _eval_readiness(readiness),
         "approval": _eval_approval(db_path, ticket_id, project_id),
     }

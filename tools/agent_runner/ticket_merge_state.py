@@ -4,9 +4,8 @@ Single public helper used by the Readiness Evaluator so the evaluator never
 shells out to ``git`` directly. Resolution order — return on the first
 definitive answer; only fall through on ``unknown``:
 
-    1. Runtime DB     — ticket_runtime / PR rows with a recorded merge state.
-    2. GitHub metadata — ``gh pr view`` for the ticket's PR if discoverable.
-    3. Git fallback   — ``git log --grep "T<id>" main`` on the project's repo.
+    1. Runtime DB     — ``ticket_runtime.pr_state`` when already synced.
+    2. GitHub metadata — ``gh pr view`` for the ticket's PR when ``pr_number`` is known.
 
 The return value is a small ``MergeCheckResult`` dataclass carrying the
 status (``merged | not_merged | unknown``), the source used to decide, and a
@@ -16,7 +15,7 @@ short human-readable reason.
 from __future__ import annotations
 
 import json
-import re
+import os
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -29,14 +28,13 @@ if str(_TOOLS_DIR) not in sys.path:
 import runtime_db  # noqa: E402
 
 
-_GIT_TIMEOUT = 10
 _GH_TIMEOUT = 10
 
 
 @dataclass
 class MergeCheckResult:
     status: str  # "merged" | "not_merged" | "unknown"
-    source: str  # "runtime_db" | "github_metadata" | "git_fallback" | "unknown"
+    source: str  # "runtime_db" | "github_metadata" | "unknown"
     reason: str = ""
 
 
@@ -44,14 +42,102 @@ def _normalize_ticket_id(ticket_id: str) -> str:
     return ticket_id.strip()
 
 
-# ── Layer 1: runtime DB ──────────────────────────────────────────────────────
-
-def _runtime_db_check(ticket_id: str) -> MergeCheckResult | None:
-    """Inspect the runtime DB. Return None when the layer cannot decide."""
+def _resolve_db_path(project_id: str | None = None):
     try:
-        db_path = runtime_db.get_db_path()
+        if project_id:
+            return runtime_db.get_db_path(project_id)
+        return runtime_db.get_db_path()
     except Exception:
         return None
+
+
+def _state_json_candidates(
+    project_root: Path,
+    ticket_id: str,
+    project_id: str | None,
+) -> list[Path]:
+    candidates: list[Path] = []
+    runtime_base = os.environ.get("RUNTIME_BASE_ROOT") or os.environ.get(
+        "AI_DEV_FACTORY_RUNTIME_ROOT"
+    )
+    if project_id and runtime_base:
+        candidates.append(
+            Path(runtime_base).expanduser()
+            / project_id
+            / "worktrees"
+            / ticket_id
+            / "runs"
+            / ticket_id
+            / "state.json"
+        )
+    candidates.append(project_root / "runs" / ticket_id / "state.json")
+    return candidates
+
+
+def _load_state_json(
+    project_root: Path,
+    ticket_id: str,
+    project_id: str | None,
+) -> dict | None:
+    for path in _state_json_candidates(project_root, ticket_id, project_id):
+        if not path.is_file():
+            continue
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+    return None
+
+
+def _resolve_pr_number(
+    ticket_id: str,
+    project_root: Path,
+    project_id: str | None,
+) -> int | None:
+    db_path = _resolve_db_path(project_id)
+    if db_path is not None:
+        try:
+            row = runtime_db.get_ticket_runtime(db_path, ticket_id)
+        except Exception:
+            row = None
+        if row and row.get("pr_number") is not None:
+            try:
+                return int(row["pr_number"])
+            except (TypeError, ValueError):
+                pass
+
+    state = _load_state_json(project_root, ticket_id, project_id)
+    if state and state.get("pr_number") is not None:
+        try:
+            return int(state["pr_number"])
+        except (TypeError, ValueError):
+            pass
+    return None
+
+
+def _ticket_exists(
+    ticket_id: str,
+    project_root: Path,
+    project_id: str | None,
+) -> bool:
+    db_path = _resolve_db_path(project_id)
+    if db_path is not None:
+        try:
+            if runtime_db.get_ticket_runtime(db_path, ticket_id):
+                return True
+        except Exception:
+            pass
+    return _load_state_json(project_root, ticket_id, project_id) is not None
+
+
+# ── Layer 1: runtime DB ──────────────────────────────────────────────────────
+
+def _runtime_db_check(
+    ticket_id: str,
+    project_id: str | None,
+) -> MergeCheckResult | None:
+    """Inspect cached ``pr_state`` in the runtime DB."""
+    db_path = _resolve_db_path(project_id)
     if db_path is None:
         return None
 
@@ -64,21 +150,20 @@ def _runtime_db_check(ticket_id: str) -> MergeCheckResult | None:
         return None
 
     pr_state = (row.get("pr_state") or "").strip().lower()
-    state = (row.get("state") or "").strip().lower()
 
-    if pr_state in {"merged"} or state in {"merged"}:
+    if pr_state == "merged":
         return MergeCheckResult(
             status="merged",
             source="runtime_db",
-            reason=f"runtime_db pr_state={row.get('pr_state')!r} state={row.get('state')!r}",
+            reason=f"runtime_db pr_state={row.get('pr_state')!r}",
         )
 
-    if pr_state in {"closed"}:
-        # Closed but not merged.
+    if pr_state in {"closed", "open"}:
+        label = "open" if pr_state == "open" else "closed without merge"
         return MergeCheckResult(
             status="not_merged",
             source="runtime_db",
-            reason="runtime_db PR is closed without merge",
+            reason=f"runtime_db PR is {label}",
         )
 
     return None
@@ -86,33 +171,18 @@ def _runtime_db_check(ticket_id: str) -> MergeCheckResult | None:
 
 # ── Layer 2: GitHub metadata via ``gh`` ──────────────────────────────────────
 
-def _resolve_pr_number_from_db(ticket_id: str) -> int | None:
-    """Best-effort PR number lookup from ticket_runtime (used by ``gh pr view``)."""
-    try:
-        db_path = runtime_db.get_db_path()
-    except Exception:
-        return None
-    if db_path is None:
-        return None
-    try:
-        row = runtime_db.get_ticket_runtime(db_path, ticket_id)
-    except Exception:
-        return None
-    if not row:
-        return None
-    pr = row.get("pr_number")
-    if pr is None:
-        return None
-    try:
-        return int(pr)
-    except (TypeError, ValueError):
-        return None
-
-
-def _gh_pr_view(project_root: Path, pr_number: int) -> dict | None:
+def _gh_pr_view(
+    project_root: Path,
+    pr_number: int,
+    *,
+    repo: str | None = None,
+) -> dict | None:
+    cmd = ["gh", "pr", "view", str(pr_number), "--json", "state,mergedAt"]
+    if repo:
+        cmd += ["--repo", repo]
     try:
         proc = subprocess.run(
-            ["gh", "pr", "view", str(pr_number), "--json", "state,mergedAt"],
+            cmd,
             cwd=str(project_root),
             capture_output=True,
             text=True,
@@ -129,15 +199,10 @@ def _gh_pr_view(project_root: Path, pr_number: int) -> dict | None:
         return None
 
 
-def _github_metadata_check(project_root: Path, ticket_id: str) -> MergeCheckResult | None:
-    pr_number = _resolve_pr_number_from_db(ticket_id)
-    if pr_number is None:
-        return None
-
-    data = _gh_pr_view(project_root, pr_number)
-    if data is None:
-        return None
-
+def _merge_result_from_github_payload(
+    pr_number: int,
+    data: dict,
+) -> MergeCheckResult:
     state = (data.get("state") or "").upper()
     merged_at = data.get("mergedAt")
 
@@ -147,80 +212,111 @@ def _github_metadata_check(project_root: Path, ticket_id: str) -> MergeCheckResu
             source="github_metadata",
             reason=f"gh pr view #{pr_number} state=MERGED",
         )
-    if state in {"CLOSED"}:
+    if state == "CLOSED":
         return MergeCheckResult(
             status="not_merged",
             source="github_metadata",
             reason=f"gh pr view #{pr_number} state=CLOSED",
         )
-    if state in {"OPEN"}:
+    if state == "OPEN":
         return MergeCheckResult(
             status="not_merged",
             source="github_metadata",
             reason=f"gh pr view #{pr_number} state=OPEN",
         )
+    return MergeCheckResult(
+        status="unknown",
+        source="unknown",
+        reason=f"gh pr view #{pr_number} returned unrecognized state {state!r}",
+    )
+
+
+def fetch_github_pr_state_label(
+    project_root: Path,
+    pr_number: int,
+    *,
+    repo: str | None = None,
+) -> str | None:
+    """Return ``merged``, ``open``, ``closed``, or ``None`` when gh is unavailable."""
+    data = _gh_pr_view(project_root, pr_number, repo=repo)
+    if data is None:
+        return None
+    state = (data.get("state") or "").upper()
+    if state == "MERGED" or data.get("mergedAt"):
+        return "merged"
+    if state == "OPEN":
+        return "open"
+    if state == "CLOSED":
+        return "closed"
     return None
 
 
-# ── Layer 3: git fallback ────────────────────────────────────────────────────
-
-_TICKET_ID_RE = re.compile(r"^T\d+$", re.IGNORECASE)
-
-
-def _git_log_grep(project_root: Path, ticket_id: str) -> MergeCheckResult | None:
-    """Return ``merged`` when a commit reachable from ``main`` mentions the ticket."""
-    if not _TICKET_ID_RE.match(ticket_id):
+def _github_metadata_check(
+    project_root: Path,
+    ticket_id: str,
+    *,
+    project_id: str | None,
+    repo: str | None,
+) -> MergeCheckResult | None:
+    pr_number = _resolve_pr_number(ticket_id, project_root, project_id)
+    if pr_number is None:
         return None
-    try:
-        proc = subprocess.run(
-            ["git", "log", "main", "--grep", ticket_id, "--oneline"],
-            cwd=str(project_root),
-            capture_output=True,
-            text=True,
-            timeout=_GIT_TIMEOUT,
-            check=False,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
+
+    data = _gh_pr_view(project_root, pr_number, repo=repo)
+    if data is None:
         return None
-    if proc.returncode != 0:
-        return None
-    if proc.stdout.strip():
-        return MergeCheckResult(
-            status="merged",
-            source="git_fallback",
-            reason=f"git log main --grep {ticket_id} found commit(s)",
-        )
-    return MergeCheckResult(
-        status="not_merged",
-        source="git_fallback",
-        reason=f"git log main --grep {ticket_id} found no commits",
-    )
+
+    return _merge_result_from_github_payload(pr_number, data)
 
 
 # ── Public entry point ───────────────────────────────────────────────────────
 
-def is_ticket_merged(project_root: Path, ticket_id: str) -> MergeCheckResult:
+def is_ticket_merged(
+    project_root: Path,
+    ticket_id: str,
+    *,
+    project_id: str | None = None,
+    repo: str | None = None,
+) -> MergeCheckResult:
     """Return whether ``ticket_id`` has been merged into the project's ``main`` branch.
 
-    Tries runtime DB → GitHub metadata → git log, in order. Returns the first
-    layer that produces a definitive ``merged`` / ``not_merged`` answer.
+    Uses cached ``pr_state`` in the runtime DB when available, then queries
+    GitHub via ``gh pr view`` when a ``pr_number`` is known. Tickets with no
+    recorded PR are treated as ``not_merged``.
     """
     ticket_id = _normalize_ticket_id(ticket_id)
+    project_root = Path(project_root)
 
-    for resolver in (
-        lambda: _runtime_db_check(ticket_id),
-        lambda: _github_metadata_check(Path(project_root), ticket_id),
-        lambda: _git_log_grep(Path(project_root), ticket_id),
-    ):
-        try:
-            result = resolver()
-        except Exception:
-            result = None
-        if result is not None:
-            return result
+    cached = _runtime_db_check(ticket_id, project_id)
+    if cached is not None:
+        return cached
+
+    github = _github_metadata_check(
+        project_root,
+        ticket_id,
+        project_id=project_id,
+        repo=repo,
+    )
+    if github is not None:
+        return github
+
+    pr_number = _resolve_pr_number(ticket_id, project_root, project_id)
+    if pr_number is not None:
+        return MergeCheckResult(
+            status="unknown",
+            source="unknown",
+            reason=f"gh pr view #{pr_number} unavailable",
+        )
+
+    if _ticket_exists(ticket_id, project_root, project_id):
+        return MergeCheckResult(
+            status="not_merged",
+            source="github_metadata",
+            reason=f"{ticket_id} has no PR recorded",
+        )
 
     return MergeCheckResult(
         status="unknown",
         source="unknown",
-        reason="no source could decide merge state",
+        reason=f"no runtime record or PR found for {ticket_id}",
     )

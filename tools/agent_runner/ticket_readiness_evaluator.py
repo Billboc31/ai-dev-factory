@@ -188,6 +188,8 @@ def read_ticket_markdown(
 def _check_dependencies(
     ticket_content: str,
     project_root: Path,
+    *,
+    project_id: str | None = None,
 ) -> tuple[str, list[str]]:
     """Returns (status, blocking_reasons). Empty deps → ``passed``."""
     deps = _extract_dependencies(ticket_content)
@@ -197,7 +199,7 @@ def _check_dependencies(
     reasons: list[str] = []
     for dep in deps:
         try:
-            result = is_ticket_merged(project_root, dep)
+            result = is_ticket_merged(project_root, dep, project_id=project_id)
         except Exception:
             reasons.append(f"Dependency {dep} merge state unknown")
             continue
@@ -309,6 +311,8 @@ def run_evaluation(
     ticket_id: str,
     ticket_content: str,
     project_root: Path,
+    *,
+    project_id: str | None = None,
 ) -> None:
     """Run the full readiness evaluation for ``ticket_id`` and persist the verdict.
 
@@ -327,7 +331,9 @@ def run_evaluation(
             intelligence_row = None
 
         intel_status, intel_reason = _check_intelligence(db_path, ticket_id)
-        dep_status, dep_reasons = _check_dependencies(ticket_content, project_root)
+        dep_status, dep_reasons = _check_dependencies(
+            ticket_content, project_root, project_id=project_id
+        )
         approval_status, approval_warnings, approval_required, approval_present = (
             _collect_future_approval_warnings(intelligence_row, project_root, ticket_id)
         )

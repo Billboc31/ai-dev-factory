@@ -103,7 +103,7 @@ def test_dependency_not_merged_blocks(evaluator, db, git_repo, monkeypatch):
     monkeypatch.setattr(
         evaluator,
         "is_ticket_merged",
-        lambda root, dep: _MergeResult(status="not_merged", source="runtime_db"),
+        lambda root, dep, **_kw: _MergeResult(status="not_merged", source="runtime_db"),
     )
 
     evaluator.run_evaluation(
@@ -123,7 +123,7 @@ def test_dependency_unknown_blocks(evaluator, db, git_repo, monkeypatch):
     monkeypatch.setattr(
         evaluator,
         "is_ticket_merged",
-        lambda root, dep: _MergeResult(status="unknown", source="unknown"),
+        lambda root, dep, **_kw: _MergeResult(status="unknown", source="unknown"),
     )
 
     evaluator.run_evaluation(
@@ -185,7 +185,7 @@ def test_dependency_missing_still_blocks(evaluator, db, git_repo, monkeypatch):
     monkeypatch.setattr(
         evaluator,
         "is_ticket_merged",
-        lambda root, dep: _MergeResult(status="not_merged", source="runtime_db"),
+        lambda root, dep, **_kw: _MergeResult(status="not_merged", source="runtime_db"),
     )
     evaluator.run_evaluation(
         db, "T010",
@@ -202,7 +202,7 @@ def test_dependency_markdown_section_blocks(evaluator, db, git_repo, monkeypatch
     monkeypatch.setattr(
         evaluator,
         "is_ticket_merged",
-        lambda root, dep: _MergeResult(status="not_merged", source="runtime_db"),
+        lambda root, dep, **_kw: _MergeResult(status="not_merged", source="runtime_db"),
     )
     content = """# T012
 

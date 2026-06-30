@@ -85,7 +85,9 @@ def maybe_run_readiness_after_intelligence(
     intel = {"analysis_status": "completed"}
     if needs_readiness(intel, ready):
         logger.info("pipeline: auto readiness for %s after intelligence", ticket_id)
-        run_evaluation(db_path, ticket_id, ticket_content, Path(project_root))
+        run_evaluation(
+            db_path, ticket_id, ticket_content, Path(project_root), project_id=project_id
+        )
 
 
 def process_ticket(
@@ -135,7 +137,7 @@ def process_ticket(
 
     if needs_readiness(intel, ready):
         logger.info("pipeline: running readiness for %s", ticket_id)
-        run_evaluation(db_path, ticket_id, content, project_root)
+        run_evaluation(db_path, ticket_id, content, project_root, project_id=project_id)
         return True
 
     return False
