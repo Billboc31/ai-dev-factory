@@ -103,8 +103,8 @@ describe('deriveStepStatuses', () => {
       approval: null,
     })
     expect(steps.approval.status).toBe('current')
-    expect(steps.approval.blockingReason).toBe('Human plan approval required')
-    expect(steps.approval.nextAction).toBe('Approve plan review')
+    expect(steps.approval.blockingReason).toBe('Human execution approval required')
+    expect(steps.approval.nextAction).toBe('Approve ticket for execution')
   })
 
   it('marks approval as done when latest approval is approved', () => {
@@ -151,7 +151,7 @@ describe('deriveStepStatuses', () => {
 })
 
 describe('deriveGlobalSummary', () => {
-  it('returns BLOCKED / Human plan approval required when awaiting plan approval', () => {
+  it('returns BLOCKED / Human execution approval required when awaiting execution approval', () => {
     const steps = deriveStepStatuses({
       intelligence: { analysis_status: 'completed' },
       readiness: { readiness_status: 'ready_candidate' },
@@ -159,8 +159,8 @@ describe('deriveGlobalSummary', () => {
     })
     const summary = deriveGlobalSummary(steps)
     expect(summary.status).toBe('BLOCKED')
-    expect(summary.reason).toBe('Human plan approval required')
-    expect(summary.nextAction).toBe('Approve plan review')
+    expect(summary.reason).toBe('Human execution approval required')
+    expect(summary.nextAction).toBe('Approve ticket for execution')
   })
 
   it('returns READY TO TAKE / All checks passed / Assign worker when all gates pass and no execution started', () => {
@@ -218,8 +218,8 @@ describe('deriveGlobalSummary', () => {
   it('eligibilityToGlobalSummary maps WAITING_HUMAN_ACTION / DEPENDENCY_BLOCKED labels', () => {
     expect(eligibilityToGlobalSummary({
       status: 'WAITING_HUMAN_ACTION',
-      reason: 'Human plan approval required',
-      next_action: 'Approve plan review',
+      reason: 'Human execution approval required',
+      next_action: 'Approve ticket for execution',
     }).status).toBe('WAITING HUMAN ACTION')
 
     expect(eligibilityToGlobalSummary({

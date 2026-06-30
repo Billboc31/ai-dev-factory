@@ -166,6 +166,17 @@ SETTING_SPECS: dict[str, SettingSpec] = {
         default=True,
         env_var="AI_DEV_FACTORY_AUTO_TICKET_PIPELINE",
     ),
+    "REQUIRE_HUMAN_EXECUTION_APPROVAL": SettingSpec(
+        key="REQUIRE_HUMAN_EXECUTION_APPROVAL",
+        value_type="bool",
+        description=(
+            "When enabled (and no project-scoped execution rule overrides), "
+            "tickets need Human Approval before the dispatcher marks them "
+            "READY_TO_TAKE."
+        ),
+        default=False,
+        env_var="AI_DEV_FACTORY_REQUIRE_HUMAN_EXECUTION_APPROVAL",
+    ),
     "LOG_LEVEL": SettingSpec(
         key="LOG_LEVEL",
         value_type="string",

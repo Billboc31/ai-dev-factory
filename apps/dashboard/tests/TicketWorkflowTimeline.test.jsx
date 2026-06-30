@@ -52,8 +52,8 @@ describe('TicketWorkflowTimeline', () => {
     renderTimeline(APPROVAL_PENDING_FIXTURE)
     const block = screen.getByTestId('ticket-workflow-global-summary')
     expect(block).toHaveTextContent('BLOCKED')
-    expect(block).toHaveTextContent('Human plan approval required')
-    expect(block).toHaveTextContent('Approve plan review')
+    expect(block).toHaveTextContent('Human execution approval required')
+    expect(block).toHaveTextContent('Approve ticket for execution')
   })
 
   it('shows the READY TO TAKE summary when all gates pass', () => {
@@ -111,8 +111,8 @@ describe('TicketWorkflowTimeline', () => {
         stepStatuses={steps}
         globalSummary={{
           status: 'WAITING HUMAN ACTION',
-          reason: 'Human plan approval required',
-          nextAction: 'Approve plan review',
+          reason: 'Human execution approval required',
+          nextAction: 'Approve ticket for execution',
         }}
       />
     )

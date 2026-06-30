@@ -88,8 +88,8 @@ def test_get_rules_returns_registry_defaults_when_empty(tmp_path):
     }
     assert defaults_enabled["require_ticket_intelligence"] is True
     assert defaults_enabled["require_readiness_candidate"] is True
-    assert defaults_enabled["require_human_approval"] is True
-    assert defaults_enabled["block_when_human_review_required"] is True
+    assert defaults_enabled["require_human_approval"] is False
+    assert defaults_enabled["block_when_human_review_required"] is False
     assert defaults_enabled["max_estimated_cost_usd"] is False
     assert defaults_enabled["max_difficulty"] is False
 

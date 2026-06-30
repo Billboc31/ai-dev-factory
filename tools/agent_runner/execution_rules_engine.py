@@ -113,22 +113,12 @@ def _rule_require_human_approval(ctx: RuleContext) -> RuleResult:
 
 
 def _rule_block_when_human_review_required(ctx: RuleContext) -> RuleResult:
-    flag = bool((ctx.intelligence or {}).get("requires_human_plan_review"))
-    if not flag:
-        return RuleResult(
-            passed=True,
-            reason="Ticket Intelligence does not require human plan review.",
-        )
-    if ctx.approval_state == "ready_to_take":
-        return RuleResult(
-            passed=True,
-            reason="Human plan review required, and human execution approval is present.",
-        )
+    _ = ctx
     return RuleResult(
-        passed=False,
+        passed=True,
         reason=(
-            "Ticket Intelligence flags requires_human_plan_review=true but human "
-            f"execution approval is missing (approval_state='{ctx.approval_state}')."
+            "Plan review is handled in the workflow state machine "
+            "(PLAN_REVIEW_NEEDED), not at entry."
         ),
     )
 
@@ -224,17 +214,17 @@ RULE_REGISTRY: dict[str, RuleSpec] = {
     "require_human_approval": RuleSpec(
         key="require_human_approval",
         description="Human execution approval must be present (ready_to_take).",
-        default_enabled=True,
+        default_enabled=False,
         default_configuration={},
         evaluator=_rule_require_human_approval,
     ),
     "block_when_human_review_required": RuleSpec(
         key="block_when_human_review_required",
         description=(
-            "Block tickets flagged requires_human_plan_review until human "
-            "execution approval is granted."
+            "Deprecated no-op: plan review is enforced during the workflow "
+            "(PLAN_REVIEW_NEEDED), not before ticket launch."
         ),
-        default_enabled=True,
+        default_enabled=False,
         default_configuration={},
         evaluator=_rule_block_when_human_review_required,
     ),

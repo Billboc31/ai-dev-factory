@@ -102,28 +102,9 @@ def test_require_human_approval_fails_when_ready_candidate():
     assert "ready_candidate" in res.reason
 
 
-# ── block_when_human_review_required ────────────────────────────────────────
+# ── block_when_human_review_required (deprecated no-op) ─────────────────────
 
-def test_block_when_human_review_passes_when_flag_off():
-    spec = engine.RULE_REGISTRY["block_when_human_review_required"]
-    res = spec.evaluator(
-        _ctx(intelligence={"requires_human_plan_review": False}, approval_state="ready_candidate")
-    )
-    assert res.passed is True
-
-
-def test_block_when_human_review_passes_when_approved():
-    spec = engine.RULE_REGISTRY["block_when_human_review_required"]
-    res = spec.evaluator(
-        _ctx(
-            intelligence={"requires_human_plan_review": True},
-            approval_state="ready_to_take",
-        )
-    )
-    assert res.passed is True
-
-
-def test_block_when_human_review_fails_when_required_without_approval():
+def test_block_when_human_review_always_passes():
     spec = engine.RULE_REGISTRY["block_when_human_review_required"]
     res = spec.evaluator(
         _ctx(
@@ -131,8 +112,8 @@ def test_block_when_human_review_fails_when_required_without_approval():
             approval_state="ready_candidate",
         )
     )
-    assert res.passed is False
-    assert "requires_human_plan_review" in res.reason
+    assert res.passed is True
+    assert "PLAN_REVIEW_NEEDED" in res.reason
 
 
 # ── max_estimated_cost_usd ───────────────────────────────────────────────────
@@ -246,6 +227,7 @@ def db(tmp_path, monkeypatch):
 def test_evaluate_ticket_blocked_when_rule_fails(db, monkeypatch):
     _db.upsert_ticket_intelligence(db, "T001", analysis_status="completed")
     _db.upsert_ticket_readiness(db, "T001", readiness_status="ready_candidate")
+    _db.upsert_project_rule(db, "proj-a", "require_human_approval", True, {})
     monkeypatch.setattr(engine, "get_execution_approval_state", lambda _db_path, _t: "ready_candidate")
 
     result = engine.evaluate_ticket(db, "proj-a", "T001")

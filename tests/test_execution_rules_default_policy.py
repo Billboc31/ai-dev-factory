@@ -41,8 +41,8 @@ def test_registry_default_rules_match_expected_policy() -> None:
 
     assert defaults["require_ticket_intelligence"]["enabled"] is True
     assert defaults["require_readiness_candidate"]["enabled"] is True
-    assert defaults["require_human_approval"]["enabled"] is True
-    assert defaults["block_when_human_review_required"]["enabled"] is True
+    assert defaults["require_human_approval"]["enabled"] is False
+    assert defaults["block_when_human_review_required"]["enabled"] is False
 
     assert defaults["max_estimated_cost_usd"]["enabled"] is False
     assert defaults["max_estimated_cost_usd"]["configuration"] == {"max_cost_usd": 0.50}
@@ -71,7 +71,7 @@ def db(tmp_path, monkeypatch):
 
 
 def test_default_policy_evaluation_with_eligible_ticket(db, monkeypatch):
-    """Eligible when ticket satisfies all 4 default-enabled rules."""
+    """Eligible when ticket satisfies all default-enabled rules."""
     _db.upsert_ticket_intelligence(
         db, "T001", analysis_status="completed", requires_human_plan_review=0
     )
@@ -84,12 +84,10 @@ def test_default_policy_evaluation_with_eligible_ticket(db, monkeypatch):
     assert result["eligibility_status"] == "eligible"
     passed_keys = {r["rule_key"] for r in result["passed_rules"]}
 
-    # The 4 default-enabled rules must all be evaluated and pass.
     assert "require_ticket_intelligence" in passed_keys
     assert "require_readiness_candidate" in passed_keys
-    assert "require_human_approval" in passed_keys
-    assert "block_when_human_review_required" in passed_keys
-    # The 2 threshold rules are disabled by default → never evaluated.
+    assert "require_human_approval" not in passed_keys
+    assert "block_when_human_review_required" not in passed_keys
     assert "max_estimated_cost_usd" not in passed_keys
     assert "max_difficulty" not in passed_keys
 

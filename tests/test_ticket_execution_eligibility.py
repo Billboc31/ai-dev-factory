@@ -96,12 +96,18 @@ def env(tmp_path, monkeypatch):
         "get_ticket_intelligence",
         "get_ticket_readiness",
         "get_latest_ticket_approval",
+        "list_project_rules",
+        "insert_ticket_approval",
     ):
         monkeypatch.setattr(live_db, name, getattr(_sqlite_db, name))
     # Force dependency check to skip gh/git fallbacks: by default the test
     # tickets carry no declared dependencies. When a test needs a dep we stub
     # ``is_ticket_merged`` directly.
     monkeypatch.setattr(eligibility, "is_ticket_merged", _raise_default_dep_stub)
+    import execution_rules_engine as rules_engine
+    monkeypatch.setattr(
+        rules_engine.runtime_db, "list_project_rules", _sqlite_db.list_project_rules
+    )
     return {"db": db_path, "root": tmp_path}
 
 
@@ -143,31 +149,60 @@ def test_ready_to_take_when_all_checks_pass(env, monkeypatch):
     assert "rules" not in result["checks"]
 
 
-# ── Scenario: plan approval pending → WAITING_HUMAN_ACTION ──────────────────
+# ── Scenario: plan review flag does not block entry ───────────────────────
 
-def test_waiting_human_action_when_plan_approval_missing(env, monkeypatch):
+def test_plan_review_flag_does_not_block_entry(env, monkeypatch):
     db, root = env["db"], env["root"]
     _write_ticket_md(root, "T101")
     _seed_complete_intelligence(db, "T101", requires_review=True)
     _seed_ready_candidate(db, "T101")
-    # No state.json with PLAN_APPROVED, no plan-approved.md marker.
 
     result = eligibility.evaluate_eligibility(db, root, "T101", ticket_content="")
+    assert result["ready_to_take"] is True
+    assert result["status"] == "READY_TO_TAKE"
+    assert result["checks"]["approval"]["status"] == "passed"
+
+
+# ── Scenario: execution approval required when rule enabled ───────────────
+
+def test_waiting_human_action_when_execution_approval_required(env, monkeypatch):
+    db, root = env["db"], env["root"]
+    _write_ticket_md(root, "T101B")
+    _seed_complete_intelligence(db, "T101B")
+    _seed_ready_candidate(db, "T101B")
+    _sqlite_db.upsert_project_rule(
+        db, "proj-a", "require_human_approval", True, {},
+    )
+
+    result = eligibility.evaluate_eligibility(
+        db, root, "T101B", ticket_content="", project_id="proj-a",
+    )
     assert result["ready_to_take"] is False
     assert result["status"] == "WAITING_HUMAN_ACTION"
     assert result["blocking_step"] == "approval"
-    assert result["reason"] == "Human plan approval required"
-    assert result["next_action"] == "Approve plan review"
+    assert result["reason"] == "Human execution approval required"
+    assert result["next_action"] == "Approve ticket for execution"
 
 
-def test_waiting_human_clears_when_state_reaches_plan_approved(env, monkeypatch):
+def test_execution_approval_clears_when_ready_to_take(env, monkeypatch):
     db, root = env["db"], env["root"]
     _write_ticket_md(root, "T102")
     _seed_complete_intelligence(db, "T102", requires_review=True)
-    _seed_ready_candidate(db, "T102")
-    _write_state(root, "T102", "PLAN_APPROVED")
+    _sqlite_db.upsert_ticket_readiness(db, "T102", readiness_status="ready_to_take")
+    _sqlite_db.insert_ticket_approval(
+        db,
+        "T102",
+        approval_type="execution",
+        approval_status="approved",
+        approved_by="alice",
+    )
+    _sqlite_db.upsert_project_rule(
+        db, "proj-a", "require_human_approval", True, {},
+    )
 
-    result = eligibility.evaluate_eligibility(db, root, "T102", ticket_content="")
+    result = eligibility.evaluate_eligibility(
+        db, root, "T102", ticket_content="", project_id="proj-a",
+    )
     assert result["checks"]["approval"]["status"] == "passed"
     assert result["status"] == "READY_TO_TAKE"
 

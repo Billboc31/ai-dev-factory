@@ -197,16 +197,16 @@ function approvalStep(approval, readiness) {
     return {
       status: 'blocked',
       summary: 'Rejected',
-      blockingReason: approval?.approval_comment || 'Plan was rejected',
-      nextAction: 'Revise plan and re-submit for approval',
+      blockingReason: approval?.approval_comment || 'Execution approval was rejected',
+      nextAction: 'Revise and re-submit for approval',
     }
   }
   if (readiness?.readiness_status === 'ready_candidate') {
     return {
       status: 'current',
-      summary: 'Waiting for plan approval',
-      blockingReason: 'Human plan approval required',
-      nextAction: 'Approve plan review',
+      summary: 'Waiting for execution approval',
+      blockingReason: 'Human execution approval required',
+      nextAction: 'Approve ticket for execution',
     }
   }
   return {

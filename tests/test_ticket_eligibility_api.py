@@ -59,9 +59,12 @@ def _make_app(tmp_path: Path):
         "get_ticket_intelligence",
         "get_ticket_readiness",
         "get_latest_ticket_approval",
+        "list_project_rules",
     ):
         setattr(live_db, name, getattr(_sqlite_db, name))
     _elig.runtime_db = live_db
+    import execution_rules_engine as rules_engine
+    rules_engine.runtime_db = live_db
     return app
 
 
@@ -112,7 +115,7 @@ def test_eligibility_404_when_ticket_missing(tmp_path):
 
 # ── Documented scenarios ─────────────────────────────────────────────────
 
-def test_eligibility_blocked_by_plan_approval(tmp_path):
+def test_eligibility_plan_review_flag_does_not_block(tmp_path):
     _make_ticket(tmp_path, "T002")
     app = _make_app(tmp_path)
     db = app.state.db_path
@@ -125,9 +128,27 @@ def test_eligibility_blocked_by_plan_approval(tmp_path):
     r = client.get("/tickets/T002/eligibility")
     assert r.status_code == 200
     body = r.json()
+    assert body["status"] == "READY_TO_TAKE"
+    assert body["checks"]["approval"]["status"] == "passed"
+
+
+def test_eligibility_blocked_by_execution_approval(tmp_path):
+    _make_ticket(tmp_path, "T002B")
+    app = _make_app(tmp_path)
+    db = app.state.db_path
+    _sqlite_db.upsert_ticket_intelligence(
+        db, "T002B", analysis_status="completed", requires_human_plan_review=0
+    )
+    _sqlite_db.upsert_ticket_readiness(db, "T002B", readiness_status="ready_candidate")
+    _sqlite_db.upsert_project_rule(db, "proj-a", "require_human_approval", True, {})
+
+    client = TestClient(app)
+    r = client.get("/projects/proj-a/tickets/T002B/eligibility")
+    assert r.status_code == 200
+    body = r.json()
     assert body["status"] == "WAITING_HUMAN_ACTION"
     assert body["blocking_step"] == "approval"
-    assert body["next_action"] == "Approve plan review"
+    assert body["next_action"] == "Approve ticket for execution"
 
 
 def test_eligibility_blocked_by_dependency(tmp_path, monkeypatch):

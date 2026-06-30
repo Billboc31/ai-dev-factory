@@ -10,6 +10,13 @@ directly. The first failing check (in a fixed order) becomes the
 ``blocking_step``; the status is derived from which step failed.
 
 Check order: intelligence → dependencies → readiness → approval.
+
+The ``approval`` step gates on **human execution approval** (the Human Approval
+panel / ``ticket_approvals`` type ``execution``) when the project rule
+``require_human_approval`` is enabled (or the global
+``REQUIRE_HUMAN_EXECUTION_APPROVAL`` setting when no ``project_id`` is
+available). Plan review during development (``PLAN_REVIEW_NEEDED``) is never
+checked here — that gate lives in the ``run_ticket`` state machine.
 """
 
 from __future__ import annotations
@@ -25,6 +32,8 @@ if str(_TOOLS_DIR) not in sys.path:
 import runtime_db  # noqa: E402
 from ticket_merge_state import is_ticket_merged  # noqa: E402
 from ticket_readiness_evaluator import _extract_dependencies  # noqa: E402
+
+_EXECUTION_APPROVAL_RULE = "require_human_approval"
 
 
 CHECK_ORDER = ("intelligence", "dependencies", "readiness", "approval")
@@ -148,50 +157,57 @@ def _eval_readiness(readiness: dict | None) -> dict:
     return {"status": "failed", "detail": f"Readiness status is '{status}'."}
 
 
-def _eval_approval(
-    intelligence: dict | None,
-    approval_plan: dict | None,
-    state_value: str | None,
-    has_plan_approved_marker: bool,
-) -> dict:
-    """Approval check — only enforced when intelligence requested human plan review.
+def _is_human_execution_approval_required(db_path, project_id: str | None) -> bool:
+    """Return whether the Human Approval gate must yield ``ready_to_take``."""
+    try:
+        from execution_rules_engine import RULE_REGISTRY, _resolve_effective_rules  # noqa: WPS433
 
-    ``state_value`` and ``has_plan_approved_marker`` mirror the readiness
-    evaluator's plan-approval signals so we treat ``runs/<ticket>/state.json``
-    states at or beyond ``PLAN_APPROVED`` (or an explicit ``plan-approved.md``
-    marker) as a present approval.
-    """
-    required = bool((intelligence or {}).get("requires_human_plan_review"))
-    if not required:
+        if project_id:
+            for rule in _resolve_effective_rules(project_id, db_path):
+                if rule["rule_key"] == _EXECUTION_APPROVAL_RULE:
+                    return bool(rule["enabled"])
+            spec = RULE_REGISTRY.get(_EXECUTION_APPROVAL_RULE)
+            return bool(spec.default_enabled) if spec else False
+    except Exception:
+        pass
+
+    try:
+        import runtime_settings as rs  # noqa: WPS433
+
+        return bool(rs.get_setting(db_path, "REQUIRE_HUMAN_EXECUTION_APPROVAL"))
+    except Exception:
+        return False
+
+
+def _eval_approval(
+    db_path,
+    ticket_id: str,
+    project_id: str | None,
+) -> dict:
+    """Gate on human **execution** approval when the project policy requires it."""
+    if not _is_human_execution_approval_required(db_path, project_id):
         return {
             "status": "passed",
-            "detail": "Human plan review not required by Intelligence.",
+            "detail": "Human execution approval gate is disabled.",
         }
 
-    state_implies_approved = False
-    if state_value:
-        # Same set the readiness evaluator considers (see _PLAN_APPROVED_OR_LATER).
-        state_implies_approved = state_value.strip().upper() in {
-            "PLAN_APPROVED",
-            "IMPLEMENTATION_REVIEW_NEEDED",
-            "IMPLEMENTATION_FIX_REQUIRED",
-            "IMPLEMENTATION_APPROVED",
-            "TEST_COMPLETE",
+    from execution_rules_engine import get_execution_approval_state  # noqa: WPS433
+
+    approval_state = get_execution_approval_state(db_path, ticket_id)
+    if approval_state == "ready_to_take":
+        return {
+            "status": "passed",
+            "detail": "Human execution approval granted.",
         }
-
-    if has_plan_approved_marker or state_implies_approved:
-        return {"status": "passed", "detail": "Human plan approval present."}
-
-    plan_status = (approval_plan or {}).get("approval_status") if approval_plan else None
-    if plan_status == "approved":
-        return {"status": "passed", "detail": "Plan approval recorded."}
-    if plan_status == "rejected":
-        return {"status": "failed", "detail": "Plan approval was rejected."}
-    # This belongs to Eligibility, not Readiness. Readiness must never
-    # surface this message as a blocker — see
-    # ``tools/agent_runner/ticket_readiness_evaluator.py`` (the
-    # ``_is_entry_prerequisite_reason`` guard would drop it).
-    return {"status": "failed", "detail": "Human plan approval required"}
+    if approval_state == "blocked":
+        return {
+            "status": "failed",
+            "detail": "Human execution approval was rejected.",
+        }
+    return {
+        "status": "failed",
+        "detail": "Human execution approval required",
+    }
 
 
 # ── Mapping helpers ──────────────────────────────────────────────────────────
@@ -207,7 +223,7 @@ def _next_action_for(blocking_step: str, checks: dict) -> str | None:
     if blocking_step == "readiness":
         return "Run readiness evaluation and resolve blockers"
     if blocking_step == "approval":
-        return "Approve plan review"
+        return "Approve ticket for execution"
     return None
 
 
@@ -244,32 +260,12 @@ def evaluate_eligibility(
 
     intelligence = _safe_get(runtime_db.get_ticket_intelligence, db_path, ticket_id)
     readiness = _safe_get(runtime_db.get_ticket_readiness, db_path, ticket_id)
-    approval_plan = _safe_get(runtime_db.get_latest_ticket_approval, db_path, ticket_id, "plan")
-
-    state_value = None
-    state_path = project_root / "runs" / ticket_id / "state.json"
-    if state_path.is_file():
-        try:
-            import json as _json
-            data = _json.loads(state_path.read_text(encoding="utf-8"))
-            state_value = data.get("state")
-        except (OSError, ValueError):
-            state_value = None
-
-    has_plan_approved_marker = (
-        project_root / "runs" / ticket_id / "plan-approved.md"
-    ).is_file()
 
     checks: dict[str, dict] = {
         "intelligence": _eval_intelligence(intelligence),
         "dependencies": _eval_dependencies(ticket_content, project_root),
         "readiness": _eval_readiness(readiness),
-        "approval": _eval_approval(
-            intelligence,
-            approval_plan,
-            state_value,
-            has_plan_approved_marker,
-        ),
+        "approval": _eval_approval(db_path, ticket_id, project_id),
     }
 
     blocking_step: str | None = None
