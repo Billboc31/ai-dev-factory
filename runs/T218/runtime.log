@@ -54,3 +54,23 @@
 [2026-06-30T14:52:25Z] compose: task (canonical prompt)
 [2026-06-30T14:52:25Z] compose: extra-context=runs/T218/reviews/review-decision-context-IMPLEMENTATION_REVIEW_NEEDED.md
 [2026-06-30T14:52:25Z] snapshot: runtime-prompt=runs/T218/prompts/review-attempt-1.md
+[2026-06-30T15:34:57Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-30T15:34:57Z] auto-run: running step=tester
+[2026-06-30T15:34:58Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-30T15:34:58Z] prompt: generic fallback — injecting runs/T218/ticket.md
+[2026-06-30T15:34:58Z] compose: global-context=docs/ai/global-context.md
+[2026-06-30T15:34:58Z] compose: role=ai/roles/tester.md
+[2026-06-30T15:34:58Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-30T15:34:58Z] compose: skill=ai/skills/testing.md
+[2026-06-30T15:34:58Z] compose: skill=ai/skills/debugging.md
+[2026-06-30T15:34:58Z] compose: task (canonical prompt)
+[2026-06-30T15:34:58Z] snapshot: runtime-prompt=runs/T218/prompts/tester-attempt-1.md
+[2026-06-30T15:41:10Z] auto-run: step=tester done rc=0
+[2026-06-30T15:41:10Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-30T15:41:10Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-30T15:41:10Z] commit-checkpoint: unstaged runtime garbage: ['runs/T218/daemon.lock', 'runs/T218/runtime.log']
+[2026-06-30T15:41:10Z] commit-checkpoint: sha=7ad8a772 files=4 title='test(T218/workflow): tester — update 4 file(s)'
+[2026-06-30T15:41:10Z] auto-run: auto-push triggered
+[2026-06-30T15:41:10Z] push: tolerating runtime dirty files (not blocking): ['runs/T218/daemon.lock', 'runs/T218/runtime.log']
+[2026-06-30T15:41:10Z] push: pushing branch=ticket/T218-add-batch-based-backlog-ingestion-and-dependency-a
+[2026-06-30T15:41:12Z] push: done branch=ticket/T218-add-batch-based-backlog-ingestion-and-dependency-a
