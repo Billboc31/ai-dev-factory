@@ -260,3 +260,241 @@ def test_init_runtime_db_runs_lifecycle_migration(monkeypatch):
 
     assert any("CREATE TABLE IF NOT EXISTS ticket_intelligence" in s for s in executed)
     assert any("ADD COLUMN IF NOT EXISTS started_at" in s for s in executed)
+
+
+# ── T218 — backlog batches / dependency analysis parity with SQLite ──────────
+
+
+def test_backlog_ddl_declares_three_new_tables():
+    """The three T218 tables must be in _DDL so init_runtime_db creates them."""
+    for table in ("backlog_batches", "backlog_batch_tickets", "ticket_dependency_analysis"):
+        assert f"CREATE TABLE IF NOT EXISTS {table}" in pg._DDL, f"missing table: {table}"
+
+
+def test_backlog_ddl_carries_project_id_for_isolation():
+    """Every new table must carry project_id and key on it for cross-project isolation."""
+    # backlog_batches: composite PK starts with project_id
+    assert "PRIMARY KEY (project_id, batch_id)" in pg._DDL
+    # backlog_batch_tickets: composite PK + UNIQUE both scoped by project_id
+    assert "PRIMARY KEY (project_id, batch_id, ticket_id)" in pg._DDL
+    assert "UNIQUE (project_id, ticket_id)" in pg._DDL
+    # ticket_dependency_analysis: composite PK starts with project_id
+    assert "PRIMARY KEY (project_id, ticket_id, batch_id)" in pg._DDL
+
+
+def test_insert_backlog_batch_tags_with_project_id(captured):
+    calls, _ = captured
+    pg.insert_backlog_batch(
+        pg.get_handle("proj-a"),
+        "batch-1",
+        status="collecting",
+        created_at="2026-06-30T15:00:00Z",
+        last_activity_at="2026-06-30T15:00:00Z",
+    )
+    sql, params = calls[-1]
+    assert sql.strip().startswith("INSERT INTO backlog_batches")
+    assert "project_id" in sql
+    assert params[0] == "proj-a"
+    assert params[1] == "batch-1"
+
+
+def test_list_backlog_batches_filters_by_project_id(captured):
+    calls, _ = captured
+    pg.list_backlog_batches(pg.get_handle("proj-b"))
+    sql, params = calls[-1]
+    assert "FROM backlog_batches WHERE project_id = %s" in sql
+    assert params == ("proj-b",)
+
+
+def test_list_backlog_batches_with_status_scopes_by_project(captured):
+    calls, _ = captured
+    pg.list_backlog_batches(pg.get_handle("proj-c"), status="collecting")
+    sql, params = calls[-1]
+    assert "WHERE project_id = %s AND status = %s" in sql
+    assert params == ("proj-c", "collecting")
+
+
+def test_update_backlog_batch_scopes_by_project(captured):
+    calls, _ = captured
+    pg.update_backlog_batch(
+        pg.get_handle("proj-d"), "batch-2", status="frozen", frozen_at="2026-06-30T15:30:00Z"
+    )
+    sql, params = calls[-1]
+    assert sql.strip().startswith("UPDATE backlog_batches")
+    assert "status=%s" in sql and "frozen_at=%s" in sql
+    assert "WHERE project_id=%s AND batch_id=%s" in sql
+    # Trailing two parameters are (project_id, batch_id).
+    assert params[-2:] == ["proj-d", "batch-2"]
+
+
+def test_update_backlog_batch_with_no_fields_is_noop(captured):
+    calls, _ = captured
+    pg.update_backlog_batch(pg.get_handle("proj-d"), "batch-2")
+    assert calls == []
+
+
+def test_insert_backlog_batch_ticket_returns_true_when_inserted(monkeypatch):
+    calls: list = []
+
+    class _Cur:
+        rowcount = 1
+
+    class _Conn:
+        def execute(self, sql, params=None):
+            calls.append((sql, params))
+            return _Cur()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):  # noqa: D401
+            return False
+
+    monkeypatch.setattr(pg, "_connect", lambda handle: _Conn())
+    ok = pg.insert_backlog_batch_ticket(
+        pg.get_handle("proj-e"), "batch-3", "T123", "2026-06-30T15:00:00Z"
+    )
+    assert ok is True
+    sql, params = calls[-1]
+    assert "ON CONFLICT DO NOTHING" in sql
+    assert params[0] == "proj-e"
+
+
+def test_insert_backlog_batch_ticket_returns_false_on_conflict(monkeypatch):
+    """ON CONFLICT DO NOTHING → rowcount==0 → helper returns False (mirrors SQLite contract)."""
+
+    class _Cur:
+        rowcount = 0
+
+    class _Conn:
+        def execute(self, sql, params=None):  # noqa: ARG002
+            return _Cur()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):  # noqa: D401
+            return False
+
+    monkeypatch.setattr(pg, "_connect", lambda handle: _Conn())
+    assert (
+        pg.insert_backlog_batch_ticket(
+            pg.get_handle("proj-f"), "batch-4", "T456", "2026-06-30T15:00:00Z"
+        )
+        is False
+    )
+
+
+def test_list_backlog_batch_ticket_ids_scopes_by_project(captured):
+    calls, rows = captured
+    rows.append({"ticket_id": "T1"})
+    out = pg.list_backlog_batch_ticket_ids(pg.get_handle("proj-g"), "batch-5")
+    sql, params = calls[-1]
+    assert "WHERE project_id = %s AND batch_id = %s" in sql
+    assert params == ("proj-g", "batch-5")
+    assert out == ["T1"]
+
+
+def test_get_batch_for_ticket_scopes_by_project(captured):
+    calls, rows = captured
+    rows.append({"batch_id": "batch-6"})
+    out = pg.get_batch_for_ticket(pg.get_handle("proj-h"), "T789")
+    sql, params = calls[-1]
+    assert "WHERE project_id = %s AND ticket_id = %s" in sql
+    assert params == ("proj-h", "T789")
+    assert out == "batch-6"
+
+
+def test_get_batch_for_ticket_returns_none_when_missing(captured):
+    calls, _ = captured  # rows empty
+    assert pg.get_batch_for_ticket(pg.get_handle("proj-h"), "T-missing") is None
+    assert "WHERE project_id = %s AND ticket_id = %s" in calls[-1][0]
+
+
+def test_upsert_dependency_analysis_persists_and_scopes(captured):
+    calls, _ = captured
+    pg.upsert_dependency_analysis(
+        pg.get_handle("proj-i"),
+        ticket_id="T1",
+        batch_id="batch-7",
+        depends_on=["T0"],
+        blocks=["T2"],
+        parallel_group=None,
+        conflicting_tickets=[],
+        execution_phase="bootstrap",
+        relationship_classifications=[{"target": "T0", "type": "HARD_DEPENDENCY"}],
+        analyzed_at="2026-06-30T16:00:00Z",
+    )
+    sql, params = calls[-1]
+    assert sql.strip().startswith("INSERT INTO ticket_dependency_analysis")
+    assert "ON CONFLICT (project_id, ticket_id, batch_id) DO UPDATE" in sql
+    # JSON fields must be serialised before binding.
+    import json as _json
+    assert _json.loads(params[3]) == ["T0"]  # depends_on_json
+    assert _json.loads(params[4]) == ["T2"]  # blocks_json
+    assert _json.loads(params[6]) == []  # conflicting_tickets_json
+    assert params[0] == "proj-i"
+
+
+def test_get_dependency_analysis_decodes_json_lists(captured):
+    calls, rows = captured
+    import json as _json
+    rows.append(
+        {
+            "project_id": "proj-j",
+            "ticket_id": "T1",
+            "batch_id": "batch-8",
+            "depends_on_json": _json.dumps(["T0"]),
+            "blocks_json": _json.dumps([]),
+            "parallel_group": None,
+            "conflicting_tickets_json": _json.dumps([]),
+            "execution_phase": "bootstrap",
+            "relationship_classifications_json": _json.dumps([]),
+            "analyzed_at": "2026-06-30T16:00:00Z",
+        }
+    )
+    out = pg.get_dependency_analysis(pg.get_handle("proj-j"), "T1", "batch-8")
+    sql, params = calls[-1]
+    assert "WHERE project_id = %s AND ticket_id = %s AND batch_id = %s" in sql
+    assert params == ("proj-j", "T1", "batch-8")
+    assert out is not None
+    assert out["depends_on"] == ["T0"]
+    assert out["blocks"] == []
+    assert out["conflicting_tickets"] == []
+    assert out["relationship_classifications"] == []
+
+
+def test_get_dependency_analysis_latest_when_batch_omitted(captured):
+    calls, _ = captured
+    pg.get_dependency_analysis(pg.get_handle("proj-k"), "T1")
+    sql, params = calls[-1]
+    assert "ORDER BY analyzed_at DESC LIMIT 1" in sql
+    assert "WHERE project_id = %s AND ticket_id = %s" in sql
+    assert params == ("proj-k", "T1")
+
+
+# ── T218 — runtime_db rebind block must expose the 9 new helpers ─────────────
+
+
+def test_runtime_db_postgres_rebind_exposes_backlog_helpers(monkeypatch):
+    """In postgres mode, runtime_db.<helper> must be the PG implementation."""
+    monkeypatch.setenv("RUNTIME_DB_BACKEND", "postgres")
+    monkeypatch.setenv("PROJECT_NAME", "ai-dev-factory")
+    mod = _load_runtime_db_fresh()
+    for name in (
+        "insert_backlog_batch",
+        "get_backlog_batch",
+        "list_backlog_batches",
+        "update_backlog_batch",
+        "insert_backlog_batch_ticket",
+        "list_backlog_batch_ticket_ids",
+        "get_batch_for_ticket",
+        "upsert_dependency_analysis",
+        "get_dependency_analysis",
+    ):
+        helper = getattr(mod, name)
+        # Source module of the rebound symbol is runtime_db_pg, not runtime_db.
+        assert helper.__module__ == "runtime_db_pg", (
+            f"{name} is not rebound to the Postgres backend "
+            f"(__module__={helper.__module__})"
+        )

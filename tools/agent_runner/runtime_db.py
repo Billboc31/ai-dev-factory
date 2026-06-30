@@ -1480,6 +1480,16 @@ if _RUNTIME_DB_BACKEND == "postgres":
     get_runtime_setting = _pg.get_runtime_setting  # type: ignore[assignment]
     upsert_runtime_setting = _pg.upsert_runtime_setting  # type: ignore[assignment]
     delete_runtime_setting = _pg.delete_runtime_setting  # type: ignore[assignment]
+    # T218 — backlog batches and global dependency analysis.
+    insert_backlog_batch = _pg.insert_backlog_batch  # type: ignore[assignment]
+    get_backlog_batch = _pg.get_backlog_batch  # type: ignore[assignment]
+    list_backlog_batches = _pg.list_backlog_batches  # type: ignore[assignment]
+    update_backlog_batch = _pg.update_backlog_batch  # type: ignore[assignment]
+    insert_backlog_batch_ticket = _pg.insert_backlog_batch_ticket  # type: ignore[assignment]
+    list_backlog_batch_ticket_ids = _pg.list_backlog_batch_ticket_ids  # type: ignore[assignment]
+    get_batch_for_ticket = _pg.get_batch_for_ticket  # type: ignore[assignment]
+    upsert_dependency_analysis = _pg.upsert_dependency_analysis  # type: ignore[assignment]
+    get_dependency_analysis = _pg.get_dependency_analysis  # type: ignore[assignment]
 elif _RUNTIME_DB_BACKEND not in ("", "sqlite"):
     raise RuntimeError(
         f"unknown RUNTIME_DB_BACKEND={_RUNTIME_DB_BACKEND!r} "
