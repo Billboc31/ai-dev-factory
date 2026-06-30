@@ -74,6 +74,8 @@ def maybe_run_readiness_after_intelligence(
     ticket_id: str,
     ticket_content: str,
     project_root: Path,
+    *,
+    project_id: str | None = None,
 ) -> None:
     """Chain readiness after a successful intelligence run when auto-pipeline is on."""
     if not is_auto_pipeline_enabled(db_path):

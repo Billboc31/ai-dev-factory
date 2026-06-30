@@ -85,7 +85,7 @@ def test_process_ticket_runs_intelligence_then_readiness(db, tmp_path, monkeypat
         intel_calls.append(ticket_id)
         _db.upsert_ticket_intelligence(db_path, ticket_id, analysis_status="completed")
 
-    def _fake_ready(db_path, ticket_id, content, root):
+    def _fake_ready(db_path, ticket_id, content, root, **kwargs):
         ready_calls.append(ticket_id)
         _db.upsert_ticket_readiness(db_path, ticket_id, readiness_status="ready_candidate")
 
@@ -112,7 +112,7 @@ def test_process_ticket_runs_readiness_when_intel_already_completed(db, tmp_path
     def _fake_intel(*args, **kwargs):
         raise AssertionError("intelligence should not run")
 
-    def _fake_ready(db_path, ticket_id, content, root):
+    def _fake_ready(db_path, ticket_id, content, root, **kwargs):
         ready_calls.append(ticket_id)
         _db.upsert_ticket_readiness(db_path, ticket_id, readiness_status="blocked")
 
@@ -130,7 +130,7 @@ def test_maybe_run_readiness_after_intelligence(db, tmp_path, monkeypatch):
     project_root = tmp_path / "repo"
     ready_calls: list[str] = []
 
-    def _fake_ready(db_path, ticket_id, content, root):
+    def _fake_ready(db_path, ticket_id, content, root, **kwargs):
         ready_calls.append(ticket_id)
         _db.upsert_ticket_readiness(db_path, ticket_id, readiness_status="ready_candidate")
 

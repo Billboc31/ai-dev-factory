@@ -664,6 +664,7 @@ def run_analysis(
 
                 maybe_run_readiness_after_intelligence(
                     db_path, ticket_id, ticket_content, project_root,
+                    project_id=project_id,
                 )
             except Exception:
                 _intel_log.exception(
