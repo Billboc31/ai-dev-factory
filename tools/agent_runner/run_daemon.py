@@ -101,6 +101,9 @@ _rdb_upsert_ticket = _rdb_mod.upsert_ticket_runtime
 _rdb_upsert_worker = _rdb_mod.upsert_worker
 _rdb_remove_worker = _rdb_mod.remove_worker
 _rdb_list_workers = _rdb_mod.list_workers
+_rdb_list_backlog_batches = _rdb_mod.list_backlog_batches
+_rdb_get_ticket_readiness = _rdb_mod.get_ticket_readiness
+_rdb_get_ticket_runtime = _rdb_mod.get_ticket_runtime
 del _rdb_spec, _rdb_mod
 
 _rr_spec = importlib.util.spec_from_file_location(
@@ -135,6 +138,29 @@ _te_mod = importlib.util.module_from_spec(_te_spec)  # type: ignore[arg-type]
 _te_spec.loader.exec_module(_te_mod)  # type: ignore[union-attr]
 _evaluate_eligibility = _te_mod.evaluate_eligibility
 del _te_spec, _te_mod
+
+_bb_spec = importlib.util.spec_from_file_location("_backlog_batch", ROOT / "backlog_batch.py")
+_bb_mod = importlib.util.module_from_spec(_bb_spec)  # type: ignore[arg-type]
+sys.modules["_backlog_batch"] = _bb_mod
+_bb_spec.loader.exec_module(_bb_mod)  # type: ignore[union-attr]
+_backlog_batch = _bb_mod
+del _bb_spec, _bb_mod
+
+_gda_spec = importlib.util.spec_from_file_location(
+    "_global_dependency_analyzer", ROOT / "global_dependency_analyzer.py",
+)
+_gda_mod = importlib.util.module_from_spec(_gda_spec)  # type: ignore[arg-type]
+sys.modules["_global_dependency_analyzer"] = _gda_mod
+_gda_spec.loader.exec_module(_gda_mod)  # type: ignore[union-attr]
+_global_dependency_analyzer = _gda_mod
+del _gda_spec, _gda_mod
+
+_rs_spec = importlib.util.spec_from_file_location("_runtime_settings", ROOT / "runtime_settings.py")
+_rs_mod = importlib.util.module_from_spec(_rs_spec)  # type: ignore[arg-type]
+sys.modules["_runtime_settings"] = _rs_mod
+_rs_spec.loader.exec_module(_rs_mod)  # type: ignore[union-attr]
+_runtime_settings = _rs_mod
+del _rs_spec, _rs_mod
 
 # SQLite path and init are cached so _rdb_get_db_path() (subprocess) runs only once per daemon process.
 _DB_PATH_RESOLVED: bool = False
@@ -1751,7 +1777,223 @@ def poll_github_issues(
                 )
             except Exception as exc:
                 _log(f"SQLite ticket upsert failed for {ticket_id}: {exc}")
+            try:
+                _attach_ticket_to_collecting_batch(db_path, ticket_id)
+            except Exception as exc:
+                _log(f"backlog batch attach failed for {ticket_id}: {exc}")
         break  # one successful intake per daemon cycle
+
+
+def _resolve_backlog_setting(db_path, key: str, fallback):
+    """Look up a backlog setting via the registry, returning ``fallback`` on error."""
+    try:
+        value = _runtime_settings.get_setting(db_path, key)
+    except Exception:
+        return fallback
+    return value if value is not None else fallback
+
+
+def _attach_ticket_to_collecting_batch(db_path, ticket_id: str) -> None:
+    """Place a newly intaken ticket into the current collecting batch.
+
+    Respects ``BACKLOG_ALLOW_PARALLEL_BATCHES``: when False and another batch
+    is already ``dispatching``, the new batch (or the open collecting one) is
+    held with ``freeze_blocked=TRUE`` so the dispatcher's graph stays stable.
+    """
+    allow_parallel = bool(_resolve_backlog_setting(
+        db_path, "BACKLOG_ALLOW_PARALLEL_BATCHES", False,
+    ))
+    max_size = int(_resolve_backlog_setting(
+        db_path, "BACKLOG_MAX_BATCH_SIZE", 50,
+    ))
+    batch_id = _backlog_batch.get_or_create_collecting_batch(
+        db_path,
+        allow_parallel_batches=allow_parallel,
+        max_batch_size=max_size,
+    )
+    inserted = _backlog_batch.add_ticket_to_batch(db_path, batch_id, ticket_id)
+    if inserted:
+        _log(f"backlog: ticket {ticket_id} attached to batch {batch_id}")
+
+
+def process_backlog_batches(
+    db_path,
+    runs_dir: Path,
+    *,
+    exec_cmd: str,
+    now: str | None = None,
+) -> None:
+    """Drive the batch lifecycle once per daemon cycle.
+
+    1. Freeze idle (or size-capped) collecting batches.
+    2. Run the global dependency analyzer for ``frozen`` and retryable
+       ``dependency_analysis_failed`` batches.
+    3. Transition ``readiness_running`` batches to ``dispatching`` once every
+       member has a completed readiness row.
+    4. Transition ``dispatching`` batches to ``completed`` once every member
+       has reached a terminal runtime state; unblock waiting collecting
+       batches.
+
+    Pure orchestration: per-step persistence lives in ``backlog_batch`` and
+    ``global_dependency_analyzer``.
+    """
+    if db_path is None:
+        return
+
+    idle_minutes = int(_resolve_backlog_setting(
+        db_path, "BACKLOG_BATCH_IDLE_TIMEOUT_MINUTES", 10,
+    ))
+    max_size = int(_resolve_backlog_setting(
+        db_path, "BACKLOG_MAX_BATCH_SIZE", 50,
+    ))
+    max_attempts = int(_resolve_backlog_setting(
+        db_path, "BACKLOG_DEPENDENCY_ANALYSIS_MAX_ATTEMPTS", 3,
+    ))
+    cooldown_minutes = int(_resolve_backlog_setting(
+        db_path, "BACKLOG_DEPENDENCY_ANALYSIS_RETRY_COOLDOWN_MINUTES", 5,
+    ))
+
+    try:
+        frozen_ids = _backlog_batch.try_freeze_idle_batches(
+            db_path,
+            idle_timeout_minutes=idle_minutes,
+            max_batch_size=max_size,
+            now=now,
+        )
+    except Exception as exc:
+        _log(f"backlog: try_freeze_idle_batches failed: {exc}")
+        frozen_ids = []
+    for batch_id in frozen_ids:
+        _log(f"backlog: batch {batch_id} frozen")
+
+    try:
+        ready_batches = _backlog_batch.pick_batches_ready_for_dependency_analysis(
+            db_path, now=now, max_attempts=max_attempts,
+        )
+    except Exception as exc:
+        _log(f"backlog: pick_batches_ready_for_dependency_analysis failed: {exc}")
+        ready_batches = []
+
+    for batch_id in ready_batches:
+        try:
+            _backlog_batch.mark_dependency_analysis_attempt_started(
+                db_path, batch_id, now=now,
+            )
+        except _backlog_batch.BatchTransitionError as exc:
+            _log(f"backlog: batch {batch_id} cannot start analysis: {exc}")
+            continue
+        outcome = _global_dependency_analyzer.run_global_analysis(
+            db_path, runs_dir, batch_id, exec_cmd=exec_cmd,
+        )
+        if outcome.success:
+            try:
+                _backlog_batch.mark_dependency_analysis_succeeded(db_path, batch_id)
+                _log(
+                    f"backlog: batch {batch_id} analysis ok "
+                    f"({outcome.persisted_ticket_count} ticket(s))"
+                )
+            except _backlog_batch.BatchTransitionError as exc:
+                _log(f"backlog: batch {batch_id} success transition failed: {exc}")
+        else:
+            try:
+                result = _backlog_batch.mark_dependency_analysis_failed(
+                    db_path, batch_id,
+                    error=outcome.error or "unknown",
+                    cooldown_minutes=cooldown_minutes,
+                    max_attempts=max_attempts,
+                    now=now,
+                )
+                _log(
+                    f"backlog: batch {batch_id} analysis failed "
+                    f"attempt={result['attempts']} exhausted={result['exhausted']}"
+                )
+            except Exception as exc:
+                _log(f"backlog: batch {batch_id} failure persist failed: {exc}")
+
+    _advance_readiness_running_batches(db_path)
+    _advance_dispatching_batches(db_path)
+
+
+def _advance_readiness_running_batches(db_path) -> None:
+    try:
+        batches = _rdb_list_backlog_batches(
+            db_path, status=_backlog_batch.BatchStatus.READINESS_RUNNING.value,
+        )
+    except Exception as exc:
+        _log(f"backlog: list readiness_running failed: {exc}")
+        return
+    for batch in batches:
+        batch_id = batch["batch_id"]
+        members = _backlog_batch.list_batch_tickets(db_path, batch_id)
+        if not members:
+            continue
+        all_done = True
+        for ticket_id in members:
+            try:
+                ready = _rdb_get_ticket_readiness(db_path, ticket_id)
+            except Exception:
+                ready = None
+            status = (ready or {}).get("readiness_status") or ""
+            if status in {"", "not_started", "queued", "running"}:
+                all_done = False
+                break
+        if all_done:
+            try:
+                _backlog_batch.transition_batch(
+                    db_path, batch_id,
+                    _backlog_batch.BatchStatus.READINESS_RUNNING.value,
+                    _backlog_batch.BatchStatus.DISPATCHING.value,
+                )
+                _log(f"backlog: batch {batch_id} dispatching")
+            except _backlog_batch.BatchTransitionError as exc:
+                _log(f"backlog: batch {batch_id} dispatch transition failed: {exc}")
+
+
+_TERMINAL_TICKET_STATES = frozenset({"TEST_COMPLETE", "CANCELLED"})
+
+
+def _advance_dispatching_batches(db_path) -> None:
+    try:
+        batches = _rdb_list_backlog_batches(
+            db_path, status=_backlog_batch.BatchStatus.DISPATCHING.value,
+        )
+    except Exception as exc:
+        _log(f"backlog: list dispatching failed: {exc}")
+        return
+    completed_any = False
+    for batch in batches:
+        batch_id = batch["batch_id"]
+        members = _backlog_batch.list_batch_tickets(db_path, batch_id)
+        if not members:
+            continue
+        all_terminal = True
+        for ticket_id in members:
+            try:
+                row = _rdb_get_ticket_runtime(db_path, ticket_id)
+            except Exception:
+                row = None
+            state = ((row or {}).get("state") or "").upper()
+            archived = bool((row or {}).get("daemon_archived"))
+            if not (state in _TERMINAL_TICKET_STATES or archived):
+                all_terminal = False
+                break
+        if all_terminal:
+            try:
+                _backlog_batch.transition_batch(
+                    db_path, batch_id,
+                    _backlog_batch.BatchStatus.DISPATCHING.value,
+                    _backlog_batch.BatchStatus.COMPLETED.value,
+                    extra_fields={"completed_at": _now_iso()},
+                )
+                _log(f"backlog: batch {batch_id} completed")
+                completed_any = True
+            except _backlog_batch.BatchTransitionError as exc:
+                _log(f"backlog: batch {batch_id} complete transition failed: {exc}")
+    if completed_any:
+        try:
+            _backlog_batch.unblock_freezing_for_pending_collecting_batches(db_path)
+        except Exception as exc:
+            _log(f"backlog: unblock pending batches failed: {exc}")
 
 
 def poll_ticket_pipeline(
@@ -2265,6 +2507,9 @@ def main(argv: list[str]) -> int:
             args.exec_cmd,
             project_id=args.project,
         )
+        process_backlog_batches(
+            _ensure_db(), runs_dir, exec_cmd=args.exec_cmd,
+        )
         if args.poll_project_map:
             poll_project_map(runs_dir, args.issue_repo, worktrees_dir=worktrees_dir)
         run_once(
@@ -2292,6 +2537,9 @@ def main(argv: list[str]) -> int:
                 REPO_ROOT,
                 args.exec_cmd,
                 project_id=args.project,
+            )
+            process_backlog_batches(
+                _ensure_db(), runs_dir, exec_cmd=args.exec_cmd,
             )
             if args.poll_project_map:
                 poll_project_map(runs_dir, args.issue_repo, worktrees_dir=worktrees_dir)

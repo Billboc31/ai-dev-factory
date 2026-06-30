@@ -598,6 +598,30 @@ def test_dispatcher_helper_returns_off_when_db_missing():
     assert mode == "off"
 
 
+def test_main_once_calls_process_backlog_batches(tmp_path, monkeypatch):
+    """``main(--once)`` runs ``process_backlog_batches`` exactly once per cycle."""
+    import run_daemon
+    runs = tmp_path / "runs"
+    runs.mkdir()
+
+    calls: list[tuple] = []
+
+    def _spy(*args, **kwargs):
+        calls.append((args, kwargs))
+
+    monkeypatch.setattr(run_daemon, "process_backlog_batches", _spy)
+    monkeypatch.setattr(run_daemon, "_check_runtime_clone", lambda: True)
+    monkeypatch.setattr(run_daemon, "_acquire_daemon_singleton", lambda _d: True)
+    monkeypatch.setattr(run_daemon, "poll_ticket_pipeline", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_daemon, "run_once", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_daemon, "reap_completed_workers", lambda *_a, **_k: None)
+    monkeypatch.setattr(run_daemon, "_cleanup_stale_workers", lambda *_a, **_k: None)
+
+    rc = main(["--exec-cmd", "test-cmd", "--once", "--runs-dir", str(runs)])
+    assert rc == 0
+    assert len(calls) == 1
+
+
 def test_resolve_repo_root_uses_cwd_when_runtime_root_set(tmp_path, monkeypatch):
     from argparse import Namespace
     from run_daemon import _resolve_repo_root

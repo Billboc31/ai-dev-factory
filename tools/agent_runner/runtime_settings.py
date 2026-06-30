@@ -177,6 +177,67 @@ SETTING_SPECS: dict[str, SettingSpec] = {
         default=False,
         env_var="AI_DEV_FACTORY_REQUIRE_HUMAN_EXECUTION_APPROVAL",
     ),
+    "BACKLOG_GITHUB_POLL_INTERVAL_SECONDS": SettingSpec(
+        key="BACKLOG_GITHUB_POLL_INTERVAL_SECONDS",
+        value_type="int",
+        description=(
+            "How often the daemon polls GitHub for new issues (seconds). "
+            "When unset, the legacy ``--interval`` CLI default is used."
+        ),
+        default=60,
+        env_var="BACKLOG_GITHUB_POLL_INTERVAL_SECONDS",
+    ),
+    "BACKLOG_BATCH_IDLE_TIMEOUT_MINUTES": SettingSpec(
+        key="BACKLOG_BATCH_IDLE_TIMEOUT_MINUTES",
+        value_type="int",
+        description=(
+            "How long a collecting backlog batch must be idle before it is "
+            "frozen for dependency analysis (minutes)."
+        ),
+        default=10,
+        env_var="BACKLOG_BATCH_IDLE_TIMEOUT_MINUTES",
+    ),
+    "BACKLOG_MAX_BATCH_SIZE": SettingSpec(
+        key="BACKLOG_MAX_BATCH_SIZE",
+        value_type="int",
+        description=(
+            "Maximum number of tickets in a single backlog batch. Reaching "
+            "this size triggers an immediate freeze."
+        ),
+        default=50,
+        env_var="BACKLOG_MAX_BATCH_SIZE",
+    ),
+    "BACKLOG_ALLOW_PARALLEL_BATCHES": SettingSpec(
+        key="BACKLOG_ALLOW_PARALLEL_BATCHES",
+        value_type="bool",
+        description=(
+            "When False, a new collecting batch cannot freeze while another "
+            "batch is still dispatching — the dependency graph stays stable "
+            "during execution."
+        ),
+        default=False,
+        env_var="BACKLOG_ALLOW_PARALLEL_BATCHES",
+    ),
+    "BACKLOG_DEPENDENCY_ANALYSIS_MAX_ATTEMPTS": SettingSpec(
+        key="BACKLOG_DEPENDENCY_ANALYSIS_MAX_ATTEMPTS",
+        value_type="int",
+        description=(
+            "Maximum automatic retry attempts for the global dependency "
+            "analyzer on a single batch."
+        ),
+        default=3,
+        env_var="BACKLOG_DEPENDENCY_ANALYSIS_MAX_ATTEMPTS",
+    ),
+    "BACKLOG_DEPENDENCY_ANALYSIS_RETRY_COOLDOWN_MINUTES": SettingSpec(
+        key="BACKLOG_DEPENDENCY_ANALYSIS_RETRY_COOLDOWN_MINUTES",
+        value_type="int",
+        description=(
+            "Delay between two dependency-analysis attempts on the same "
+            "batch (minutes)."
+        ),
+        default=5,
+        env_var="BACKLOG_DEPENDENCY_ANALYSIS_RETRY_COOLDOWN_MINUTES",
+    ),
     "LOG_LEVEL": SettingSpec(
         key="LOG_LEVEL",
         value_type="string",

@@ -95,8 +95,11 @@ def _eval_dependencies(
     project_id: str | None = None,
     repo: str | None = None,
     intelligence: dict | None = None,
+    dependency_analysis: dict | None = None,
 ) -> dict:
-    deps = collect_dependency_ticket_ids(ticket_content or "", intelligence)
+    deps = collect_dependency_ticket_ids(
+        ticket_content or "", intelligence, dependency_analysis=dependency_analysis,
+    )
     if not deps:
         return {
             "status": "passed",
@@ -269,6 +272,11 @@ def evaluate_eligibility(
 
     intelligence = _safe_get(runtime_db.get_ticket_intelligence, db_path, ticket_id)
     readiness = _safe_get(runtime_db.get_ticket_readiness, db_path, ticket_id)
+    dependency_analysis = None
+    if hasattr(runtime_db, "get_dependency_analysis"):
+        dependency_analysis = _safe_get(
+            runtime_db.get_dependency_analysis, db_path, ticket_id
+        )
 
     checks: dict[str, dict] = {
         "intelligence": _eval_intelligence(intelligence),
@@ -277,6 +285,7 @@ def evaluate_eligibility(
             project_root,
             project_id=project_id,
             intelligence=intelligence,
+            dependency_analysis=dependency_analysis,
         ),
         "readiness": _eval_readiness(readiness),
         "approval": _eval_approval(db_path, ticket_id, project_id),
