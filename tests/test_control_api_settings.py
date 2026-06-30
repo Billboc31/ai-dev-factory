@@ -78,7 +78,7 @@ def test_list_returns_one_entry_per_spec(tmp_path):
     from services.control_api.routes import settings as _settings_route
 
     client = TestClient(_make_app(tmp_path))
-    r = client.get("/api/settings")
+    r = client.get("/settings")
     assert r.status_code == 200
     body = r.json()
     keys = {row["key"] for row in body["settings"]}
@@ -87,19 +87,19 @@ def test_list_returns_one_entry_per_spec(tmp_path):
 
 def test_get_unknown_key_returns_404(tmp_path):
     client = TestClient(_make_app(tmp_path))
-    r = client.get("/api/settings/UNKNOWN_KEY")
+    r = client.get("/settings/UNKNOWN_KEY")
     assert r.status_code == 404
 
 
 def test_put_persists_value_and_source_switches_to_db(tmp_path):
     client = TestClient(_make_app(tmp_path))
-    r = client.put("/api/settings/MAX_WORKERS", json={"value": "5"})
+    r = client.put("/settings/MAX_WORKERS", json={"value": "5"})
     assert r.status_code == 200
     body = r.json()
     assert body["value"] == 5
     assert body["source"] == "db"
 
-    r = client.get("/api/settings/MAX_WORKERS")
+    r = client.get("/settings/MAX_WORKERS")
     assert r.status_code == 200
     assert r.json()["value"] == 5
     assert r.json()["source"] == "db"
@@ -109,11 +109,11 @@ def test_delete_resets_to_env(tmp_path, monkeypatch):
     monkeypatch.setenv("DAEMON_MAX_WORKERS", "2")
     client = TestClient(_make_app(tmp_path))
 
-    client.put("/api/settings/MAX_WORKERS", json={"value": "9"})
-    r = client.delete("/api/settings/MAX_WORKERS")
+    client.put("/settings/MAX_WORKERS", json={"value": "9"})
+    r = client.delete("/settings/MAX_WORKERS")
     assert r.status_code == 204
 
-    r = client.get("/api/settings/MAX_WORKERS")
+    r = client.get("/settings/MAX_WORKERS")
     body = r.json()
     assert body["value"] == 2
     assert body["source"] == "env"
@@ -121,19 +121,19 @@ def test_delete_resets_to_env(tmp_path, monkeypatch):
 
 def test_put_bad_int_returns_422(tmp_path):
     client = TestClient(_make_app(tmp_path))
-    r = client.put("/api/settings/MAX_WORKERS", json={"value": "not-an-int"})
+    r = client.put("/settings/MAX_WORKERS", json={"value": "not-an-int"})
     assert r.status_code == 422
 
 
 def test_put_unknown_key_returns_404(tmp_path):
     client = TestClient(_make_app(tmp_path))
-    r = client.put("/api/settings/UNKNOWN_KEY", json={"value": "x"})
+    r = client.put("/settings/UNKNOWN_KEY", json={"value": "x"})
     assert r.status_code == 404
 
 
 def test_sensitive_get_is_redacted(tmp_path):
     client = TestClient(_make_app(tmp_path))
-    r = client.get("/api/settings/OPENAI_API_KEY")
+    r = client.get("/settings/OPENAI_API_KEY")
     assert r.status_code == 200
     body = r.json()
     assert body["value"] in ("configured", "not_configured")
@@ -143,7 +143,7 @@ def test_sensitive_get_is_redacted(tmp_path):
 
 def test_sensitive_put_is_rejected(tmp_path):
     client = TestClient(_make_app(tmp_path))
-    r = client.put("/api/settings/OPENAI_API_KEY", json={"value": "sk-test"})
+    r = client.put("/settings/OPENAI_API_KEY", json={"value": "sk-test"})
     assert r.status_code == 403
     # The DB must never store a sensitive value.
     rows = _sqlite_db.list_runtime_settings(
@@ -157,7 +157,7 @@ def test_sensitive_put_is_rejected(tmp_path):
 def test_sensitive_status_reads_from_env(tmp_path, monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-xxx")
     client = TestClient(_make_app(tmp_path))
-    r = client.get("/api/settings/OPENAI_API_KEY")
+    r = client.get("/settings/OPENAI_API_KEY")
     body = r.json()
     assert body["value"] == "configured"
     assert body["source"] == "env"
@@ -165,7 +165,7 @@ def test_sensitive_status_reads_from_env(tmp_path, monkeypatch):
 
 def test_router_smoke_registered(tmp_path):
     client = TestClient(_make_app(tmp_path))
-    r = client.get("/api/settings")
+    r = client.get("/settings")
     assert r.status_code == 200
 
 
@@ -187,7 +187,7 @@ def test_list_returns_all_settings_on_empty_table(tmp_path):
 
     specs = _settings_route._runtime_settings.SETTING_SPECS
     client = TestClient(_make_app(tmp_path))
-    r = client.get("/api/settings")
+    r = client.get("/settings")
     assert r.status_code == 200
     body = r.json()
     rows = body["settings"]
@@ -206,7 +206,7 @@ def test_list_source_is_default_when_no_env_no_db(tmp_path, monkeypatch):
     specs = _settings_route._runtime_settings.SETTING_SPECS
 
     client = TestClient(_make_app(tmp_path))
-    r = client.get("/api/settings")
+    r = client.get("/settings")
     assert r.status_code == 200
     rows = r.json()["settings"]
     by_key = {row["key"]: row for row in rows}
@@ -229,7 +229,7 @@ def test_list_source_is_env_when_no_db(tmp_path, monkeypatch):
 
     specs = _settings_route._runtime_settings.SETTING_SPECS
     client = TestClient(_make_app(tmp_path))
-    r = client.get("/api/settings")
+    r = client.get("/settings")
     assert r.status_code == 200
     by_key = {row["key"]: row for row in r.json()["settings"]}
 
@@ -248,10 +248,10 @@ def test_list_source_is_env_when_no_db(tmp_path, monkeypatch):
 
 def test_list_source_switches_to_db_after_put(tmp_path):
     client = TestClient(_make_app(tmp_path))
-    put = client.put("/api/settings/MAX_WORKERS", json={"value": "7"})
+    put = client.put("/settings/MAX_WORKERS", json={"value": "7"})
     assert put.status_code == 200
 
-    r = client.get("/api/settings")
+    r = client.get("/settings")
     assert r.status_code == 200
     by_key = {row["key"]: row for row in r.json()["settings"]}
     assert by_key["MAX_WORKERS"]["source"] == "db"
@@ -272,7 +272,7 @@ def test_list_survives_missing_runtime_settings_table(tmp_path):
         conn.execute("DROP TABLE runtime_settings")
 
     client = TestClient(app)
-    r = client.get("/api/settings")
+    r = client.get("/settings")
     assert r.status_code == 200
     body = r.json()
     specs = _settings_route._runtime_settings.SETTING_SPECS

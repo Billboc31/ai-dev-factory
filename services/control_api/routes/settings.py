@@ -3,13 +3,16 @@
 Endpoints
 ---------
 
-``GET    /api/settings``           — list every declared setting, redacted for
+``GET    /settings``           — list every declared setting, redacted for
                                      sensitive keys.
-``GET    /api/settings/{key}``     — one setting, redacted for sensitive keys.
-``PUT    /api/settings/{key}``     — persist a DB override. Sensitive keys are
+``GET    /settings/{key}``     — one setting, redacted for sensitive keys.
+``PUT    /settings/{key}``     — persist a DB override. Sensitive keys are
                                      rejected with 403 (V1 stores no secrets).
-``DELETE /api/settings/{key}``     — drop the DB override; resolution falls
+``DELETE /settings/{key}``     — drop the DB override; resolution falls
                                      back to env / hardcoded default.
+
+Mounted at ``/settings`` (not ``/api/settings``) so nginx can strip the
+``/api`` prefix from dashboard requests the same way it does for ``/tickets``.
 
 The settings layer is global. ``scope='global'`` is the only supported value
 in V1; project-scoped settings are out of scope.
@@ -36,7 +39,7 @@ if str(_TOOLS_DIR) not in sys.path:
 import runtime_settings as _runtime_settings  # noqa: E402
 
 logger = logging.getLogger("control-api")
-router = APIRouter(prefix="/api/settings", tags=["settings"])
+router = APIRouter(prefix="/settings", tags=["settings"])
 
 
 def _db_path(request: Request):
@@ -58,7 +61,7 @@ def list_settings(request: Request) -> RuntimeSettingsListResponse:
     never DB-filtered. An empty ``runtime_settings`` table is normal on a fresh
     install — rows resolve through env / hardcoded defaults.
     """
-    logger.info("api: GET /api/settings")
+    logger.info("api: GET /settings")
     db = _db_path(request)
     try:
         rows = _runtime_settings.list_effective_settings(db)
@@ -73,7 +76,7 @@ def list_settings(request: Request) -> RuntimeSettingsListResponse:
 
 @router.get("/{key}", response_model=RuntimeSetting)
 def get_setting(key: str, request: Request) -> RuntimeSetting:
-    logger.info("api: GET /api/settings/%s", key)
+    logger.info("api: GET /settings/%s", key)
     db = _db_path(request)
     try:
         row = _runtime_settings.resolve_effective_setting(db, key)
@@ -88,7 +91,7 @@ def put_setting(
     payload: RuntimeSettingUpdate,
     request: Request,
 ) -> RuntimeSetting:
-    logger.info("api: PUT /api/settings/%s", key)
+    logger.info("api: PUT /settings/%s", key)
     db = _db_path(request)
     try:
         row = _runtime_settings.set_setting(
@@ -105,7 +108,7 @@ def put_setting(
 
 @router.delete("/{key}", status_code=204)
 def delete_setting(key: str, request: Request) -> None:
-    logger.info("api: DELETE /api/settings/%s", key)
+    logger.info("api: DELETE /settings/%s", key)
     db = _db_path(request)
     try:
         _runtime_settings.delete_setting(db, key)

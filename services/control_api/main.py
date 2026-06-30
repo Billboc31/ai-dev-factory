@@ -234,7 +234,7 @@ def create_app(
     # T212: /dispatcher/* — advisory next-ticket dispatcher (read-only).
     app.include_router(dispatcher.router)
     app.include_router(dispatcher.project_router)
-    # T215: /api/settings/* — global runtime settings (DB-backed, env fallback).
+    # T215: /settings/* — global runtime settings (DB-backed, env fallback).
     app.include_router(settings.router)
 
     return app

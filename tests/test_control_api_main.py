@@ -53,7 +53,7 @@ def test_create_app_uses_explicit_runtime_base_root(tmp_path, monkeypatch):
 
 
 def test_settings_router_is_registered(tmp_path, monkeypatch):
-    """T215 — /api/settings router is mounted and reachable.
+    """T215 — /settings router is mounted and reachable.
 
     Loads a private SQLite runtime_db so the smoke test never reaches a
     process-wide Postgres handle that may not be available in CI, and
@@ -91,7 +91,7 @@ def test_settings_router_is_registered(tmp_path, monkeypatch):
         app.state.db_path = isolated_db
         _settings_route._runtime_settings.runtime_db = sqlite_db
         client = TestClient(app)
-        r = client.get("/api/settings")
+        r = client.get("/settings")
         assert r.status_code == 200
     finally:
         _settings_route._runtime_settings.runtime_db = original_binding

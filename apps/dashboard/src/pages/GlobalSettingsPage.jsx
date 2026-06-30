@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useContext } from 'react'
+import { Link } from 'react-router-dom'
 import { listSettings, updateSetting, resetSetting } from '../api/settings'
 import ErrorBanner from '../components/ErrorBanner'
+import { ActiveProjectContext } from '../App'
 
 const SOURCE_BADGE = {
   db: 'bg-emerald-100 text-emerald-800',
@@ -93,6 +95,7 @@ function SettingEditor({ setting, onSave, onCancel, busy }) {
 }
 
 export default function GlobalSettingsPage() {
+  const activeProject = useContext(ActiveProjectContext)
   const [settings, setSettings] = useState([])
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
@@ -155,6 +158,19 @@ export default function GlobalSettingsPage() {
         Runtime values stored in the database. Precedence: DB override → .env → hardcoded default.
         Sensitive settings are read-only in V1 and only display configured / not configured.
       </p>
+
+      {activeProject && (
+        <p className="text-sm text-gray-600 mb-4">
+          Per-project execution gates (Human Approval, cost limits, …) live in{' '}
+          <Link
+            to={`/projects/${activeProject}/rules`}
+            className="text-blue-600 hover:text-blue-800 underline font-medium"
+          >
+            Execution Rules
+          </Link>
+          {' '}for project <span className="font-mono">{activeProject}</span>.
+        </p>
+      )}
 
       <ErrorBanner message={error} onClose={() => setError(null)} />
 
