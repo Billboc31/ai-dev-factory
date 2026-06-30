@@ -1,7 +1,7 @@
 {
   "ticket_id": "T219",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_APPROVED",
   "branch": "ticket/T219-add-backlog-batch-dashboard-with-dependency-graph",
   "issue_number": 294,
-  "updated_at": "2026-06-30T17:21:14Z"
+  "updated_at": "2026-06-30T17:25:57Z"
 }
