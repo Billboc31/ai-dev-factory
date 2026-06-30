@@ -113,6 +113,14 @@ _get_dispatcher_mode = _td_mod.get_dispatcher_mode
 _get_recommended_tickets = _td_mod.get_recommended_tickets
 del _td_spec, _td_mod
 
+_tp_spec = importlib.util.spec_from_file_location("_ticket_pipeline", ROOT / "ticket_pipeline.py")
+_tp_mod = importlib.util.module_from_spec(_tp_spec)  # type: ignore[arg-type]
+_tp_spec.loader.exec_module(_tp_mod)  # type: ignore[union-attr]
+_is_auto_pipeline_enabled = _tp_mod.is_auto_pipeline_enabled
+_find_next_pipeline_ticket = _tp_mod.find_next_ticket
+_process_ticket_pipeline = _tp_mod.process_ticket
+del _tp_spec, _tp_mod
+
 # SQLite path and init are cached so _rdb_get_db_path() (subprocess) runs only once per daemon process.
 _DB_PATH_RESOLVED: bool = False
 _DB_PATH_VALUE: "Path | None" = None
@@ -1602,6 +1610,42 @@ def poll_github_issues(
                 _log(f"SQLite ticket upsert failed for {ticket_id}: {exc}")
 
 
+def poll_ticket_pipeline(
+    db_path: "Path | None",
+    runs_dir: Path,
+    worktrees_dir: Path | None,
+    project_root: Path,
+    exec_cmd: str,
+    *,
+    project_id: str | None = None,
+) -> None:
+    """Run intelligence/readiness for one ticket that still needs pipeline work."""
+    if db_path is None or not _is_auto_pipeline_enabled(db_path):
+        return
+
+    tickets = sorted(scan_tickets(runs_dir, worktrees_dir), key=lambda t: ticket_sort_key(t[0]))
+    ticket_ids = [ticket_id for ticket_id, _state in tickets]
+    next_id = _find_next_pipeline_ticket(db_path, ticket_ids)
+    if next_id is None:
+        return
+
+    _log(f"pipeline: processing {next_id}")
+    try:
+        ran = _process_ticket_pipeline(
+            db_path,
+            next_id,
+            project_root,
+            exec_cmd,
+            worktrees_dir=worktrees_dir,
+            project_id=project_id,
+        )
+    except Exception as exc:
+        _log(f"pipeline: failed for {next_id}: {exc}")
+        return
+    if ran:
+        _log(f"pipeline: finished {next_id}")
+
+
 def poll_project_map(runs_dir: Path, repo: str | None, worktrees_dir: Path | None = None) -> None:
     """Run run_issue_mapper.py to refresh the project dependency map."""
     cmd = [sys.executable, str(RUN_ISSUE_MAPPER), "--runs-dir", str(runs_dir)]
@@ -1654,6 +1698,8 @@ def _select_tickets_via_dispatcher(
     runs_dir: Path,
     worktrees_dir: Path | None,
     mode: str,
+    *,
+    project_id: str | None = None,
 ) -> list[tuple[str, str]]:
     """Return ``[(ticket_id, state), ...]`` ranked by the dispatcher.
 
@@ -1665,7 +1711,9 @@ def _select_tickets_via_dispatcher(
     if db_path is None:
         return []
     try:
-        payload = _get_recommended_tickets(db_path, project_root, mode=mode)
+        payload = _get_recommended_tickets(
+            db_path, project_root, mode=mode, project_id=project_id, worktrees_dir=worktrees_dir,
+        )
     except Exception as exc:
         _log(f"dispatcher get_recommended_tickets failed: {exc}")
         return []
@@ -1696,6 +1744,7 @@ def run_once(
     use_project_map: bool = False,
     state_dir: Path | None = None,
     project_root: Path | None = None,
+    project_id: str | None = None,
 ) -> None:
     """Scan all tickets and process auto-runnable ones."""
     _state_dir = state_dir if state_dir is not None else runs_dir
@@ -1726,8 +1775,14 @@ def run_once(
     if dispatcher_enabled:
         _log(f"scheduling: dispatcher (mode={dispatcher_mode})")
         _resolved_project_root = project_root if project_root is not None else REPO_ROOT
+        _resolved_project_id = project_id or os.environ.get("PROJECT_NAME")
         dispatcher_tickets = _select_tickets_via_dispatcher(
-            _db_path, _resolved_project_root, runs_dir, worktrees_dir, dispatcher_mode,
+            _db_path,
+            _resolved_project_root,
+            runs_dir,
+            worktrees_dir,
+            dispatcher_mode,
+            project_id=_resolved_project_id,
         )
         if dispatcher_tickets:
             tickets = dispatcher_tickets
@@ -1958,6 +2013,11 @@ def main(argv: list[str]) -> int:
     except Exception:
         _boot_mode = "off"
     _log(f"  dispatcher_mode = {_boot_mode}")
+    try:
+        _boot_pipeline = _is_auto_pipeline_enabled(_boot_db) if _boot_db else True
+    except Exception:
+        _boot_pipeline = True
+    _log(f"  auto_pipeline  = {_boot_pipeline}")
     _log("=" * 60)
 
     # Strict refuse mode: if gh is missing while issue polling is requested,
@@ -1995,6 +2055,14 @@ def main(argv: list[str]) -> int:
     if args.once:
         if args.poll_issues:
             poll_github_issues(runs_dir, args.issue_label, args.issue_repo, worktrees_dir=worktrees_dir, state_dir=state_dir)
+        poll_ticket_pipeline(
+            _ensure_db(),
+            runs_dir,
+            worktrees_dir,
+            REPO_ROOT,
+            args.exec_cmd,
+            project_id=args.project,
+        )
         if args.poll_project_map:
             poll_project_map(runs_dir, args.issue_repo, worktrees_dir=worktrees_dir)
         run_once(
@@ -2006,6 +2074,7 @@ def main(argv: list[str]) -> int:
             use_project_map=args.use_project_map,
             state_dir=state_dir,
             project_root=REPO_ROOT,
+            project_id=args.project,
         )
         return 0
 
@@ -2013,6 +2082,14 @@ def main(argv: list[str]) -> int:
         while True:
             if args.poll_issues:
                 poll_github_issues(runs_dir, args.issue_label, args.issue_repo, worktrees_dir=worktrees_dir, state_dir=state_dir)
+            poll_ticket_pipeline(
+                _ensure_db(),
+                runs_dir,
+                worktrees_dir,
+                REPO_ROOT,
+                args.exec_cmd,
+                project_id=args.project,
+            )
             if args.poll_project_map:
                 poll_project_map(runs_dir, args.issue_repo, worktrees_dir=worktrees_dir)
             run_once(
@@ -2023,6 +2100,8 @@ def main(argv: list[str]) -> int:
                 max_workers=args.max_workers,
                 use_project_map=args.use_project_map,
                 state_dir=state_dir,
+                project_root=REPO_ROOT,
+                project_id=args.project,
             )
             _log(f"sleeping {args.interval}s")
             time.sleep(args.interval)

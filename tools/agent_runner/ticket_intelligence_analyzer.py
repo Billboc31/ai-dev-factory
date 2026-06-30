@@ -659,6 +659,17 @@ def run_analysis(
                 f"ticket_intelligence analysis completed ticket_id={ticket_id}",
                 metadata={"project_id": project_id, "stage": current_stage},
             )
+            try:
+                from ticket_pipeline import maybe_run_readiness_after_intelligence  # noqa: WPS433
+
+                maybe_run_readiness_after_intelligence(
+                    db_path, ticket_id, ticket_content, project_root,
+                )
+            except Exception:
+                _intel_log.exception(
+                    "intel.readiness_chain_failed project_id=%s ticket_id=%s",
+                    project_id, ticket_id,
+                )
 
         except Exception as exc:
             summary = f"Unexpected error: {exc}"

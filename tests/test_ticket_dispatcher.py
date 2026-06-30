@@ -255,6 +255,38 @@ def test_blocked_tickets_are_reported(env):
     assert entry["reason"]
 
 
+def test_dependency_blocked_from_markdown_section_in_worktree(env, monkeypatch):
+    db, root = env["db"], env["root"]
+    worktrees_dir = root / "worktrees"
+    wt_run = worktrees_dir / "T070" / "runs" / "T070"
+    wt_run.mkdir(parents=True)
+    (wt_run / "ticket.md").write_text(
+        "# T070\n\n## Depends on\n- T010 - prerequisite\n",
+        encoding="utf-8",
+    )
+    _seed_ticket_runtime(db, "T070")
+    _seed_intelligence(db, "T070", queue_rank=1)
+    _seed_ready_candidate(db, "T070")
+    _seed_rules_eligible(db, "T070")
+
+    def _dep_status(_project_root, dep_id):
+        from ticket_merge_state import MergeCheckResult
+
+        return MergeCheckResult(status="not_merged", source="test")
+
+    monkeypatch.setattr(eligibility, "is_ticket_merged", _dep_status)
+
+    result = dispatcher.get_recommended_tickets(
+        db, root, mode="advisory", worktrees_dir=worktrees_dir,
+    )
+    assert result["recommendations"] == []
+    assert len(result["blocked"]) == 1
+    entry = result["blocked"][0]
+    assert entry["ticket_id"] == "T070"
+    assert entry["blocking_step"] == "dependencies"
+    assert "T010" in entry["reason"]
+
+
 # ── Deterministic ordering on ties ────────────────────────────────────────
 
 def test_ranking_is_deterministic_on_ties(env):

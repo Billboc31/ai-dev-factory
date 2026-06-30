@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -68,11 +69,25 @@ def _is_entry_prerequisite_reason(reason: str) -> bool:
     lowered = reason.lower()
     return not any(token in lowered for token in _FORBIDDEN_BLOCKER_SUBSTRINGS)
 
-# Case-insensitive dependency markers.
-_DEPENDENCY_RE = re.compile(
+# Case-insensitive inline dependency markers (e.g. "Depends on T010.").
+_INLINE_DEPENDENCY_RE = re.compile(
     r"(?:depends\s+on|after|blocked\s+by)\s+(T\d+)",
     re.IGNORECASE,
 )
+
+# Markdown section heading: "## Depends on" (common in GitHub-ingested tickets).
+_DEPENDS_ON_SECTION_RE = re.compile(
+    r"^#{1,6}\s*depends\s+on\s*$",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+# List item under a Depends-on section: "- T010 - description" or "1. T010".
+_LIST_ITEM_TICKET_RE = re.compile(
+    r"^[\s>]*(?:[-*+]|(?:\d+\.))\s+(T\d+)\b",
+    re.IGNORECASE,
+)
+
+_HEADING_LINE_RE = re.compile(r"^#{1,6}\s+\S")
 
 # Ticket runtime states that imply a human has approved the plan.
 _PLAN_APPROVED_OR_LATER = frozenset({
@@ -97,16 +112,77 @@ def _check_intelligence(db_path, ticket_id: str) -> tuple[str, str | None]:
     return "passed", None
 
 
+def _extract_dependencies_from_section(ticket_content: str, start: int) -> list[str]:
+    """Parse ticket IDs from list items under a ``## Depends on`` section."""
+    deps: list[str] = []
+    rest = ticket_content[start:]
+    for line in rest.splitlines():
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if _HEADING_LINE_RE.match(stripped):
+            break
+        match = _LIST_ITEM_TICKET_RE.match(stripped)
+        if match:
+            deps.append(match.group(1).upper())
+        elif deps:
+            # Prose after the list ends the dependency block.
+            break
+    return deps
+
+
 def _extract_dependencies(ticket_content: str) -> list[str]:
     """Return a stable, deduplicated, uppercase list of dependency ticket IDs."""
     if not ticket_content:
         return []
     seen: list[str] = []
-    for match in _DEPENDENCY_RE.finditer(ticket_content):
-        dep = match.group(1).upper()
+
+    def _add(dep: str) -> None:
+        dep = dep.upper()
         if dep not in seen:
             seen.append(dep)
+
+    for match in _INLINE_DEPENDENCY_RE.finditer(ticket_content):
+        _add(match.group(1))
+    for section in _DEPENDS_ON_SECTION_RE.finditer(ticket_content):
+        for dep in _extract_dependencies_from_section(ticket_content, section.end()):
+            _add(dep)
     return seen
+
+
+def read_ticket_markdown(
+    project_root: Path,
+    ticket_id: str,
+    *,
+    worktrees_dir: Path | None = None,
+    project_id: str | None = None,
+) -> str:
+    """Read ``ticket.md``, preferring the active worktree run dir when present."""
+    project_root = Path(project_root)
+    candidates: list[Path] = []
+    if worktrees_dir is not None:
+        candidates.append(
+            worktrees_dir / ticket_id / "runs" / ticket_id / "ticket.md"
+        )
+    runtime_base = os.environ.get("RUNTIME_BASE_ROOT")
+    if project_id and runtime_base:
+        candidates.append(
+            Path(runtime_base).expanduser()
+            / project_id
+            / "worktrees"
+            / ticket_id
+            / "runs"
+            / ticket_id
+            / "ticket.md"
+        )
+    candidates.append(project_root / "runs" / ticket_id / "ticket.md")
+    for path in candidates:
+        if path.is_file():
+            try:
+                return path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+    return ""
 
 
 def _check_dependencies(

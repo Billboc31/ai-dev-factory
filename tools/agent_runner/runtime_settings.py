@@ -156,6 +156,16 @@ SETTING_SPECS: dict[str, SettingSpec] = {
         default="off",
         env_var="AI_DEV_FACTORY_DISPATCHER_MODE",
     ),
+    "AUTO_TICKET_PIPELINE": SettingSpec(
+        key="AUTO_TICKET_PIPELINE",
+        value_type="bool",
+        description=(
+            "When enabled, the daemon automatically runs ticket intelligence "
+            "and readiness evaluation after GitHub issue intake."
+        ),
+        default=True,
+        env_var="AI_DEV_FACTORY_AUTO_TICKET_PIPELINE",
+    ),
     "LOG_LEVEL": SettingSpec(
         key="LOG_LEVEL",
         value_type="string",

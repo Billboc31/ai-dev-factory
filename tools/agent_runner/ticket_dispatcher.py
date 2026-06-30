@@ -36,6 +36,7 @@ if str(_TOOLS_DIR) not in sys.path:
 import runtime_db  # noqa: E402
 import runtime_settings as _runtime_settings  # noqa: E402
 import ticket_execution_eligibility as _eligibility  # noqa: E402
+from ticket_readiness_evaluator import read_ticket_markdown  # noqa: E402
 
 
 DISPATCHER_MODES: tuple[str, ...] = ("off", "advisory", "manual", "auto")
@@ -108,14 +109,19 @@ def _safe_call(fn, *args, **kwargs):
         return None
 
 
-def _read_ticket_content(project_root: Path, ticket_id: str) -> str:
-    path = project_root / "runs" / ticket_id / "ticket.md"
-    if path.is_file():
-        try:
-            return path.read_text(encoding="utf-8")
-        except OSError:
-            return ""
-    return ""
+def _read_ticket_content(
+    project_root: Path,
+    ticket_id: str,
+    *,
+    worktrees_dir: Path | None = None,
+    project_id: str | None = None,
+) -> str:
+    return read_ticket_markdown(
+        project_root,
+        ticket_id,
+        worktrees_dir=worktrees_dir,
+        project_id=project_id,
+    )
 
 
 def _parse_iso(value: str | None) -> datetime.datetime | None:
@@ -217,6 +223,7 @@ def get_recommended_tickets(
     project_root: Path,
     *,
     project_id: str | None = None,
+    worktrees_dir: Path | None = None,
     mode: str | None = None,
     limit: int | None = None,
 ) -> dict:
@@ -259,7 +266,12 @@ def get_recommended_tickets(
         if not _candidate_row(row):
             continue
 
-        ticket_content = _read_ticket_content(project_root, ticket_id)
+        ticket_content = _read_ticket_content(
+            project_root,
+            ticket_id,
+            worktrees_dir=worktrees_dir,
+            project_id=project_id,
+        )
         eligibility = _eligibility.evaluate_eligibility(
             db_path,
             project_root,

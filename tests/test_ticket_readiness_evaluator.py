@@ -197,6 +197,24 @@ def test_dependency_missing_still_blocks(evaluator, db, git_repo, monkeypatch):
     assert "Dependency T100 not merged" in row["blocking_reasons_json"]
 
 
+def test_dependency_markdown_section_blocks(evaluator, db, git_repo, monkeypatch):
+    _set_completed_intelligence(db, "T012")
+    monkeypatch.setattr(
+        evaluator,
+        "is_ticket_merged",
+        lambda root, dep: _MergeResult(status="not_merged", source="runtime_db"),
+    )
+    content = """# T012
+
+## Depends on
+- T010 - foundation ticket
+"""
+    evaluator.run_evaluation(db, "T012", content, git_repo)
+    row = _db.get_ticket_readiness(db, "T012")
+    assert row["readiness_status"] == "blocked"
+    assert "Dependency T010 not merged" in row["blocking_reasons_json"]
+
+
 def test_warnings_persist_alongside_ready_candidate(evaluator, db, git_repo):
     """A ticket can be ready_candidate AND carry advisory warnings."""
     _set_completed_intelligence(db, "T011", requires_human_plan_review=1)

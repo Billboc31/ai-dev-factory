@@ -1,0 +1,76 @@
+"""Tests for ticket dependency extraction and worktree ticket.md resolution."""
+
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+import pytest
+
+_TOOLS = Path(__file__).parent.parent / "tools" / "agent_runner"
+sys.path.insert(0, str(_TOOLS))
+
+from ticket_readiness_evaluator import (  # noqa: E402
+    _extract_dependencies,
+    read_ticket_markdown,
+)
+
+
+def test_extract_dependencies_inline_marker():
+    content = "This ticket depends on T010 before we can ship."
+    assert _extract_dependencies(content) == ["T010"]
+
+
+def test_extract_dependencies_markdown_section_list():
+    content = """# T011
+
+## Depends on
+- T010 - foundation ticket
+- T005 - shared config
+
+## Scope
+Implement the feature.
+"""
+    assert _extract_dependencies(content) == ["T010", "T005"]
+
+
+def test_extract_dependencies_combines_inline_and_section():
+    content = """# T012
+
+Blocked by T001.
+
+## Depends on
+- T010 - prerequisite
+"""
+    assert _extract_dependencies(content) == ["T001", "T010"]
+
+
+def test_extract_dependencies_deduplicates():
+    content = """Depends on T010.
+
+## Depends on
+- T010 - same ticket again
+"""
+    assert _extract_dependencies(content) == ["T010"]
+
+
+def test_read_ticket_markdown_prefers_worktree(tmp_path: Path):
+    project_root = tmp_path / "repo"
+    project_root.mkdir()
+    (project_root / "runs" / "T011").mkdir(parents=True)
+    (project_root / "runs" / "T011" / "ticket.md").write_text(
+        "# T011\n\nfrom project root\n",
+        encoding="utf-8",
+    )
+
+    worktrees_dir = tmp_path / "worktrees"
+    wt_ticket = worktrees_dir / "T011" / "runs" / "T011" / "ticket.md"
+    wt_ticket.parent.mkdir(parents=True)
+    wt_ticket.write_text(
+        "# T011\n\n## Depends on\n- T010 - from worktree\n",
+        encoding="utf-8",
+    )
+
+    content = read_ticket_markdown(project_root, "T011", worktrees_dir=worktrees_dir)
+    assert "from worktree" in content
+    assert _extract_dependencies(content) == ["T010"]
