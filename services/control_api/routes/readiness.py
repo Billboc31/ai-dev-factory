@@ -15,11 +15,20 @@ import sys
 import threading
 from pathlib import Path
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 
+from ..dependencies import resolve_project, resolve_project_runtime_root
 from ..models.schemas import TicketReadiness, TicketReadinessQueued
 from ..services.artifact_reader import get_ticket
-from ..services.runtime_resolver import resolve_runs_dir, resolve_ticket_run_dir
+from ..services.runtime_resolver import resolve_runs_dir, resolve_ticket_run_dir, resolve_worktrees_dir
+
+try:
+    from ..services.container_paths import to_container_path
+except ImportError:
+    def to_container_path(path: Path | str | None) -> Path | None:  # type: ignore[misc]
+        return Path(path) if path is not None else None
+
+from .intelligence import _resolve_db_for_project
 
 _TOOLS_DIR = Path(__file__).resolve().parents[3] / "tools" / "agent_runner"
 if str(_TOOLS_DIR) not in sys.path:
@@ -42,6 +51,26 @@ def _db_path(request: Request):
 
 def _worktrees_dir(request: Request) -> Path | None:
     return getattr(request.app.state, "worktrees_dir", None)
+
+
+def _scoped_runtime_root(project_runtime_root: Path | None) -> Path | None:
+    return to_container_path(project_runtime_root) if project_runtime_root is not None else None
+
+
+def _scoped_worktrees(
+    request: Request,
+    project_root: Path,
+    *,
+    project_id: str | None = None,
+    project_runtime_root: Path | None = None,
+) -> Path | None:
+    if project_id is not None or project_runtime_root is not None:
+        return resolve_worktrees_dir(
+            project_root,
+            project_id=project_id,
+            project_runtime_root=_scoped_runtime_root(project_runtime_root),
+        )
+    return _worktrees_dir(request)
 
 
 def _bool_or_none(val) -> bool | None:
@@ -70,9 +99,20 @@ def _parse_row(row: dict) -> TicketReadiness:
     )
 
 
-def _read_ticket_content(project_root: Path, ticket_id: str, worktrees_dir: Path | None) -> str:
+def _read_ticket_content(
+    project_root: Path,
+    ticket_id: str,
+    worktrees_dir: Path | None,
+    *,
+    project_id: str | None = None,
+    project_runtime_root: Path | None = None,
+) -> str:
     try:
-        runs_dir = resolve_runs_dir(project_root)
+        runs_dir = resolve_runs_dir(
+            project_root,
+            project_id=project_id,
+            project_runtime_root=_scoped_runtime_root(project_runtime_root),
+        )
         run_dir = resolve_ticket_run_dir(ticket_id, runs_dir, worktrees_dir)
         ticket_path = run_dir / "ticket.md"
         if ticket_path.exists():
@@ -83,16 +123,25 @@ def _read_ticket_content(project_root: Path, ticket_id: str, worktrees_dir: Path
 
 
 @router.get("/{ticket_id}/readiness", response_model=TicketReadiness)
-def get_readiness(ticket_id: str, request: Request) -> TicketReadiness:
+def get_readiness(
+    ticket_id: str,
+    request: Request,
+    project_id: str | None = None,
+    project_root: Path | None = None,
+    project_runtime_root: Path | None = None,
+) -> TicketReadiness:
     logger.info("api: GET /tickets/%s/readiness", ticket_id)
-    project_root = _root(request)
-    wt_dir = _worktrees_dir(request)
+    root = project_root or _root(request)
+    prr = _scoped_runtime_root(project_runtime_root)
+    wt_dir = _scoped_worktrees(
+        request, root, project_id=project_id, project_runtime_root=project_runtime_root
+    )
 
-    ticket = get_ticket(project_root, ticket_id, worktrees_dir=wt_dir)
+    ticket = get_ticket(root, ticket_id, worktrees_dir=wt_dir, project_runtime_root=prr)
     if ticket is None:
         raise HTTPException(status_code=404, detail=f"ticket {ticket_id} not found")
 
-    db = _db_path(request)
+    db = _resolve_db_for_project(request, project_id) if project_id else _db_path(request)
     if db is None:
         raise HTTPException(status_code=503, detail="database not available")
 
@@ -111,16 +160,25 @@ def get_readiness(ticket_id: str, request: Request) -> TicketReadiness:
     response_model=TicketReadinessQueued,
     status_code=202,
 )
-def evaluate_readiness(ticket_id: str, request: Request) -> TicketReadinessQueued:
+def evaluate_readiness(
+    ticket_id: str,
+    request: Request,
+    project_id: str | None = None,
+    project_root: Path | None = None,
+    project_runtime_root: Path | None = None,
+) -> TicketReadinessQueued:
     logger.info("api: POST /tickets/%s/evaluate-readiness", ticket_id)
-    project_root = _root(request)
-    wt_dir = _worktrees_dir(request)
+    root = project_root or _root(request)
+    prr = _scoped_runtime_root(project_runtime_root)
+    wt_dir = _scoped_worktrees(
+        request, root, project_id=project_id, project_runtime_root=project_runtime_root
+    )
 
-    ticket = get_ticket(project_root, ticket_id, worktrees_dir=wt_dir)
+    ticket = get_ticket(root, ticket_id, worktrees_dir=wt_dir, project_runtime_root=prr)
     if ticket is None:
         raise HTTPException(status_code=404, detail=f"ticket {ticket_id} not found")
 
-    db = _db_path(request)
+    db = _resolve_db_for_project(request, project_id) if project_id else _db_path(request)
     if db is None:
         raise HTTPException(status_code=503, detail="database not available")
 
@@ -131,13 +189,15 @@ def evaluate_readiness(ticket_id: str, request: Request) -> TicketReadinessQueue
             readiness_status=existing["readiness_status"],
         )
 
-    ticket_content = _read_ticket_content(project_root, ticket_id, wt_dir)
+    ticket_content = _read_ticket_content(
+        root, ticket_id, wt_dir, project_id=project_id, project_runtime_root=project_runtime_root
+    )
 
     runtime_db.upsert_ticket_readiness(db, ticket_id, readiness_status="queued")
 
     def _bg() -> None:
         try:
-            _evaluator.run_evaluation(db, ticket_id, ticket_content, project_root)
+            _evaluator.run_evaluation(db, ticket_id, ticket_content, root)
         except Exception:
             logger.exception("readiness evaluation background error for %s", ticket_id)
 
@@ -151,8 +211,20 @@ def evaluate_readiness(ticket_id: str, request: Request) -> TicketReadinessQueue
     "/{project_id}/tickets/{ticket_id}/readiness",
     response_model=TicketReadiness,
 )
-def get_readiness_project(project_id: str, ticket_id: str, request: Request) -> TicketReadiness:
-    return get_readiness(ticket_id, request)
+def get_readiness_project(
+    project_id: str,
+    ticket_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> TicketReadiness:
+    return get_readiness(
+        ticket_id,
+        request,
+        project_id=project_id,
+        project_root=project_root,
+        project_runtime_root=project_runtime_root,
+    )
 
 
 @project_router.post(
@@ -161,6 +233,16 @@ def get_readiness_project(project_id: str, ticket_id: str, request: Request) -> 
     status_code=202,
 )
 def evaluate_readiness_project(
-    project_id: str, ticket_id: str, request: Request
+    project_id: str,
+    ticket_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
 ) -> TicketReadinessQueued:
-    return evaluate_readiness(ticket_id, request)
+    return evaluate_readiness(
+        ticket_id,
+        request,
+        project_id=project_id,
+        project_root=project_root,
+        project_runtime_root=project_runtime_root,
+    )

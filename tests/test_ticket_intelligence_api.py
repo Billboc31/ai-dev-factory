@@ -49,12 +49,20 @@ def _isolate_env(monkeypatch):
 def _make_app(tmp_path: Path):
     from services.control_api.main import create_app
     import services.control_api.routes.intelligence as _intel_route
+    from services.control_api.services.project_registry import ProjectEntry, ProjectRegistry
 
     app = create_app(project_root=tmp_path)
     # Each test gets its own isolated SQLite DB to avoid shared-DB cross-test pollution.
     isolated_db = tmp_path / ".runtime" / "adf-test.sqlite"
     _sqlite_db.init_runtime_db(isolated_db)
     app.state.db_path = isolated_db
+    app.state.project_registry = ProjectRegistry(
+        _entries=[
+            ProjectEntry(id=tmp_path.name, root=tmp_path, project_runtime_root=tmp_path),
+            ProjectEntry(id="proj1", root=tmp_path, project_runtime_root=tmp_path),
+            ProjectEntry(id="P1", root=tmp_path, project_runtime_root=tmp_path),
+        ],
+    )
 
     # The route imports runtime_db at module level; in a postgres env that module is
     # rebound to postgres functions expecting a PgHandle. Override the reference so the
@@ -512,9 +520,13 @@ def test_post_analyze_persists_failure_on_supervisor_unreachable(tmp_path, monke
 
     from services.control_api.main import create_app
     import services.control_api.routes.intelligence as _intel_route
+    from services.control_api.services.project_registry import ProjectEntry, ProjectRegistry
 
     app = create_app(project_root=tmp_path)
     _intel_route.runtime_db = _sqlite_db
+    app.state.project_registry = ProjectRegistry(
+        _entries=[ProjectEntry(id="P1", root=tmp_path, project_runtime_root=tmp_path / "P1")],
+    )
 
     expected_db = tmp_path / "P1" / ".runtime" / "ai-dev-factory.sqlite"
     expected_db.parent.mkdir(parents=True, exist_ok=True)

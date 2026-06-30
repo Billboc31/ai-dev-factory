@@ -156,7 +156,11 @@ def test_run_once_calls_launch_for_auto_runnable_state(tmp_path):
     _write_state(runs, "T001", "PLAN_APPROVED")
     with patch("run_daemon.launch_ticket") as mock_launch:
         run_once("test-cmd", False, runs)
-    mock_launch.assert_called_once_with("T001", "test-cmd", False, runs, worktrees_dir=None, auto_commit=False, auto_push=False, auto_include_code=False)
+    mock_launch.assert_called_once_with(
+        "T001", "test-cmd", False, runs,
+        worktrees_dir=None, auto_commit=False, auto_push=False, auto_include_code=False,
+        state_dir=runs,
+    )
 
 
 def test_run_once_skips_human_gate_state(tmp_path):
@@ -448,7 +452,7 @@ def test_run_once_uses_dispatcher_when_enabled(tmp_path, monkeypatch, capsys):
     assert "scheduling: dispatcher (mode=advisory)" in capsys.readouterr().out
 
 
-def test_run_once_falls_back_to_legacy_when_dispatcher_empty(tmp_path, monkeypatch, capsys):
+def test_run_once_launches_nothing_when_dispatcher_empty(tmp_path, monkeypatch, capsys):
     runs = tmp_path / "runs"
     _write_state(runs, "T001", "PLAN_APPROVED")
 
@@ -464,11 +468,33 @@ def test_run_once_falls_back_to_legacy_when_dispatcher_empty(tmp_path, monkeypat
     with patch("run_daemon.launch_ticket") as mock_launch:
         run_once("test-cmd", False, runs)
 
-    assert mock_launch.call_count == 1
-    assert mock_launch.call_args.args[0] == "T001"
+    mock_launch.assert_not_called()
     out = capsys.readouterr().out
     assert "scheduling: dispatcher (mode=advisory)" in out
-    assert "dispatcher returned no recommendations — falling back to legacy scan" in out
+    assert "dispatcher returned no runnable tickets; launching nothing" in out
+
+
+def test_run_once_launches_nothing_when_dispatcher_raises(tmp_path, monkeypatch, capsys):
+    runs = tmp_path / "runs"
+    _write_state(runs, "T001", "PLAN_APPROVED")
+
+    import run_daemon
+    monkeypatch.setattr(run_daemon, "_get_dispatcher_mode", lambda _db: "manual")
+    monkeypatch.setattr(run_daemon, "_ensure_db", lambda: tmp_path / "fake.sqlite")
+
+    def _boom(*_args, **_kwargs):
+        raise RuntimeError("dispatcher unavailable")
+
+    monkeypatch.setattr(run_daemon, "_get_recommended_tickets", _boom)
+
+    with patch("run_daemon.launch_ticket") as mock_launch:
+        run_once("test-cmd", False, runs)
+
+    mock_launch.assert_not_called()
+    out = capsys.readouterr().out
+    assert "scheduling: dispatcher (mode=manual)" in out
+    assert "dispatcher get_recommended_tickets failed" in out
+    assert "dispatcher returned no runnable tickets; launching nothing" in out
 
 
 def test_run_once_dispatcher_skips_when_state_not_auto_runnable(tmp_path, monkeypatch):
@@ -505,6 +531,8 @@ def test_run_once_dispatcher_skips_when_state_not_auto_runnable(tmp_path, monkey
     [
         ("off", "scheduling: legacy (dispatcher=off)"),
         ("advisory", "scheduling: dispatcher (mode=advisory)"),
+        ("manual", "scheduling: dispatcher (mode=manual)"),
+        ("auto", "scheduling: dispatcher (mode=auto)"),
     ],
 )
 def test_run_once_logs_active_strategy(tmp_path, monkeypatch, capsys, mode, expected):

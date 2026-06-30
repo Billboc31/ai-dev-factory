@@ -48,11 +48,15 @@ def _isolate_env(monkeypatch):
 
 def _make_app(tmp_path: Path):
     from services.control_api.main import create_app
+    from services.control_api.services.project_registry import ProjectEntry, ProjectRegistry
 
     app = create_app(project_root=tmp_path)
     isolated_db = tmp_path / ".runtime" / "adf-test-dispatcher.sqlite"
     _sqlite_db.init_runtime_db(isolated_db)
     app.state.db_path = isolated_db
+    app.state.project_registry = ProjectRegistry(
+        _entries=[ProjectEntry(id="proj-a", root=tmp_path, project_runtime_root=tmp_path)],
+    )
 
     import runtime_db as live_db
     import ticket_dispatcher as _disp

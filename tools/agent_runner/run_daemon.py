@@ -1660,7 +1660,7 @@ def _select_tickets_via_dispatcher(
     Filters to states in ``AUTO_RUNNABLE_STATES`` so the caller's loop can run
     the existing retry/cooldown/worker-registry logic untouched. Returns ``[]``
     on any failure or when the dispatcher reports ``not_implemented`` — the
-    caller logs and falls back to the legacy scan.
+    caller must not fall back to legacy scheduling while dispatcher is enabled.
     """
     if db_path is None:
         return []
@@ -1732,10 +1732,10 @@ def run_once(
         if dispatcher_tickets:
             tickets = dispatcher_tickets
         else:
-            _log("dispatcher returned no recommendations — falling back to legacy scan")
-            tickets = legacy_tickets
+            _log("dispatcher returned no runnable tickets; launching nothing")
+            return
     else:
-        _log(f"scheduling: legacy (dispatcher={dispatcher_mode})")
+        _log(f"scheduling: legacy (dispatcher=off)")
         tickets = legacy_tickets
 
     if not tickets:

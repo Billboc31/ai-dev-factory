@@ -269,6 +269,8 @@ def _run_ai_subprocess(
     prompt: str,
     env: dict,
     timeout: int,
+    *,
+    cwd: Path | str | None = None,
 ) -> tuple[int, str, str, bool, int]:
     """Run the AI subprocess with an enforced upper bound on wall-clock time.
 
@@ -284,6 +286,7 @@ def _run_ai_subprocess(
         stderr=subprocess.PIPE,
         text=True,
         env=env,
+        cwd=str(cwd) if cwd is not None else None,
     )
     t0 = time.monotonic()
     timed_out = False
@@ -459,6 +462,9 @@ def run_analysis(
             command = shlex.split(exec_cmd)
             if not command:
                 raise ValueError("exec_cmd is empty")
+            # Non-interactive mode — matches run_analysis / run_scripts.
+            if "--print" not in command and "-p" not in command:
+                command = command + ["--print"]
 
             env = dict(os.environ)
             env["PYTHONDONTWRITEBYTECODE"] = "1"
@@ -493,7 +499,7 @@ def run_analysis(
             )
 
             rc, stdout, stderr, timed_out, duration_ms = _run_ai_subprocess(
-                command, prompt, env, analysis_timeout,
+                command, prompt, env, analysis_timeout, cwd=project_root,
             )
 
             _intel_log.info(
@@ -547,8 +553,9 @@ def run_analysis(
 
             if rc != 0 or not stdout.strip():
                 summary = f"AI call failed (rc={rc})"
-                if stderr:
-                    summary += f": {stderr[:500]}"
+                detail = (stderr or stdout or "").strip()
+                if detail:
+                    summary += f": {detail[:500]}"
                 _set_stage(
                     db_path, ticket_id, STAGE_FAILED,
                     project_id=project_id,
