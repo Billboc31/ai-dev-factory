@@ -197,10 +197,24 @@ def test_run_once_skips_launch_when_eligibility_not_ready(tmp_path, monkeypatch)
 
 def test_run_once_logs_human_gate_skip(tmp_path, capsys):
     runs = tmp_path / "runs"
-    _write_state(runs, "T001", "TEST_COMPLETE")
-    with patch("run_daemon.launch_ticket"):
+    run_dir = runs / "T001"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(
+        json.dumps({"ticket_id": "T001", "state": "TEST_COMPLETE", "issue_closed": True}),
+        encoding="utf-8",
+    )
+    with patch("run_daemon.launch_ticket"), patch("run_daemon.handle_test_complete"):
         run_once("test-cmd", False, runs)
     assert "human gate" in capsys.readouterr().out
+
+
+def test_run_once_finalizes_pending_test_complete_before_dispatcher(tmp_path):
+    runs = tmp_path / "runs"
+    _write_state(runs, "T001", "TEST_COMPLETE")
+    with patch("run_daemon.handle_test_complete") as mock_handle, \
+         patch("run_daemon.launch_ticket"):
+        run_once("test-cmd", False, runs)
+    mock_handle.assert_called_once()
 
 
 def test_run_once_logs_no_tickets_when_empty(tmp_path, capsys):

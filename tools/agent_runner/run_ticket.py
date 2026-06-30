@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Sequential ticket runner for ai-dev-factory.
 
-This runner remains intentionally explicit:
-- no autonomous merge
-- no hidden network calls except explicit git commands
-- no prompt generation
+This runner orchestrates the ticket workflow explicitly. At ``TEST_COMPLETE`` it
+runs the shared PR lifecycle (create PR, auto-merge, close issue) via
+``ticket_pr_lifecycle``.
 """
 
 from __future__ import annotations
@@ -1064,6 +1063,44 @@ def init_auto(ticket_id: str, branch_slug: str | None, ticket_source: str | None
 
 # ── --auto ────────────────────────────────────────────────────────────────────
 
+def _resolve_github_repo() -> str | None:
+    """Return ``owner/repo`` for the current git checkout via ``gh``."""
+    try:
+        proc = subprocess.run(
+            ["gh", "repo", "view", "--json", "nameWithOwner"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if proc.returncode == 0:
+            data = json.loads(proc.stdout)
+            owner_repo = data.get("nameWithOwner")
+            if owner_repo:
+                return str(owner_repo)
+    except (FileNotFoundError, json.JSONDecodeError, OSError):
+        pass
+    return None
+
+
+def _finalize_test_complete_pr(ticket_id: str) -> None:
+    """Create/merge PR and close issue — last step of the coding workflow."""
+    state = load_state(ticket_id)
+    if state.get("issue_closed") or state.get("pr_skipped_no_diff"):
+        return
+
+    import ticket_pr_lifecycle as pr  # noqa: WPS433
+
+    run_dir = _state_path(ticket_id).parent
+    repo = _resolve_github_repo()
+    _log_runtime(ticket_id, "auto-run: TEST_COMPLETE — running PR lifecycle")
+    pr.handle_test_complete(
+        ticket_id,
+        run_dir,
+        repo,
+        worktree_cwd=str(Path.cwd()),
+    )
+
+
 def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push: bool = False, include_code: bool = False, project_root: Path | None = None) -> int:
     try:
         state = load_state(ticket_id)
@@ -1074,9 +1111,13 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
     current_state = state["state"]
     _log_runtime(ticket_id, f"auto-run start: state={current_state}")
 
-    # Gate 3: terminal state
+    # Gate 3: terminal state — finalize GitHub PR if the workflow stopped early
     if current_state == "TEST_COMPLETE":
-        print("workflow complete — no automatic merge")
+        try:
+            _finalize_test_complete_pr(ticket_id)
+        except TicketRunnerError:
+            pass
+        print("workflow complete")
         _log_runtime(ticket_id, "auto-run: workflow complete (TEST_COMPLETE)")
         return 0
 
@@ -1226,6 +1267,13 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
         elif commit_rc not in (0, 1):
             print(f"warning: auto-commit failed (rc={commit_rc}) — state saved, push skipped", file=sys.stderr)
             _log_runtime(ticket_id, f"auto-run: auto-commit failed rc={commit_rc}")
+
+    if next_state == "TEST_COMPLETE":
+        try:
+            _finalize_test_complete_pr(ticket_id)
+        except TicketRunnerError as exc:
+            print(f"warning: PR lifecycle failed: {exc}", file=sys.stderr)
+            _log_runtime(ticket_id, f"auto-run: PR lifecycle failed: {exc}")
 
     return 0
 
