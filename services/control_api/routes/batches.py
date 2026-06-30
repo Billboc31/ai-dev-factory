@@ -478,11 +478,12 @@ def _build_insights(
                 runnable.append(tid)
     runnable.sort()
 
+    runtime_map = _ticket_runtime_map(db_path)
     blocked: list[BatchBlockedTicket] = []
     for ticket_id in ticket_ids:
         deps = list(analyses.get(ticket_id, {}).get("depends_on") or [])
         runtime_state = (
-            _ticket_runtime_map(db_path).get(ticket_id, {}).get("state") or ""
+            runtime_map.get(ticket_id, {}).get("state") or ""
         ).upper()
         if runtime_state in _DONE_STATES:
             continue

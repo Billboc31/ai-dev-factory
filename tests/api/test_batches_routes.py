@@ -85,6 +85,12 @@ def _make_app(tmp_path: Path):
         "get_ticket_readiness",
         "update_backlog_batch",
         "append_runtime_event",
+        # Project-scoped resolver: in Postgres mode the live module returns a
+        # PgHandle whose __str__ is "postgres:adf#<project>". The route then
+        # hands that string to the SQLite functions reinjected above, and
+        # sqlite3.connect() materialises a real file in CWD. Alias the SQLite
+        # resolver so the route stays on the fixture's isolated .sqlite path.
+        "resolve_db_path_for_project",
     ):
         setattr(live_db, name, getattr(_sqlite_db, name))
     _bb.runtime_db = live_db
