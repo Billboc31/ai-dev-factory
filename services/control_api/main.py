@@ -15,7 +15,7 @@ from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from .routes import approvals, auto_fix, daemon, deployer, diagnostics, dispatcher, eligibility, environments, health, intelligence, issues, operations, project_map, projects, providers, readiness, rules, runtime_dashboard, sandbox, settings, tickets
+from .routes import approvals, auto_fix, batches, daemon, deployer, diagnostics, dispatcher, eligibility, environments, health, intelligence, issues, operations, project_map, projects, providers, readiness, rules, runtime_dashboard, sandbox, settings, tickets
 from .services.project_registry import ProjectRegistry
 from .services.runtime_resolver import resolve_worktrees_dir
 
@@ -234,6 +234,9 @@ def create_app(
     # T212: /dispatcher/* — advisory next-ticket dispatcher (read-only).
     app.include_router(dispatcher.router)
     app.include_router(dispatcher.project_router)
+    # T219: /dispatcher/batches/* — backlog batch dashboard (read-only + guarded actions).
+    app.include_router(batches.router)
+    app.include_router(batches.project_router)
     # T215: /settings/* — global runtime settings (DB-backed, env fallback).
     app.include_router(settings.router)
 

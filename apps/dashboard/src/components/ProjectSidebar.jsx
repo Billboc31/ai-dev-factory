@@ -4,6 +4,7 @@ const PROJECT_NAV = [
   { label: 'Tickets', path: 'tickets' },
   { label: 'Dashboard', path: 'dashboard' },
   { label: 'Dispatcher', path: 'dispatcher' },
+  { label: 'Batches', path: 'dispatcher/batches' },
   { label: 'Execution Rules', path: 'rules' },
   { label: 'Worktrees', path: 'worktrees' },
   { label: 'Logs', path: 'logs' },
