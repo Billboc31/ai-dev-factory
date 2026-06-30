@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  EXECUTION_APPROVAL_GATE_DISABLED_DETAIL,
   STEP_KEYS,
   deriveGlobalSummary,
   deriveStepStatuses,
   eligibilityToGlobalSummary,
+  getVisibleStepKeys,
+  isHumanExecutionApprovalRequired,
 } from '../src/lib/ticketWorkflowStatus'
 
 describe('deriveStepStatuses', () => {
@@ -12,7 +15,8 @@ describe('deriveStepStatuses', () => {
     expect(Object.keys(steps).sort()).toEqual([...STEP_KEYS].sort())
     expect(steps.intelligence.status).toBe('pending')
     expect(steps.readiness.status).toBe('pending')
-    expect(steps.approval.status).toBe('pending')
+    expect(steps.approval.status).toBe('done')
+    expect(steps.approval.summary).toBe('Not required')
     expect(steps.readyToTake.status).toBe('pending')
     expect(steps.execution.status).toBe('pending')
   })
@@ -101,15 +105,27 @@ describe('deriveStepStatuses', () => {
     const steps = deriveStepStatuses({
       readiness: { readiness_status: 'ready_candidate' },
       approval: null,
+      requireHumanApproval: true,
     })
     expect(steps.approval.status).toBe('current')
     expect(steps.approval.blockingReason).toBe('Human execution approval required')
     expect(steps.approval.nextAction).toBe('Approve ticket for execution')
   })
 
+  it('marks approval as done when gate is disabled', () => {
+    const steps = deriveStepStatuses({
+      readiness: { readiness_status: 'ready_candidate' },
+      approval: null,
+      requireHumanApproval: false,
+    })
+    expect(steps.approval.status).toBe('done')
+    expect(steps.approval.summary).toBe('Not required')
+  })
+
   it('marks approval as done when latest approval is approved', () => {
     const steps = deriveStepStatuses({
       approval: { approval_status: 'approved', approved_by: 'alice' },
+      requireHumanApproval: true,
     })
     expect(steps.approval.status).toBe('done')
     expect(steps.approval.summary).toMatch(/alice/)
@@ -120,6 +136,16 @@ describe('deriveStepStatuses', () => {
       intelligence: { analysis_status: 'completed' },
       readiness: { readiness_status: 'ready_candidate' },
       approval: { approval_status: 'approved' },
+      requireHumanApproval: true,
+    })
+    expect(steps.readyToTake.status).toBe('done')
+  })
+
+  it('marks readyToTake as done when gate disabled and intelligence/readiness pass', () => {
+    const steps = deriveStepStatuses({
+      intelligence: { analysis_status: 'completed' },
+      readiness: { readiness_status: 'ready_candidate' },
+      requireHumanApproval: false,
     })
     expect(steps.readyToTake.status).toBe('done')
   })
@@ -156,11 +182,25 @@ describe('deriveGlobalSummary', () => {
       intelligence: { analysis_status: 'completed' },
       readiness: { readiness_status: 'ready_candidate' },
       approval: null,
+      requireHumanApproval: true,
     })
-    const summary = deriveGlobalSummary(steps)
+    const summary = deriveGlobalSummary(steps, { requireHumanApproval: true })
     expect(summary.status).toBe('BLOCKED')
     expect(summary.reason).toBe('Human execution approval required')
     expect(summary.nextAction).toBe('Approve ticket for execution')
+  })
+
+  it('returns READY TO TAKE when gate disabled and intelligence/readiness pass', () => {
+    const steps = deriveStepStatuses({
+      intelligence: { analysis_status: 'completed' },
+      readiness: { readiness_status: 'ready_candidate' },
+      requireHumanApproval: false,
+      ticket: { state: 'QUEUED' },
+    })
+    const summary = deriveGlobalSummary(steps, { requireHumanApproval: false })
+    expect(summary.status).toBe('READY TO TAKE')
+    expect(summary.reason).toBe('All checks passed')
+    expect(summary.nextAction).toBe('Assign worker')
   })
 
   it('returns READY TO TAKE / All checks passed / Assign worker when all gates pass and no execution started', () => {
@@ -169,8 +209,9 @@ describe('deriveGlobalSummary', () => {
       readiness: { readiness_status: 'ready_candidate' },
       approval: { approval_status: 'approved' },
       ticket: { state: 'QUEUED' },
+      requireHumanApproval: true,
     })
-    const summary = deriveGlobalSummary(steps)
+    const summary = deriveGlobalSummary(steps, { requireHumanApproval: true })
     expect(summary.status).toBe('READY TO TAKE')
     expect(summary.reason).toBe('All checks passed')
     expect(summary.nextAction).toBe('Assign worker')
@@ -181,9 +222,26 @@ describe('deriveGlobalSummary', () => {
       intelligence: { analysis_status: 'completed' },
       readiness: { readiness_status: 'blocked', blocking_reasons: ['needs human input'] },
     })
-    const summary = deriveGlobalSummary(steps)
+    const summary = deriveGlobalSummary(steps, { requireHumanApproval: true })
     expect(summary.status).toBe('BLOCKED')
     expect(summary.reason).toBe('needs human input')
+  })
+
+  it('isHumanExecutionApprovalRequired reads eligibility checks', () => {
+    expect(isHumanExecutionApprovalRequired(null)).toBe(false)
+    expect(isHumanExecutionApprovalRequired({
+      checks: { approval: { detail: EXECUTION_APPROVAL_GATE_DISABLED_DETAIL } },
+    })).toBe(false)
+    expect(isHumanExecutionApprovalRequired({
+      checks: { approval: { detail: 'Human execution approval required' } },
+    })).toBe(true)
+  })
+
+  it('getVisibleStepKeys omits approval and readyToTake when gate disabled', () => {
+    expect(getVisibleStepKeys({ requireHumanApproval: false })).toEqual([
+      'intelligence', 'readiness', 'execution',
+    ])
+    expect(getVisibleStepKeys({ requireHumanApproval: true })).toEqual(STEP_KEYS)
   })
 
   it('returns IN PROGRESS when execution is current', () => {

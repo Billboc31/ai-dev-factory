@@ -12,6 +12,7 @@ const APPROVAL_PENDING_FIXTURE = {
   intelligence: { analysis_status: 'completed', difficulty_score: 4, risk_score: 3 },
   readiness: { readiness_status: 'ready_candidate' },
   approval: null,
+  requireHumanApproval: true,
 }
 
 const ALL_DONE_FIXTURE = {
@@ -19,22 +20,32 @@ const ALL_DONE_FIXTURE = {
   readiness: { readiness_status: 'ready_candidate' },
   approval: { approval_status: 'approved', approved_by: 'alice' },
   ticket: { state: 'QUEUED' },
+  requireHumanApproval: true,
 }
 
-function renderTimeline(fixture, content = {}) {
-  const steps = deriveStepStatuses(fixture)
-  const summary = deriveGlobalSummary(steps)
+const GATE_DISABLED_FIXTURE = {
+  intelligence: { analysis_status: 'completed', difficulty_score: 2, risk_score: 1 },
+  readiness: { readiness_status: 'ready_candidate' },
+  ticket: { state: 'QUEUED' },
+  requireHumanApproval: false,
+}
+
+function renderTimeline(fixture, content = {}, options = {}) {
+  const { requireHumanApproval = fixture.requireHumanApproval ?? false } = options
+  const steps = deriveStepStatuses({ ...fixture, requireHumanApproval })
+  const summary = deriveGlobalSummary(steps, { requireHumanApproval })
   return render(
     <TicketWorkflowTimeline
       stepStatuses={steps}
       globalSummary={summary}
+      requireHumanApproval={requireHumanApproval}
       stepContent={content}
     />
   )
 }
 
 describe('TicketWorkflowTimeline', () => {
-  it('renders all five steps in workflow order', () => {
+  it('renders all five steps in workflow order when approval gate is enabled', () => {
     renderTimeline(APPROVAL_PENDING_FIXTURE)
     for (const key of STEP_KEYS) {
       expect(screen.getByTestId(`workflow-step-${key}`)).toBeInTheDocument()
@@ -48,6 +59,15 @@ describe('TicketWorkflowTimeline', () => {
     }
   })
 
+  it('hides Human Approval and Ready To Take when gate is disabled', () => {
+    renderTimeline(GATE_DISABLED_FIXTURE)
+    expect(screen.getByTestId('workflow-step-intelligence')).toBeInTheDocument()
+    expect(screen.getByTestId('workflow-step-readiness')).toBeInTheDocument()
+    expect(screen.getByTestId('workflow-step-execution')).toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-step-approval')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('workflow-step-readyToTake')).not.toBeInTheDocument()
+  })
+
   it('shows the blocked-by-approval global summary fixture', () => {
     renderTimeline(APPROVAL_PENDING_FIXTURE)
     const block = screen.getByTestId('ticket-workflow-global-summary')
@@ -56,7 +76,15 @@ describe('TicketWorkflowTimeline', () => {
     expect(block).toHaveTextContent('Approve ticket for execution')
   })
 
-  it('shows the READY TO TAKE summary when all gates pass', () => {
+  it('shows the READY TO TAKE summary when gate disabled and upstream checks pass', () => {
+    renderTimeline(GATE_DISABLED_FIXTURE)
+    const block = screen.getByTestId('ticket-workflow-global-summary')
+    expect(block).toHaveTextContent('READY TO TAKE')
+    expect(block).toHaveTextContent('All checks passed')
+    expect(block).toHaveTextContent('Assign worker')
+  })
+
+  it('shows the READY TO TAKE summary when all gates pass with approval enabled', () => {
     renderTimeline(ALL_DONE_FIXTURE)
     const block = screen.getByTestId('ticket-workflow-global-summary')
     expect(block).toHaveTextContent('READY TO TAKE')
@@ -87,7 +115,7 @@ describe('TicketWorkflowTimeline', () => {
   })
 
   it('renders DEPENDENCY BLOCKED summary with reason and next action', () => {
-    const steps = deriveStepStatuses(ALL_DONE_FIXTURE)
+    const steps = deriveStepStatuses({ ...ALL_DONE_FIXTURE, requireHumanApproval: true })
     render(
       <TicketWorkflowTimeline
         stepStatuses={steps}
@@ -96,6 +124,7 @@ describe('TicketWorkflowTimeline', () => {
           reason: 'Dependency T001 not merged',
           nextAction: 'Wait for T001 to be merged',
         }}
+        requireHumanApproval
       />
     )
     const block = screen.getByTestId('ticket-workflow-global-summary')
@@ -105,7 +134,7 @@ describe('TicketWorkflowTimeline', () => {
   })
 
   it('renders WAITING HUMAN ACTION summary with the dedicated style', () => {
-    const steps = deriveStepStatuses(APPROVAL_PENDING_FIXTURE)
+    const steps = deriveStepStatuses({ ...APPROVAL_PENDING_FIXTURE, requireHumanApproval: true })
     render(
       <TicketWorkflowTimeline
         stepStatuses={steps}
@@ -114,6 +143,7 @@ describe('TicketWorkflowTimeline', () => {
           reason: 'Human execution approval required',
           nextAction: 'Approve ticket for execution',
         }}
+        requireHumanApproval
       />
     )
     const block = screen.getByTestId('ticket-workflow-global-summary')

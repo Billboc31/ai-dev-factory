@@ -12,7 +12,7 @@ import TicketReadinessPanel from '../components/TicketReadinessPanel'
 import TicketWorkflowTimeline from '../components/TicketWorkflowTimeline'
 import WorkflowTimeline from '../components/WorkflowTimeline'
 import usePolling from '../hooks/usePolling'
-import { deriveGlobalSummary, deriveStepStatuses, eligibilityToGlobalSummary } from '../lib/ticketWorkflowStatus'
+import { deriveGlobalSummary, deriveStepStatuses, eligibilityToGlobalSummary, isHumanExecutionApprovalRequired } from '../lib/ticketWorkflowStatus'
 
 const CONFLICT_PANEL_STATES = new Set([
   'CONFLICT_RESOLUTION_NEEDED',
@@ -337,6 +337,11 @@ export default function TicketDetailPage() {
       .catch(err => setError(err.response?.data?.detail || err.message))
   }, [id, projectId])
 
+  const requireHumanApproval = useMemo(
+    () => isHumanExecutionApprovalRequired(workflowData.eligibility),
+    [workflowData.eligibility],
+  )
+
   const stepStatuses = useMemo(() => deriveStepStatuses({
     intelligence: workflowData.intelligence,
     readiness: workflowData.readiness,
@@ -344,15 +349,16 @@ export default function TicketDetailPage() {
       ? workflowData.approvals[workflowData.approvals.length - 1]
       : null,
     ticket,
-  }), [workflowData, ticket])
+    requireHumanApproval,
+  }), [workflowData, ticket, requireHumanApproval])
 
   const globalSummary = useMemo(() => {
     // Prefer the server-side eligibility decision when available — the page
     // falls back to the offline client-side derivation while the eligibility
     // endpoint is loading or returns 404.
     return eligibilityToGlobalSummary(workflowData.eligibility)
-      ?? deriveGlobalSummary(stepStatuses)
-  }, [workflowData.eligibility, stepStatuses])
+      ?? deriveGlobalSummary(stepStatuses, { requireHumanApproval })
+  }, [workflowData.eligibility, stepStatuses, requireHumanApproval])
 
   if (loading) return <p className="text-gray-500">Loading…</p>
 
@@ -386,6 +392,7 @@ export default function TicketDetailPage() {
       <TicketWorkflowTimeline
         stepStatuses={stepStatuses}
         globalSummary={globalSummary}
+        requireHumanApproval={requireHumanApproval}
         stepContent={{
           intelligence: <TicketIntelligencePanel ticketId={id} projectId={projectId} />,
           readiness:    <TicketReadinessPanel ticketId={id} projectId={projectId} />,

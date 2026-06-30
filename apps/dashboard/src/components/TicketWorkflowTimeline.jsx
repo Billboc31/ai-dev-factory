@@ -1,4 +1,4 @@
-import { STEP_KEYS, STEP_LABELS } from '../lib/ticketWorkflowStatus'
+import { getVisibleStepKeys, STEP_LABELS } from '../lib/ticketWorkflowStatus'
 import TicketWorkflowStep from './TicketWorkflowStep'
 
 const GLOBAL_STATUS_STYLES = {
@@ -35,12 +35,19 @@ function GlobalSummary({ summary }) {
   )
 }
 
-export default function TicketWorkflowTimeline({ stepStatuses, globalSummary, stepContent }) {
+export default function TicketWorkflowTimeline({
+  stepStatuses,
+  globalSummary,
+  stepContent,
+  requireHumanApproval = false,
+}) {
   if (!stepStatuses) return null
+
+  const visibleKeys = getVisibleStepKeys({ requireHumanApproval })
 
   // Auto-open the first step that is current or blocked so the user lands on the
   // step that needs attention without an extra click.
-  const blockerKey = STEP_KEYS.find(k =>
+  const blockerKey = visibleKeys.find(k =>
     stepStatuses[k]?.status === 'current' || stepStatuses[k]?.status === 'blocked'
   )
 
@@ -48,7 +55,7 @@ export default function TicketWorkflowTimeline({ stepStatuses, globalSummary, st
     <div className="mb-6" data-testid="ticket-workflow-timeline">
       <GlobalSummary summary={globalSummary} />
       <div className="space-y-0">
-        {STEP_KEYS.map((key, idx) => {
+        {visibleKeys.map((key, idx) => {
           const step = stepStatuses[key]
           return (
             <div key={key}>
@@ -63,7 +70,7 @@ export default function TicketWorkflowTimeline({ stepStatuses, globalSummary, st
               >
                 {stepContent?.[key]}
               </TicketWorkflowStep>
-              {idx < STEP_KEYS.length - 1 && (
+              {idx < visibleKeys.length - 1 && (
                 <div className="flex justify-center text-gray-400 text-lg leading-none my-1" aria-hidden="true">
                   ↓
                 </div>

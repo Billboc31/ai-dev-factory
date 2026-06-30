@@ -20,6 +20,21 @@ export const STEP_LABELS = {
   execution:    'Execution',
 }
 
+export const EXECUTION_APPROVAL_GATE_DISABLED_DETAIL =
+  'Human execution approval gate is disabled.'
+
+/** Whether the Human Approval / Ready To Take timeline steps should be shown. */
+export function isHumanExecutionApprovalRequired(eligibility) {
+  if (!eligibility?.checks?.approval) return false
+  const detail = eligibility.checks.approval.detail ?? ''
+  return detail !== EXECUTION_APPROVAL_GATE_DISABLED_DETAIL
+}
+
+export function getVisibleStepKeys({ requireHumanApproval = false } = {}) {
+  if (requireHumanApproval) return STEP_KEYS
+  return STEP_KEYS.filter(key => key !== 'approval' && key !== 'readyToTake')
+}
+
 const EXECUTION_DONE_STATES = new Set([
   'IMPLEMENTATION_APPROVED',
   'TEST_COMPLETE',
@@ -183,7 +198,15 @@ function readinessStep(readiness, ticket) {
   }
 }
 
-function approvalStep(approval, readiness) {
+function approvalStep(approval, readiness, requireHumanApproval) {
+  if (!requireHumanApproval) {
+    return {
+      status: 'done',
+      summary: 'Not required',
+      blockingReason: null,
+      nextAction: null,
+    }
+  }
   const status = approval?.approval_status
   if (status === 'approved') {
     return {
@@ -217,8 +240,10 @@ function approvalStep(approval, readiness) {
   }
 }
 
-function readyToTakeStep(stepsSoFar) {
-  const upstream = [stepsSoFar.intelligence, stepsSoFar.readiness, stepsSoFar.approval]
+function readyToTakeStep(stepsSoFar, requireHumanApproval) {
+  const upstream = requireHumanApproval
+    ? [stepsSoFar.intelligence, stepsSoFar.readiness, stepsSoFar.approval]
+    : [stepsSoFar.intelligence, stepsSoFar.readiness]
   if (upstream.some(s => s.status === 'blocked')) {
     return {
       status: 'blocked',
@@ -285,13 +310,19 @@ function executionStep(ticket) {
   }
 }
 
-export function deriveStepStatuses({ intelligence, readiness, approval, ticket } = {}) {
+export function deriveStepStatuses({
+  intelligence,
+  readiness,
+  approval,
+  ticket,
+  requireHumanApproval = false,
+} = {}) {
   const steps = {
     intelligence: intelligenceStep(intelligence),
     readiness:    readinessStep(readiness, ticket),
-    approval:     approvalStep(approval, readiness),
+    approval:     approvalStep(approval, readiness, requireHumanApproval),
   }
-  steps.readyToTake = readyToTakeStep(steps)
+  steps.readyToTake = readyToTakeStep(steps, requireHumanApproval)
   steps.execution = executionStep(ticket)
   return steps
 }
@@ -315,7 +346,7 @@ export function eligibilityToGlobalSummary(eligibility) {
   }
 }
 
-export function deriveGlobalSummary(stepStatuses) {
+export function deriveGlobalSummary(stepStatuses, { requireHumanApproval = false } = {}) {
   if (!stepStatuses) {
     return { status: 'UNKNOWN', reason: 'No data', nextAction: null }
   }
@@ -329,7 +360,9 @@ export function deriveGlobalSummary(stepStatuses) {
   // Walk pre-execution steps in order, surfacing the first one that blocks or is
   // actively waiting on something (a `current` upstream step is what the user
   // needs to act on next).
-  const PRE_EXECUTION = ['intelligence', 'readiness', 'approval']
+  const PRE_EXECUTION = requireHumanApproval
+    ? ['intelligence', 'readiness', 'approval']
+    : ['intelligence', 'readiness']
   for (const key of PRE_EXECUTION) {
     const step = stepStatuses[key]
     if (step?.status === 'blocked' || step?.status === 'current') {
@@ -354,7 +387,10 @@ export function deriveGlobalSummary(stepStatuses) {
       nextAction: null,
     }
   }
-  if (stepStatuses.readyToTake?.status === 'done') {
+  const readyToTakeDone = requireHumanApproval
+    ? stepStatuses.readyToTake?.status === 'done'
+    : PRE_EXECUTION.every(key => stepStatuses[key]?.status === 'done')
+  if (readyToTakeDone) {
     return {
       status: 'READY TO TAKE',
       reason: 'All checks passed',
