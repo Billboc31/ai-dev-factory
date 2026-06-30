@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from typing import Any, Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class HealthResponse(BaseModel):
@@ -726,3 +726,118 @@ class RuntimeSettingsListResponse(BaseModel):
 class RuntimeSettingUpdate(BaseModel):
     value: Any
     updated_by: str | None = None
+
+
+# T219 — Backlog batch dashboard schemas.
+
+BatchStatusLiteral = Literal[
+    "collecting",
+    "frozen",
+    "dependency_analysis_running",
+    "dependency_analysis_failed",
+    "readiness_running",
+    "dispatching",
+    "completed",
+]
+
+
+class BatchSummary(BaseModel):
+    batch_id: str
+    status: BatchStatusLiteral | str
+    ticket_count: int = 0
+    created_at: str | None = None
+    frozen_at: str | None = None
+    completed_at: str | None = None
+    last_activity_at: str | None = None
+    freeze_blocked: bool = False
+    freeze_blocked_reason: str | None = None
+    dependency_analysis_attempts: int = 0
+    last_dependency_analysis_error: str | None = None
+    next_dependency_analysis_retry_at: str | None = None
+    progress: dict[str, int] = {}
+    current_phase: int | None = None
+
+
+class BatchListResponse(BaseModel):
+    batches: list[BatchSummary] = []
+
+
+class BatchCurrentResponse(BaseModel):
+    current: BatchSummary | None = None
+    next: BatchSummary | None = None
+
+
+class BatchTicketDetail(BaseModel):
+    ticket_id: str
+    title: str | None = None
+    status: str | None = None
+    execution_phase: int | None = None
+    parallel_group: str | None = None
+    depends_on: list[str] = []
+    blocks: list[str] = []
+    conflicting_tickets: list[str] = []
+    readiness_state: str | None = None
+    dispatcher_state: str | None = None
+
+
+class BatchDetailResponse(BaseModel):
+    batch: BatchSummary
+    tickets: list[BatchTicketDetail] = []
+
+
+class BatchGraphNode(BaseModel):
+    id: str
+    label: str
+    status: str | None = None
+    color_key: Literal[
+        "done", "running", "waiting", "waiting_human", "failed", "selected"
+    ] = "waiting"
+    execution_phase: int | None = None
+    parallel_group: str | None = None
+    selected_by_dispatcher: bool = False
+
+
+class BatchGraphEdge(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
+    from_id: str = Field(alias="from")
+    to_id: str = Field(alias="to")
+    type: Literal["depends_on", "blocks", "conflicts_with"] = "depends_on"
+
+
+class BatchGraphResponse(BaseModel):
+    nodes: list[BatchGraphNode] = []
+    edges: list[BatchGraphEdge] = []
+
+
+class BatchPhase(BaseModel):
+    phase: int | None = None
+    tickets: list[str] = []
+
+
+class BatchPhasesResponse(BaseModel):
+    phases: list[BatchPhase] = []
+
+
+class BatchBlockedTicket(BaseModel):
+    ticket_id: str
+    blocked_by: list[str] = []
+
+
+class BatchConflict(BaseModel):
+    ticket_id: str
+    conflicts_with: list[str] = []
+
+
+class BatchInsightsResponse(BaseModel):
+    runnable: list[str] = []
+    blocked: list[BatchBlockedTicket] = []
+    conflicts: list[BatchConflict] = []
+
+
+class BatchActionResponse(BaseModel):
+    ok: bool = True
+    batch_id: str
+    action: str
+    status: str | None = None
+    message: str | None = None

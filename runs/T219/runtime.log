@@ -1,0 +1,48 @@
+[2026-06-30T17:17:57Z] auto-run start: state=INIT
+[2026-06-30T17:17:57Z] auto-run: running step=planner
+[2026-06-30T17:17:57Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-06-30T17:17:57Z] prompt: generic fallback — injecting runs/T219/ticket.md
+[2026-06-30T17:17:57Z] compose: global-context=docs/ai/global-context.md
+[2026-06-30T17:17:57Z] compose: role=ai/roles/planner.md
+[2026-06-30T17:17:57Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-30T17:17:57Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-06-30T17:17:57Z] compose: skill=ai/skills/documentation.md
+[2026-06-30T17:17:57Z] compose: task (canonical prompt)
+[2026-06-30T17:17:57Z] snapshot: runtime-prompt=runs/T219/prompts/planner-attempt-1.md
+[2026-06-30T17:21:11Z] auto-run: step=planner done rc=0
+[2026-06-30T18:43:52Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-30T18:43:53Z] auto-run: running step=tester
+[2026-06-30T18:43:53Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-30T18:43:53Z] prompt: generic fallback — injecting runs/T219/ticket.md
+[2026-06-30T18:43:53Z] compose: global-context=docs/ai/global-context.md
+[2026-06-30T18:43:53Z] compose: role=ai/roles/tester.md
+[2026-06-30T18:43:53Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-30T18:43:53Z] compose: skill=ai/skills/testing.md
+[2026-06-30T18:43:53Z] compose: skill=ai/skills/debugging.md
+[2026-06-30T18:43:53Z] compose: task (canonical prompt)
+[2026-06-30T18:43:53Z] snapshot: runtime-prompt=runs/T219/prompts/tester-attempt-4.md
+[2026-06-30T18:43:55Z] runtime failure: process_failed (rc=1)
+[2026-06-30T18:43:55Z] auto-run: runtime failure: process_failed (rc=1)
+[2026-06-30T18:43:55Z] auto-run: step=tester done rc=1
+[2026-06-30T18:43:55Z] auto-run: runtime failure: process_failed (rc=1)
+[2026-06-30T18:43:55Z] auto-run: step=tester failed rc=1, state unchanged=IMPLEMENTATION_APPROVED
+[2026-06-30T23:28:21Z] auto-run start: state=IMPLEMENTATION_APPROVED
+error: working tree is not clean — commit or stash changes first
+[2026-06-30T23:28:21Z] auto-run gate failed: working tree is not clean — commit or stash changes first
+[2026-06-30T23:28:21Z] runtime failure: dirty_tree
+DEBUG dirty working tree:
+ D runs/T219/daemon.lock
+ D runs/T219/retry-state.json
+ M runs/T219/runtime.log
+?? runs/T219/prompts/tester-attempt-4.md
+
+[2026-06-30T23:44:19Z] auto-run: step=tester done rc=0
+[2026-06-30T23:44:20Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-06-30T23:44:20Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-06-30T23:44:20Z] commit-checkpoint: unstaged runtime garbage: ['runs/T219/runtime.log']
+[2026-06-30T23:44:20Z] commit-checkpoint: sha=90318a9c files=4 title='test(T219/dashboard,workflow): tester — update 4 file(s)'
+[2026-06-30T23:44:20Z] auto-run: auto-push triggered
+[2026-06-30T23:44:20Z] push: tolerating runtime dirty files (not blocking): ['runs/T219/runtime.log']
+[2026-06-30T23:44:20Z] push: pushing branch=ticket/T219-add-backlog-batch-dashboard-with-dependency-graph
+[2026-06-30T23:44:22Z] push: done branch=ticket/T219-add-backlog-batch-dashboard-with-dependency-graph
+[2026-06-30T23:44:22Z] auto-run: TEST_COMPLETE — running PR lifecycle

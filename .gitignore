@@ -80,3 +80,8 @@ runs/daemon.pid
 runs/.project-map*.json
 runs/.issue-intake.json
 runtime/*.sqlite-wal
+
+# Postgres-backed runtime: PgHandle.__str__ renders as `postgres:adf#<project>`.
+# When test fixtures don't fully patch the backend resolver, that string can
+# leak into sqlite3.connect() and create a file in CWD — block at the source.
+postgres:adf#*

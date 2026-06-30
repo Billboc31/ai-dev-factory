@@ -19,6 +19,8 @@ import ProjectWorktreesPage from './pages/ProjectWorktreesPage'
 import ProjectLogsPage from './pages/ProjectLogsPage'
 import ProjectAgentLayoutPage from './pages/ProjectAgentLayoutPage'
 import DispatcherPage from './pages/DispatcherPage'
+import BatchesPage from './pages/BatchesPage'
+import BatchDetailPage from './pages/BatchDetailPage'
 import GlobalSettingsPage from './pages/GlobalSettingsPage'
 import ProjectRulesPage from './pages/ProjectRulesPage'
 import useProjects from './hooks/useProjects'
@@ -92,6 +94,8 @@ function AppLayout() {
             <Route path="/projects/:projectId/daemon" element={<ProjectDaemonPage />} />
             <Route path="/projects/:projectId/agent-layout" element={<ProjectAgentLayoutPage />} />
             <Route path="/projects/:projectId/dispatcher" element={<DispatcherPage />} />
+            <Route path="/projects/:projectId/dispatcher/batches" element={<BatchesPage />} />
+            <Route path="/projects/:projectId/dispatcher/batches/:batchId" element={<BatchDetailPage />} />
             <Route path="/projects/:projectId/rules" element={<ProjectRulesPage />} />
             {/* Legacy routes not yet migrated to project-scoped URLs */}
             <Route path="/project-map" element={<ProjectMapPage projectId={activeProject} />} />

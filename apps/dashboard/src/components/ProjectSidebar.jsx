@@ -3,7 +3,9 @@ import { NavLink } from 'react-router-dom'
 const PROJECT_NAV = [
   { label: 'Tickets', path: 'tickets' },
   { label: 'Dashboard', path: 'dashboard' },
-  { label: 'Dispatcher', path: 'dispatcher' },
+  // `end` so /dispatcher/batches/* does not also highlight the Dispatcher tab.
+  { label: 'Dispatcher', path: 'dispatcher', end: true },
+  { label: 'Batches', path: 'dispatcher/batches' },
   { label: 'Execution Rules', path: 'rules' },
   { label: 'Worktrees', path: 'worktrees' },
   { label: 'Logs', path: 'logs' },
@@ -71,10 +73,11 @@ export default function ProjectSidebar({ projects, activeProject, onSelect }) {
             {activeProject}
           </p>
           <ul className="space-y-0.5">
-            {PROJECT_NAV.map(({ label, path }) => (
+            {PROJECT_NAV.map(({ label, path, end }) => (
               <li key={path}>
                 <NavLink
                   to={`/projects/${activeProject}/${path}`}
+                  end={end}
                   className={navItemClass}
                 >
                   {label}
