@@ -734,7 +734,12 @@ _CONFLICT_SKIP_STATES = frozenset({
 })
 
 
-def scan_tickets(runs_dir: Path, worktrees_dir: Path | None = None) -> list[tuple[str, str]]:
+def scan_tickets(
+    runs_dir: Path,
+    worktrees_dir: Path | None = None,
+    *,
+    include_archived: bool = False,
+) -> list[tuple[str, str]]:
     """Return (ticket_id, state) for all readable state.json files, sorted by ticket_id."""
     seen: dict[str, str] = {}
 
@@ -749,7 +754,7 @@ def scan_tickets(runs_dir: Path, worktrees_dir: Path | None = None) -> list[tupl
                 continue
             try:
                 data = json.loads(state_path.read_text(encoding="utf-8"))
-                if data.get("daemon_archived"):
+                if data.get("daemon_archived") and not include_archived:
                     _log(f"skipping {ticket_id}: daemon_archived=true")
                     continue
                 state = data.get("state", "")
@@ -765,7 +770,7 @@ def scan_tickets(runs_dir: Path, worktrees_dir: Path | None = None) -> list[tupl
             continue  # worktree state takes priority
         try:
             data = json.loads(state_path.read_text(encoding="utf-8"))
-            if data.get("daemon_archived"):
+            if data.get("daemon_archived") and not include_archived:
                 _log(f"skipping {ticket_id}: daemon_archived=true")
                 continue
             state = data.get("state", "")
@@ -775,6 +780,56 @@ def scan_tickets(runs_dir: Path, worktrees_dir: Path | None = None) -> list[tupl
             _log(f"skipping {ticket_id}: corrupted or unreadable state.json")
 
     return list(seen.items())
+
+
+def _sync_worktree_runtime_rows(
+    db_path: "Path | None",
+    runs_dir: Path,
+    worktrees_dir: Path | None,
+    repo: str | None,
+    *,
+    dry_run: bool = False,
+) -> None:
+    """Mirror every worktree ``state.json`` into ``ticket_runtime``.
+
+    Archived tickets are excluded from scheduling via ``scan_tickets()`` but
+    must still reach Postgres so the dispatcher stops recommending them.
+    """
+    if db_path is None or dry_run:
+        return
+    for ticket_id, state in scan_tickets(
+        runs_dir, worktrees_dir, include_archived=True
+    ):
+        run_dir = _get_run_dir(ticket_id, runs_dir, worktrees_dir)
+        worktree_path = worktrees_dir / ticket_id if worktrees_dir else None
+        worktree_cwd = (
+            str(worktree_path) if worktree_path and worktree_path.exists() else None
+        )
+        try:
+            ticket_data = _load_state_json(run_dir)
+            upsert_fields: dict = {
+                "state": state,
+                "branch": ticket_data.get("branch"),
+                "issue_number": ticket_data.get("issue_number"),
+                "run_dir": str(run_dir),
+                "worktree_path": worktree_cwd,
+                "daemon_archived": int(bool(ticket_data.get("daemon_archived"))),
+                "pr_number": ticket_data.get("pr_number"),
+            }
+            pr_number = ticket_data.get("pr_number")
+            if pr_number:
+                from ticket_merge_state import fetch_github_pr_state_label
+
+                gh_state = fetch_github_pr_state_label(
+                    REPO_ROOT, int(pr_number), repo=repo
+                )
+                if gh_state:
+                    upsert_fields["pr_state"] = gh_state
+            elif ticket_data.get("pr_merged"):
+                upsert_fields["pr_state"] = "MERGED"
+            _rdb_upsert_ticket(db_path, ticket_id, **upsert_fields)
+        except Exception as exc:
+            _log(f"worktree runtime sync failed for {ticket_id}: {exc}")
 
 
 def _get_run_dir(ticket_id: str, runs_dir: Path, worktrees_dir: Path | None = None) -> Path:
@@ -1854,6 +1909,9 @@ def run_once(
     reap_completed_workers(_state_dir)
     _db_path = _ensure_db()
     _process_pending_pr_finalization(runs_dir, worktrees_dir, repo, dry_run)
+    _sync_worktree_runtime_rows(
+        _db_path, runs_dir, worktrees_dir, repo, dry_run=dry_run
+    )
     dispatcher_enabled, dispatcher_mode = _dispatcher_enabled(_db_path)
 
     all_tickets = sorted(scan_tickets(runs_dir, worktrees_dir), key=lambda t: ticket_sort_key(t[0]))

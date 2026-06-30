@@ -62,6 +62,52 @@ def _save_state_json(run_dir: Path, data: dict) -> None:
     tmp.replace(path)
 
 
+def _sync_runtime_db(
+    ticket_id: str,
+    run_dir: Path,
+    *,
+    worktree_cwd: str | None = None,
+    repo: str | None = None,
+) -> None:
+    """Push ``state.json`` fields into ``ticket_runtime`` when a DB is configured."""
+    try:
+        import runtime_db as rdb
+
+        db_path = rdb.get_db_path()
+        if not db_path:
+            return
+        state_data = _load_state_json(run_dir)
+        state = (state_data.get("state") or "").strip()
+        if not state:
+            return
+        fields: dict = {
+            "state": state,
+            "branch": state_data.get("branch"),
+            "issue_number": state_data.get("issue_number"),
+            "run_dir": str(run_dir),
+            "worktree_path": worktree_cwd,
+            "daemon_archived": int(bool(state_data.get("daemon_archived"))),
+            "pr_number": state_data.get("pr_number"),
+        }
+        pr_number = state_data.get("pr_number")
+        if pr_number:
+            try:
+                from ticket_merge_state import fetch_github_pr_state_label
+
+                gh_state = fetch_github_pr_state_label(
+                    ROOT.parent.parent, int(pr_number), repo=repo
+                )
+                if gh_state:
+                    fields["pr_state"] = gh_state
+            except Exception:
+                pass
+        elif state_data.get("pr_merged"):
+            fields["pr_state"] = "MERGED"
+        rdb.upsert_ticket_runtime(db_path, ticket_id, **fields)
+    except Exception as exc:
+        _log(f"{ticket_id}: runtime DB sync failed: {exc}")
+
+
 def _pr_title(ticket_id: str, run_dir: Path) -> str:
     ticket_path = run_dir / "ticket.md"
     if ticket_path.exists():
@@ -183,6 +229,7 @@ def create_or_update_pr(ticket_id: str, run_dir: Path, repo: str | None) -> None
                     state["pr_skipped_no_diff"] = True
                     state["daemon_archived"] = True
                     _save_state_json(run_dir, state)
+                    _sync_runtime_db(ticket_id, run_dir, repo=repo)
                     _log(f"{ticket_id}: no diff — marked pr_skipped_no_diff=true daemon_archived=true")
         except FileNotFoundError:
             _log(f"{ticket_id}: gh not found — cannot create PR")
@@ -248,6 +295,7 @@ def check_and_close_issue(ticket_id: str, run_dir: Path, repo: str | None) -> No
 
     state["issue_closed"] = True
     _save_state_json(run_dir, state)
+    _sync_runtime_db(ticket_id, run_dir, repo=repo)
 
 
 def _checkpoint_and_push_before_pr(ticket_id: str, cwd: str | None = None) -> bool:
@@ -306,6 +354,7 @@ def auto_merge_pr(ticket_id: str, run_dir: Path, repo: str | None) -> bool:
         state["pr_merged"] = True
         state["daemon_archived"] = True
         _save_state_json(run_dir, state)
+        _sync_runtime_db(ticket_id, run_dir, repo=repo)
         return True
     if pr_state != "OPEN":
         _log(f"{ticket_id}: auto-merge: PR #{pr_number} state={pr_state!r} — not OPEN, skipping")
@@ -333,6 +382,7 @@ def auto_merge_pr(ticket_id: str, run_dir: Path, repo: str | None) -> bool:
     state["pr_merged"] = True
     state["daemon_archived"] = True
     _save_state_json(run_dir, state)
+    _sync_runtime_db(ticket_id, run_dir, repo=repo)
     return True
 
 
@@ -415,6 +465,7 @@ def handle_test_complete(
             _log(f"{ticket_id}: auto-merge failed but no pr_number in state.json — cannot check for conflicts")
         return
     check_and_close_issue(ticket_id, run_dir, repo)
+    _sync_runtime_db(ticket_id, run_dir, worktree_cwd=worktree_cwd, repo=repo)
 
 
 def needs_pr_finalization(run_dir: Path) -> bool:
