@@ -55,6 +55,48 @@ def test_extract_dependencies_deduplicates():
     assert _extract_dependencies(content) == ["T010"]
 
 
+def test_extract_dependencies_ignores_arrow_example_lines():
+    content = """# T218
+
+Examples:
+
+→ T010 depends on T001
+→ T011 depends on T010
+→ T016 depends on T015
+
+This ticket depends on T042 before shipping.
+"""
+    assert _extract_dependencies(content) == ["T042"]
+
+
+def test_extract_dependencies_ignores_fenced_code_blocks():
+    content = """Depends on T999 in prose.
+
+```
+→ T010 depends on T001
+Blocked by T001
+```
+"""
+    assert _extract_dependencies(content) == ["T999"]
+
+
+def test_extract_dependencies_t218_spec_excerpt_has_no_false_deps():
+    content = """Examples:
+
+T001 - Define architecture
+T010 - Bootstrap project
+
+→ T010 depends on T001
+
+T011 - Backend foundation
+→ T011 depends on T010
+→ T012 depends on T010
+
+→ T016 depends on T015
+"""
+    assert _extract_dependencies(content) == []
+
+
 def test_collect_dependency_ticket_ids_merges_intelligence_hints():
     content = "Create the frontend foundation."
     intelligence = {"dependency_hints": '["T001"]'}

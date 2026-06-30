@@ -75,6 +75,14 @@ _INLINE_DEPENDENCY_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Fenced markdown / plain-text code blocks (``` ... ```).
+_FENCED_CODE_BLOCK_RE = re.compile(r"```.*?```", re.DOTALL | re.IGNORECASE)
+
+# Illustrative dependency lines in specs (e.g. "→ T010 depends on T001").
+_EXAMPLE_DEPENDENCY_LINE_RE = re.compile(
+    r"^[\s>*-]*(?:→|->)\s",
+)
+
 # Markdown section heading: "## Depends on" (common in GitHub-ingested tickets).
 _DEPENDS_ON_SECTION_RE = re.compile(
     r"^#{1,6}\s*depends\s+on\s*$",
@@ -112,6 +120,26 @@ def _check_intelligence(db_path, ticket_id: str) -> tuple[str, str | None]:
     return "passed", None
 
 
+def _strip_fenced_code_blocks(ticket_content: str) -> str:
+    """Remove fenced code blocks so inline markers inside examples are ignored."""
+    return _FENCED_CODE_BLOCK_RE.sub("", ticket_content)
+
+
+def _extract_inline_dependencies(ticket_content: str) -> list[str]:
+    """Parse inline dependency markers from prose, skipping examples and code."""
+    deps: list[str] = []
+    prose = _strip_fenced_code_blocks(ticket_content)
+    for line in prose.splitlines():
+        stripped = line.strip()
+        if not stripped or _EXAMPLE_DEPENDENCY_LINE_RE.match(stripped):
+            continue
+        for match in _INLINE_DEPENDENCY_RE.finditer(line):
+            dep = match.group(1).upper()
+            if dep not in deps:
+                deps.append(dep)
+    return deps
+
+
 def _extract_dependencies_from_section(ticket_content: str, start: int) -> list[str]:
     """Parse ticket IDs from list items under a ``## Depends on`` section."""
     deps: list[str] = []
@@ -142,8 +170,8 @@ def _extract_dependencies(ticket_content: str) -> list[str]:
         if dep not in seen:
             seen.append(dep)
 
-    for match in _INLINE_DEPENDENCY_RE.finditer(ticket_content):
-        _add(match.group(1))
+    for dep in _extract_inline_dependencies(ticket_content):
+        _add(dep)
     for section in _DEPENDS_ON_SECTION_RE.finditer(ticket_content):
         for dep in _extract_dependencies_from_section(ticket_content, section.end()):
             _add(dep)
