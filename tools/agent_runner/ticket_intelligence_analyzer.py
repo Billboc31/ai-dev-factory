@@ -222,6 +222,11 @@ You are a Ticket Intelligence Analyzer for an AI-assisted software development s
 Analyze the ticket content and computed signals below, then return ONLY a valid JSON object.
 Do not include any explanation, markdown, or text outside the JSON object.
 
+For ``dependency_hints``: list only ticket IDs this ticket truly cannot start without
+(explicit ``## Depends on`` section or clear prose dependency). Use ``[]`` when none.
+Never include illustrative/example ticket IDs from code blocks, sample graphs, or
+mock UI data.
+
 ## Ticket Content
 
 {{ticket_content}}

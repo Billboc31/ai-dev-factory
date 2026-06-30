@@ -109,6 +109,36 @@ def test_collect_dependency_ticket_ids_deduplicates_body_and_hints():
     assert collect_dependency_ticket_ids(content, intelligence) == ["T001", "T002"]
 
 
+def test_collect_dependency_ticket_ids_ignores_hints_from_fenced_examples_only():
+    content = """# T219
+
+Example graph:
+
+```text
+T001
+└── T010
+    └── T011
+```
+
+Dispatcher examples:
+
+```text
+T015 blocked by T011
+T020 conflicts with T021
+```
+"""
+    intelligence = {
+        "dependency_hints": ["T001", "T010", "T011", "T015", "T020", "T021"],
+    }
+    assert collect_dependency_ticket_ids(content, intelligence) == []
+
+
+def test_collect_dependency_ticket_ids_keeps_hints_not_in_ticket_body():
+    content = "Create the frontend foundation."
+    intelligence = {"dependency_hints": '["T001"]'}
+    assert collect_dependency_ticket_ids(content, intelligence) == ["T001"]
+
+
 def test_read_ticket_markdown_prefers_worktree(tmp_path: Path):
     project_root = tmp_path / "repo"
     project_root.mkdir()

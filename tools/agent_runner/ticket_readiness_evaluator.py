@@ -140,6 +140,24 @@ def _extract_inline_dependencies(ticket_content: str) -> list[str]:
     return deps
 
 
+# Ticket IDs mentioned in prose (used to drop illustrative-only intelligence hints).
+_TICKET_ID_RE = re.compile(r"\b(T\d+)\b", re.IGNORECASE)
+
+
+def _ticket_ids_only_in_fenced_blocks(ticket_content: str) -> set[str]:
+    """Return ticket IDs that appear only inside fenced code blocks, not in prose."""
+    if not ticket_content:
+        return set()
+    in_fenced: set[str] = set()
+    for block in _FENCED_CODE_BLOCK_RE.finditer(ticket_content):
+        for match in _TICKET_ID_RE.finditer(block.group(0)):
+            in_fenced.add(match.group(1).upper())
+    prose = _strip_fenced_code_blocks(ticket_content)
+    for match in _TICKET_ID_RE.finditer(prose):
+        in_fenced.discard(match.group(1).upper())
+    return in_fenced
+
+
 def _extract_dependencies_from_section(ticket_content: str, start: int) -> list[str]:
     """Parse ticket IDs from list items under a ``## Depends on`` section."""
     deps: list[str] = []
@@ -192,6 +210,7 @@ def collect_dependency_ticket_ids(
     """
     deps = _extract_dependencies(ticket_content or "")
     seen = set(deps)
+    illustrative_only = _ticket_ids_only_in_fenced_blocks(ticket_content or "")
 
     def _add_ticket_id(candidate: object) -> None:
         if not isinstance(candidate, str):
@@ -206,6 +225,14 @@ def collect_dependency_ticket_ids(
         deps.append(ticket_id)
         seen.add(ticket_id)
 
+    def _add_external_hint(candidate: object) -> None:
+        if not isinstance(candidate, str):
+            return
+        ticket_id = candidate.strip().upper()
+        if ticket_id in illustrative_only:
+            return
+        _add_ticket_id(candidate)
+
     if intelligence:
         hints = intelligence.get("dependency_hints")
         if isinstance(hints, str):
@@ -215,7 +242,7 @@ def collect_dependency_ticket_ids(
                 hints = []
         if isinstance(hints, list):
             for hint in hints:
-                _add_ticket_id(hint)
+                _add_external_hint(hint)
 
     if dependency_analysis:
         analyzer_deps = dependency_analysis.get("depends_on")
@@ -228,7 +255,7 @@ def collect_dependency_ticket_ids(
                     analyzer_deps = []
         if isinstance(analyzer_deps, list):
             for hint in analyzer_deps:
-                _add_ticket_id(hint)
+                _add_external_hint(hint)
 
     return deps
 
