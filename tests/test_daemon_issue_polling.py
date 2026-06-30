@@ -408,6 +408,37 @@ def test_poll_github_issues_ingests_lowest_ticket_id_first(tmp_path):
     assert load_issue_index(runs) == {"24": "T001"}
 
 
+def test_poll_github_issues_reconciles_existing_worktree_without_re_intake(tmp_path):
+    runs = _make_runs(tmp_path)
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
+    worktrees_dir = tmp_path / "worktrees"
+    run_dir = worktrees_dir / "T001" / "runs" / "T001"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(
+        json.dumps({"ticket_id": "T001", "state": "INIT", "issue_number": 24}),
+        encoding="utf-8",
+    )
+
+    issues = [
+        {"number": 5, "title": "T002 - Bootstrap backend foundation"},
+        {"number": 24, "title": "T001 - Define product vision"},
+    ]
+
+    with patch("run_daemon.fetch_ready_issues", return_value=issues), \
+         patch("run_daemon.call_issue_intake") as mock_intake, \
+         patch("run_daemon.fetch_origin_main") as mock_fetch, \
+         patch("run_daemon.create_ticket_branch_and_worktree") as mock_create:
+        poll_github_issues(
+            runs, "ai-ready", None, worktrees_dir=worktrees_dir, state_dir=state_dir,
+        )
+
+    mock_intake.assert_not_called()
+    mock_fetch.assert_not_called()
+    mock_create.assert_not_called()
+    assert load_issue_index(state_dir) == {"24": "T001"}
+
+
 def test_clear_stale_run_dir_removes_existing_ticket_runs(tmp_path):
     worktree = tmp_path / "wt"
     stale = worktree / "runs" / "T001"

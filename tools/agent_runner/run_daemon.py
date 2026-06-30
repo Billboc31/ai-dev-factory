@@ -1531,6 +1531,52 @@ def slugify_title(title: str) -> str:
     return slug or "issue"
 
 
+def _try_reconcile_existing_worktree(
+    ticket_id: str,
+    issue_number: str,
+    worktrees_dir: Path,
+    index: dict[str, str],
+    state_dir: Path,
+) -> bool:
+    """Adopt a pre-existing worktree into the intake index when ``state.json`` is present."""
+    worktree_path = get_ticket_worktree_path(ticket_id, worktrees_dir)
+    if not worktree_path.is_dir():
+        return False
+
+    run_dir = worktree_path / "runs" / ticket_id
+    state_path = run_dir / "state.json"
+    if not state_path.is_file():
+        _log(
+            f"{ticket_id}: worktree exists at {worktree_path} but no {state_path.name} "
+            f"— cannot reconcile issue #{issue_number}"
+        )
+        return False
+
+    if index.get(issue_number) == ticket_id:
+        return True
+
+    index[issue_number] = ticket_id
+    save_issue_index(state_dir, index)
+    _log(f"{ticket_id}: reconciled existing worktree for issue #{issue_number}")
+
+    db_path = _ensure_db()
+    if db_path:
+        try:
+            ticket_state = _load_state_json(run_dir)
+            _rdb_upsert_ticket(
+                db_path,
+                ticket_id,
+                issue_number=int(issue_number),
+                branch=ticket_state.get("branch"),
+                state=ticket_state.get("state", "INIT"),
+                run_dir=str(run_dir),
+                worktree_path=str(worktree_path),
+            )
+        except Exception as exc:
+            _log(f"SQLite ticket upsert failed for reconciled {ticket_id}: {exc}")
+    return True
+
+
 def clear_stale_run_dir(worktree_path: Path, ticket_id: str) -> bool:
     """Remove a pre-existing ``runs/<ticket_id>/`` tree left on ``origin/main``.
 
@@ -1620,7 +1666,6 @@ def poll_github_issues(
         return
 
     _log(f"found {len(candidates)} candidate issue(s)")
-    candidates = candidates[:1]  # one intake per daemon cycle
 
     for issue in candidates:
         number = str(issue["number"])
@@ -1628,7 +1673,13 @@ def poll_github_issues(
         ticket_id = extract_ticket_id_from_title(title)
         if ticket_id is None:
             ticket_id = next_ticket_id(runs_dir, reserved=set(index.values()))
-        elif (runs_dir / ticket_id).exists() or ticket_id in index.values():
+        elif ticket_id in index.values():
+            continue
+        elif worktrees_dir and ticket_id and _try_reconcile_existing_worktree(
+            ticket_id, number, worktrees_dir, index, _state_dir,
+        ):
+            break  # one intake/reconcile action per daemon cycle
+        elif (runs_dir / ticket_id).exists():
             _log(f"issue #{number}: ticket {ticket_id} already exists — skipping intake")
             continue
 
@@ -1655,6 +1706,10 @@ def poll_github_issues(
             ticket_id, branch, worktrees_dir, repo_root=REPO_ROOT,
         )
         if not created:
+            if worktrees_dir and _try_reconcile_existing_worktree(
+                ticket_id, number, worktrees_dir, index, _state_dir,
+            ):
+                break
             _log(f"{ticket_id}: {create_msg} — skipping issue #{number}")
             continue
         _log(f"{ticket_id}: {create_msg}")
@@ -1688,6 +1743,7 @@ def poll_github_issues(
                 )
             except Exception as exc:
                 _log(f"SQLite ticket upsert failed for {ticket_id}: {exc}")
+        break  # one successful intake per daemon cycle
 
 
 def poll_ticket_pipeline(
