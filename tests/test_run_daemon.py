@@ -22,6 +22,7 @@ from run_daemon import (
     handle_test_complete,
     launch_ticket,
     main,
+    reap_completed_workers,
     run_once,
     scan_tickets,
 )
@@ -246,14 +247,23 @@ def test_release_lock_is_idempotent(tmp_path):
     _release_lock(run_dir)  # no file — should not raise
 
 
+def _launch_preflight_ok(*, branch: str = "ticket/T001"):
+    return patch.multiple(
+        "run_daemon",
+        _sync_ticket_branch=MagicMock(return_value=True),
+        _ensure_clean_working_tree=MagicMock(return_value=True),
+        _get_current_branch=MagicMock(return_value=branch),
+    )
+
+
 # ── launch_ticket ─────────────────────────────────────────────────────────────
 
 def test_launch_ticket_dry_run_does_not_call_subprocess(tmp_path):
     runs = tmp_path / "runs"
     _write_state(runs, "T001", "PLAN_APPROVED")
-    with patch("run_daemon.subprocess.run") as mock_sub:
+    with patch("run_daemon._spawn_worker_process") as mock_spawn:
         launch_ticket("T001", "test-cmd", dry_run=True, runs_dir=runs)
-    mock_sub.assert_not_called()
+    mock_spawn.assert_not_called()
 
 
 def test_launch_ticket_dry_run_logs_action(tmp_path, capsys):
@@ -273,20 +283,28 @@ def test_launch_ticket_blocked_by_live_lock_does_not_launch(tmp_path):
         encoding="utf-8",
     )
     with patch("run_daemon._is_pid_alive", return_value=True):
-        with patch("run_daemon.subprocess.run") as mock_sub:
+        with patch("run_daemon._spawn_worker_process") as mock_spawn:
             launch_ticket("T001", "test-cmd", dry_run=False, runs_dir=runs)
-    mock_sub.assert_not_called()
+    mock_spawn.assert_not_called()
 
 
-def test_launch_ticket_releases_lock_after_run(tmp_path):
+def test_launch_ticket_releases_lock_after_reap(tmp_path):
+    import run_daemon
+
     runs = tmp_path / "runs"
+    state_dir = tmp_path / "state"
+    state_dir.mkdir()
     run_dir = _write_state(runs, "T001", "PLAN_APPROVED")
-    mock_result = MagicMock()
-    mock_result.stdout = ""
-    mock_result.stderr = ""
-    mock_result.returncode = 0
-    with patch("run_daemon.subprocess.run", return_value=mock_result):
-        launch_ticket("T001", "test-cmd", dry_run=False, runs_dir=runs)
+    proc = MagicMock()
+    proc.pid = 4242
+    proc.poll.return_value = None
+    run_daemon._ACTIVE_WORKERS.clear()
+    with _launch_preflight_ok(), \
+         patch("run_daemon._spawn_worker_process", return_value=proc):
+        launch_ticket("T001", "test-cmd", dry_run=False, runs_dir=runs, state_dir=state_dir)
+    assert _lock_path(run_dir).exists()
+    proc.poll.return_value = 0
+    reap_completed_workers(state_dir)
     assert not _lock_path(run_dir).exists()
 
 

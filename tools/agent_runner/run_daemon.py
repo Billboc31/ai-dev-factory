@@ -16,11 +16,18 @@ import json
 import os
 import re
 import shlex
+import shutil
 import subprocess
 import sys
 import time
 from pathlib import Path
 
+
+# In-memory handles for background worker processes (not serializable to JSON).
+_ACTIVE_WORKERS: dict[str, dict] = {}
+
+# Max intelligence/readiness tickets processed per daemon cycle once workers are async.
+_PIPELINE_TICKETS_PER_CYCLE = 32
 
 # Suppress .pyc generation for this process *and* every subprocess we spawn.
 # `.pyc` files in __pycache__/ are the #1 source of runtime dirty trees that
@@ -289,6 +296,17 @@ def _release_lock(run_dir: Path) -> None:
         pass
 
 
+def _set_lock_holder_pid(run_dir: Path, pid: int) -> None:
+    """Rewrite daemon.lock so stale detection tracks the worker child PID."""
+    try:
+        _lock_path(run_dir).write_text(
+            json.dumps({"pid": pid, "created_at": _now_iso()}),
+            encoding="utf-8",
+        )
+    except OSError:
+        pass
+
+
 # ── retry / cooldown state ────────────────────────────────────────────────────
 
 def _retry_state_path(run_dir: Path) -> Path:
@@ -342,10 +360,17 @@ def _save_workers_registry(state_dir: Path, workers: dict) -> None:
     tmp.replace(path)
 
 
-def _register_worker(state_dir: Path, ticket_id: str, branch: str | None, worktree_path: str) -> None:
+def _register_worker(
+    state_dir: Path,
+    ticket_id: str,
+    branch: str | None,
+    worktree_path: str,
+    *,
+    pid: int,
+) -> None:
     workers = _load_workers_registry(state_dir)
     workers[ticket_id] = {
-        "pid": os.getpid(),
+        "pid": pid,
         "branch": branch,
         "worktree_path": worktree_path,
         "started_at": _now_iso(),
@@ -354,7 +379,7 @@ def _register_worker(state_dir: Path, ticket_id: str, branch: str | None, worktr
     db_path = _ensure_db()
     if db_path:
         try:
-            _rdb_upsert_worker(db_path, ticket_id, os.getpid(), branch, worktree_path)
+            _rdb_upsert_worker(db_path, ticket_id, pid, branch, worktree_path)
         except Exception as exc:
             _log(f"SQLite worker register failed for {ticket_id}: {exc}")
 
@@ -400,6 +425,50 @@ def _cleanup_stale_workers(state_dir: Path) -> None:
                 _rdb_remove_worker(db_path, tid)
     except Exception as exc:
         _log(f"SQLite stale worker cleanup failed: {exc}")
+
+
+def _count_live_workers(state_dir: Path) -> int:
+    """Return the number of registered workers whose PID is still alive."""
+    workers = _load_workers_registry(state_dir)
+    live = 0
+    for w in workers.values():
+        pid = w.get("pid")
+        if isinstance(pid, int) and _is_pid_alive(pid):
+            live += 1
+    return live
+
+
+def _handle_worker_exit(
+    ticket_id: str,
+    run_dir: Path,
+    returncode: int,
+) -> None:
+    if returncode != 0:
+        failure_class = _read_last_failure_class(run_dir)
+        if failure_class:
+            retry_state = _load_retry_state(run_dir)
+            retry_state = _apply_retry_policy(ticket_id, failure_class, retry_state)
+            _save_retry_state(run_dir, retry_state)
+        else:
+            _log(f"{ticket_id}: no failure class in runtime.log — retry policy not applied")
+    else:
+        _clear_retry_state(run_dir)
+
+
+def reap_completed_workers(state_dir: Path) -> None:
+    """Reap background run_ticket workers and release their locks."""
+    for ticket_id in list(_ACTIVE_WORKERS.keys()):
+        info = _ACTIVE_WORKERS[ticket_id]
+        proc = info["proc"]
+        returncode = proc.poll()
+        if returncode is None:
+            continue
+        run_dir = info["run_dir"]
+        _log(f"{ticket_id}: worker exited rc={returncode}")
+        _handle_worker_exit(ticket_id, run_dir, returncode)
+        _unregister_worker(state_dir, ticket_id)
+        _release_lock(run_dir)
+        del _ACTIVE_WORKERS[ticket_id]
 
 
 def _read_last_failure_class(run_dir: Path) -> str | None:
@@ -1246,6 +1315,17 @@ def _get_current_branch() -> str | None:
     return result.stdout.strip() or None
 
 
+def _spawn_worker_process(cmd: list[str], *, cwd: str, env: dict[str, str]) -> subprocess.Popen:
+    """Start ``run_ticket.py`` in the background. Separated for testability."""
+    return subprocess.Popen(
+        cmd,
+        cwd=cwd,
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 def launch_ticket(
     ticket_id: str,
     exec_cmd: str,
@@ -1257,7 +1337,13 @@ def launch_ticket(
     auto_include_code: bool = False,
     state_dir: Path | None = None,
 ) -> None:
-    """Launch run_ticket.py --auto for one ticket. No-op in dry_run mode."""
+    """Launch run_ticket.py --auto for one ticket in the background.
+
+    Returns immediately after spawning the worker so the daemon can keep
+    polling GitHub and running the intelligence/readiness pipeline in parallel.
+    Call ``reap_completed_workers`` each cycle to collect exit codes and apply
+    retry policy.
+    """
     if dry_run:
         _log(f"dry-run: would launch {ticket_id} --auto --exec-cmd {exec_cmd!r}")
         return
@@ -1284,73 +1370,44 @@ def launch_ticket(
                 return
 
     if worktree_path is not None:
-        # ── Worktree-based launch ─────────────────────────────────────────────
-        worktree_run_dir = worktree_path / "runs" / ticket_id
-        worktree_run_dir.mkdir(parents=True, exist_ok=True)
+        run_dir = worktree_path / "runs" / ticket_id
+        cwd = str(worktree_path)
+    else:
+        run_dir = runs_dir / ticket_id
+        cwd = None
 
-        if not _acquire_lock(worktree_run_dir):
-            _log(f"skipping {ticket_id}: already running (lock held in worktree)")
-            return
+    run_dir.mkdir(parents=True, exist_ok=True)
 
-        try:
-            ticket_state = _load_state_json(worktree_run_dir)
+    if not _acquire_lock(run_dir):
+        _log(f"skipping {ticket_id}: already running (lock held)")
+        return
+
+    lock_released = False
+    try:
+        if worktree_path is not None:
+            ticket_state = _load_state_json(run_dir)
             branch = ticket_state.get("branch")
 
             if branch and not _sync_ticket_branch(
                 ticket_id,
                 branch,
-                cwd=str(worktree_path),
+                cwd=cwd,
                 auto_commit=auto_commit,
                 auto_push=auto_push,
             ):
                 _log(f"skipping {ticket_id}: branch sync failed in worktree")
                 return
-
-            _register_worker(_state_dir, ticket_id, branch, str(worktree_path))
-            cmd = build_run_ticket_command(ticket_id, exec_cmd, auto_commit, auto_push, auto_include_code)
-            _log(f"launching worker {ticket_id} in worktree={worktree_path}: {shlex.join(cmd)}")
-            result = subprocess.run(
-                cmd,
-                text=True,
-                capture_output=True,
-                check=False,
-                cwd=str(worktree_path),
-                env=_no_bytecode_env(),
-            )
-            for line in result.stdout.splitlines():
-                _log(f"{ticket_id}: {line}")
-            for line in result.stderr.splitlines():
-                _log(f"{ticket_id} [err]: {line}")
-            _log(f"{ticket_id}: done rc={result.returncode}")
-            if result.returncode != 0:
-                failure_class = _read_last_failure_class(worktree_run_dir)
-                if failure_class:
-                    retry_state = _load_retry_state(worktree_run_dir)
-                    retry_state = _apply_retry_policy(ticket_id, failure_class, retry_state)
-                    _save_retry_state(worktree_run_dir, retry_state)
-                else:
-                    _log(f"{ticket_id}: no failure class in runtime.log — retry policy not applied")
-            else:
-                _clear_retry_state(worktree_run_dir)
-        finally:
-            _unregister_worker(_state_dir, ticket_id)
-            _release_lock(worktree_run_dir)
-
-    else:
-        # ── Legacy: no worktree (single working tree) ─────────────────────────
-        run_dir = runs_dir / ticket_id
-
-        if not _acquire_lock(run_dir):
-            _log(f"skipping {ticket_id}: already running (lock held)")
-            return
-
-        try:
+        else:
             ticket_state = _load_state_json(run_dir)
             expected_branch = ticket_state.get("branch")
+            branch = expected_branch
             if expected_branch:
                 current_branch = _get_current_branch()
                 if current_branch != expected_branch:
-                    _log(f"skipping {ticket_id}: branch mismatch current={current_branch!r} expected={expected_branch!r}")
+                    _log(
+                        f"skipping {ticket_id}: branch mismatch "
+                        f"current={current_branch!r} expected={expected_branch!r}"
+                    )
                     return
                 if not _sync_ticket_branch(
                     ticket_id,
@@ -1364,31 +1421,25 @@ def launch_ticket(
             if not _ensure_clean_working_tree(ticket_id, auto_push=auto_push):
                 return
 
-            cmd = build_run_ticket_command(ticket_id, exec_cmd, auto_commit, auto_push, auto_include_code)
+        cmd = build_run_ticket_command(ticket_id, exec_cmd, auto_commit, auto_push, auto_include_code)
+        launch_cwd = cwd if cwd is not None else os.getcwd()
+        if worktree_path is not None:
+            _log(f"launching worker {ticket_id} in worktree={worktree_path}: {shlex.join(cmd)}")
+        else:
             _log(f"Running ticket command: {shlex.join(cmd)}")
-            result = subprocess.run(
-                cmd,
-                text=True,
-                capture_output=True,
-                check=False,
-                env=_no_bytecode_env(),
-            )
-            for line in result.stdout.splitlines():
-                _log(f"{ticket_id}: {line}")
-            for line in result.stderr.splitlines():
-                _log(f"{ticket_id} [err]: {line}")
-            _log(f"{ticket_id}: done rc={result.returncode}")
-            if result.returncode != 0:
-                failure_class = _read_last_failure_class(run_dir)
-                if failure_class:
-                    retry_state = _load_retry_state(run_dir)
-                    retry_state = _apply_retry_policy(ticket_id, failure_class, retry_state)
-                    _save_retry_state(run_dir, retry_state)
-                else:
-                    _log(f"{ticket_id}: no failure class in runtime.log — retry policy not applied")
-            else:
-                _clear_retry_state(run_dir)
-        finally:
+
+        proc = _spawn_worker_process(cmd, cwd=launch_cwd, env=_no_bytecode_env())
+        _set_lock_holder_pid(run_dir, proc.pid)
+        worktree_label = str(worktree_path) if worktree_path is not None else ""
+        _register_worker(_state_dir, ticket_id, branch, worktree_label, pid=proc.pid)
+        _ACTIVE_WORKERS[ticket_id] = {
+            "proc": proc,
+            "run_dir": run_dir,
+        }
+        _log(f"{ticket_id}: worker started pid={proc.pid} (background)")
+        lock_released = True
+    finally:
+        if not lock_released:
             _release_lock(run_dir)
 
 
@@ -1460,11 +1511,38 @@ def extract_ticket_id_from_title(title: str) -> str | None:
     return match.group(0).upper()
 
 
+def issue_intake_sort_key(issue: dict) -> tuple[int, int]:
+    """Order intake candidates by ticket id from the title, then GitHub issue number.
+
+    GitHub issue numbers reflect creation order, not ticket sequence — issue #5
+    may be T002 while issue #24 is T001. Sorting by extracted ticket id ensures
+    T001 is ingested before T002 even when its GitHub number is higher.
+    """
+    title = issue.get("title", "")
+    ticket_id = extract_ticket_id_from_title(title)
+    ticket_ord = ticket_sort_key(ticket_id) if ticket_id else 999_999
+    return (ticket_ord, int(issue.get("number") or 0))
+
+
 def slugify_title(title: str) -> str:
     """Convert an issue title to a URL-safe branch slug."""
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
     slug = slug[:50].rstrip("-")
     return slug or "issue"
+
+
+def clear_stale_run_dir(worktree_path: Path, ticket_id: str) -> bool:
+    """Remove a pre-existing ``runs/<ticket_id>/`` tree left on ``origin/main``.
+
+    Merged tickets commit their run artifacts to main. Re-ingesting the same
+    ticket id on a fresh branch would otherwise fail ``check_state_absent``.
+    Returns True when a stale directory was removed.
+    """
+    stale = worktree_path / "runs" / ticket_id
+    if not stale.is_dir():
+        return False
+    shutil.rmtree(stale)
+    return True
 
 
 def fetch_ready_issues(label: str, repo: str | None) -> list[dict]:
@@ -1531,7 +1609,7 @@ def poll_github_issues(
     index = load_issue_index(_state_dir)
     candidates = sorted(
         [i for i in issues if str(i["number"]) not in index],
-        key=lambda i: i["number"],
+        key=issue_intake_sort_key,
     )
     already_ingested = [i for i in issues if str(i["number"]) in index]
     for issue in already_ingested:
@@ -1582,6 +1660,8 @@ def poll_github_issues(
         _log(f"{ticket_id}: {create_msg}")
 
         worktree_path = get_ticket_worktree_path(ticket_id, worktrees_dir)
+        if clear_stale_run_dir(worktree_path, ticket_id):
+            _log(f"{ticket_id}: removed stale runs/{ticket_id}/ from main checkout")
         intake_ok = call_issue_intake(
             int(number), ticket_id, slug, repo, push=True, cwd=str(worktree_path),
         )
@@ -1619,31 +1699,37 @@ def poll_ticket_pipeline(
     *,
     project_id: str | None = None,
 ) -> None:
-    """Run intelligence/readiness for one ticket that still needs pipeline work."""
+    """Run intelligence/readiness for tickets that still need pipeline work.
+
+    Processes up to ``_PIPELINE_TICKETS_PER_CYCLE`` tickets per daemon cycle so
+    orchestration keeps moving while coding workers run in the background.
+    """
     if db_path is None or not _is_auto_pipeline_enabled(db_path):
         return
 
     tickets = sorted(scan_tickets(runs_dir, worktrees_dir), key=lambda t: ticket_sort_key(t[0]))
     ticket_ids = [ticket_id for ticket_id, _state in tickets]
-    next_id = _find_next_pipeline_ticket(db_path, ticket_ids)
-    if next_id is None:
-        return
 
-    _log(f"pipeline: processing {next_id}")
-    try:
-        ran = _process_ticket_pipeline(
-            db_path,
-            next_id,
-            project_root,
-            exec_cmd,
-            worktrees_dir=worktrees_dir,
-            project_id=project_id,
-        )
-    except Exception as exc:
-        _log(f"pipeline: failed for {next_id}: {exc}")
-        return
-    if ran:
-        _log(f"pipeline: finished {next_id}")
+    for _ in range(_PIPELINE_TICKETS_PER_CYCLE):
+        next_id = _find_next_pipeline_ticket(db_path, ticket_ids)
+        if next_id is None:
+            return
+
+        _log(f"pipeline: processing {next_id}")
+        try:
+            ran = _process_ticket_pipeline(
+                db_path,
+                next_id,
+                project_root,
+                exec_cmd,
+                worktrees_dir=worktrees_dir,
+                project_id=project_id,
+            )
+        except Exception as exc:
+            _log(f"pipeline: failed for {next_id}: {exc}")
+            return
+        if ran:
+            _log(f"pipeline: finished {next_id}")
 
 
 def poll_project_map(runs_dir: Path, repo: str | None, worktrees_dir: Path | None = None) -> None:
@@ -1748,6 +1834,7 @@ def run_once(
 ) -> None:
     """Scan all tickets and process auto-runnable ones."""
     _state_dir = state_dir if state_dir is not None else runs_dir
+    reap_completed_workers(_state_dir)
     _db_path = _ensure_db()
     dispatcher_enabled, dispatcher_mode = _dispatcher_enabled(_db_path)
 
@@ -1830,7 +1917,7 @@ def run_once(
 
         if state in AUTO_RUNNABLE_STATES:
             _log(f"detected {ticket_id} state={state}")
-            active_count = len(_load_workers_registry(_state_dir))
+            active_count = _count_live_workers(_state_dir)
             if active_count >= max_workers:
                 _log(f"skipping {ticket_id}: max_workers={max_workers} reached ({active_count} active)")
                 continue
@@ -2053,6 +2140,7 @@ def main(argv: list[str]) -> int:
     _cleanup_stale_workers(state_dir)
 
     if args.once:
+        reap_completed_workers(state_dir)
         if args.poll_issues:
             poll_github_issues(runs_dir, args.issue_label, args.issue_repo, worktrees_dir=worktrees_dir, state_dir=state_dir)
         poll_ticket_pipeline(
@@ -2080,6 +2168,7 @@ def main(argv: list[str]) -> int:
 
     try:
         while True:
+            reap_completed_workers(state_dir)
             if args.poll_issues:
                 poll_github_issues(runs_dir, args.issue_label, args.issue_repo, worktrees_dir=worktrees_dir, state_dir=state_dir)
             poll_ticket_pipeline(

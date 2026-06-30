@@ -19,6 +19,7 @@ from run_daemon import (
     _retry_state_path,
     _save_retry_state,
     launch_ticket,
+    reap_completed_workers,
     run_once,
 )
 
@@ -324,53 +325,92 @@ def _make_mock_result(returncode: int, stdout: str = "", stderr: str = "") -> Ma
     m.returncode = returncode
     m.stdout = stdout
     m.stderr = stderr
+    m.pid = 4242
+    m.poll.return_value = None
     return m
 
 
+def _launch_preflight_ok(*, branch: str = "ticket/T001"):
+    return patch.multiple(
+        "run_daemon",
+        _sync_ticket_branch=MagicMock(return_value=True),
+        _ensure_clean_working_tree=MagicMock(return_value=True),
+        _get_current_branch=MagicMock(return_value=branch),
+    )
+
+
 def test_launch_ticket_saves_retry_state_on_failure(tmp_path):
+    import run_daemon
+
     runs = tmp_path / "runs"
     run_dir = _write_state(runs, "T001", "PLAN_APPROVED")
     (run_dir / "runtime.log").write_text(
         "[2026-01-01T00:00:00Z] auto-run: runtime failure: quota_exceeded (rc=1)\n",
         encoding="utf-8",
     )
-    with patch("run_daemon.subprocess.run", return_value=_make_mock_result(1)):
+    proc = _make_mock_result(1)
+    proc.poll.return_value = 1
+    run_daemon._ACTIVE_WORKERS.clear()
+    with _launch_preflight_ok(), \
+         patch("run_daemon._spawn_worker_process", return_value=proc):
         launch_ticket("T001", "test-cmd", dry_run=False, runs_dir=runs)
+    reap_completed_workers(runs)
     state = _load_retry_state(run_dir)
     assert state.get("failure_class") == "quota_exceeded"
     assert "cooldown_until" in state
 
 
 def test_launch_ticket_clears_retry_state_on_success(tmp_path):
+    import run_daemon
+
     runs = tmp_path / "runs"
     run_dir = _write_state(runs, "T001", "PLAN_APPROVED")
     _save_retry_state(run_dir, {"failure_class": "quota_exceeded", "retry_count": 1})
-    with patch("run_daemon.subprocess.run", return_value=_make_mock_result(0)):
+    proc = _make_mock_result(0)
+    proc.poll.return_value = 0
+    run_daemon._ACTIVE_WORKERS.clear()
+    with _launch_preflight_ok(), \
+         patch("run_daemon._spawn_worker_process", return_value=proc):
         launch_ticket("T001", "test-cmd", dry_run=False, runs_dir=runs)
+    reap_completed_workers(runs)
     assert not _retry_state_path(run_dir).exists()
 
 
 def test_launch_ticket_no_retry_state_when_no_failure_class_in_log(tmp_path):
+    import run_daemon
+
     runs = tmp_path / "runs"
     run_dir = _write_state(runs, "T001", "PLAN_APPROVED")
     (run_dir / "runtime.log").write_text(
         "[2026-01-01T00:00:00Z] auto-run start: state=PLAN_APPROVED\n",
         encoding="utf-8",
     )
-    with patch("run_daemon.subprocess.run", return_value=_make_mock_result(1)):
+    proc = _make_mock_result(1)
+    proc.poll.return_value = 1
+    run_daemon._ACTIVE_WORKERS.clear()
+    with _launch_preflight_ok(), \
+         patch("run_daemon._spawn_worker_process", return_value=proc):
         launch_ticket("T001", "test-cmd", dry_run=False, runs_dir=runs)
+    reap_completed_workers(runs)
     assert not _retry_state_path(run_dir).exists()
 
 
 def test_launch_ticket_stops_on_write_permission_missing(tmp_path):
+    import run_daemon
+
     runs = tmp_path / "runs"
     run_dir = _write_state(runs, "T001", "PLAN_APPROVED")
     (run_dir / "runtime.log").write_text(
         "[2026-01-01T00:00:00Z] auto-run: runtime failure: write_permission_missing (rc=0)\n",
         encoding="utf-8",
     )
-    with patch("run_daemon.subprocess.run", return_value=_make_mock_result(1)):
+    proc = _make_mock_result(1)
+    proc.poll.return_value = 1
+    run_daemon._ACTIVE_WORKERS.clear()
+    with _launch_preflight_ok(), \
+         patch("run_daemon._spawn_worker_process", return_value=proc):
         launch_ticket("T001", "test-cmd", dry_run=False, runs_dir=runs)
+    reap_completed_workers(runs)
     state = _load_retry_state(run_dir)
     assert state.get("stopped") is True
 

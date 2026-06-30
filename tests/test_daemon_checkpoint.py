@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch, call
 sys.path.insert(0, str(Path(__file__).parent.parent / "tools" / "agent_runner"))
 
 from run_daemon import (
+    CheckpointError,
     _classify_dirty_files,
     _ensure_clean_working_tree,
     launch_ticket,
@@ -25,45 +26,62 @@ def _write_state(runs_dir: Path, ticket_id: str, state: str) -> Path:
     return run_dir
 
 
+def _launch_preflight_ok(*, branch: str = "ticket/T001"):
+    return patch.multiple(
+        "run_daemon",
+        _sync_ticket_branch=MagicMock(return_value=True),
+        _ensure_clean_working_tree=MagicMock(return_value=True),
+        _get_current_branch=MagicMock(return_value=branch),
+    )
+
+
 # ── launch_ticket auto flags ───────────────────────────────────────────────────
 
 def test_launch_ticket_passes_auto_commit_flag(tmp_path):
     runs = tmp_path / "runs"
     _write_state(runs, "T001", "PLAN_APPROVED")
-    mock_result = MagicMock(stdout="", stderr="", returncode=0)
-    with patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
+    mock_result = MagicMock(stdout="", stderr="", returncode=0, pid=4242)
+    mock_result.poll.return_value = None
+    with _launch_preflight_ok(), \
+         patch("run_daemon._spawn_worker_process", return_value=mock_result) as mock_spawn:
         launch_ticket("T001", "test-cmd", dry_run=False, runs_dir=runs, auto_commit=True)
-    cmd = mock_sub.call_args[0][0]
+    cmd = mock_spawn.call_args[0][0]
     assert "--auto-commit" in cmd
 
 
 def test_launch_ticket_passes_auto_push_flag(tmp_path):
     runs = tmp_path / "runs"
     _write_state(runs, "T001", "PLAN_APPROVED")
-    mock_result = MagicMock(stdout="", stderr="", returncode=0)
-    with patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
+    mock_result = MagicMock(stdout="", stderr="", returncode=0, pid=4242)
+    mock_result.poll.return_value = None
+    with _launch_preflight_ok(), \
+         patch("run_daemon._spawn_worker_process", return_value=mock_result) as mock_spawn:
         launch_ticket("T001", "test-cmd", dry_run=False, runs_dir=runs, auto_push=True)
-    cmd = mock_sub.call_args[0][0]
+    cmd = mock_spawn.call_args[0][0]
     assert "--auto-push" in cmd
 
 
 def test_launch_ticket_passes_auto_include_code_flag(tmp_path):
     runs = tmp_path / "runs"
     _write_state(runs, "T001", "PLAN_APPROVED")
-    mock_result = MagicMock(stdout="", stderr="", returncode=0)
-    with patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
+    mock_result = MagicMock(stdout="", stderr="", returncode=0, pid=4242)
+    mock_result.poll.return_value = None
+    with _launch_preflight_ok(), \
+         patch("run_daemon._spawn_worker_process", return_value=mock_result) as mock_spawn:
         launch_ticket("T001", "test-cmd", dry_run=False, runs_dir=runs, auto_include_code=True)
-    cmd = mock_sub.call_args[0][0]
+    cmd = mock_spawn.call_args[0][0]
     assert "--auto-include-code" in cmd
 
 
 def test_launch_ticket_no_auto_flags_by_default(tmp_path):
     runs = tmp_path / "runs"
     _write_state(runs, "T001", "PLAN_APPROVED")
-    mock_result = MagicMock(stdout="", stderr="", returncode=0)
-    with patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
+    mock_result = MagicMock(stdout="", stderr="", returncode=0, pid=4242)
+    mock_result.poll.return_value = None
+    with _launch_preflight_ok(), \
+         patch("run_daemon._spawn_worker_process", return_value=mock_result) as mock_spawn:
         launch_ticket("T001", "test-cmd", dry_run=False, runs_dir=runs)
-    cmd = mock_sub.call_args[0][0]
+    cmd = mock_spawn.call_args[0][0]
     assert "--auto-commit" not in cmd
     assert "--auto-push" not in cmd
     assert "--auto-include-code" not in cmd
@@ -77,6 +95,7 @@ def test_run_once_passes_auto_flags_to_launch_ticket(tmp_path):
     mock_launch.assert_called_once_with(
         "T001", "test-cmd", False, runs,
         worktrees_dir=None, auto_commit=True, auto_push=True, auto_include_code=True,
+        state_dir=runs,
     )
 
 
@@ -162,82 +181,70 @@ def test_ensure_clean_working_tree_unknown_files_aborts():
 
 
 def test_ensure_clean_working_tree_workflow_artifacts_trigger_checkpoint():
-    mock_commit = MagicMock(stdout="", stderr="", returncode=0)
     with patch("run_daemon._classify_dirty_files", return_value=(["runs/T001/plan.md"], [], [])), \
-         patch("run_daemon.subprocess.run", return_value=mock_commit) as mock_sub:
+         patch("run_daemon.checkpoint_transition") as mock_ckpt:
         result = _ensure_clean_working_tree("T001", auto_push=False)
     assert result is True
-    cmd = mock_sub.call_args[0][0]
-    assert "--commit" in cmd
-    assert "--include-code" in cmd
+    mock_ckpt.assert_called_once_with(
+        "T001",
+        "T001: pre-flight checkpoint — persist dirty runtime artifacts",
+        push=False,
+        include_code=True,
+    )
 
 
 def test_ensure_clean_working_tree_code_scope_files_trigger_checkpoint():
-    mock_commit = MagicMock(stdout="", stderr="", returncode=0)
-    with patch("run_daemon._classify_dirty_files", return_value=([], ["services/control_api/routes/tickets.py"], [])), \
-         patch("run_daemon.subprocess.run", return_value=mock_commit) as mock_sub:
+    with patch(
+        "run_daemon._classify_dirty_files",
+        return_value=([], ["services/control_api/routes/tickets.py"], []),
+    ), patch("run_daemon.checkpoint_transition") as mock_ckpt:
         result = _ensure_clean_working_tree("T001", auto_push=False)
     assert result is True
-    cmd = mock_sub.call_args[0][0]
-    assert "--commit" in cmd
-    assert "--include-code" in cmd
+    mock_ckpt.assert_called_once_with(
+        "T001",
+        "T001: pre-flight checkpoint — persist dirty runtime artifacts",
+        push=False,
+        include_code=True,
+    )
 
 
 def test_ensure_clean_working_tree_code_scope_files_do_not_block_when_no_unknown():
-    mock_commit = MagicMock(stdout="", stderr="", returncode=0)
     with patch("run_daemon._classify_dirty_files", return_value=([], ["apps/dashboard/src/App.jsx"], [])), \
-         patch("run_daemon.subprocess.run", return_value=mock_commit):
+         patch("run_daemon.checkpoint_transition"):
         result = _ensure_clean_working_tree("T001")
     assert result is True
 
 
 def test_ensure_clean_working_tree_checkpoint_failure_aborts():
-    mock_fail = MagicMock(stdout="", stderr="error", returncode=2)
     with patch("run_daemon._classify_dirty_files", return_value=(["runs/T001/plan.md"], [], [])), \
-         patch("run_daemon.subprocess.run", return_value=mock_fail):
+         patch("run_daemon.checkpoint_transition", side_effect=CheckpointError("error")):
         result = _ensure_clean_working_tree("T001")
     assert result is False
 
 
 def test_ensure_clean_working_tree_nothing_to_commit_proceeds():
-    # returncode=1 from commit_ticket means nothing to commit — still proceed
-    mock_nothing = MagicMock(stdout="", stderr="", returncode=1)
     with patch("run_daemon._classify_dirty_files", return_value=(["runs/T001/plan.md"], [], [])), \
-         patch("run_daemon.subprocess.run", return_value=mock_nothing):
+         patch("run_daemon.checkpoint_transition"):
         result = _ensure_clean_working_tree("T001")
     assert result is True
 
 
 def test_ensure_clean_working_tree_pushes_when_auto_push_and_commit_succeeds():
-    subprocess_calls = []
-
-    def fake_run(args, **kwargs):
-        subprocess_calls.append(args)
-        return MagicMock(stdout="", stderr="", returncode=0)
-
     with patch("run_daemon._classify_dirty_files", return_value=(["runs/T001/plan.md"], [], [])), \
-         patch("run_daemon.subprocess.run", side_effect=fake_run):
+         patch("run_daemon.checkpoint_transition") as mock_ckpt:
         result = _ensure_clean_working_tree("T001", auto_push=True)
 
     assert result is True
-    push_calls = [c for c in subprocess_calls if "--push" in c]
-    assert len(push_calls) == 1
+    assert mock_ckpt.call_args.kwargs["push"] is True
 
 
 def test_ensure_clean_working_tree_no_push_when_auto_push_false():
-    subprocess_calls = []
-
-    def fake_run(args, **kwargs):
-        subprocess_calls.append(args)
-        return MagicMock(stdout="", stderr="", returncode=0)
-
     with patch("run_daemon._classify_dirty_files", return_value=(["runs/T001/plan.md"], [], [])), \
-         patch("run_daemon.subprocess.run", side_effect=fake_run):
+         patch("run_daemon.checkpoint_transition") as mock_ckpt:
         result = _ensure_clean_working_tree("T001", auto_push=False)
 
     assert result is True
-    push_calls = [c for c in subprocess_calls if "--push" in c]
-    assert push_calls == []
+    assert mock_ckpt.call_args.kwargs["push"] is False
 
 
 # ── launch_ticket: pre-flight integration ─────────────────────────────────────
@@ -252,22 +259,23 @@ def test_launch_ticket_aborts_when_unknown_dirty_files(tmp_path):
         return MagicMock(stdout="", stderr="", returncode=0)
 
     with patch("run_daemon._classify_dirty_files", return_value=([], [], ["some-user-file.py"])), \
-         patch("run_daemon.subprocess.run", side_effect=fake_run):
+         patch("run_daemon.subprocess.run", side_effect=fake_run), \
+         patch("run_daemon._spawn_worker_process") as mock_spawn:
         launch_ticket("T001", "test-cmd", dry_run=False, runs_dir=runs)
 
-    run_ticket_calls = [c for c in subprocess_calls if "--auto" in c]
-    assert run_ticket_calls == []
+    mock_spawn.assert_not_called()
 
 
 def test_launch_ticket_proceeds_after_auto_checkpoint(tmp_path):
     runs = tmp_path / "runs"
     _write_state(runs, "T001", "PLAN_APPROVED")
-    mock_result = MagicMock(stdout="", stderr="", returncode=0)
+    mock_result = MagicMock(stdout="", stderr="", returncode=0, pid=4242)
+    mock_result.poll.return_value = None
 
     with patch("run_daemon._classify_dirty_files", return_value=(["runs/T001/plan.md"], [], [])), \
-         patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
+         _launch_preflight_ok(), \
+         patch("run_daemon._spawn_worker_process", return_value=mock_result) as mock_spawn:
         launch_ticket("T001", "test-cmd", dry_run=False, runs_dir=runs)
 
-    all_calls = [c[0][0] for c in mock_sub.call_args_list]
-    run_ticket_auto_calls = [c for c in all_calls if "--auto" in c]
-    assert len(run_ticket_auto_calls) == 1
+    cmd = mock_spawn.call_args[0][0]
+    assert "--auto" in cmd

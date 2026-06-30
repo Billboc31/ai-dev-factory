@@ -11,7 +11,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "tools" / "agent_runner"))
 
 from run_daemon import (
     call_issue_intake,
+    clear_stale_run_dir,
+    extract_ticket_id_from_title,
     fetch_ready_issues,
+    issue_intake_sort_key,
     load_issue_index,
     main,
     next_ticket_id,
@@ -374,6 +377,47 @@ def test_poll_github_issues_multiple_issues_sequential_ids(tmp_path):
     assert "2" not in index
 
 
+def test_issue_intake_sort_key_orders_by_ticket_id_not_github_number():
+    issues = [
+        {"number": 5, "title": "T002 - Bootstrap backend foundation"},
+        {"number": 24, "title": "T001 - Define product vision"},
+    ]
+    ordered = sorted(issues, key=issue_intake_sort_key)
+    assert ordered[0]["number"] == 24
+    assert extract_ticket_id_from_title(ordered[0]["title"]) == "T001"
+
+
+def test_poll_github_issues_ingests_lowest_ticket_id_first(tmp_path):
+    runs = _make_runs(tmp_path)
+    worktrees_dir = tmp_path / "worktrees"
+    issues = [
+        {"number": 5, "title": "T002 - Bootstrap backend foundation"},
+        {"number": 24, "title": "T001 - Define product vision"},
+    ]
+
+    with patch("run_daemon.fetch_ready_issues", return_value=issues), \
+         patch("run_daemon.call_issue_intake", return_value=True) as mock_intake, \
+         patch("run_daemon.fetch_origin_main", return_value=(True, "fetched origin/main")), \
+         patch("run_daemon.create_ticket_branch_and_worktree", return_value=(True, "ok")), \
+         patch("run_daemon.clear_stale_run_dir", return_value=False):
+        poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir)
+
+    issue_number, ticket_id, _, _ = mock_intake.call_args[0]
+    assert issue_number == 24
+    assert ticket_id == "T001"
+    assert load_issue_index(runs) == {"24": "T001"}
+
+
+def test_clear_stale_run_dir_removes_existing_ticket_runs(tmp_path):
+    worktree = tmp_path / "wt"
+    stale = worktree / "runs" / "T001"
+    stale.mkdir(parents=True)
+    (stale / "state.json").write_text("{}", encoding="utf-8")
+    assert clear_stale_run_dir(worktree, "T001") is True
+    assert not stale.exists()
+    assert clear_stale_run_dir(worktree, "T001") is False
+
+
 def test_poll_github_issues_does_not_commit_after_intake_on_success(tmp_path):
     # T111: intake no longer creates a git commit — index saved in SQLite + gitignored JSON
     runs = _make_runs(tmp_path)
@@ -414,11 +458,22 @@ def test_poll_github_issues_does_not_call_commit_after_intake_on_failure(tmp_pat
 
 # ── main CLI integration ──────────────────────────────────────────────────────
 
+def _boot_daemon_for_test():
+    return patch.multiple(
+        "run_daemon",
+        _check_runtime_clone=MagicMock(return_value=True),
+        _acquire_daemon_singleton=MagicMock(return_value=True),
+        reap_completed_workers=MagicMock(),
+        _cleanup_stale_workers=MagicMock(),
+        poll_ticket_pipeline=MagicMock(),
+    )
+
+
 def test_main_poll_issues_flag_calls_poll_before_run_once(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
 
-    with patch("run_daemon._check_runtime_clone", return_value=True):
+    with _boot_daemon_for_test():
         with patch("run_daemon.poll_github_issues") as mock_poll:
             with patch("run_daemon.run_once") as mock_run:
                 rc = main([
@@ -438,19 +493,20 @@ def test_main_without_poll_issues_does_not_call_poll(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
 
-    with patch("run_daemon._check_runtime_clone", return_value=True):
+    with _boot_daemon_for_test():
         with patch("run_daemon.poll_github_issues") as mock_poll:
-            with patch("run_daemon.run_once"):
+            with patch("run_daemon.run_once") as mock_run:
                 main(["--exec-cmd", "test-cmd", "--once", "--runs-dir", str(runs)])
 
     mock_poll.assert_not_called()
+    mock_run.assert_called_once()
 
 
 def test_main_issue_label_passed_to_poll(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
 
-    with patch("run_daemon._check_runtime_clone", return_value=True):
+    with _boot_daemon_for_test():
         with patch("run_daemon.poll_github_issues") as mock_poll:
             with patch("run_daemon.run_once"):
                 main([
@@ -469,7 +525,7 @@ def test_main_issue_repo_passed_to_poll(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
 
-    with patch("run_daemon._check_runtime_clone", return_value=True):
+    with _boot_daemon_for_test():
         with patch("run_daemon.poll_github_issues") as mock_poll:
             with patch("run_daemon.run_once"):
                 main([
@@ -488,7 +544,7 @@ def test_main_default_issue_label_is_ai_ready(tmp_path):
     runs = tmp_path / "runs"
     runs.mkdir()
 
-    with patch("run_daemon._check_runtime_clone", return_value=True):
+    with _boot_daemon_for_test():
         with patch("run_daemon.poll_github_issues") as mock_poll:
             with patch("run_daemon.run_once"):
                 main(["--exec-cmd", "cmd", "--once", "--poll-issues", "--runs-dir", str(runs)])
