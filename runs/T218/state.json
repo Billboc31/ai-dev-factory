@@ -1,7 +1,7 @@
 {
   "ticket_id": "T218",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_APPROVED",
   "branch": "ticket/T218-add-batch-based-backlog-ingestion-and-dependency-a",
   "issue_number": 292,
-  "updated_at": "2026-06-30T14:30:28Z"
+  "updated_at": "2026-06-30T14:33:34Z"
 }
