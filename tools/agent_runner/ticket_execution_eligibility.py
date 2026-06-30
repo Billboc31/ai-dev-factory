@@ -31,7 +31,7 @@ if str(_TOOLS_DIR) not in sys.path:
 
 import runtime_db  # noqa: E402
 from ticket_merge_state import is_ticket_merged  # noqa: E402
-from ticket_readiness_evaluator import _extract_dependencies  # noqa: E402
+from ticket_readiness_evaluator import _extract_dependencies, collect_dependency_ticket_ids  # noqa: E402
 
 _EXECUTION_APPROVAL_RULE = "require_human_approval"
 
@@ -94,8 +94,9 @@ def _eval_dependencies(
     *,
     project_id: str | None = None,
     repo: str | None = None,
+    intelligence: dict | None = None,
 ) -> dict:
-    deps = _extract_dependencies(ticket_content or "")
+    deps = collect_dependency_ticket_ids(ticket_content or "", intelligence)
     if not deps:
         return {
             "status": "passed",
@@ -272,7 +273,10 @@ def evaluate_eligibility(
     checks: dict[str, dict] = {
         "intelligence": _eval_intelligence(intelligence),
         "dependencies": _eval_dependencies(
-            ticket_content, project_root, project_id=project_id
+            ticket_content,
+            project_root,
+            project_id=project_id,
+            intelligence=intelligence,
         ),
         "readiness": _eval_readiness(readiness),
         "approval": _eval_approval(db_path, ticket_id, project_id),

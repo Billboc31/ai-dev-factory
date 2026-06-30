@@ -12,6 +12,7 @@ sys.path.insert(0, str(_TOOLS))
 
 from ticket_readiness_evaluator import (  # noqa: E402
     _extract_dependencies,
+    collect_dependency_ticket_ids,
     read_ticket_markdown,
 )
 
@@ -52,6 +53,18 @@ def test_extract_dependencies_deduplicates():
 - T010 - same ticket again
 """
     assert _extract_dependencies(content) == ["T010"]
+
+
+def test_collect_dependency_ticket_ids_merges_intelligence_hints():
+    content = "Create the frontend foundation."
+    intelligence = {"dependency_hints": '["T001"]'}
+    assert collect_dependency_ticket_ids(content, intelligence) == ["T001"]
+
+
+def test_collect_dependency_ticket_ids_deduplicates_body_and_hints():
+    content = "## Depends on\n- T001\n"
+    intelligence = {"dependency_hints": ["T001", "T002"]}
+    assert collect_dependency_ticket_ids(content, intelligence) == ["T001", "T002"]
 
 
 def test_read_ticket_markdown_prefers_worktree(tmp_path: Path):

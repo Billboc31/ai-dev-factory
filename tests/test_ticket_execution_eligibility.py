@@ -226,6 +226,30 @@ def test_dependency_blocked_when_dep_not_merged(env, monkeypatch):
     assert result["next_action"] == "Wait for T001 to be merged"
 
 
+def test_dependency_blocked_from_intelligence_hints_only(env, monkeypatch):
+    db, root = env["db"], env["root"]
+    _write_ticket_md(root, "T106", body="Bootstrap frontend based on T001 architecture.")
+    _seed_complete_intelligence(db, "T106")
+    _sqlite_db.upsert_ticket_intelligence(
+        db,
+        "T106",
+        analysis_status="completed",
+        dependency_hints='["T001"]',
+    )
+    _seed_ready_candidate(db, "T106")
+    _stub_deps(monkeypatch, {"T001": "not_merged"})
+
+    result = eligibility.evaluate_eligibility(
+        db,
+        root,
+        "T106",
+        ticket_content="Bootstrap frontend based on T001 architecture.",
+    )
+    assert result["ready_to_take"] is False
+    assert result["status"] == "DEPENDENCY_BLOCKED"
+    assert result["checks"]["dependencies"]["unmet"] == ["T001"]
+
+
 # ── Scenario: missing intelligence → BLOCKED at intelligence ────────────────
 
 def test_blocked_when_intelligence_missing(env):

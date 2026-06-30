@@ -10,6 +10,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "tools" / "agent_runner"))
 
+import run_daemon
 from run_daemon import (
     AUTO_RUNNABLE_STATES,
     HUMAN_GATE_STATES,
@@ -175,6 +176,20 @@ def test_run_once_skips_human_gate_state(tmp_path):
 def test_run_once_skips_unknown_state(tmp_path):
     runs = tmp_path / "runs"
     _write_state(runs, "T001", "SOME_UNKNOWN_STATE")
+    with patch("run_daemon.launch_ticket") as mock_launch:
+        run_once("test-cmd", False, runs)
+    mock_launch.assert_not_called()
+
+
+def test_run_once_skips_launch_when_eligibility_not_ready(tmp_path, monkeypatch):
+    runs = tmp_path / "runs"
+    _write_state(runs, "T003", "INIT")
+    monkeypatch.setattr(run_daemon, "_get_dispatcher_mode", lambda _db: "off")
+    monkeypatch.setattr(
+        run_daemon,
+        "_launch_blocked_by_eligibility",
+        lambda *_a, **_k: "Dependency T001 not merged",
+    )
     with patch("run_daemon.launch_ticket") as mock_launch:
         run_once("test-cmd", False, runs)
     mock_launch.assert_not_called()

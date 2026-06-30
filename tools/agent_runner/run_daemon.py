@@ -128,6 +128,14 @@ _find_next_pipeline_ticket = _tp_mod.find_next_ticket
 _process_ticket_pipeline = _tp_mod.process_ticket
 del _tp_spec, _tp_mod
 
+_te_spec = importlib.util.spec_from_file_location(
+    "_ticket_execution_eligibility", ROOT / "ticket_execution_eligibility.py",
+)
+_te_mod = importlib.util.module_from_spec(_te_spec)  # type: ignore[arg-type]
+_te_spec.loader.exec_module(_te_mod)  # type: ignore[union-attr]
+_evaluate_eligibility = _te_mod.evaluate_eligibility
+del _te_spec, _te_mod
+
 # SQLite path and init are cached so _rdb_get_db_path() (subprocess) runs only once per daemon process.
 _DB_PATH_RESOLVED: bool = False
 _DB_PATH_VALUE: "Path | None" = None
@@ -1834,6 +1842,35 @@ def _dispatcher_enabled(db_path: "Path | None") -> tuple[bool, str]:
     return mode != "off", mode
 
 
+def _launch_blocked_by_eligibility(
+    db_path: "Path | None",
+    project_root: Path,
+    ticket_id: str,
+    run_dir: Path,
+    project_id: str | None,
+) -> str | None:
+    """Return a human-readable block reason when the ticket must not spawn a worker."""
+    if db_path is None:
+        return None
+    ticket_path = run_dir / "ticket.md"
+    if not ticket_path.is_file():
+        return None
+    try:
+        content = ticket_path.read_text(encoding="utf-8")
+        result = _evaluate_eligibility(
+            db_path,
+            project_root,
+            ticket_id,
+            ticket_content=content,
+            project_id=project_id,
+        )
+    except Exception as exc:
+        return f"eligibility check failed: {exc}"
+    if result.get("ready_to_take"):
+        return None
+    return result.get("reason") or result.get("status") or "not ready to take"
+
+
 def _select_tickets_via_dispatcher(
     db_path: "Path | None",
     project_root: Path,
@@ -1988,6 +2025,18 @@ def run_once(
                 continue
             retry_state = _load_retry_state(run_dir)
             if _is_blocked_by_retry(ticket_id, retry_state):
+                continue
+            _resolved_project_root = project_root if project_root is not None else REPO_ROOT
+            _resolved_project_id = project_id or os.environ.get("PROJECT_NAME")
+            block_reason = _launch_blocked_by_eligibility(
+                _db_path,
+                _resolved_project_root,
+                ticket_id,
+                run_dir,
+                _resolved_project_id,
+            )
+            if block_reason:
+                _log(f"skipping {ticket_id}: not ready to take — {block_reason}")
                 continue
             launch_ticket(
                 ticket_id, exec_cmd, dry_run, runs_dir,

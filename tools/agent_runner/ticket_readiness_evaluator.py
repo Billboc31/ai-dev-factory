@@ -150,6 +150,36 @@ def _extract_dependencies(ticket_content: str) -> list[str]:
     return seen
 
 
+def collect_dependency_ticket_ids(
+    ticket_content: str,
+    intelligence: dict | None = None,
+) -> list[str]:
+    """Union ticket-body dependencies with intelligence ``dependency_hints``."""
+    deps = _extract_dependencies(ticket_content or "")
+    seen = set(deps)
+
+    if not intelligence:
+        return deps
+
+    hints = intelligence.get("dependency_hints")
+    if isinstance(hints, str):
+        try:
+            hints = json.loads(hints)
+        except json.JSONDecodeError:
+            hints = []
+    if not isinstance(hints, list):
+        return deps
+
+    for hint in hints:
+        if not isinstance(hint, str):
+            continue
+        ticket_id = hint.strip().upper()
+        if re.fullmatch(r"T\d+", ticket_id, re.IGNORECASE) and ticket_id not in seen:
+            deps.append(ticket_id)
+            seen.add(ticket_id)
+    return deps
+
+
 def read_ticket_markdown(
     project_root: Path,
     ticket_id: str,
@@ -190,9 +220,10 @@ def _check_dependencies(
     project_root: Path,
     *,
     project_id: str | None = None,
+    intelligence: dict | None = None,
 ) -> tuple[str, list[str]]:
     """Returns (status, blocking_reasons). Empty deps → ``passed``."""
-    deps = _extract_dependencies(ticket_content)
+    deps = collect_dependency_ticket_ids(ticket_content, intelligence)
     if not deps:
         return "passed", []
 
@@ -332,7 +363,10 @@ def run_evaluation(
 
         intel_status, intel_reason = _check_intelligence(db_path, ticket_id)
         dep_status, dep_reasons = _check_dependencies(
-            ticket_content, project_root, project_id=project_id
+            ticket_content,
+            project_root,
+            project_id=project_id,
+            intelligence=intelligence_row,
         )
         approval_status, approval_warnings, approval_required, approval_present = (
             _collect_future_approval_warnings(intelligence_row, project_root, ticket_id)
