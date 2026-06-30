@@ -197,6 +197,42 @@ CREATE TABLE IF NOT EXISTS runtime_settings (
     updated_at       TEXT NOT NULL,
     updated_by       TEXT
 );
+
+CREATE TABLE IF NOT EXISTS backlog_batches (
+    batch_id                          TEXT PRIMARY KEY,
+    status                            TEXT NOT NULL,
+    created_at                        TEXT NOT NULL,
+    frozen_at                         TEXT,
+    last_activity_at                  TEXT NOT NULL,
+    completed_at                      TEXT,
+    freeze_blocked                    INTEGER NOT NULL DEFAULT 0,
+    freeze_blocked_reason             TEXT,
+    dependency_analysis_attempts      INTEGER NOT NULL DEFAULT 0,
+    last_dependency_analysis_error    TEXT,
+    next_dependency_analysis_retry_at TEXT,
+    notes                             TEXT
+);
+
+CREATE TABLE IF NOT EXISTS backlog_batch_tickets (
+    batch_id   TEXT NOT NULL,
+    ticket_id  TEXT NOT NULL,
+    added_at   TEXT NOT NULL,
+    PRIMARY KEY (batch_id, ticket_id),
+    UNIQUE (ticket_id)
+);
+
+CREATE TABLE IF NOT EXISTS ticket_dependency_analysis (
+    ticket_id                          TEXT NOT NULL,
+    batch_id                           TEXT NOT NULL,
+    depends_on_json                    TEXT NOT NULL,
+    blocks_json                        TEXT NOT NULL,
+    parallel_group                     TEXT,
+    conflicting_tickets_json           TEXT NOT NULL,
+    execution_phase                    TEXT,
+    relationship_classifications_json  TEXT NOT NULL,
+    analyzed_at                        TEXT NOT NULL,
+    PRIMARY KEY (ticket_id, batch_id)
+);
 """
 
 
@@ -288,6 +324,38 @@ def _ensure_ticket_intelligence_lifecycle_columns(conn: sqlite3.Connection) -> N
             conn.execute(f"ALTER TABLE ticket_intelligence ADD COLUMN {name} {sql_type}")
 
 
+_BACKLOG_BATCHES_COLUMNS = (
+    ("status", "TEXT NOT NULL DEFAULT 'collecting'"),
+    ("created_at", "TEXT"),
+    ("frozen_at", "TEXT"),
+    ("last_activity_at", "TEXT"),
+    ("completed_at", "TEXT"),
+    ("freeze_blocked", "INTEGER NOT NULL DEFAULT 0"),
+    ("freeze_blocked_reason", "TEXT"),
+    ("dependency_analysis_attempts", "INTEGER NOT NULL DEFAULT 0"),
+    ("last_dependency_analysis_error", "TEXT"),
+    ("next_dependency_analysis_retry_at", "TEXT"),
+    ("notes", "TEXT"),
+)
+
+
+def _ensure_backlog_batches_columns(conn: sqlite3.Connection) -> None:
+    """Idempotent additive migration for backlog_batches new columns (T218).
+
+    Pre-existing databases created before T218 don't have this table at all, so
+    the CREATE TABLE IF NOT EXISTS in ``_SCHEMA`` covers them. For very old DBs
+    that may have a partial version of the table, this helper introspects
+    ``PRAGMA table_info`` and adds any missing columns.
+    """
+    rows = list(conn.execute("PRAGMA table_info('backlog_batches')"))
+    if not rows:
+        return
+    existing = {row[1] for row in rows}
+    for name, sql_type in _BACKLOG_BATCHES_COLUMNS:
+        if name not in existing:
+            conn.execute(f"ALTER TABLE backlog_batches ADD COLUMN {name} {sql_type}")
+
+
 def _ensure_runtime_settings_table(conn: sqlite3.Connection) -> None:
     """Idempotent migration: create runtime_settings if missing.
 
@@ -323,6 +391,7 @@ def init_runtime_db(db_path: Path) -> None:
         conn.executescript(_SCHEMA)
         _ensure_ticket_intelligence_lifecycle_columns(conn)
         _ensure_runtime_settings_table(conn)
+        _ensure_backlog_batches_columns(conn)
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
@@ -1109,6 +1178,195 @@ def delete_runtime_setting(db_path: Path, key: str) -> None:
         conn.execute("DELETE FROM runtime_settings WHERE key = ?", (key,))
 
 
+# ── backlog_batches / backlog_batch_tickets ───────────────────────────────────
+
+def insert_backlog_batch(
+    db_path: Path,
+    batch_id: str,
+    *,
+    status: str,
+    created_at: str,
+    last_activity_at: str,
+    freeze_blocked: bool = False,
+    freeze_blocked_reason: str | None = None,
+) -> None:
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO backlog_batches
+                (batch_id, status, created_at, last_activity_at,
+                 freeze_blocked, freeze_blocked_reason,
+                 dependency_analysis_attempts)
+            VALUES (?, ?, ?, ?, ?, ?, 0)
+            """,
+            (
+                batch_id, status, created_at, last_activity_at,
+                1 if freeze_blocked else 0, freeze_blocked_reason,
+            ),
+        )
+
+
+def get_backlog_batch(db_path: Path, batch_id: str) -> dict | None:
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT * FROM backlog_batches WHERE batch_id = ?", (batch_id,)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_backlog_batches(db_path: Path, *, status: str | None = None) -> list[dict]:
+    with _connect(db_path) as conn:
+        if status is None:
+            rows = conn.execute(
+                "SELECT * FROM backlog_batches ORDER BY created_at, batch_id"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM backlog_batches WHERE status = ? "
+                "ORDER BY created_at, batch_id",
+                (status,),
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_backlog_batch(db_path: Path, batch_id: str, **fields) -> None:
+    if not fields:
+        return
+    with _connect(db_path) as conn:
+        set_clause = ", ".join(f"{k}=?" for k in fields)
+        conn.execute(
+            f"UPDATE backlog_batches SET {set_clause} WHERE batch_id = ?",
+            list(fields.values()) + [batch_id],
+        )
+
+
+def insert_backlog_batch_ticket(
+    db_path: Path,
+    batch_id: str,
+    ticket_id: str,
+    added_at: str,
+) -> bool:
+    """Insert one membership row. Returns False on UNIQUE violation (already in a batch)."""
+    try:
+        with _connect(db_path) as conn:
+            conn.execute(
+                "INSERT INTO backlog_batch_tickets (batch_id, ticket_id, added_at) "
+                "VALUES (?, ?, ?)",
+                (batch_id, ticket_id, added_at),
+            )
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+
+def list_backlog_batch_ticket_ids(db_path: Path, batch_id: str) -> list[str]:
+    with _connect(db_path) as conn:
+        rows = conn.execute(
+            "SELECT ticket_id FROM backlog_batch_tickets WHERE batch_id = ? "
+            "ORDER BY added_at, ticket_id",
+            (batch_id,),
+        ).fetchall()
+    return [r["ticket_id"] for r in rows]
+
+
+def get_batch_for_ticket(db_path: Path, ticket_id: str) -> str | None:
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT batch_id FROM backlog_batch_tickets WHERE ticket_id = ?",
+            (ticket_id,),
+        ).fetchone()
+    return row["batch_id"] if row else None
+
+
+# ── ticket_dependency_analysis ────────────────────────────────────────────────
+
+def upsert_dependency_analysis(
+    db_path: Path,
+    *,
+    ticket_id: str,
+    batch_id: str,
+    depends_on: list[str],
+    blocks: list[str],
+    parallel_group: str | None,
+    conflicting_tickets: list[str],
+    execution_phase: str | None,
+    relationship_classifications: list[dict],
+    analyzed_at: str,
+) -> None:
+    depends_on_json = json.dumps(depends_on or [])
+    blocks_json = json.dumps(blocks or [])
+    conflicting_json = json.dumps(conflicting_tickets or [])
+    rels_json = json.dumps(relationship_classifications or [])
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            INSERT INTO ticket_dependency_analysis
+                (ticket_id, batch_id, depends_on_json, blocks_json,
+                 parallel_group, conflicting_tickets_json, execution_phase,
+                 relationship_classifications_json, analyzed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(ticket_id, batch_id) DO UPDATE SET
+                depends_on_json                   = excluded.depends_on_json,
+                blocks_json                       = excluded.blocks_json,
+                parallel_group                    = excluded.parallel_group,
+                conflicting_tickets_json          = excluded.conflicting_tickets_json,
+                execution_phase                   = excluded.execution_phase,
+                relationship_classifications_json = excluded.relationship_classifications_json,
+                analyzed_at                       = excluded.analyzed_at
+            """,
+            (
+                ticket_id,
+                batch_id,
+                depends_on_json,
+                blocks_json,
+                parallel_group,
+                conflicting_json,
+                execution_phase,
+                rels_json,
+                analyzed_at,
+            ),
+        )
+
+
+def get_dependency_analysis(
+    db_path: Path,
+    ticket_id: str,
+    batch_id: str | None = None,
+) -> dict | None:
+    """Return the most recent analysis row for ``ticket_id`` (filtered by batch when given)."""
+    with _connect(db_path) as conn:
+        if batch_id is None:
+            row = conn.execute(
+                "SELECT * FROM ticket_dependency_analysis WHERE ticket_id = ? "
+                "ORDER BY analyzed_at DESC LIMIT 1",
+                (ticket_id,),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM ticket_dependency_analysis "
+                "WHERE ticket_id = ? AND batch_id = ?",
+                (ticket_id, batch_id),
+            ).fetchone()
+    if row is None:
+        return None
+    out = dict(row)
+    for key in (
+        "depends_on_json",
+        "blocks_json",
+        "conflicting_tickets_json",
+        "relationship_classifications_json",
+    ):
+        raw = out.get(key)
+        if raw is None or raw == "":
+            out[key.removesuffix("_json")] = []
+            continue
+        try:
+            out[key.removesuffix("_json")] = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            out[key.removesuffix("_json")] = []
+    return out
+
+
 # ── Backend selection ─────────────────────────────────────────────────────────
 # Everything above is the SQLite backend (the default). When
 # RUNTIME_DB_BACKEND=postgres the public API is rebound to the networked
@@ -1222,6 +1480,16 @@ if _RUNTIME_DB_BACKEND == "postgres":
     get_runtime_setting = _pg.get_runtime_setting  # type: ignore[assignment]
     upsert_runtime_setting = _pg.upsert_runtime_setting  # type: ignore[assignment]
     delete_runtime_setting = _pg.delete_runtime_setting  # type: ignore[assignment]
+    # T218 — backlog batches and global dependency analysis.
+    insert_backlog_batch = _pg.insert_backlog_batch  # type: ignore[assignment]
+    get_backlog_batch = _pg.get_backlog_batch  # type: ignore[assignment]
+    list_backlog_batches = _pg.list_backlog_batches  # type: ignore[assignment]
+    update_backlog_batch = _pg.update_backlog_batch  # type: ignore[assignment]
+    insert_backlog_batch_ticket = _pg.insert_backlog_batch_ticket  # type: ignore[assignment]
+    list_backlog_batch_ticket_ids = _pg.list_backlog_batch_ticket_ids  # type: ignore[assignment]
+    get_batch_for_ticket = _pg.get_batch_for_ticket  # type: ignore[assignment]
+    upsert_dependency_analysis = _pg.upsert_dependency_analysis  # type: ignore[assignment]
+    get_dependency_analysis = _pg.get_dependency_analysis  # type: ignore[assignment]
 elif _RUNTIME_DB_BACKEND not in ("", "sqlite"):
     raise RuntimeError(
         f"unknown RUNTIME_DB_BACKEND={_RUNTIME_DB_BACKEND!r} "

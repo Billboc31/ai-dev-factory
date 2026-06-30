@@ -242,6 +242,53 @@ CREATE TABLE IF NOT EXISTS runtime_settings (
     updated_at       TEXT NOT NULL,
     updated_by       TEXT
 );
+
+-- T218: backlog batches and per-batch dependency-analysis output. All three
+-- tables carry a project_id column so the same single Postgres database can
+-- host multiple projects without row-level leakage. Composite primary keys put
+-- project_id first so every lookup is forced to scope by it.
+CREATE TABLE IF NOT EXISTS backlog_batches (
+    project_id                        TEXT NOT NULL,
+    batch_id                          TEXT NOT NULL,
+    status                            TEXT NOT NULL,
+    created_at                        TEXT NOT NULL,
+    frozen_at                         TEXT,
+    last_activity_at                  TEXT NOT NULL,
+    completed_at                      TEXT,
+    freeze_blocked                    INTEGER NOT NULL DEFAULT 0,
+    freeze_blocked_reason             TEXT,
+    dependency_analysis_attempts      INTEGER NOT NULL DEFAULT 0,
+    last_dependency_analysis_error    TEXT,
+    next_dependency_analysis_retry_at TEXT,
+    notes                             TEXT,
+    PRIMARY KEY (project_id, batch_id)
+);
+
+-- A ticket may belong to at most one batch within a project at a time. The
+-- UNIQUE(project_id, ticket_id) constraint is what insert_backlog_batch_ticket
+-- relies on to report "already in a batch" via ON CONFLICT DO NOTHING.
+CREATE TABLE IF NOT EXISTS backlog_batch_tickets (
+    project_id TEXT NOT NULL,
+    batch_id   TEXT NOT NULL,
+    ticket_id  TEXT NOT NULL,
+    added_at   TEXT NOT NULL,
+    PRIMARY KEY (project_id, batch_id, ticket_id),
+    UNIQUE (project_id, ticket_id)
+);
+
+CREATE TABLE IF NOT EXISTS ticket_dependency_analysis (
+    project_id                        TEXT NOT NULL,
+    ticket_id                         TEXT NOT NULL,
+    batch_id                          TEXT NOT NULL,
+    depends_on_json                   TEXT NOT NULL,
+    blocks_json                       TEXT NOT NULL,
+    parallel_group                    TEXT,
+    conflicting_tickets_json          TEXT NOT NULL,
+    execution_phase                   TEXT,
+    relationship_classifications_json TEXT NOT NULL,
+    analyzed_at                       TEXT NOT NULL,
+    PRIMARY KEY (project_id, ticket_id, batch_id)
+);
 """
 
 
@@ -1141,3 +1188,231 @@ def upsert_runtime_setting(
 def delete_runtime_setting(handle: PgHandle, key: str) -> None:
     with _connect(handle) as conn:
         conn.execute("DELETE FROM runtime_settings WHERE key = %s", (key,))
+
+
+# ── backlog_batches / backlog_batch_tickets (T218) ────────────────────────────
+#
+# Public signatures mirror the SQLite helpers in runtime_db.py one-for-one so
+# the rebind block stays a trivial assignment. Project scoping comes from the
+# PgHandle, not from a function parameter — same convention as the rest of
+# this module.
+
+def insert_backlog_batch(
+    handle: PgHandle,
+    batch_id: str,
+    *,
+    status: str,
+    created_at: str,
+    last_activity_at: str,
+    freeze_blocked: bool = False,
+    freeze_blocked_reason: str | None = None,
+) -> None:
+    with _connect(handle) as conn:
+        conn.execute(
+            """
+            INSERT INTO backlog_batches
+                (project_id, batch_id, status, created_at, last_activity_at,
+                 freeze_blocked, freeze_blocked_reason,
+                 dependency_analysis_attempts)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 0)
+            """,
+            (
+                handle.project_id,
+                batch_id,
+                status,
+                created_at,
+                last_activity_at,
+                1 if freeze_blocked else 0,
+                freeze_blocked_reason,
+            ),
+        )
+
+
+def get_backlog_batch(handle: PgHandle, batch_id: str) -> dict | None:
+    with _connect(handle) as conn:
+        row = conn.execute(
+            "SELECT * FROM backlog_batches "
+            "WHERE project_id = %s AND batch_id = %s",
+            (handle.project_id, batch_id),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def list_backlog_batches(
+    handle: PgHandle, *, status: str | None = None
+) -> list[dict]:
+    with _connect(handle) as conn:
+        if status is None:
+            rows = conn.execute(
+                "SELECT * FROM backlog_batches WHERE project_id = %s "
+                "ORDER BY created_at, batch_id",
+                (handle.project_id,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM backlog_batches "
+                "WHERE project_id = %s AND status = %s "
+                "ORDER BY created_at, batch_id",
+                (handle.project_id, status),
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_backlog_batch(handle: PgHandle, batch_id: str, **fields) -> None:
+    """Partial update by kwarg → column. Mirrors the SQLite helper exactly.
+
+    Callers only pass known column names (see backlog_batch.py) so it is safe
+    to interpolate them directly. Values stay parameterised.
+    """
+    if not fields:
+        return
+    with _connect(handle) as conn:
+        set_clause = ", ".join(f"{k}=%s" for k in fields)
+        conn.execute(
+            f"UPDATE backlog_batches SET {set_clause} "
+            f"WHERE project_id=%s AND batch_id=%s",
+            list(fields.values()) + [handle.project_id, batch_id],
+        )
+
+
+def insert_backlog_batch_ticket(
+    handle: PgHandle,
+    batch_id: str,
+    ticket_id: str,
+    added_at: str,
+) -> bool:
+    """Insert one membership row. Returns False on conflict (already in a batch).
+
+    Uses ``ON CONFLICT DO NOTHING`` so a ticket that is already in *any* batch
+    for this project is rejected without raising — matching the SQLite contract
+    where ``UNIQUE(ticket_id)`` raises ``IntegrityError`` and is caught.
+    """
+    with _connect(handle) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO backlog_batch_tickets
+                (project_id, batch_id, ticket_id, added_at)
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT DO NOTHING
+            """,
+            (handle.project_id, batch_id, ticket_id, added_at),
+        )
+    return getattr(cur, "rowcount", 0) > 0
+
+
+def list_backlog_batch_ticket_ids(
+    handle: PgHandle, batch_id: str
+) -> list[str]:
+    with _connect(handle) as conn:
+        rows = conn.execute(
+            "SELECT ticket_id FROM backlog_batch_tickets "
+            "WHERE project_id = %s AND batch_id = %s "
+            "ORDER BY added_at, ticket_id",
+            (handle.project_id, batch_id),
+        ).fetchall()
+    return [r["ticket_id"] for r in rows]
+
+
+def get_batch_for_ticket(handle: PgHandle, ticket_id: str) -> str | None:
+    with _connect(handle) as conn:
+        row = conn.execute(
+            "SELECT batch_id FROM backlog_batch_tickets "
+            "WHERE project_id = %s AND ticket_id = %s",
+            (handle.project_id, ticket_id),
+        ).fetchone()
+    return row["batch_id"] if row else None
+
+
+# ── ticket_dependency_analysis (T218) ─────────────────────────────────────────
+
+_DEPENDENCY_ANALYSIS_JSON_FIELDS = (
+    "depends_on_json",
+    "blocks_json",
+    "conflicting_tickets_json",
+    "relationship_classifications_json",
+)
+
+
+def upsert_dependency_analysis(
+    handle: PgHandle,
+    *,
+    ticket_id: str,
+    batch_id: str,
+    depends_on: list[str],
+    blocks: list[str],
+    parallel_group: str | None,
+    conflicting_tickets: list[str],
+    execution_phase: str | None,
+    relationship_classifications: list[dict],
+    analyzed_at: str,
+) -> None:
+    depends_on_json = json.dumps(depends_on or [])
+    blocks_json = json.dumps(blocks or [])
+    conflicting_json = json.dumps(conflicting_tickets or [])
+    rels_json = json.dumps(relationship_classifications or [])
+    with _connect(handle) as conn:
+        conn.execute(
+            """
+            INSERT INTO ticket_dependency_analysis
+                (project_id, ticket_id, batch_id, depends_on_json, blocks_json,
+                 parallel_group, conflicting_tickets_json, execution_phase,
+                 relationship_classifications_json, analyzed_at)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (project_id, ticket_id, batch_id) DO UPDATE SET
+                depends_on_json                   = EXCLUDED.depends_on_json,
+                blocks_json                       = EXCLUDED.blocks_json,
+                parallel_group                    = EXCLUDED.parallel_group,
+                conflicting_tickets_json          = EXCLUDED.conflicting_tickets_json,
+                execution_phase                   = EXCLUDED.execution_phase,
+                relationship_classifications_json = EXCLUDED.relationship_classifications_json,
+                analyzed_at                       = EXCLUDED.analyzed_at
+            """,
+            (
+                handle.project_id,
+                ticket_id,
+                batch_id,
+                depends_on_json,
+                blocks_json,
+                parallel_group,
+                conflicting_json,
+                execution_phase,
+                rels_json,
+                analyzed_at,
+            ),
+        )
+
+
+def get_dependency_analysis(
+    handle: PgHandle,
+    ticket_id: str,
+    batch_id: str | None = None,
+) -> dict | None:
+    """Return the most recent analysis row for ``ticket_id`` (filtered by batch when given)."""
+    with _connect(handle) as conn:
+        if batch_id is None:
+            row = conn.execute(
+                "SELECT * FROM ticket_dependency_analysis "
+                "WHERE project_id = %s AND ticket_id = %s "
+                "ORDER BY analyzed_at DESC LIMIT 1",
+                (handle.project_id, ticket_id),
+            ).fetchone()
+        else:
+            row = conn.execute(
+                "SELECT * FROM ticket_dependency_analysis "
+                "WHERE project_id = %s AND ticket_id = %s AND batch_id = %s",
+                (handle.project_id, ticket_id, batch_id),
+            ).fetchone()
+    if row is None:
+        return None
+    out = dict(row)
+    for key in _DEPENDENCY_ANALYSIS_JSON_FIELDS:
+        raw = out.get(key)
+        decoded_key = key.removesuffix("_json")
+        if raw is None or raw == "":
+            out[decoded_key] = []
+            continue
+        try:
+            out[decoded_key] = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            out[decoded_key] = []
+    return out

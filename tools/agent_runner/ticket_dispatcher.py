@@ -38,6 +38,11 @@ import runtime_settings as _runtime_settings  # noqa: E402
 import ticket_execution_eligibility as _eligibility  # noqa: E402
 from ticket_readiness_evaluator import read_ticket_markdown  # noqa: E402
 
+try:
+    import backlog_batch as _backlog_batch  # noqa: E402
+except ImportError:
+    _backlog_batch = None  # type: ignore[assignment]
+
 
 DISPATCHER_MODES: tuple[str, ...] = ("off", "advisory", "manual", "auto")
 DEFAULT_DISPATCHER_MODE = "off"
@@ -209,6 +214,30 @@ def _candidate_row(row: dict) -> bool:
     return True
 
 
+def _ticket_passes_batch_gate(db_path, ticket_id: str) -> bool:
+    """Return True when ``ticket_id`` is eligible from the batch state machine.
+
+    Two acceptable cases:
+      - the ticket is not part of any backlog batch (legacy / non-batch
+        ingestion path) → eligibility falls back to the existing rules;
+      - the ticket belongs to a batch whose status is ``dispatching``.
+
+    Tickets in a batch that is still ``collecting``, ``frozen``,
+    ``dependency_analysis_running``, ``dependency_analysis_failed``, or
+    ``readiness_running`` are excluded from dispatcher recommendations until
+    the batch transitions to ``dispatching``.
+    """
+    if _backlog_batch is None:
+        return True
+    try:
+        batch_status = _backlog_batch.get_ticket_batch_status(db_path, ticket_id)
+    except Exception:
+        return True
+    if batch_status is None:
+        return True
+    return batch_status == _backlog_batch.BatchStatus.DISPATCHING.value
+
+
 def _sort_key(rec: dict) -> tuple:
     """Stable ordering: higher score first, then lower queue_rank, then older
     updated_at (ascending ISO string), then ticket_id."""
@@ -264,6 +293,8 @@ def get_recommended_tickets(
         if not ticket_id:
             continue
         if not _candidate_row(row):
+            continue
+        if not _ticket_passes_batch_gate(db_path, ticket_id):
             continue
 
         ticket_content = _read_ticket_content(

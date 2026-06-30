@@ -181,30 +181,55 @@ def _extract_dependencies(ticket_content: str) -> list[str]:
 def collect_dependency_ticket_ids(
     ticket_content: str,
     intelligence: dict | None = None,
+    *,
+    dependency_analysis: dict | None = None,
 ) -> list[str]:
-    """Union ticket-body dependencies with intelligence ``dependency_hints``."""
+    """Union ticket-body deps with intelligence hints and analyzer ``depends_on``.
+
+    Markdown is parsed first (so it takes precedence on metadata); intelligence
+    hints and the dependency analyzer's ``depends_on`` rows are merged on top,
+    deduplicated, in source order.
+    """
     deps = _extract_dependencies(ticket_content or "")
     seen = set(deps)
 
-    if not intelligence:
-        return deps
+    def _add_ticket_id(candidate: object) -> None:
+        if not isinstance(candidate, str):
+            return
+        ticket_id = candidate.strip().upper()
+        if not ticket_id:
+            return
+        if not re.fullmatch(r"T\d+", ticket_id, re.IGNORECASE):
+            return
+        if ticket_id in seen:
+            return
+        deps.append(ticket_id)
+        seen.add(ticket_id)
 
-    hints = intelligence.get("dependency_hints")
-    if isinstance(hints, str):
-        try:
-            hints = json.loads(hints)
-        except json.JSONDecodeError:
-            hints = []
-    if not isinstance(hints, list):
-        return deps
+    if intelligence:
+        hints = intelligence.get("dependency_hints")
+        if isinstance(hints, str):
+            try:
+                hints = json.loads(hints)
+            except json.JSONDecodeError:
+                hints = []
+        if isinstance(hints, list):
+            for hint in hints:
+                _add_ticket_id(hint)
 
-    for hint in hints:
-        if not isinstance(hint, str):
-            continue
-        ticket_id = hint.strip().upper()
-        if re.fullmatch(r"T\d+", ticket_id, re.IGNORECASE) and ticket_id not in seen:
-            deps.append(ticket_id)
-            seen.add(ticket_id)
+    if dependency_analysis:
+        analyzer_deps = dependency_analysis.get("depends_on")
+        if analyzer_deps is None:
+            raw = dependency_analysis.get("depends_on_json")
+            if isinstance(raw, str):
+                try:
+                    analyzer_deps = json.loads(raw)
+                except json.JSONDecodeError:
+                    analyzer_deps = []
+        if isinstance(analyzer_deps, list):
+            for hint in analyzer_deps:
+                _add_ticket_id(hint)
+
     return deps
 
 
@@ -249,9 +274,12 @@ def _check_dependencies(
     *,
     project_id: str | None = None,
     intelligence: dict | None = None,
+    dependency_analysis: dict | None = None,
 ) -> tuple[str, list[str]]:
     """Returns (status, blocking_reasons). Empty deps → ``passed``."""
-    deps = collect_dependency_ticket_ids(ticket_content, intelligence)
+    deps = collect_dependency_ticket_ids(
+        ticket_content, intelligence, dependency_analysis=dependency_analysis,
+    )
     if not deps:
         return "passed", []
 
@@ -389,12 +417,22 @@ def run_evaluation(
         except Exception:
             intelligence_row = None
 
+        dependency_analysis_row = None
+        try:
+            if hasattr(runtime_db, "get_dependency_analysis"):
+                dependency_analysis_row = runtime_db.get_dependency_analysis(
+                    db_path, ticket_id,
+                )
+        except Exception:
+            dependency_analysis_row = None
+
         intel_status, intel_reason = _check_intelligence(db_path, ticket_id)
         dep_status, dep_reasons = _check_dependencies(
             ticket_content,
             project_root,
             project_id=project_id,
             intelligence=intelligence_row,
+            dependency_analysis=dependency_analysis_row,
         )
         approval_status, approval_warnings, approval_required, approval_present = (
             _collect_future_approval_warnings(intelligence_row, project_root, ticket_id)

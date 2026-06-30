@@ -20,6 +20,17 @@ import runtime_db  # noqa: E402
 import runtime_settings as _runtime_settings  # noqa: E402
 from ticket_readiness_evaluator import read_ticket_markdown, run_evaluation  # noqa: E402
 
+try:
+    import backlog_batch as _backlog_batch  # noqa: E402
+except ImportError:
+    _backlog_batch = None  # type: ignore[assignment]
+
+_BATCH_READY_FOR_READINESS = frozenset({
+    "readiness_running",
+    "dispatching",
+    "completed",
+})
+
 logger = logging.getLogger("ticket_pipeline")
 
 _SETTING_KEY = "AUTO_TICKET_PIPELINE"
@@ -56,15 +67,42 @@ def needs_readiness(intel_row: dict | None, ready_row: dict | None) -> bool:
     return status in {"queued", "running"}
 
 
+def _is_batch_ready_for_readiness(db_path, ticket_id: str) -> bool:
+    """Return True when the ticket's batch (if any) authorises readiness evaluation.
+
+    Tickets that do not belong to any batch (legacy / non-dispatcher flow) keep
+    their previous behaviour and are eligible. Tickets in a batch are only
+    eligible once the batch has reached ``readiness_running`` (or any later
+    status — covers idempotent re-runs).
+    """
+    if _backlog_batch is None:
+        return True
+    try:
+        status = _backlog_batch.get_ticket_batch_status(db_path, ticket_id)
+    except Exception:
+        return True
+    if status is None:
+        return True
+    return status in _BATCH_READY_FOR_READINESS
+
+
 def find_next_ticket(db_path, ticket_ids: list[str]) -> str | None:
-    """Return the first ticket needing pipeline work, in scan order."""
+    """Return the first ticket needing pipeline work, in scan order.
+
+    Intelligence runs continuously (regardless of any batch state) so backlog
+    ingestion always enriches new tickets. Readiness only runs once the ticket's
+    batch (if any) is in ``readiness_running`` or later — tickets without a
+    batch keep the legacy behaviour.
+    """
     for ticket_id in ticket_ids:
         try:
             intel = runtime_db.get_ticket_intelligence(db_path, ticket_id)
             ready = runtime_db.get_ticket_readiness(db_path, ticket_id)
         except Exception:
             continue
-        if needs_intelligence(intel) or needs_readiness(intel, ready):
+        if needs_intelligence(intel):
+            return ticket_id
+        if needs_readiness(intel, ready) and _is_batch_ready_for_readiness(db_path, ticket_id):
             return ticket_id
     return None
 
@@ -85,7 +123,7 @@ def maybe_run_readiness_after_intelligence(
     except Exception:
         ready = None
     intel = {"analysis_status": "completed"}
-    if needs_readiness(intel, ready):
+    if needs_readiness(intel, ready) and _is_batch_ready_for_readiness(db_path, ticket_id):
         logger.info("pipeline: auto readiness for %s after intelligence", ticket_id)
         run_evaluation(
             db_path, ticket_id, ticket_content, Path(project_root), project_id=project_id
@@ -137,7 +175,7 @@ def process_ticket(
     except Exception:
         ready = None
 
-    if needs_readiness(intel, ready):
+    if needs_readiness(intel, ready) and _is_batch_ready_for_readiness(db_path, ticket_id):
         logger.info("pipeline: running readiness for %s", ticket_id)
         run_evaluation(db_path, ticket_id, content, project_root, project_id=project_id)
         return True
