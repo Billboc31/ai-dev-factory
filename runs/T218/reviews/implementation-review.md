@@ -1,0 +1,43 @@
+Now I have enough to write the review. Let me compose it.
+
+# Review — T218
+
+## Summary
+
+The implementation is correct on the **SQLite backend** and faithfully follows the plan: closed `BatchStatus` enum (no `pending_collecting`), guarded transitions, `freeze_blocked` flag instead of a new status, retry/cooldown/exhaustion with the `batch.dependency_analysis_exhausted` event emitted exactly once, idempotent membership and analysis UPSERTs, dispatcher/readiness gating, dependency-union extension, and per-cycle integration in `run_daemon.py`. All 26 new tests in `tests/test_backlog_batch.py`, `tests/test_global_dependency_analyzer.py`, `tests/test_daemon_batch_lifecycle.py`, plus the new union case in `tests/test_ticket_readiness_evaluator.py::test_dependency_analysis_dep_included_in_union`, pass. The full repo suite was compared against `main`: no new failures were introduced (T218 has 113 failed / main has 112 failed, all attributable to pre-existing environmental issues; an external daemon holds the local singleton lock).
+
+## Blocking issues
+
+### B1. Postgres backend support missing — silent split-brain risk
+
+The repository declares Postgres as a first-class backend, selected by `RUNTIME_DB_BACKEND=postgres`, with rebinding at `tools/agent_runner/runtime_db.py:1427-1482` that swaps the SQLite helpers for their `runtime_db_pg.py` counterparts. The module's own contract (`runtime_db.py:1378-1392`) reads:
+
+> "Postgres mode NEVER falls back to SQLite. A backend mismatch between the API, the supervisor and the daemon is a configuration error: a silent downgrade would create an invisible split-brain..."
+
+T218 adds three new tables (`backlog_batches`, `backlog_batch_tickets`, `ticket_dependency_analysis`) and nine new helpers (`insert_backlog_batch`, `get_backlog_batch`, `list_backlog_batches`, `update_backlog_batch`, `insert_backlog_batch_ticket`, `list_backlog_batch_ticket_ids`, `get_batch_for_ticket`, `upsert_dependency_analysis`, `get_dependency_analysis`) — exclusively on the SQLite side:
+
+- `runtime_db_pg.py:_DDL` (lines 43-245) does not create the new tables, and `init_runtime_db(handle)` therefore won't create them in Postgres.
+- None of the nine helpers are implemented in `runtime_db_pg.py` (verified: `grep "backlog\|dependency_analysis"` returns zero matches).
+- The PG rebind block at `runtime_db.py:1427-1482` does not include any of the new helpers.
+
+Consequence in PG mode: `backlog_batch.py` and `global_dependency_analyzer.py` call `runtime_db.list_backlog_batches(db_path, ...)`, which remains bound to the SQLite implementation. The SQLite helper executes `sqlite3.connect(str(db_path))` with `db_path` being a `PgHandle` object — `str(PgHandle)` returns `"backend=postgres project_id=... db=... host=..."` (see `runtime_db_pg.py:299`), so SQLite happily creates a new file at that literal path. Result: a silent SQLite split-brain exactly as the architecture comment warns. The plan's first acceptance criterion — *"Running the daemon on a fresh runtime DB creates the new tables ... and applies the additive ALTER TABLE migrations on existing DBs without errors"* — is not met in PG mode.
+
+The `implementation-output.md` confirms tests were only run under `RUNTIME_DB_BACKEND=sqlite`; the new tests load `runtime_db.py` with `RUNTIME_DB_BACKEND=sqlite` forced via env override and then rebind `mod.runtime_db = _db`, so they cannot detect the PG gap.
+
+Required fix:
+- Add the three new tables (with PG-appropriate types/keys) to `runtime_db_pg.py:_DDL`.
+- Implement the nine helpers in `runtime_db_pg.py` (mirroring the SQLite signatures; `insert_backlog_batch_ticket` must return `False` on unique-violation conflict, matching the SQLite contract).
+- Rebind all nine helpers in the `if _RUNTIME_DB_BACKEND == "postgres":` block at `runtime_db.py:1427-1482`.
+- Add at minimum a smoke test (mirroring `tests/test_runtime_db_pg.py` patterns) covering insert/list/upsert/UNIQUE for the new tables.
+
+## Non-blocking observations
+
+- **O1.** `tools/agent_runner/run_daemon.py:1834-1862` calls `_resolve_backlog_setting` 4× per cycle and `_attach_ticket_to_collecting_batch` calls it 2× per intaken ticket. Each call hits the `runtime_settings` registry, which re-queries the DB per call by design ("Tight inner loops are not in scope for V1" — `runtime_settings.py:12-16`). Acceptable for V1; consider caching when the cycle frequency increases.
+- **O2.** `_advance_dispatching_batches` (`run_daemon.py:1923-1968`) uses `_TERMINAL_TICKET_STATES = {"TEST_COMPLETE", "CANCELLED"}` OR `daemon_archived` to mark a ticket terminal. The plan says *"every member has reached a terminal runtime state (merged, cancelled, or failed-final)"*. There is no explicit `FAILED_FINAL` ticket state in the codebase, and a permanently-failed ticket without `daemon_archived=1` would keep its batch stuck in `dispatching` forever and prevent `freeze_unblock`. Not blocking — current ticket-failure path archives via `daemon_archived` — but worth a follow-up to confirm there is no orphan-state risk.
+- **O3.** The fix-context artifact `runs/T218/fixes/context-20260630T142858Z.md` (428 lines) is left in the worktree untracked. Workflow noise rather than a code issue, but worth cleaning up before merge.
+
+## Verdict
+
+The plan-defined behaviour is implemented correctly on SQLite and covered by passing, well-targeted tests; no regressions to the rest of the suite. The Postgres-backend gap (B1) is a hard architectural invariant violation that the repo explicitly warns against, and it must be closed before merge.
+
+IMPLEMENTATION_FIX_REQUIRED
