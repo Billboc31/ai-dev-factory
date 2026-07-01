@@ -1,7 +1,7 @@
 {
   "ticket_id": "T220",
-  "state": "IMPLEMENTATION_APPROVED",
+  "state": "TEST_COMPLETE",
   "branch": "ticket/T220-improve-global-dependency-analyzer-to-produce-cohe",
   "issue_number": 297,
-  "updated_at": "2026-07-01T08:57:03Z"
+  "updated_at": "2026-07-01T09:00:34Z"
 }
