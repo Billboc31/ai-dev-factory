@@ -1,7 +1,7 @@
 {
   "ticket_id": "T221",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_FIX_REQUIRED",
   "branch": "ticket/T221-make-github-issue-intake-near-real-time-and-decoup",
   "issue_number": 299,
-  "updated_at": "2026-07-01T09:22:26Z"
+  "updated_at": "2026-07-01T09:31:00Z"
 }
