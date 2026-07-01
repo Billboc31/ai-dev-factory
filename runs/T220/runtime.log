@@ -1,0 +1,63 @@
+[2026-07-01T08:12:21Z] auto-run start: state=INIT
+[2026-07-01T08:12:21Z] auto-run: running step=planner
+[2026-07-01T08:12:21Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-07-01T08:12:21Z] prompt: generic fallback — injecting runs/T220/ticket.md
+[2026-07-01T08:12:21Z] compose: global-context=docs/ai/global-context.md
+[2026-07-01T08:12:21Z] compose: role=ai/roles/planner.md
+[2026-07-01T08:12:21Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-07-01T08:12:21Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-07-01T08:12:21Z] compose: skill=ai/skills/documentation.md
+[2026-07-01T08:12:21Z] compose: task (canonical prompt)
+[2026-07-01T08:12:21Z] snapshot: runtime-prompt=runs/T220/prompts/planner-attempt-1.md
+[2026-07-01T08:15:03Z] auto-run: step=planner done rc=0
+[2026-07-01T08:25:08Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-07-01T08:25:08Z] auto-run: running step=planner
+[2026-07-01T08:25:08Z] auto-run: fix context: previous_output=runs/T220/plan.md
+[2026-07-01T08:25:08Z] auto-run: fix context: review=runs/T220/reviews/plan-review-conflict-tiebreak.md
+[2026-07-01T08:25:08Z] auto-run: fix context: fix_instructions=runs/T220/fixes/plan-fix-conflict-tiebreak.md
+[2026-07-01T08:25:08Z] auto-run: fix context: context_file=runs/T220/fixes/context-20260701T082508Z.md
+[2026-07-01T08:25:08Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-07-01T08:25:08Z] prompt: generic fallback — injecting runs/T220/ticket.md
+[2026-07-01T08:25:08Z] compose: global-context=docs/ai/global-context.md
+[2026-07-01T08:25:08Z] compose: role=ai/roles/planner.md
+[2026-07-01T08:25:08Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-07-01T08:25:08Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-07-01T08:25:08Z] compose: skill=ai/skills/documentation.md
+[2026-07-01T08:25:08Z] compose: task (canonical prompt)
+[2026-07-01T08:25:08Z] compose: extra-context=runs/T220/fixes/context-20260701T082508Z.md
+[2026-07-01T08:25:08Z] snapshot: runtime-prompt=runs/T220/prompts/planner-attempt-2.md
+[2026-07-01T08:26:05Z] auto-run: step=planner done rc=0
+[2026-07-01T08:37:15Z] auto-run start: state=PLAN_APPROVED
+[2026-07-01T08:37:15Z] auto-run: running step=coder
+[2026-07-01T08:37:15Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-07-01T08:37:15Z] prompt: generic fallback — injecting runs/T220/ticket.md
+[2026-07-01T08:37:15Z] compose: global-context=docs/ai/global-context.md
+[2026-07-01T08:37:15Z] compose: role=ai/roles/coder.md
+[2026-07-01T08:37:15Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-07-01T08:37:15Z] compose: skill=ai/skills/git-discipline.md
+[2026-07-01T08:37:15Z] compose: skill=ai/skills/code-quality.md
+[2026-07-01T08:37:15Z] compose: skill=ai/skills/refactor-safety.md
+[2026-07-01T08:37:15Z] compose: skill=ai/skills/security.md
+[2026-07-01T08:37:15Z] compose: task (canonical prompt)
+[2026-07-01T08:37:15Z] snapshot: runtime-prompt=runs/T220/prompts/coder-attempt-1.md
+[2026-07-01T08:57:32Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-07-01T08:57:32Z] auto-run: running step=tester
+[2026-07-01T08:57:32Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-07-01T08:57:32Z] prompt: generic fallback — injecting runs/T220/ticket.md
+[2026-07-01T08:57:32Z] compose: global-context=docs/ai/global-context.md
+[2026-07-01T08:57:32Z] compose: role=ai/roles/tester.md
+[2026-07-01T08:57:32Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-07-01T08:57:32Z] compose: skill=ai/skills/testing.md
+[2026-07-01T08:57:32Z] compose: skill=ai/skills/debugging.md
+[2026-07-01T08:57:32Z] compose: task (canonical prompt)
+[2026-07-01T08:57:32Z] snapshot: runtime-prompt=runs/T220/prompts/tester-attempt-1.md
+[2026-07-01T09:00:34Z] auto-run: step=tester done rc=0
+[2026-07-01T09:00:34Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-07-01T09:00:34Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-07-01T09:00:35Z] commit-checkpoint: unstaged runtime garbage: ['runs/T220/runtime.log']
+[2026-07-01T09:00:35Z] commit-checkpoint: sha=d89feb30 files=3 title='test(T220/workflow): tester — update 3 file(s)'
+[2026-07-01T09:00:35Z] auto-run: auto-push triggered
+[2026-07-01T09:00:35Z] push: tolerating runtime dirty files (not blocking): ['runs/T220/runtime.log']
+[2026-07-01T09:00:35Z] push: pushing branch=ticket/T220-improve-global-dependency-analyzer-to-produce-cohe
+[2026-07-01T09:00:37Z] push: done branch=ticket/T220-improve-global-dependency-analyzer-to-produce-cohe
+[2026-07-01T09:00:37Z] auto-run: TEST_COMPLETE — running PR lifecycle

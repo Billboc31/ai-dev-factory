@@ -90,6 +90,41 @@ Do not include any explanation, markdown, or text outside the JSON object.
 
 {{batch_tickets}}
 
+## How to reason
+
+Think like a software architect planning the whole batch:
+
+1. First, build a conceptual implementation plan by grouping tickets into
+   layers: foundation/bootstrap (vision, architecture, tech stack,
+   conventions, scaffolding), then infrastructure, then backend APIs, then
+   frontend / UI, then features, then integration, then quality/testing.
+2. Only then derive ``depends_on`` / ``blocks`` / ``parallel_group`` /
+   ``conflicting_tickets`` / ``execution_phase`` and the ``relationships``
+   array from that plan.
+
+Foundation tickets — those defining product vision, overall architecture,
+technical stack, conventions, or project bootstrap/scaffolding — belong in
+the earliest execution phases. Prefer classifying dependencies whose target
+is a foundation ticket as ``FOUNDATION_DEPENDENCY``.
+
+Infer implicit architectural dependencies even when tickets do not cite each
+other by id: architecture → bootstrap, bootstrap → backend/frontend
+foundations, backend API → frontend consuming it, infrastructure → features,
+features → integration, implementation → testing.
+
+## Output invariants
+
+The final JSON output MUST satisfy these invariants:
+
+1. Phase ordering: if ticket A lists B in ``depends_on``, then
+   ``execution_phase(A) > execution_phase(B)``.
+2. Same-phase parallelism: tickets sharing an ``execution_phase`` must be
+   parallel-compatible.
+3. Conflict exclusivity: if B is in A.conflicting_tickets, then
+   ``execution_phase(A) != execution_phase(B)``.
+4. Foundation position: foundation/bootstrap tickets occupy the earliest
+   phase(s).
+
 ## Required JSON output
 
 Return exactly this structure:
@@ -285,6 +320,313 @@ def _normalize_response(raw: dict) -> tuple[list[dict], list[dict]]:
     return norm_tickets, norm_relationships
 
 
+# ── Coherence pass ────────────────────────────────────────────────────────────
+
+ROLE_ORDER = (
+    "FOUNDATION",
+    "BOOTSTRAP",
+    "INFRASTRUCTURE",
+    "BACKEND_API",
+    "FRONTEND_UI",
+    "FEATURE",
+    "INTEGRATION",
+    "QUALITY_TESTING",
+    "DOCS_MISC",
+    "UNKNOWN",
+)
+
+_ROLE_PATTERNS: tuple[tuple[str, re.Pattern], ...] = (
+    ("FOUNDATION", re.compile(
+        r"architecture|vision|stack|conventions|foundation|global context",
+        re.IGNORECASE,
+    )),
+    ("BOOTSTRAP", re.compile(
+        r"bootstrap|scaffold|initial setup|project foundation",
+        re.IGNORECASE,
+    )),
+    ("BACKEND_API", re.compile(
+        r"backend|api|endpoint|route|service",
+        re.IGNORECASE,
+    )),
+    ("FRONTEND_UI", re.compile(
+        r"frontend|ui|page|react|dashboard|component",
+        re.IGNORECASE,
+    )),
+    ("QUALITY_TESTING", re.compile(
+        r"test|playwright|regression|coverage|qa",
+        re.IGNORECASE,
+    )),
+    ("INTEGRATION", re.compile(
+        r"integration|wiring|end-to-end|connect",
+        re.IGNORECASE,
+    )),
+    ("INFRASTRUCTURE", re.compile(
+        r"infra|infrastructure|deployment|\bci\b|\bcd\b|pipeline",
+        re.IGNORECASE,
+    )),
+    ("DOCS_MISC", re.compile(
+        r"docs|documentation|readme|typo",
+        re.IGNORECASE,
+    )),
+)
+
+
+def _infer_ticket_role(
+    ticket_id: str,
+    ticket_text: str,
+    relationships: list[dict],
+    has_dependency_signal: bool,
+) -> str:
+    """Infer an architectural role for a ticket from its text + relationships."""
+    for rel in relationships:
+        if rel.get("type") == "FOUNDATION_DEPENDENCY" and rel.get("to") == ticket_id:
+            return "FOUNDATION"
+    text = ticket_text or ""
+    for role, pattern in _ROLE_PATTERNS:
+        if pattern.search(text):
+            return role
+    if has_dependency_signal:
+        return "FEATURE"
+    return "UNKNOWN"
+
+
+def _topological_order(deps: dict[str, set[str]]) -> list[str]:
+    """DFS-based topological order; deps come before dependents. Assumes DAG."""
+    order: list[str] = []
+    visited: set[str] = set()
+
+    def visit(node: str) -> None:
+        if node in visited:
+            return
+        visited.add(node)
+        for d in sorted(deps.get(node, set())):
+            if d in deps:
+                visit(d)
+        order.append(node)
+
+    for t in sorted(deps.keys()):
+        visit(t)
+    return order
+
+
+def _break_cycles(deps: dict[str, set[str]]) -> int:
+    """Remove back-edges via DFS coloring to make the graph acyclic.
+
+    Returns the count of removed edges. Mutates ``deps`` in place.
+    """
+    removed = 0
+    WHITE, GRAY, BLACK = 0, 1, 2
+    color: dict[str, int] = {t: WHITE for t in deps}
+
+    def visit(node: str) -> None:
+        nonlocal removed
+        color[node] = GRAY
+        for d in sorted(list(deps.get(node, set()))):
+            state = color.get(d, WHITE)
+            if state == GRAY:
+                deps[node].discard(d)
+                removed += 1
+            elif state == WHITE and d in deps:
+                visit(d)
+        color[node] = BLACK
+
+    for t in sorted(list(deps.keys())):
+        if color[t] == WHITE:
+            visit(t)
+    return removed
+
+
+def _compute_phases(
+    deps: dict[str, set[str]],
+    ticket_ids: list[str],
+    forced_min: dict[str, int],
+) -> dict[str, int]:
+    """Longest-path phase assignment. ``forced_min[t]`` is an extra lower bound."""
+    order = _topological_order(deps)
+    phases: dict[str, int] = {}
+    for t in order:
+        base = 1
+        if deps.get(t):
+            dep_phases = [phases[d] for d in deps[t] if d in phases]
+            if dep_phases:
+                base = 1 + max(dep_phases)
+        phases[t] = max(base, forced_min.get(t, 1))
+    for t in ticket_ids:
+        phases.setdefault(t, max(1, forced_min.get(t, 1)))
+    return phases
+
+
+def _transitively_depends(a: str, b: str, deps: dict[str, set[str]]) -> bool:
+    """True if ``a`` transitively depends on ``b``."""
+    seen: set[str] = set()
+    stack: list[str] = list(deps.get(a, set()))
+    while stack:
+        node = stack.pop()
+        if node == b:
+            return True
+        if node in seen:
+            continue
+        seen.add(node)
+        stack.extend(deps.get(node, set()))
+    return False
+
+
+def _resolve_conflict_pair(
+    a: str,
+    b: str,
+    deps: dict[str, set[str]],
+    roles: dict[str, str],
+    original_phases: dict[str, int],
+) -> tuple[str, str]:
+    """Pick which ticket in a same-phase conflict to bump.
+
+    Returns ``(ticket_to_bump, resolver_step)``. ``resolver_step`` is one of
+    ``dependency`` / ``role`` / ``original_phase`` / ``ticket_id``.
+    """
+    if _transitively_depends(a, b, deps):
+        return a, "dependency"
+    if _transitively_depends(b, a, deps):
+        return b, "dependency"
+
+    a_idx = ROLE_ORDER.index(roles.get(a, "UNKNOWN"))
+    b_idx = ROLE_ORDER.index(roles.get(b, "UNKNOWN"))
+    if a_idx != b_idx:
+        return (b, "role") if a_idx < b_idx else (a, "role")
+
+    a_orig = original_phases.get(a, 0)
+    b_orig = original_phases.get(b, 0)
+    if a_orig != b_orig:
+        return (a, "original_phase") if a_orig > b_orig else (b, "original_phase")
+
+    return (a, "ticket_id") if a > b else (b, "ticket_id")
+
+
+def _enforce_coherence(
+    norm_tickets: list[dict],
+    norm_relationships: list[dict],
+    original_phases: dict[str, int],
+    ticket_texts: dict[str, str] | None = None,
+) -> tuple[list[dict], list[dict], list[str]]:
+    """Post-process the analyzer response so the output invariants hold.
+
+    Fixes the graph deterministically rather than failing:
+
+    - Enforces ``phase(A) > phase(B)`` whenever ``A depends_on B`` via a
+      topological longest-path pass.
+    - Detects and breaks dependency cycles (drops back-edges).
+    - Splits same-phase conflicting pairs using a priority ladder:
+      dependency direction → role ordering → original LLM phase → ticket id.
+    """
+    ticket_texts = ticket_texts or {}
+    notes: list[str] = []
+    ticket_ids = [t["ticket_id"] for t in norm_tickets]
+    ticket_set = set(ticket_ids)
+
+    deps: dict[str, set[str]] = {}
+    for t in norm_tickets:
+        tid = t["ticket_id"]
+        deps[tid] = {
+            d for d in t["depends_on"] if d in ticket_set and d != tid
+        }
+
+    cycles_broken = _break_cycles(deps)
+    if cycles_broken:
+        notes.append(f"cycles_broken={cycles_broken}")
+
+    roles: dict[str, str] = {}
+    for tid in ticket_ids:
+        roles[tid] = _infer_ticket_role(
+            tid,
+            ticket_texts.get(tid, ""),
+            norm_relationships,
+            has_dependency_signal=bool(deps.get(tid)),
+        )
+
+    conflicting_map: dict[str, set[str]] = {}
+    for t in norm_tickets:
+        tid = t["ticket_id"]
+        conflicting_map[tid] = {
+            c for c in t["conflicting_tickets"] if c in ticket_set and c != tid
+        }
+
+    forced_min: dict[str, int] = {}
+    phases = _compute_phases(deps, ticket_ids, forced_min)
+    original_int_phases = dict(phases)  # snapshot in case we need it later
+
+    resolver_steps: list[str] = []
+    conflict_splits = 0
+    max_iters = len(ticket_ids) * 4 + 10
+    for _ in range(max_iters):
+        collisions: list[tuple[str, str]] = []
+        seen_pairs: set[tuple[str, str]] = set()
+        for tid, cts in conflicting_map.items():
+            for other in cts:
+                if other not in ticket_set:
+                    continue
+                pair = (tid, other) if tid < other else (other, tid)
+                if pair in seen_pairs:
+                    continue
+                seen_pairs.add(pair)
+                if phases[pair[0]] == phases[pair[1]]:
+                    collisions.append(pair)
+        if not collisions:
+            break
+        for a, b in collisions:
+            bump, step = _resolve_conflict_pair(
+                a, b, deps, roles, original_phases,
+            )
+            resolver_steps.append(step)
+            conflict_splits += 1
+            keep = b if bump == a else a
+            forced_min[bump] = max(
+                forced_min.get(bump, 0), phases[keep] + 1,
+            )
+        phases = _compute_phases(deps, ticket_ids, forced_min)
+
+    phase_reassignments = 0
+    for t in norm_tickets:
+        tid = t["ticket_id"]
+        new_phase = str(phases[tid])
+        old_phase = t.get("execution_phase")
+        if old_phase != new_phase:
+            phase_reassignments += 1
+        t["execution_phase"] = new_phase
+        t["depends_on"] = sorted(deps[tid])
+
+    if resolver_steps or phase_reassignments or cycles_broken:
+        logger.info(
+            "global_dependency_analyzer coherence: "
+            "phase_reassignments=%d cycles_broken=%d conflict_splits=%d "
+            "resolver_steps=%s",
+            phase_reassignments,
+            cycles_broken,
+            conflict_splits,
+            resolver_steps,
+        )
+    notes.append(f"phase_reassignments={phase_reassignments}")
+    notes.append(f"conflict_splits={conflict_splits}")
+    notes.append(f"resolver_steps={resolver_steps}")
+
+    # Silence unused warning; kept for future debug hooks
+    _ = original_int_phases
+
+    return norm_tickets, norm_relationships, notes
+
+
+def _load_ticket_texts(runs_dir: Path, ticket_ids: list[str]) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for tid in ticket_ids:
+        candidate = runs_dir / tid / "ticket.md"
+        if candidate.is_file():
+            try:
+                out[tid] = candidate.read_text(encoding="utf-8")
+            except OSError:
+                out[tid] = ""
+        else:
+            out[tid] = ""
+    return out
+
+
 def _persist(
     db_path,
     batch_id: str,
@@ -385,6 +727,25 @@ def run_global_analysis(
     except ValueError as exc:
         return AnalysisOutcome(success=False, error=f"invalid response shape: {exc}")
 
+    original_phases: dict[str, int] = {}
+    for entry in norm_tickets:
+        raw_phase = entry.get("execution_phase")
+        try:
+            original_phases[entry["ticket_id"]] = (
+                int(raw_phase) if raw_phase is not None else 0
+            )
+        except (TypeError, ValueError):
+            original_phases[entry["ticket_id"]] = 0
+
+    ticket_texts = _load_ticket_texts(runs_dir, ticket_ids)
+
+    try:
+        norm_tickets, norm_relationships, _coherence_notes = _enforce_coherence(
+            norm_tickets, norm_relationships, original_phases, ticket_texts,
+        )
+    except Exception as exc:
+        logger.warning("coherence pass failed; persisting raw output: %s", exc)
+
     try:
         persisted = _persist(
             db_path, batch_id, norm_tickets, norm_relationships, now=_now_iso(),
@@ -397,5 +758,9 @@ def run_global_analysis(
 
 __all__ = [
     "AnalysisOutcome",
+    "ROLE_ORDER",
+    "_enforce_coherence",
+    "_infer_ticket_role",
+    "_resolve_conflict_pair",
     "run_global_analysis",
 ]
