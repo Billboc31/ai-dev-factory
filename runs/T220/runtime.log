@@ -10,3 +10,20 @@
 [2026-07-01T08:12:21Z] compose: task (canonical prompt)
 [2026-07-01T08:12:21Z] snapshot: runtime-prompt=runs/T220/prompts/planner-attempt-1.md
 [2026-07-01T08:15:03Z] auto-run: step=planner done rc=0
+[2026-07-01T08:25:08Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-07-01T08:25:08Z] auto-run: running step=planner
+[2026-07-01T08:25:08Z] auto-run: fix context: previous_output=runs/T220/plan.md
+[2026-07-01T08:25:08Z] auto-run: fix context: review=runs/T220/reviews/plan-review-conflict-tiebreak.md
+[2026-07-01T08:25:08Z] auto-run: fix context: fix_instructions=runs/T220/fixes/plan-fix-conflict-tiebreak.md
+[2026-07-01T08:25:08Z] auto-run: fix context: context_file=runs/T220/fixes/context-20260701T082508Z.md
+[2026-07-01T08:25:08Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-07-01T08:25:08Z] prompt: generic fallback — injecting runs/T220/ticket.md
+[2026-07-01T08:25:08Z] compose: global-context=docs/ai/global-context.md
+[2026-07-01T08:25:08Z] compose: role=ai/roles/planner.md
+[2026-07-01T08:25:08Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-07-01T08:25:08Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-07-01T08:25:08Z] compose: skill=ai/skills/documentation.md
+[2026-07-01T08:25:08Z] compose: task (canonical prompt)
+[2026-07-01T08:25:08Z] compose: extra-context=runs/T220/fixes/context-20260701T082508Z.md
+[2026-07-01T08:25:08Z] snapshot: runtime-prompt=runs/T220/prompts/planner-attempt-2.md
+[2026-07-01T08:26:05Z] auto-run: step=planner done rc=0
