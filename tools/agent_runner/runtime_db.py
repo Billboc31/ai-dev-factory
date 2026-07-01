@@ -497,6 +497,27 @@ def record_issue_intake(
         )
 
 
+def record_intake_once(
+    db_path: Path,
+    issue_number: int,
+    ticket_id: str,
+    branch: str | None = None,
+) -> bool:
+    """Insert one ``issue_intake`` row if the GitHub issue was not seen before."""
+    now = _now_iso()
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO issue_intake
+                (issue_number, ticket_id, branch, status, ingested_at, updated_at)
+            VALUES (?, ?, ?, 'ingested', ?, ?)
+            ON CONFLICT(issue_number) DO NOTHING
+            """,
+            (issue_number, ticket_id, branch, now, now),
+        )
+        return cur.rowcount == 1
+
+
 def get_issue_intake(db_path: Path, issue_number: int) -> dict | None:
     with _connect(db_path) as conn:
         row = conn.execute(
@@ -679,6 +700,26 @@ def get_ticket_intelligence(db_path: Path, ticket_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def claim_ticket_intelligence(db_path: Path, ticket_id: str) -> bool:
+    """Atomically claim the intelligence stage for ``ticket_id``."""
+    now = _now_iso()
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO ticket_intelligence
+                (ticket_id, analysis_status, started_at, created_at, updated_at)
+            VALUES (?, 'running', ?, ?, ?)
+            ON CONFLICT(ticket_id) DO UPDATE SET
+                analysis_status = 'running',
+                started_at      = excluded.started_at,
+                updated_at      = excluded.updated_at
+            WHERE ticket_intelligence.analysis_status NOT IN ('running', 'completed')
+            """,
+            (ticket_id, now, now, now),
+        )
+        return cur.rowcount == 1
+
+
 # ── ticket_readiness ──────────────────────────────────────────────────────────
 
 _READINESS_LIST_FIELDS = ("blocking_reasons_json", "warnings_json")
@@ -748,6 +789,25 @@ def get_ticket_readiness(db_path: Path, ticket_id: str) -> dict | None:
     if row is None:
         return None
     return _decode_readiness_lists(dict(row))
+
+
+def claim_ticket_readiness(db_path: Path, ticket_id: str) -> bool:
+    """Atomically claim the readiness stage for ``ticket_id``."""
+    now = _now_iso()
+    with _connect(db_path) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO ticket_readiness
+                (ticket_id, readiness_status, created_at, updated_at)
+            VALUES (?, 'running', ?, ?)
+            ON CONFLICT(ticket_id) DO UPDATE SET
+                readiness_status = 'running',
+                updated_at       = excluded.updated_at
+            WHERE ticket_readiness.readiness_status NOT IN ('running', 'completed')
+            """,
+            (ticket_id, now, now),
+        )
+        return cur.rowcount == 1
 
 
 # ── ticket_approvals ──────────────────────────────────────────────────────────
@@ -1450,6 +1510,7 @@ if _RUNTIME_DB_BACKEND == "postgres":
     verify_backend_available = _pg.verify_backend_available  # type: ignore[assignment]
     healthcheck = _pg.healthcheck  # type: ignore[assignment]
     record_issue_intake = _pg.record_issue_intake  # type: ignore[assignment]
+    record_intake_once = _pg.record_intake_once  # type: ignore[assignment]
     get_issue_intake = _pg.get_issue_intake  # type: ignore[assignment]
     list_issue_intake = _pg.list_issue_intake  # type: ignore[assignment]
     upsert_ticket_runtime = _pg.upsert_ticket_runtime  # type: ignore[assignment]
@@ -1462,8 +1523,10 @@ if _RUNTIME_DB_BACKEND == "postgres":
     list_runtime_events = _pg.list_runtime_events  # type: ignore[assignment]
     upsert_ticket_intelligence = _pg.upsert_ticket_intelligence  # type: ignore[assignment]
     get_ticket_intelligence = _pg.get_ticket_intelligence  # type: ignore[assignment]
+    claim_ticket_intelligence = _pg.claim_ticket_intelligence  # type: ignore[assignment]
     upsert_ticket_readiness = _pg.upsert_ticket_readiness  # type: ignore[assignment]
     get_ticket_readiness = _pg.get_ticket_readiness  # type: ignore[assignment]
+    claim_ticket_readiness = _pg.claim_ticket_readiness  # type: ignore[assignment]
     insert_ticket_approval = _pg.insert_ticket_approval  # type: ignore[assignment]
     list_ticket_approvals = _pg.list_ticket_approvals  # type: ignore[assignment]
     get_latest_ticket_approval = _pg.get_latest_ticket_approval  # type: ignore[assignment]

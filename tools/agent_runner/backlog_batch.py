@@ -486,6 +486,18 @@ def mark_dependency_analysis_failed(
     }
 
 
+def batch_intelligence_complete(db_path, batch_id: str) -> bool:
+    """Return True when every batch member has completed Ticket Intelligence."""
+    members = list_batch_tickets(db_path, batch_id)
+    if not members:
+        return True
+    for ticket_id in members:
+        row = runtime_db.get_ticket_intelligence(db_path, ticket_id)
+        if row is None or row.get("analysis_status") != "completed":
+            return False
+    return True
+
+
 def pick_batches_ready_for_dependency_analysis(
     db_path,
     *,
@@ -497,7 +509,8 @@ def pick_batches_ready_for_dependency_analysis(
     now_dt = _parse_iso(now_str)
     out: list[str] = []
     for batch in runtime_db.list_backlog_batches(db_path, status=BatchStatus.FROZEN.value):
-        out.append(batch["batch_id"])
+        if batch_intelligence_complete(db_path, batch["batch_id"]):
+            out.append(batch["batch_id"])
     for batch in runtime_db.list_backlog_batches(
         db_path, status=BatchStatus.DEPENDENCY_ANALYSIS_FAILED.value
     ):
@@ -509,7 +522,8 @@ def pick_batches_ready_for_dependency_analysis(
             continue
         retry_dt = _parse_iso(next_retry_at)
         if retry_dt is None or now_dt is None or now_dt >= retry_dt:
-            out.append(batch["batch_id"])
+            if batch_intelligence_complete(db_path, batch["batch_id"]):
+                out.append(batch["batch_id"])
     return out
 
 
@@ -556,6 +570,7 @@ __all__ = [
     "BatchStatus",
     "BatchTransitionError",
     "add_ticket_to_batch",
+    "batch_intelligence_complete",
     "get_batch_id_for_ticket",
     "get_batch_status",
     "get_or_create_collecting_batch",

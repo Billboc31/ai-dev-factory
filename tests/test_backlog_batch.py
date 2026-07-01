@@ -217,7 +217,8 @@ def test_dependency_analysis_failure_records_retry(db):
     )
     assert batch_id not in eligible
 
-    # After cooldown the batch is eligible again.
+    # After cooldown the batch is eligible again once intelligence is complete.
+    _db.upsert_ticket_intelligence(db, "T001", analysis_status="completed")
     later = _iso(base + datetime.timedelta(minutes=10))
     eligible = bb.pick_batches_ready_for_dependency_analysis(
         db, now=later, max_attempts=3,
@@ -268,3 +269,18 @@ def test_get_batch_status_returns_dict(db):
     assert info["status"] == "collecting"
     assert info["ticket_count"] == 1
     assert info["attempts"] == 0
+
+
+def test_pick_batches_waits_for_intelligence(db):
+    batch_id = bb.get_or_create_collecting_batch(db, allow_parallel_batches=True)
+    bb.add_ticket_to_batch(db, batch_id, "T001")
+    bb.add_ticket_to_batch(db, batch_id, "T002")
+    bb.transition_batch(db, batch_id, "collecting", "frozen")
+
+    assert bb.pick_batches_ready_for_dependency_analysis(db, max_attempts=3) == []
+
+    _db.upsert_ticket_intelligence(db, "T001", analysis_status="completed")
+    assert bb.pick_batches_ready_for_dependency_analysis(db, max_attempts=3) == []
+
+    _db.upsert_ticket_intelligence(db, "T002", analysis_status="completed")
+    assert bb.pick_batches_ready_for_dependency_analysis(db, max_attempts=3) == [batch_id]

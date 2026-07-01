@@ -469,6 +469,27 @@ def record_issue_intake(
         )
 
 
+def record_intake_once(
+    handle: PgHandle,
+    issue_number: int,
+    ticket_id: str,
+    branch: str | None = None,
+) -> bool:
+    """Insert one ``issue_intake`` row if the GitHub issue was not seen before."""
+    now = _now_iso()
+    with _connect(handle) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO issue_intake
+                (project_id, issue_number, ticket_id, branch, status, ingested_at, updated_at)
+            VALUES (%s, %s, %s, %s, 'ingested', %s, %s)
+            ON CONFLICT (project_id, issue_number) DO NOTHING
+            """,
+            (handle.project_id, issue_number, ticket_id, branch, now, now),
+        )
+        return cur.rowcount == 1
+
+
 def get_issue_intake(handle: PgHandle, issue_number: int) -> dict | None:
     with _connect(handle) as conn:
         row = conn.execute(
@@ -667,6 +688,26 @@ def get_ticket_intelligence(handle: PgHandle, ticket_id: str) -> dict | None:
     return dict(row) if row else None
 
 
+def claim_ticket_intelligence(handle: PgHandle, ticket_id: str) -> bool:
+    """Atomically claim the intelligence stage for ``ticket_id``."""
+    now = _now_iso()
+    with _connect(handle) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO ticket_intelligence
+                (project_id, ticket_id, analysis_status, started_at, created_at, updated_at)
+            VALUES (%s, %s, 'running', %s, %s, %s)
+            ON CONFLICT (project_id, ticket_id) DO UPDATE SET
+                analysis_status = 'running',
+                started_at      = EXCLUDED.started_at,
+                updated_at      = EXCLUDED.updated_at
+            WHERE ticket_intelligence.analysis_status NOT IN ('running', 'completed')
+            """,
+            (handle.project_id, ticket_id, now, now, now),
+        )
+        return cur.rowcount == 1
+
+
 # ── ticket_readiness ───────────────────────────────────────────────────────────
 
 _READINESS_LIST_FIELDS = ("blocking_reasons_json", "warnings_json")
@@ -738,6 +779,25 @@ def get_ticket_readiness(handle: PgHandle, ticket_id: str) -> dict | None:
     if row is None:
         return None
     return _decode_readiness_lists(dict(row))
+
+
+def claim_ticket_readiness(handle: PgHandle, ticket_id: str) -> bool:
+    """Atomically claim the readiness stage for ``ticket_id``."""
+    now = _now_iso()
+    with _connect(handle) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO ticket_readiness
+                (project_id, ticket_id, readiness_status, created_at, updated_at)
+            VALUES (%s, %s, 'running', %s, %s)
+            ON CONFLICT (project_id, ticket_id) DO UPDATE SET
+                readiness_status = 'running',
+                updated_at       = EXCLUDED.updated_at
+            WHERE ticket_readiness.readiness_status NOT IN ('running', 'completed')
+            """,
+            (handle.project_id, ticket_id, now, now),
+        )
+        return cur.rowcount == 1
 
 
 # ── ticket_approvals ──────────────────────────────────────────────────────────

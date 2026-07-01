@@ -491,6 +491,9 @@ def test_runtime_db_postgres_rebind_exposes_backlog_helpers(monkeypatch):
         "get_batch_for_ticket",
         "upsert_dependency_analysis",
         "get_dependency_analysis",
+        "claim_ticket_intelligence",
+        "claim_ticket_readiness",
+        "record_intake_once",
     ):
         helper = getattr(mod, name)
         # Source module of the rebound symbol is runtime_db_pg, not runtime_db.
