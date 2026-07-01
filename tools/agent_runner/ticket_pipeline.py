@@ -115,7 +115,11 @@ def maybe_run_readiness_after_intelligence(
     *,
     project_id: str | None = None,
 ) -> None:
-    """Chain readiness after a successful intelligence run when auto-pipeline is on."""
+    """Chain readiness after a successful intelligence run when auto-pipeline is on.
+
+    Uses ``claim_readiness`` so the inline chain and the readiness thread pool
+    cannot both process the same ticket at once.
+    """
     if not is_auto_pipeline_enabled(db_path):
         return
     try:
@@ -123,11 +127,110 @@ def maybe_run_readiness_after_intelligence(
     except Exception:
         ready = None
     intel = {"analysis_status": "completed"}
-    if needs_readiness(intel, ready) and _is_batch_ready_for_readiness(db_path, ticket_id):
-        logger.info("pipeline: auto readiness for %s after intelligence", ticket_id)
-        run_evaluation(
-            db_path, ticket_id, ticket_content, Path(project_root), project_id=project_id
+    if not (needs_readiness(intel, ready) and _is_batch_ready_for_readiness(db_path, ticket_id)):
+        return
+    if not claim_readiness(db_path, ticket_id):
+        logger.info(
+            "pipeline: skip already_claimed ticket=%s stage=readiness (chain)",
+            ticket_id,
         )
+        return
+    logger.info("pipeline: auto readiness for %s after intelligence", ticket_id)
+    run_evaluation(
+        db_path, ticket_id, ticket_content, Path(project_root), project_id=project_id
+    )
+
+
+# ── Atomic claim helpers (T221) ──────────────────────────────────────────────
+#
+# The stage runners (Ticket Intelligence and Readiness) can now execute in
+# parallel across tickets. To keep them safe under concurrent scheduling we
+# guarantee that at most one worker processes a given ticket at a time by
+# claiming the stage atomically before touching it.
+#
+# Both helpers use a single UPSERT statement so the transition is atomic
+# under WAL SQLite:
+#   * If no row exists → INSERT with status='running' (PK guards uniqueness).
+#   * If a row exists in a non-terminal / non-running state → UPDATE to
+#     'running'; the ``WHERE`` clause on the ``DO UPDATE`` blocks the
+#     transition when another worker already holds the claim or the stage
+#     has completed.
+# ``rowcount == 1`` when the caller now owns the claim; ``0`` otherwise.
+
+_INTELLIGENCE_TERMINAL_OR_RUNNING = ("running", "completed")
+_READINESS_TERMINAL_OR_RUNNING = ("running", "completed")
+
+
+def claim_intelligence(db_path, ticket_id: str) -> bool:
+    """Atomically claim the intelligence stage for ``ticket_id``.
+
+    Returns True when the caller must run the stage. Returns False when
+    another worker already owns the run or the analysis is already complete.
+    """
+    now = runtime_db._now_iso()
+    with runtime_db._connect(db_path) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO ticket_intelligence
+                (ticket_id, analysis_status, started_at, created_at, updated_at)
+            VALUES (?, 'running', ?, ?, ?)
+            ON CONFLICT(ticket_id) DO UPDATE SET
+                analysis_status = 'running',
+                started_at      = excluded.started_at,
+                updated_at      = excluded.updated_at
+            WHERE ticket_intelligence.analysis_status NOT IN ('running', 'completed')
+            """,
+            (ticket_id, now, now, now),
+        )
+        return cur.rowcount == 1
+
+
+def claim_readiness(db_path, ticket_id: str) -> bool:
+    """Atomically claim the readiness stage for ``ticket_id``.
+
+    Returns True when the caller must run the evaluation. Returns False when
+    another worker already owns the run or the evaluation is complete.
+    """
+    now = runtime_db._now_iso()
+    with runtime_db._connect(db_path) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO ticket_readiness
+                (ticket_id, readiness_status, created_at, updated_at)
+            VALUES (?, 'running', ?, ?)
+            ON CONFLICT(ticket_id) DO UPDATE SET
+                readiness_status = 'running',
+                updated_at       = excluded.updated_at
+            WHERE ticket_readiness.readiness_status NOT IN ('running', 'completed')
+            """,
+            (ticket_id, now, now),
+        )
+        return cur.rowcount == 1
+
+
+def record_intake_once(
+    db_path,
+    issue_number: int,
+    ticket_id: str,
+    branch: str | None = None,
+) -> bool:
+    """Insert one ``issue_intake`` row if the GitHub issue was not seen before.
+
+    Returns True on a fresh insert, False when the issue was already intaken.
+    The PK on ``issue_intake.issue_number`` makes this race-safe under WAL.
+    """
+    now = runtime_db._now_iso()
+    with runtime_db._connect(db_path) as conn:
+        cur = conn.execute(
+            """
+            INSERT INTO issue_intake
+                (issue_number, ticket_id, branch, status, ingested_at, updated_at)
+            VALUES (?, ?, ?, 'ingested', ?, ?)
+            ON CONFLICT(issue_number) DO NOTHING
+            """,
+            (issue_number, ticket_id, branch, now, now),
+        )
+        return cur.rowcount == 1
 
 
 def process_ticket(
@@ -184,10 +287,13 @@ def process_ticket(
 
 
 __all__ = [
+    "claim_intelligence",
+    "claim_readiness",
     "find_next_ticket",
     "is_auto_pipeline_enabled",
     "maybe_run_readiness_after_intelligence",
     "needs_intelligence",
     "needs_readiness",
     "process_ticket",
+    "record_intake_once",
 ]

@@ -56,3 +56,16 @@
 [2026-07-01T09:37:40Z] compose: extra-context=runs/T221/fixes/context-20260701T093740Z.md
 [2026-07-01T09:37:40Z] snapshot: runtime-prompt=runs/T221/prompts/planner-attempt-4.md
 [2026-07-01T09:38:35Z] auto-run: step=planner done rc=0
+[2026-07-01T09:40:02Z] auto-run start: state=PLAN_APPROVED
+[2026-07-01T09:40:02Z] auto-run: running step=coder
+[2026-07-01T09:40:02Z] prompt: resolved=prompts/generic/coder.md source=generic
+[2026-07-01T09:40:02Z] prompt: generic fallback — injecting runs/T221/ticket.md
+[2026-07-01T09:40:02Z] compose: global-context=docs/ai/global-context.md
+[2026-07-01T09:40:02Z] compose: role=ai/roles/coder.md
+[2026-07-01T09:40:02Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-07-01T09:40:02Z] compose: skill=ai/skills/git-discipline.md
+[2026-07-01T09:40:02Z] compose: skill=ai/skills/code-quality.md
+[2026-07-01T09:40:02Z] compose: skill=ai/skills/refactor-safety.md
+[2026-07-01T09:40:02Z] compose: skill=ai/skills/security.md
+[2026-07-01T09:40:02Z] compose: task (canonical prompt)
+[2026-07-01T09:40:02Z] snapshot: runtime-prompt=runs/T221/prompts/coder-attempt-1.md

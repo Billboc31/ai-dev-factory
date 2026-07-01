@@ -8,6 +8,7 @@ Never bypasses human gate states.
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import datetime
 import errno
 import fcntl
@@ -19,6 +20,7 @@ import shlex
 import shutil
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -103,6 +105,7 @@ _rdb_remove_worker = _rdb_mod.remove_worker
 _rdb_list_workers = _rdb_mod.list_workers
 _rdb_list_backlog_batches = _rdb_mod.list_backlog_batches
 _rdb_get_ticket_readiness = _rdb_mod.get_ticket_readiness
+_rdb_get_ticket_intelligence = _rdb_mod.get_ticket_intelligence
 _rdb_get_ticket_runtime = _rdb_mod.get_ticket_runtime
 del _rdb_spec, _rdb_mod
 
@@ -129,6 +132,12 @@ _tp_spec.loader.exec_module(_tp_mod)  # type: ignore[union-attr]
 _is_auto_pipeline_enabled = _tp_mod.is_auto_pipeline_enabled
 _find_next_pipeline_ticket = _tp_mod.find_next_ticket
 _process_ticket_pipeline = _tp_mod.process_ticket
+_claim_intelligence = _tp_mod.claim_intelligence
+_claim_readiness = _tp_mod.claim_readiness
+_record_intake_once = _tp_mod.record_intake_once
+_ticket_needs_intelligence = _tp_mod.needs_intelligence
+_ticket_needs_readiness = _tp_mod.needs_readiness
+_is_batch_ready_for_readiness = _tp_mod._is_batch_ready_for_readiness  # noqa: SLF001
 del _tp_spec, _tp_mod
 
 _te_spec = importlib.util.spec_from_file_location(
@@ -1388,6 +1397,14 @@ def call_issue_intake(issue_number: int, ticket_id: str, branch_slug: str, repo:
     return result.returncode == 0
 
 
+def _resolve_max_intakes_per_poll() -> int:
+    """Return the effective ``MAX_ISSUES_INTAKED_PER_POLL`` cap for this cycle."""
+    db_path = _ensure_db()
+    return _runtime_settings.get_setting_int_positive(
+        db_path, "MAX_ISSUES_INTAKED_PER_POLL", 1,
+    )
+
+
 def poll_github_issues(
     runs_dir: Path,
     label: str,
@@ -1395,12 +1412,18 @@ def poll_github_issues(
     worktrees_dir: Path | None = None,
     state_dir: Path | None = None,
 ) -> None:
-    """Detect ready GitHub issues and create local runs for new ones."""
+    """Detect ready GitHub issues and intake every new one in a single pass.
+
+    Bounded by ``MAX_ISSUES_INTAKED_PER_POLL``; the remainder is deferred to
+    the next poll and counted as ``skipped_limit``. Emits one summary log line
+    per poll so operators can see intake throughput at a glance.
+    """
     _state_dir = state_dir if state_dir is not None else runs_dir
 
     issues = fetch_ready_issues(label, repo)
     if not issues:
         _log(f"no issues found with label={label!r}")
+        _log("github poll: discovered=0 intaked=0 skipped_existing=0 skipped_limit=0")
         return
 
     index = load_issue_index(_state_dir)
@@ -1412,24 +1435,50 @@ def poll_github_issues(
     for issue in already_ingested:
         _log(f"issue #{issue['number']} already ingested as {index[str(issue['number'])]} — skipping")
 
+    discovered = len(issues)
+    skipped_existing = len(already_ingested)
+    intaked = 0
+    skipped_limit = 0
+
     if not candidates:
         _log(f"found {len(issues)} issue(s) with label={label!r} — all already ingested")
+        _log(
+            f"github poll: discovered={discovered} intaked=0 "
+            f"skipped_existing={skipped_existing} skipped_limit=0"
+        )
         return
 
     _log(f"found {len(candidates)} candidate issue(s)")
 
+    max_intakes = _resolve_max_intakes_per_poll()
+
     for issue in candidates:
+        # Cap the per-poll intake batch — anything beyond the cap is deferred
+        # to the next cycle and counted as ``skipped_limit``.
+        if intaked >= max_intakes:
+            skipped_limit = len(candidates) - intaked
+            _log(
+                f"github poll: intake cap reached "
+                f"(MAX_ISSUES_INTAKED_PER_POLL={max_intakes}) — "
+                f"deferring {skipped_limit} candidate(s) to next cycle"
+            )
+            break
+
         number = str(issue["number"])
         title = issue.get("title", "")
         ticket_id = extract_ticket_id_from_title(title)
         if ticket_id is None:
-            ticket_id = next_ticket_id(runs_dir, reserved=set(index.values()))
+            ticket_id = next_ticket_id(
+                runs_dir,
+                reserved=set(index.values()),
+            )
         elif ticket_id in index.values():
             continue
         elif worktrees_dir and ticket_id and _try_reconcile_existing_worktree(
             ticket_id, number, worktrees_dir, index, _state_dir,
         ):
-            break  # one intake/reconcile action per daemon cycle
+            intaked += 1  # reconcile counts as an intake action for this cycle
+            continue
         elif (runs_dir / ticket_id).exists():
             _log(f"issue #{number}: ticket {ticket_id} already exists — skipping intake")
             continue
@@ -1460,7 +1509,8 @@ def poll_github_issues(
             if worktrees_dir and _try_reconcile_existing_worktree(
                 ticket_id, number, worktrees_dir, index, _state_dir,
             ):
-                break
+                intaked += 1
+                continue
             _log(f"{ticket_id}: {create_msg} — skipping issue #{number}")
             continue
         _log(f"{ticket_id}: {create_msg}")
@@ -1486,6 +1536,18 @@ def poll_github_issues(
         db_path = _ensure_db()
         if db_path:
             try:
+                inserted = _record_intake_once(db_path, int(number), ticket_id, branch)
+                if not inserted:
+                    # DB row survived a lost/reset file index — treat as a
+                    # duplicate rather than double-processing.
+                    _log(
+                        f"issue #{number}: DB intake row already exists — "
+                        f"treating as skipped_existing"
+                    )
+                    skipped_existing += 1
+            except Exception as exc:
+                _log(f"SQLite intake upsert failed for {ticket_id}: {exc}")
+            try:
                 _rdb_upsert_ticket(
                     db_path, ticket_id,
                     issue_number=int(number),
@@ -1498,7 +1560,12 @@ def poll_github_issues(
                 _attach_ticket_to_collecting_batch(db_path, ticket_id)
             except Exception as exc:
                 _log(f"backlog batch attach failed for {ticket_id}: {exc}")
-        break  # one successful intake per daemon cycle
+        intaked += 1
+
+    _log(
+        f"github poll: discovered={discovered} intaked={intaked} "
+        f"skipped_existing={skipped_existing} skipped_limit={skipped_limit}"
+    )
 
 
 def _resolve_backlog_setting(db_path, key: str, fallback):
@@ -1713,6 +1780,182 @@ def _advance_dispatching_batches(db_path) -> None:
             _log(f"backlog: unblock pending batches failed: {exc}")
 
 
+# ── Parallel Ticket Intelligence / Readiness pools (T221) ────────────────────
+#
+# Two ThreadPoolExecutors — one per stage — live for the daemon's lifetime and
+# are sized once from the runtime settings registry. Each cycle scans the
+# ticket set, decides which stage each ticket needs, and submits work to the
+# right pool. Atomic claim helpers in ``ticket_pipeline`` guarantee that at
+# most one worker actually processes a given ticket at a time; the pool's
+# ``max_workers`` guarantees the daemon never runs more concurrent stage
+# workers than configured. Coding-worker scheduling (``MAX_WORKERS``) is
+# untouched by this machinery.
+
+_intel_pool: "concurrent.futures.ThreadPoolExecutor | None" = None
+_intel_pool_size: int = 0
+_intel_inflight: set[str] = set()
+_intel_pool_lock = threading.Lock()
+
+_readiness_pool: "concurrent.futures.ThreadPoolExecutor | None" = None
+_readiness_pool_size: int = 0
+_readiness_inflight: set[str] = set()
+_readiness_pool_lock = threading.Lock()
+
+
+def _init_pipeline_pools(db_path) -> None:
+    """Lazily create the two stage pools; safe to call every poll."""
+    global _intel_pool, _intel_pool_size, _readiness_pool, _readiness_pool_size
+    with _intel_pool_lock:
+        if _intel_pool is None:
+            size = _runtime_settings.get_setting_int_positive(
+                db_path, "MAX_PARALLEL_TICKET_INTELLIGENCE", 1,
+            )
+            _intel_pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=size, thread_name_prefix="intel",
+            )
+            _intel_pool_size = size
+    with _readiness_pool_lock:
+        if _readiness_pool is None:
+            size = _runtime_settings.get_setting_int_positive(
+                db_path, "MAX_PARALLEL_READINESS", 1,
+            )
+            _readiness_pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=size, thread_name_prefix="readiness",
+            )
+            _readiness_pool_size = size
+
+
+def _shutdown_pipeline_pools() -> None:
+    """Shut down the stage pools cleanly at daemon exit. Idempotent."""
+    global _intel_pool, _readiness_pool
+    with _intel_pool_lock:
+        intel = _intel_pool
+        _intel_pool = None
+    if intel is not None:
+        intel.shutdown(wait=False, cancel_futures=True)
+    with _readiness_pool_lock:
+        ready = _readiness_pool
+        _readiness_pool = None
+    if ready is not None:
+        ready.shutdown(wait=False, cancel_futures=True)
+
+
+def _intelligence_worker(
+    db_path,
+    ticket_id: str,
+    ticket_content: str,
+    exec_cmd: str,
+    project_root: Path,
+    project_id: str | None,
+) -> None:
+    try:
+        if not _claim_intelligence(db_path, ticket_id):
+            _log(f"pipeline: skip already_claimed ticket={ticket_id} stage=intelligence")
+            return
+        _log(f"pipeline: running intelligence for {ticket_id}")
+        try:
+            import ticket_intelligence_analyzer as _analyzer  # noqa: WPS433
+
+            _analyzer.run_analysis(
+                db_path,
+                ticket_id,
+                ticket_content,
+                exec_cmd,
+                project_root,
+                project_id=project_id,
+            )
+            _log(f"pipeline: finished intelligence for {ticket_id}")
+        except Exception as exc:
+            _log(f"pipeline: intelligence failed for {ticket_id}: {exc}")
+    finally:
+        with _intel_pool_lock:
+            _intel_inflight.discard(ticket_id)
+
+
+def _readiness_worker(
+    db_path,
+    ticket_id: str,
+    ticket_content: str,
+    project_root: Path,
+    project_id: str | None,
+) -> None:
+    try:
+        if not _claim_readiness(db_path, ticket_id):
+            _log(f"pipeline: skip already_claimed ticket={ticket_id} stage=readiness")
+            return
+        _log(f"pipeline: running readiness for {ticket_id}")
+        try:
+            from ticket_readiness_evaluator import run_evaluation as _run_ev  # noqa: WPS433
+
+            _run_ev(
+                db_path, ticket_id, ticket_content, project_root, project_id=project_id,
+            )
+            _log(f"pipeline: finished readiness for {ticket_id}")
+        except Exception as exc:
+            _log(f"pipeline: readiness failed for {ticket_id}: {exc}")
+    finally:
+        with _readiness_pool_lock:
+            _readiness_inflight.discard(ticket_id)
+
+
+def _submit_intelligence(
+    db_path,
+    ticket_id: str,
+    ticket_content: str,
+    exec_cmd: str,
+    project_root: Path,
+    project_id: str | None,
+) -> bool:
+    """Submit an intelligence job unless one for the same ticket is already in-flight."""
+    _init_pipeline_pools(db_path)
+    with _intel_pool_lock:
+        if ticket_id in _intel_inflight:
+            return False
+        _intel_inflight.add(ticket_id)
+        pool = _intel_pool
+    assert pool is not None  # init above guarantees this
+    pool.submit(
+        _intelligence_worker,
+        db_path, ticket_id, ticket_content, exec_cmd, project_root, project_id,
+    )
+    return True
+
+
+def _submit_readiness(
+    db_path,
+    ticket_id: str,
+    ticket_content: str,
+    project_root: Path,
+    project_id: str | None,
+) -> bool:
+    """Submit a readiness job unless one for the same ticket is already in-flight."""
+    _init_pipeline_pools(db_path)
+    with _readiness_pool_lock:
+        if ticket_id in _readiness_inflight:
+            return False
+        _readiness_inflight.add(ticket_id)
+        pool = _readiness_pool
+    assert pool is not None
+    pool.submit(
+        _readiness_worker,
+        db_path, ticket_id, ticket_content, project_root, project_id,
+    )
+    return True
+
+
+def _read_pipeline_ticket_content(
+    project_root: Path,
+    ticket_id: str,
+    worktrees_dir: Path | None,
+    project_id: str | None,
+) -> str:
+    from ticket_readiness_evaluator import read_ticket_markdown  # noqa: WPS433
+
+    return read_ticket_markdown(
+        project_root, ticket_id, worktrees_dir=worktrees_dir, project_id=project_id,
+    )
+
+
 def poll_ticket_pipeline(
     db_path: "Path | None",
     runs_dir: Path,
@@ -1722,37 +1965,59 @@ def poll_ticket_pipeline(
     *,
     project_id: str | None = None,
 ) -> None:
-    """Run intelligence/readiness for tickets that still need pipeline work.
+    """Dispatch intelligence/readiness work for every ticket that needs it.
 
-    Processes up to ``_PIPELINE_TICKETS_PER_CYCLE`` tickets per daemon cycle so
-    orchestration keeps moving while coding workers run in the background.
+    Scans all discovered tickets once per poll and submits eligible work to
+    the stage-specific thread pools. Each pool's ``max_workers`` bounds
+    concurrent execution; the atomic claim helpers guarantee that a ticket
+    is processed by at most one worker per stage even under contention.
     """
     if db_path is None or not _is_auto_pipeline_enabled(db_path):
         return
 
+    _init_pipeline_pools(db_path)
+
     tickets = sorted(scan_tickets(runs_dir, worktrees_dir), key=lambda t: ticket_sort_key(t[0]))
     ticket_ids = [ticket_id for ticket_id, _state in tickets]
 
-    for _ in range(_PIPELINE_TICKETS_PER_CYCLE):
-        next_id = _find_next_pipeline_ticket(db_path, ticket_ids)
-        if next_id is None:
-            return
+    submitted_intel = 0
+    submitted_ready = 0
 
-        _log(f"pipeline: processing {next_id}")
+    for ticket_id in ticket_ids:
         try:
-            ran = _process_ticket_pipeline(
-                db_path,
-                next_id,
-                project_root,
-                exec_cmd,
-                worktrees_dir=worktrees_dir,
-                project_id=project_id,
+            intel = _rdb_get_ticket_intelligence(db_path, ticket_id)
+        except Exception:
+            intel = None
+        try:
+            ready = _rdb_get_ticket_readiness(db_path, ticket_id)
+        except Exception:
+            ready = None
+
+        if _ticket_needs_intelligence(intel):
+            content = _read_pipeline_ticket_content(
+                project_root, ticket_id, worktrees_dir, project_id,
             )
-        except Exception as exc:
-            _log(f"pipeline: failed for {next_id}: {exc}")
-            return
-        if ran:
-            _log(f"pipeline: finished {next_id}")
+            if _submit_intelligence(
+                db_path, ticket_id, content, exec_cmd, project_root, project_id,
+            ):
+                submitted_intel += 1
+            continue
+
+        if _ticket_needs_readiness(intel, ready) and _is_batch_ready_for_readiness(
+            db_path, ticket_id,
+        ):
+            content = _read_pipeline_ticket_content(
+                project_root, ticket_id, worktrees_dir, project_id,
+            )
+            if _submit_readiness(
+                db_path, ticket_id, content, project_root, project_id,
+            ):
+                submitted_ready += 1
+
+    if submitted_intel or submitted_ready:
+        _log(
+            f"pipeline: submitted intel={submitted_intel} readiness={submitted_ready}"
+        )
 
 
 def poll_project_map(runs_dir: Path, repo: str | None, worktrees_dir: Path | None = None) -> None:
@@ -2289,6 +2554,8 @@ def main(argv: list[str]) -> int:
             time.sleep(args.interval)
     except KeyboardInterrupt:
         _log("interrupted — daemon stopping")
+    finally:
+        _shutdown_pipeline_pools()
 
     return 0
 
