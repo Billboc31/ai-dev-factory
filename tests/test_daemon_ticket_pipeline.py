@@ -17,12 +17,12 @@ def test_poll_ticket_pipeline_skips_when_disabled(tmp_path, monkeypatch, capsys)
     db_path = tmp_path / "fake.sqlite"
 
     with patch("run_daemon._is_auto_pipeline_enabled", return_value=False), \
-         patch("run_daemon._process_ticket_pipeline") as mock_process:
+         patch("run_daemon._init_pipeline_pools") as mock_init:
         poll_ticket_pipeline(
             db_path, runs, None, tmp_path, "claude --print", project_id="proj-a",
         )
 
-    mock_process.assert_not_called()
+    mock_init.assert_not_called()
 
 
 def test_main_calls_poll_ticket_pipeline_each_cycle(tmp_path):

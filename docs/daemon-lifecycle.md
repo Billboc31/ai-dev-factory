@@ -142,6 +142,10 @@ The pipeline entry-side knobs (T221):
 
 Invalid or `<= 0` values fall back to the "safe fallback" column and emit exactly one warning per key on the first invalid read. These four settings are strictly independent from `MAX_WORKERS`, which continues to cap coding-worker concurrency.
 
+`GITHUB_POLL_INTERVAL_SECONDS` is resolved live at each cycle end — changing it in the settings UI takes effect on the next sleep, no restart needed. `MAX_PARALLEL_TICKET_INTELLIGENCE` and `MAX_PARALLEL_READINESS` are read once when the thread pools are first created and are flagged `requires_restart=True`; live edits show a "Restart required" badge and take effect after the daemon is restarted.
+
+An explicit `--interval N` on the daemon CLI overrides `GITHUB_POLL_INTERVAL_SECONDS` for operators who want to pin the value at launch; when omitted, the setting is authoritative.
+
 ---
 
 ## Issue Intake (ephemeral)

@@ -130,8 +130,6 @@ _tp_spec = importlib.util.spec_from_file_location("_ticket_pipeline", ROOT / "ti
 _tp_mod = importlib.util.module_from_spec(_tp_spec)  # type: ignore[arg-type]
 _tp_spec.loader.exec_module(_tp_mod)  # type: ignore[union-attr]
 _is_auto_pipeline_enabled = _tp_mod.is_auto_pipeline_enabled
-_find_next_pipeline_ticket = _tp_mod.find_next_ticket
-_process_ticket_pipeline = _tp_mod.process_ticket
 _claim_intelligence = _tp_mod.claim_intelligence
 _claim_readiness = _tp_mod.claim_readiness
 _record_intake_once = _tp_mod.record_intake_once
@@ -1405,6 +1403,22 @@ def _resolve_max_intakes_per_poll() -> int:
     )
 
 
+def _resolve_poll_interval(args: argparse.Namespace) -> int:
+    """Return the effective sleep interval (seconds) between daemon cycles.
+
+    An explicit ``--interval`` on the CLI overrides the runtime setting so
+    operators can pin the value at launch. Otherwise the interval is resolved
+    per-cycle from ``GITHUB_POLL_INTERVAL_SECONDS`` (DB → env → spec default),
+    which lets an admin change the polling cadence live from the settings UI
+    without restarting the daemon.
+    """
+    if getattr(args, "interval", None) is not None:
+        return int(args.interval)
+    return _runtime_settings.get_setting_int_positive(
+        _ensure_db(), "GITHUB_POLL_INTERVAL_SECONDS", 30,
+    )
+
+
 def poll_github_issues(
     runs_dir: Path,
     label: str,
@@ -2364,7 +2378,7 @@ def _resolve_repo_root(args: argparse.Namespace) -> Path:
 def parse_args(argv: list[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Local workflow daemon for ai-dev-factory")
     parser.add_argument("--exec-cmd", required=True, help="Command passed to run_ticket.py --auto")
-    parser.add_argument("--interval", type=int, default=30, help="Polling interval in seconds (default: 30)")
+    parser.add_argument("--interval", type=int, default=None, help="Polling interval in seconds. When omitted, resolved from GITHUB_POLL_INTERVAL_SECONDS (spec default: 5). When set, overrides the setting.")
     parser.add_argument("--once", action="store_true", help="Scan once and exit")
     parser.add_argument("--dry-run", action="store_true", help="Log actions without executing")
     parser.add_argument("--runs-dir", default="runs", help="Path to runs directory (default: runs)")
@@ -2442,7 +2456,8 @@ def main(argv: list[str]) -> int:
     _log(f"  git            = {git_path}")
     _log(f"  gh             = {gh_path}")
     _log(f"  exec_cmd       = {args.exec_cmd!r}")
-    _log(f"  interval       = {args.interval}s  dry-run={args.dry_run}")
+    _interval_display = f"{args.interval}s (CLI override)" if args.interval is not None else "resolved per-cycle from GITHUB_POLL_INTERVAL_SECONDS"
+    _log(f"  interval       = {_interval_display}  dry-run={args.dry_run}")
     _log(f"  max-workers    = {args.max_workers}")
     if args.project:
         _log(f"  project_id     = {args.project}")
@@ -2550,8 +2565,9 @@ def main(argv: list[str]) -> int:
                 project_root=REPO_ROOT,
                 project_id=args.project,
             )
-            _log(f"sleeping {args.interval}s")
-            time.sleep(args.interval)
+            poll_interval = _resolve_poll_interval(args)
+            _log(f"sleeping {poll_interval}s")
+            time.sleep(poll_interval)
     except KeyboardInterrupt:
         _log("interrupted — daemon stopping")
     finally:

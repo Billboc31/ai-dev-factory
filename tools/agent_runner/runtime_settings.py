@@ -216,6 +216,8 @@ SETTING_SPECS: dict[str, SettingSpec] = {
         ),
         default=4,
         env_var="MAX_PARALLEL_TICKET_INTELLIGENCE",
+        # Pool sized once at first use; live changes need a daemon restart.
+        requires_restart=True,
     ),
     "MAX_PARALLEL_READINESS": SettingSpec(
         key="MAX_PARALLEL_READINESS",
@@ -226,6 +228,8 @@ SETTING_SPECS: dict[str, SettingSpec] = {
         ),
         default=4,
         env_var="MAX_PARALLEL_READINESS",
+        # Pool sized once at first use; live changes need a daemon restart.
+        requires_restart=True,
     ),
     "BACKLOG_BATCH_IDLE_TIMEOUT_MINUTES": SettingSpec(
         key="BACKLOG_BATCH_IDLE_TIMEOUT_MINUTES",
