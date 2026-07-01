@@ -1,0 +1,1 @@
+Plan written to `runs/T221/plan.md`. It targets the two `break` statements in `poll_github_issues` (run_daemon.py:1432 & 1501), wires `BACKLOG_GITHUB_POLL_INTERVAL_SECONDS` into the actual sleep, adds three new settings for intake cap and pipeline parallelism, parallelizes `poll_ticket_pipeline` via bounded thread pools, and preserves the `MAX_WORKERS` execution cap unchanged.
