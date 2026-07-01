@@ -36,6 +36,7 @@ DEBUG dirty working tree:
  M runs/T219/runtime.log
 ?? runs/T219/prompts/tester-attempt-4.md
 
+<<<<<<< Updated upstream
 [2026-06-30T23:44:19Z] auto-run: step=tester done rc=0
 [2026-06-30T23:44:20Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
 [2026-06-30T23:44:20Z] auto-run: auto-commit triggered (step=tester, include_code=True)
@@ -46,3 +47,16 @@ DEBUG dirty working tree:
 [2026-06-30T23:44:20Z] push: pushing branch=ticket/T219-add-backlog-batch-dashboard-with-dependency-graph
 [2026-06-30T23:44:22Z] push: done branch=ticket/T219-add-backlog-batch-dashboard-with-dependency-graph
 [2026-06-30T23:44:22Z] auto-run: TEST_COMPLETE — running PR lifecycle
+=======
+[2026-06-30T23:29:03Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-06-30T23:29:03Z] auto-run: running step=tester
+[2026-06-30T23:29:03Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-06-30T23:29:03Z] prompt: generic fallback — injecting runs/T219/ticket.md
+[2026-06-30T23:29:03Z] compose: global-context=docs/ai/global-context.md
+[2026-06-30T23:29:03Z] compose: role=ai/roles/tester.md
+[2026-06-30T23:29:03Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-06-30T23:29:03Z] compose: skill=ai/skills/testing.md
+[2026-06-30T23:29:03Z] compose: skill=ai/skills/debugging.md
+[2026-06-30T23:29:03Z] compose: task (canonical prompt)
+[2026-06-30T23:29:03Z] snapshot: runtime-prompt=runs/T219/prompts/tester-attempt-6.md
+>>>>>>> Stashed changes
