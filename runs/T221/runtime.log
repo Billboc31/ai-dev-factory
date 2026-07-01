@@ -80,3 +80,13 @@
 [2026-07-01T10:26:00Z] compose: skill=ai/skills/debugging.md
 [2026-07-01T10:26:00Z] compose: task (canonical prompt)
 [2026-07-01T10:26:00Z] snapshot: runtime-prompt=runs/T221/prompts/tester-attempt-1.md
+[2026-07-01T10:36:12Z] auto-run: step=tester done rc=0
+[2026-07-01T10:36:12Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-07-01T10:36:12Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-07-01T10:36:12Z] commit-checkpoint: unstaged runtime garbage: ['runs/T221/runtime.log']
+[2026-07-01T10:36:12Z] commit-checkpoint: sha=516fb6a6 files=3 title='test(T221/workflow): tester — update 3 file(s)'
+[2026-07-01T10:36:12Z] auto-run: auto-push triggered
+[2026-07-01T10:36:12Z] push: tolerating runtime dirty files (not blocking): ['runs/T221/runtime.log']
+[2026-07-01T10:36:12Z] push: pushing branch=ticket/T221-make-github-issue-intake-near-real-time-and-decoup
+[2026-07-01T10:36:15Z] push: done branch=ticket/T221-make-github-issue-intake-near-real-time-and-decoup
+[2026-07-01T10:36:15Z] auto-run: TEST_COMPLETE — running PR lifecycle
