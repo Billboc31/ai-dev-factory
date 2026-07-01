@@ -1,7 +1,7 @@
 {
   "ticket_id": "T221",
-  "state": "IMPLEMENTATION_REVIEW_NEEDED",
+  "state": "IMPLEMENTATION_FIX_REQUIRED",
   "branch": "ticket/T221-make-github-issue-intake-near-real-time-and-decoup",
   "issue_number": 299,
-  "updated_at": "2026-07-01T10:09:02Z"
+  "updated_at": "2026-07-01T10:15:01Z"
 }
