@@ -39,3 +39,20 @@
 [2026-07-01T09:32:19Z] compose: extra-context=runs/T221/fixes/context-20260701T093219Z.md
 [2026-07-01T09:32:19Z] snapshot: runtime-prompt=runs/T221/prompts/planner-attempt-3.md
 [2026-07-01T09:34:40Z] auto-run: step=planner done rc=0
+[2026-07-01T09:37:40Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-07-01T09:37:40Z] auto-run: running step=planner
+[2026-07-01T09:37:40Z] auto-run: fix context: previous_output=runs/T221/plan.md
+[2026-07-01T09:37:40Z] auto-run: fix context: review=runs/T221/reviews/plan-review-concurrency-guards.md
+[2026-07-01T09:37:40Z] auto-run: fix context: fix_instructions=runs/T221/fixes/plan-fix-concurrency-guards.md
+[2026-07-01T09:37:40Z] auto-run: fix context: context_file=runs/T221/fixes/context-20260701T093740Z.md
+[2026-07-01T09:37:40Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-07-01T09:37:40Z] prompt: generic fallback — injecting runs/T221/ticket.md
+[2026-07-01T09:37:40Z] compose: global-context=docs/ai/global-context.md
+[2026-07-01T09:37:40Z] compose: role=ai/roles/planner.md
+[2026-07-01T09:37:40Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-07-01T09:37:40Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-07-01T09:37:40Z] compose: skill=ai/skills/documentation.md
+[2026-07-01T09:37:40Z] compose: task (canonical prompt)
+[2026-07-01T09:37:40Z] compose: extra-context=runs/T221/fixes/context-20260701T093740Z.md
+[2026-07-01T09:37:40Z] snapshot: runtime-prompt=runs/T221/prompts/planner-attempt-4.md
+[2026-07-01T09:38:35Z] auto-run: step=planner done rc=0
