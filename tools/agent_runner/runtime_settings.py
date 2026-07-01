@@ -187,6 +187,50 @@ SETTING_SPECS: dict[str, SettingSpec] = {
         default=60,
         env_var="BACKLOG_GITHUB_POLL_INTERVAL_SECONDS",
     ),
+    "GITHUB_POLL_INTERVAL_SECONDS": SettingSpec(
+        key="GITHUB_POLL_INTERVAL_SECONDS",
+        value_type="int",
+        description=(
+            "Interval (seconds) between GitHub polls for new eligible issues. "
+            "Decoupled from ticket pipeline execution so intake can be fast."
+        ),
+        default=5,
+        env_var="GITHUB_POLL_INTERVAL_SECONDS",
+    ),
+    "MAX_ISSUES_INTAKED_PER_POLL": SettingSpec(
+        key="MAX_ISSUES_INTAKED_PER_POLL",
+        value_type="int",
+        description=(
+            "Upper bound on the number of GitHub issues intaken by a single "
+            "poll cycle."
+        ),
+        default=50,
+        env_var="MAX_ISSUES_INTAKED_PER_POLL",
+    ),
+    "MAX_PARALLEL_TICKET_INTELLIGENCE": SettingSpec(
+        key="MAX_PARALLEL_TICKET_INTELLIGENCE",
+        value_type="int",
+        description=(
+            "Maximum number of Ticket Intelligence workers that may run in "
+            "parallel. Independent of MAX_WORKERS (which caps coding workers)."
+        ),
+        default=4,
+        env_var="MAX_PARALLEL_TICKET_INTELLIGENCE",
+        # Pool sized once at first use; live changes need a daemon restart.
+        requires_restart=True,
+    ),
+    "MAX_PARALLEL_READINESS": SettingSpec(
+        key="MAX_PARALLEL_READINESS",
+        value_type="int",
+        description=(
+            "Maximum number of Readiness Evaluation workers that may run in "
+            "parallel. Independent of MAX_WORKERS."
+        ),
+        default=4,
+        env_var="MAX_PARALLEL_READINESS",
+        # Pool sized once at first use; live changes need a daemon restart.
+        requires_restart=True,
+    ),
     "BACKLOG_BATCH_IDLE_TIMEOUT_MINUTES": SettingSpec(
         key="BACKLOG_BATCH_IDLE_TIMEOUT_MINUTES",
         value_type="int",
@@ -462,6 +506,82 @@ def _stringify_for_storage(value_type: str, value: Any) -> str:
     return str(value)
 
 
+# Keys for which we have already logged an invalid-value fallback. Warn at most
+# once per key per daemon lifetime so operators see the problem without the log
+# stream drowning in per-poll repetitions.
+_warned_invalid_values: set[str] = set()
+
+
+def _coerce_positive_int(raw: Any) -> int | None:
+    """Return ``raw`` coerced to a ``>= 1`` int, or None on any failure."""
+    if raw is None or raw == "":
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    if value < 1:
+        return None
+    return value
+
+
+def _warn_invalid_setting_once(key: str, raw: Any, safe_default: int) -> None:
+    if key in _warned_invalid_values:
+        return
+    _warned_invalid_values.add(key)
+    logger.warning(
+        "runtime_settings: %r resolved to invalid value %r; "
+        "falling back to safe default %d",
+        key, raw, safe_default,
+    )
+
+
+def get_setting_int_positive(db_path, key: str, safe_default: int) -> int:
+    """Return an int setting, guaranteeing ``>= 1``.
+
+    Precedence: an explicit DB row that resolves to a valid positive int wins;
+    otherwise the env var, otherwise the spec default. If an explicit DB or env
+    value is present but invalid (``"0"``, ``"abc"``, negative), fall back to
+    ``safe_default`` and emit exactly one warning per key per process
+    lifetime. Used by the poll / concurrency knobs added in T221 where a value
+    of ``0`` would silently disable a whole pipeline stage.
+    """
+    if safe_default < 1:
+        safe_default = 1
+    spec = _get_spec(key)
+
+    # 1. DB override (skipped for sensitive keys; never applies to the T221 knobs).
+    db_raw: Any = None
+    if not spec.is_sensitive:
+        try:
+            row = runtime_db.get_runtime_setting(db_path, key)
+        except Exception:
+            row = None
+        if row is not None and row.get("value") is not None:
+            db_raw = row["value"]
+            value = _coerce_positive_int(db_raw)
+            if value is not None:
+                return value
+            _warn_invalid_setting_once(key, db_raw, safe_default)
+            return safe_default
+
+    # 2. Environment override.
+    env_raw = _env_value(spec)
+    if env_raw is not None:
+        value = _coerce_positive_int(env_raw)
+        if value is not None:
+            return value
+        _warn_invalid_setting_once(key, env_raw, safe_default)
+        return safe_default
+
+    # 3. Spec default — trusted; falls back to safe_default only if the spec
+    #    itself is misconfigured.
+    default_value = _coerce_positive_int(spec.default)
+    if default_value is not None:
+        return default_value
+    return safe_default
+
+
 __all__ = [
     "SettingSpec",
     "SETTING_SPECS",
@@ -469,6 +589,7 @@ __all__ = [
     "UnknownSettingError",
     "SensitiveSettingWriteError",
     "get_setting",
+    "get_setting_int_positive",
     "resolve_effective_setting",
     "list_effective_settings",
     "set_setting",

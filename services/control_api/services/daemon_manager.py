@@ -132,6 +132,9 @@ def _recommended_host_command(
     runtime_root_display = _expand_user(runtime_root)
     issue_repo = repo_slug or os.environ.get("AI_DEV_FACTORY_ISSUE_REPO", "<owner>/<repo>")
 
+    # Poll interval is resolved per-cycle from the GITHUB_POLL_INTERVAL_SECONDS
+    # runtime setting so admins can change it from the settings UI without
+    # editing this command. Pass an explicit ``--interval N`` to pin the value.
     return (
         f"cd {host_clone} && "
         f"source .venv/bin/activate && "
@@ -142,8 +145,7 @@ def _recommended_host_command(
         f"--issue-repo {issue_repo} "
         f"--auto-commit "
         f"--auto-push "
-        f"--auto-include-code "
-        f"--interval 30"
+        f"--auto-include-code"
     )
 
 

@@ -123,10 +123,28 @@ falling back to `Path.cwd()`.
 
 Each daemon cycle (default: 30s interval):
 
-1. **Poll GitHub issues** (if `--poll-issues`): fetch open issues with label `ai-ready`, skip already-ingested ones, run intake for at most one new issue per cycle.
+1. **Poll GitHub issues** (if `--poll-issues`): fetch open issues with label `ai-ready`, skip already-ingested ones, and **batch-intake every eligible issue in a single pass** (bounded by `MAX_ISSUES_INTAKED_PER_POLL`). Each poll ends with a summary log line: `github poll: discovered=<N> intaked=<N> skipped_existing=<N> skipped_limit=<N>`.
 2. **Scan tickets**: read `runs/*/state.json` and active worktrees to build the current ticket/state map.
-3. **Process tickets**: for each auto-runnable ticket, launch `run_ticket.py --auto` inside its worktree.
-4. **TEST_COMPLETE lifecycle**: for tickets at `TEST_COMPLETE`, trigger checkpoint → PR create/update → auto-merge → issue close.
+3. **Dispatch Ticket Intelligence and Readiness**: eligible tickets are submitted to two dedicated thread pools — sized by `MAX_PARALLEL_TICKET_INTELLIGENCE` and `MAX_PARALLEL_READINESS` respectively — so multiple tickets can be enriched in parallel while atomic per-stage claim helpers guarantee that no ticket is processed twice.
+4. **Process tickets**: for each auto-runnable ticket, launch `run_ticket.py --auto` inside its worktree. Coding-worker concurrency is still capped by `MAX_WORKERS` — the new stage pools are independent.
+5. **TEST_COMPLETE lifecycle**: for tickets at `TEST_COMPLETE`, trigger checkpoint → PR create/update → auto-merge → issue close.
+
+### Runtime settings
+
+The pipeline entry-side knobs (T221):
+
+| Key | Env var | Default | Safe fallback | Purpose |
+|---|---|---|---|---|
+| `GITHUB_POLL_INTERVAL_SECONDS` | `GITHUB_POLL_INTERVAL_SECONDS` | `5` | `30` | Interval between GitHub polls. |
+| `MAX_ISSUES_INTAKED_PER_POLL` | `MAX_ISSUES_INTAKED_PER_POLL` | `50` | `1` | Upper bound on the intake batch size per poll. |
+| `MAX_PARALLEL_TICKET_INTELLIGENCE` | `MAX_PARALLEL_TICKET_INTELLIGENCE` | `4` | `1` | Concurrent Ticket Intelligence workers. |
+| `MAX_PARALLEL_READINESS` | `MAX_PARALLEL_READINESS` | `4` | `1` | Concurrent Readiness workers. |
+
+Invalid or `<= 0` values fall back to the "safe fallback" column and emit exactly one warning per key on the first invalid read. These four settings are strictly independent from `MAX_WORKERS`, which continues to cap coding-worker concurrency.
+
+`GITHUB_POLL_INTERVAL_SECONDS` is resolved live at each cycle end — changing it in the settings UI takes effect on the next sleep, no restart needed. `MAX_PARALLEL_TICKET_INTELLIGENCE` and `MAX_PARALLEL_READINESS` are read once when the thread pools are first created and are flagged `requires_restart=True`; live edits show a "Restart required" badge and take effect after the daemon is restarted.
+
+An explicit `--interval N` on the daemon CLI overrides `GITHUB_POLL_INTERVAL_SECONDS` for operators who want to pin the value at launch; when omitted, the setting is authoritative.
 
 ---
 
@@ -137,9 +155,12 @@ Intake is fully ephemeral — there is **no persistent `_intake` worktree**. Whe
 1. `fetch_origin_main(REPO_ROOT)` — pure ref operation (`git fetch origin main`), does not touch any branch or working tree.
 2. `create_ticket_branch_and_worktree(ticket_id, branch, worktrees_dir, REPO_ROOT)` — atomically creates the ticket branch from `origin/main` and adds `worktrees/TXXX/` on that branch. If the worktree add fails the branch ref is rolled back.
 3. `run_issue_intake.py` runs **inside the new `worktrees/TXXX/`** which is already on the ticket branch: writes `ticket.md` + `state.json`, commits the bootstrap checkpoint, pushes.
-4. On any failure during the intake call, `cleanup_failed_intake(...)` removes the worktree and deletes the branch so the next daemon cycle can retry from scratch.
+4. `record_intake_once(...)` persists the intake in the runtime DB via `INSERT ... ON CONFLICT DO NOTHING`. If the same issue re-appears in a future poll (file index lost, cross-process race), the second insert is silently dropped and the counter increments `skipped_existing`.
+5. On any failure during the intake call, `cleanup_failed_intake(...)` removes the worktree and deletes the branch so the next daemon cycle can retry from scratch.
 
 There is no return-to-main checkout, no shared `_intake` worktree, and no `runs/TXXX/runtime.log` produced during intake — the per-ticket runtime.log is created later by `run_ticket.py`.
+
+Since T221 the poller does **not** short-circuit after the first new issue: a single poll iterates over every discovered candidate up to `MAX_ISSUES_INTAKED_PER_POLL`. Creating 10 issues at once therefore surfaces all 10 tickets within one or two poll cycles (≈5–10 s at the demo default), instead of one every 30 s.
 
 ### runtime.log and intake preflight
 
