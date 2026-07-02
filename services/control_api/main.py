@@ -234,7 +234,7 @@ def create_app(
     # T212: /dispatcher/* — advisory next-ticket dispatcher (read-only).
     app.include_router(dispatcher.router)
     app.include_router(dispatcher.project_router)
-    # T219: /dispatcher/batches/* — backlog batch dashboard (read-only + guarded actions).
+    # T219: /dispatcher/batches/* — backlog batch dashboard (read + operator actions).
     app.include_router(batches.router)
     app.include_router(batches.project_router)
     # T215: /settings/* — global runtime settings (DB-backed, env fallback).
