@@ -216,7 +216,6 @@ SETTING_SPECS: dict[str, SettingSpec] = {
         ),
         default=4,
         env_var="MAX_PARALLEL_TICKET_INTELLIGENCE",
-        # Pool sized once at first use; live changes need a daemon restart.
         requires_restart=True,
     ),
     "MAX_PARALLEL_READINESS": SettingSpec(
@@ -228,7 +227,6 @@ SETTING_SPECS: dict[str, SettingSpec] = {
         ),
         default=4,
         env_var="MAX_PARALLEL_READINESS",
-        # Pool sized once at first use; live changes need a daemon restart.
         requires_restart=True,
     ),
     "BACKLOG_BATCH_IDLE_TIMEOUT_MINUTES": SettingSpec(
@@ -550,8 +548,6 @@ def get_setting_int_positive(db_path, key: str, safe_default: int) -> int:
         safe_default = 1
     spec = _get_spec(key)
 
-    # 1. DB override (skipped for sensitive keys; never applies to the T221 knobs).
-    db_raw: Any = None
     if not spec.is_sensitive:
         try:
             row = runtime_db.get_runtime_setting(db_path, key)
@@ -565,7 +561,6 @@ def get_setting_int_positive(db_path, key: str, safe_default: int) -> int:
             _warn_invalid_setting_once(key, db_raw, safe_default)
             return safe_default
 
-    # 2. Environment override.
     env_raw = _env_value(spec)
     if env_raw is not None:
         value = _coerce_positive_int(env_raw)
@@ -574,8 +569,6 @@ def get_setting_int_positive(db_path, key: str, safe_default: int) -> int:
         _warn_invalid_setting_once(key, env_raw, safe_default)
         return safe_default
 
-    # 3. Spec default — trusted; falls back to safe_default only if the spec
-    #    itself is misconfigured.
     default_value = _coerce_positive_int(spec.default)
     if default_value is not None:
         return default_value
