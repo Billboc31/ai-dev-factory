@@ -52,6 +52,10 @@ const BATCH = {
       depends_on: [],
       readiness_state: 'ready_candidate',
       dispatcher_state: 'DONE',
+      why_this_phase: 'Foundation ticket.',
+      dependencies_inferred: [],
+      reasoning: 'Baseline architecture.',
+      confidence: 'high',
     },
     {
       ticket_id: 'T2',
@@ -61,8 +65,26 @@ const BATCH = {
       depends_on: ['T1'],
       readiness_state: 'ready_candidate',
       dispatcher_state: 'RUNNING',
+      why_this_phase: 'Consumes T1.',
+      dependencies_inferred: ['T1 — foundation'],
+      reasoning: 'Feature ticket built on top of T1.',
+      confidence: 'medium',
     },
   ],
+  analysis_summary: {
+    strategy: 'Foundation first, then features.',
+    foundation_tickets: ['T1'],
+    bootstrap_tickets: [],
+    important_inferred_dependencies: ['T2 depends on T1'],
+    parallel_opportunities: [],
+    conflicts_resolved: [],
+    warnings: [],
+    generated_at: '2026-06-30T10:05:00Z',
+  },
+  raw_analyzer_output: {
+    stdout_excerpt: '{}',
+    parsed: { tickets: [] },
+  },
 }
 
 const GRAPH = {
@@ -154,5 +176,25 @@ describe('BatchDetailPage', () => {
     await screen.findByRole('heading', { name: 'B0001' })
     expect(screen.getByText(/blocked by/i)).toBeInTheDocument()
     expect(screen.getByText(/conflicts with/i)).toBeInTheDocument()
+  })
+
+  it('renders the analysis summary and raw output sections', async () => {
+    renderPage()
+    await screen.findByRole('heading', { name: 'B0001' })
+    expect(screen.getByTestId('batch-analysis-summary')).toBeInTheDocument()
+    expect(screen.getByTestId('raw-analyzer-output')).toBeInTheDocument()
+    expect(screen.getByText(/Foundation first, then features/i)).toBeInTheDocument()
+  })
+
+  it('expands a ticket row to reveal reasoning', async () => {
+    const user = (await import('@testing-library/user-event')).default.setup()
+    renderPage()
+    await screen.findByRole('heading', { name: 'B0001' })
+    const toggle = screen.getByTestId('ticket-toggle-T2')
+    await user.click(toggle)
+    const row = screen.getByTestId('ticket-reasoning-row-T2')
+    expect(row).toBeInTheDocument()
+    expect(row).toHaveTextContent(/Consumes T1/i)
+    expect(row).toHaveTextContent(/Feature ticket built on top of T1/i)
   })
 })

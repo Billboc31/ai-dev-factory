@@ -526,6 +526,258 @@ def test_conflict_ticket_id_fallback_only_when_ties():
     assert any("ticket_id" in n for n in notes_b)
 
 
+# ── Reasoning-summary tests (T222) ────────────────────────────────────────────
+
+
+def _reasoning_payload() -> str:
+    """LLM response with full reasoning fields populated."""
+    return json.dumps({
+        "analysis_summary": {
+            "strategy": "Foundation first, then backend, then frontend.",
+            "foundation_tickets": ["T010"],
+            "bootstrap_tickets": [],
+            "important_inferred_dependencies": [
+                "T011 depends on T010 (backend API contract).",
+            ],
+            "parallel_opportunities": [],
+            "conflicts_resolved": [],
+            "warnings": ["T010 body is thin — best-effort inference."],
+        },
+        "tickets": [
+            {
+                "ticket_id": "T010",
+                "depends_on": [],
+                "blocks": ["T011"],
+                "parallel_group": "foundation",
+                "conflicting_tickets": [],
+                "execution_phase": 1,
+                "why_this_phase": "Architectural foundation everything depends on.",
+                "dependencies_inferred": [],
+                "reasoning": "Foundation ticket — must land first.",
+                "confidence": "high",
+            },
+            {
+                "ticket_id": "T011",
+                "depends_on": ["T010"],
+                "blocks": [],
+                "parallel_group": None,
+                "conflicting_tickets": [],
+                "execution_phase": 2,
+                "why_this_phase": "Builds on T010's contract.",
+                "dependencies_inferred": [
+                    "T010 — provides the API contract T011 consumes.",
+                ],
+                "reasoning": "Backend API consumer of T010.",
+                "confidence": "medium",
+            },
+        ],
+        "relationships": [
+            {"from": "T011", "to": "T010", "type": "HARD_DEPENDENCY"},
+        ],
+    })
+
+
+def test_normalize_response_extracts_reasoning_fields():
+    raw = json.loads(_reasoning_payload())
+    summary, tickets, _ = gda._normalize_response(raw)
+    assert summary["strategy"].startswith("Foundation first")
+    assert summary["foundation_tickets"] == ["T010"]
+    assert summary["warnings"] == ["T010 body is thin — best-effort inference."]
+
+    by_id = {t["ticket_id"]: t for t in tickets}
+    assert by_id["T011"]["why_this_phase"] == "Builds on T010's contract."
+    assert by_id["T011"]["dependencies_inferred"] == [
+        "T010 — provides the API contract T011 consumes.",
+    ]
+    assert by_id["T011"]["reasoning"] == "Backend API consumer of T010."
+    assert by_id["T011"]["confidence"] == "medium"
+
+
+def test_normalize_response_defaults_missing_reasoning_fields():
+    raw = {
+        "tickets": [
+            {
+                "ticket_id": "T010",
+                "depends_on": [],
+                "blocks": [],
+                "parallel_group": None,
+                "conflicting_tickets": [],
+                "execution_phase": 1,
+                # Reasoning fields intentionally omitted.
+            },
+        ],
+        "relationships": [],
+    }
+    summary, tickets, _ = gda._normalize_response(raw)
+    assert summary == {}
+    t = tickets[0]
+    assert t["why_this_phase"] is None
+    assert t["dependencies_inferred"] == []
+    assert t["reasoning"] is None
+    assert t["confidence"] is None
+
+
+def test_normalize_response_malformed_reasoning_fields_are_safe():
+    raw = {
+        "analysis_summary": "not a dict",  # malformed
+        "tickets": [
+            {
+                "ticket_id": "T010",
+                "depends_on": [],
+                "blocks": [],
+                "parallel_group": None,
+                "conflicting_tickets": [],
+                "execution_phase": 1,
+                "why_this_phase": 42,  # not a string
+                "dependencies_inferred": "oops",  # not a list
+                "reasoning": None,
+                "confidence": "medium-ish",  # not one of low/medium/high
+            },
+        ],
+        "relationships": [],
+    }
+    summary, tickets, _ = gda._normalize_response(raw)
+    assert summary == {}
+    t = tickets[0]
+    assert t["why_this_phase"] is None
+    assert t["dependencies_inferred"] == []
+    assert t["reasoning"] is None
+    assert t["confidence"] is None
+
+
+def test_reasoning_persisted_on_upsert(db, runs_dir, monkeypatch):
+    batch_id = _seed_batch_with_tickets(db, runs_dir, ["T010", "T011"])
+    _configure_stub(monkeypatch, stdout=_reasoning_payload())
+    outcome = gda.run_global_analysis(
+        db, runs_dir, batch_id, exec_cmd="echo fake",
+    )
+    assert outcome.success is True
+
+    row_t011 = _db.get_dependency_analysis(db, "T011", batch_id)
+    assert row_t011["why_this_phase"] == "Builds on T010's contract."
+    assert row_t011["dependencies_inferred"] == [
+        "T010 — provides the API contract T011 consumes.",
+    ]
+    assert row_t011["reasoning"] == "Backend API consumer of T010."
+    assert row_t011["confidence"] == "medium"
+
+    batch_summary = _db.get_batch_analysis_summary(db, batch_id)
+    assert batch_summary is not None
+    assert batch_summary["analysis_summary"]["strategy"].startswith("Foundation")
+    assert batch_summary["analysis_summary"]["foundation_tickets"] == ["T010"]
+    raw = batch_summary["raw_analyzer_output"]
+    assert isinstance(raw, dict)
+    assert "parsed" in raw
+    assert "stdout_excerpt" in raw
+    assert batch_summary["generated_at"] is not None
+
+
+def test_reasoning_survives_coherence_pass(db, runs_dir, monkeypatch):
+    """Coherence bumps a phase; the per-ticket reasoning stays as returned."""
+    batch_id = _seed_batch_with_tickets(db, runs_dir, ["T010", "T011"])
+    payload = json.dumps({
+        "analysis_summary": {"strategy": "s"},
+        "tickets": [
+            {
+                "ticket_id": "T010",
+                "depends_on": [],
+                "blocks": [],
+                "parallel_group": None,
+                "conflicting_tickets": [],
+                "execution_phase": 3,  # will be moved to 1 by coherence
+                "why_this_phase": "written by the LLM",
+                "dependencies_inferred": [],
+                "reasoning": "foundation",
+                "confidence": "high",
+            },
+            {
+                "ticket_id": "T011",
+                "depends_on": ["T010"],
+                "blocks": [],
+                "parallel_group": None,
+                "conflicting_tickets": [],
+                "execution_phase": 1,  # coherence will bump to 2
+                "why_this_phase": "consumer",
+                "dependencies_inferred": ["T010 — provides X"],
+                "reasoning": "backend consumer",
+                "confidence": "low",
+            },
+        ],
+        "relationships": [
+            {"from": "T011", "to": "T010", "type": "HARD_DEPENDENCY"},
+        ],
+    })
+    _configure_stub(monkeypatch, stdout=payload)
+    outcome = gda.run_global_analysis(
+        db, runs_dir, batch_id, exec_cmd="echo fake",
+    )
+    assert outcome.success is True
+    row_t010 = _db.get_dependency_analysis(db, "T010", batch_id)
+    row_t011 = _db.get_dependency_analysis(db, "T011", batch_id)
+    # phase moved but reasoning preserved verbatim.
+    assert row_t010["why_this_phase"] == "written by the LLM"
+    assert row_t011["reasoning"] == "backend consumer"
+    assert row_t011["confidence"] == "low"
+
+
+def test_missing_analysis_summary_still_persists_raw_output(db, runs_dir, monkeypatch):
+    """The LLM omits ``analysis_summary`` — raw output still lands so operators can debug."""
+    batch_id = _seed_batch_with_tickets(db, runs_dir, ["T010"])
+    payload = json.dumps({
+        "tickets": [
+            {
+                "ticket_id": "T010",
+                "depends_on": [],
+                "blocks": [],
+                "parallel_group": None,
+                "conflicting_tickets": [],
+                "execution_phase": 1,
+            },
+        ],
+        "relationships": [],
+    })
+    _configure_stub(monkeypatch, stdout=payload)
+    outcome = gda.run_global_analysis(
+        db, runs_dir, batch_id, exec_cmd="echo fake",
+    )
+    assert outcome.success is True
+    summary = _db.get_batch_analysis_summary(db, batch_id)
+    assert summary is not None
+    assert summary["analysis_summary"] == {}
+    assert summary["raw_analyzer_output"] is not None
+
+
+def test_raw_stdout_excerpt_is_truncated(db, runs_dir, monkeypatch):
+    """The stdout_excerpt is capped so a chatty LLM cannot bloat the DB row."""
+    batch_id = _seed_batch_with_tickets(db, runs_dir, ["T010"])
+    # Pad the JSON with a giant trailing comment-like blob so the raw stdout
+    # exceeds the 20 000 char cap. The extractor still finds the JSON object.
+    padding = "X" * 25_000
+    payload_json = json.dumps({
+        "tickets": [
+            {
+                "ticket_id": "T010",
+                "depends_on": [],
+                "blocks": [],
+                "parallel_group": None,
+                "conflicting_tickets": [],
+                "execution_phase": 1,
+            },
+        ],
+        "relationships": [],
+    })
+    stdout = f"{payload_json}\n\n{padding}"
+    _configure_stub(monkeypatch, stdout=stdout)
+    outcome = gda.run_global_analysis(
+        db, runs_dir, batch_id, exec_cmd="echo fake",
+    )
+    assert outcome.success is True
+    summary = _db.get_batch_analysis_summary(db, batch_id)
+    assert summary is not None
+    excerpt = summary["raw_analyzer_output"]["stdout_excerpt"]
+    assert len(excerpt) <= gda._RAW_STDOUT_MAX_CHARS
+
+
 def test_realistic_test_ai_dev_backlog(db, runs_dir, monkeypatch):
     """The `test-ai-dev` bad-case: T001 (architecture) shares phase 1 with T010 (backend)
     while being marked as conflicting. Coherence must lift T010 into a later phase

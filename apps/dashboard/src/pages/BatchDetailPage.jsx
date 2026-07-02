@@ -6,11 +6,86 @@ import {
   getBatchPhases,
   getBatchInsights,
 } from '../api/batches'
+import BatchAnalysisSummaryPanel from '../components/BatchAnalysisSummaryPanel'
 import BatchDependencyGraph, { colorClassForKey } from '../components/BatchDependencyGraph'
 import BatchPhasesPanel from '../components/BatchPhasesPanel'
 import DispatcherInsightsPanel from '../components/DispatcherInsightsPanel'
 import ErrorBanner from '../components/ErrorBanner'
+import RawAnalyzerOutputPanel from '../components/RawAnalyzerOutputPanel'
 import usePolling from '../hooks/usePolling'
+
+const CONFIDENCE_BADGE = {
+  low: 'bg-yellow-100 text-yellow-800',
+  medium: 'bg-blue-100 text-blue-800',
+  high: 'bg-green-100 text-green-800',
+}
+
+function ConfidencePill({ level }) {
+  if (!level) return null
+  const cls = CONFIDENCE_BADGE[level] || 'bg-gray-100 text-gray-700'
+  return (
+    <span
+      className={`px-2 py-0.5 rounded text-xs font-medium uppercase tracking-wider ${cls}`}
+    >
+      {level}
+    </span>
+  )
+}
+
+function TicketReasoning({ ticket }) {
+  const hasAny =
+    ticket.why_this_phase ||
+    (ticket.dependencies_inferred && ticket.dependencies_inferred.length > 0) ||
+    ticket.reasoning ||
+    ticket.confidence
+  if (!hasAny) {
+    return (
+      <p className="text-xs text-gray-400" data-testid="ticket-reasoning-empty">
+        No reasoning captured for this ticket.
+      </p>
+    )
+  }
+  return (
+    <div className="space-y-2 text-xs">
+      <div>
+        <span className="font-semibold text-gray-500">Phase:</span>{' '}
+        <span className="text-gray-700">
+          {ticket.execution_phase == null ? '—' : ticket.execution_phase}
+        </span>
+      </div>
+      {ticket.why_this_phase && (
+        <div>
+          <div className="font-semibold text-gray-500">Why this phase?</div>
+          <p className="text-gray-700 whitespace-pre-wrap">
+            {ticket.why_this_phase}
+          </p>
+        </div>
+      )}
+      {ticket.dependencies_inferred && ticket.dependencies_inferred.length > 0 && (
+        <div>
+          <div className="font-semibold text-gray-500">Dependencies inferred</div>
+          <ul className="list-disc list-inside text-gray-700">
+            {ticket.dependencies_inferred.map((item, idx) => (
+              <li key={idx}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {ticket.reasoning && (
+        <div>
+          <div className="font-semibold text-gray-500">Reasoning</div>
+          <p className="text-gray-700 whitespace-pre-wrap">{ticket.reasoning}</p>
+        </div>
+      )}
+      {ticket.confidence && (
+        <div>
+          <span className="font-semibold text-gray-500 mr-2">Confidence:</span>
+          <ConfidencePill level={ticket.confidence} />
+        </div>
+      )}
+    </div>
+  )
+}
 
 const STATUS_BADGE = {
   collecting: 'bg-gray-100 text-gray-700',
@@ -105,6 +180,62 @@ function BatchHeader({ batch, projectId }) {
   )
 }
 
+function TicketRow({ ticket, projectId }) {
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <>
+      <tr className="border-t border-gray-100">
+        <td className="p-3">
+          <button
+            type="button"
+            onClick={() => setExpanded(v => !v)}
+            aria-label={expanded ? 'Collapse reasoning' : 'Expand reasoning'}
+            aria-expanded={expanded}
+            className="mr-1 text-gray-500 hover:text-gray-800 w-4 inline-block text-center"
+            data-testid={`ticket-toggle-${ticket.ticket_id}`}
+          >
+            {expanded ? '▾' : '▸'}
+          </button>
+          <Link
+            to={projectId
+              ? `/projects/${projectId}/tickets/${ticket.ticket_id}`
+              : `/tickets/${ticket.ticket_id}`}
+            className="text-blue-600 hover:underline font-mono font-medium"
+          >
+            {ticket.ticket_id}
+          </Link>
+        </td>
+        <td className="p-3 text-xs text-gray-700">{ticket.title || '—'}</td>
+        <td className="p-3 text-xs font-mono text-gray-700">
+          {ticket.status || '—'}
+        </td>
+        <td className="p-3 text-xs">
+          {ticket.execution_phase == null ? '—' : ticket.execution_phase}
+        </td>
+        <td className="p-3 text-xs text-gray-600">
+          {ticket.depends_on?.length ? ticket.depends_on.join(', ') : '—'}
+        </td>
+        <td className="p-3 text-xs text-gray-600">
+          {ticket.readiness_state || '—'}
+        </td>
+        <td className="p-3 text-xs text-gray-700">
+          {ticket.dispatcher_state || '—'}
+        </td>
+      </tr>
+      {expanded && (
+        <tr
+          className="border-t border-gray-100 bg-gray-50"
+          data-testid={`ticket-reasoning-row-${ticket.ticket_id}`}
+        >
+          <td colSpan={7} className="p-3">
+            <TicketReasoning ticket={ticket} />
+          </td>
+        </tr>
+      )}
+    </>
+  )
+}
+
 function TicketsTable({ tickets, projectId }) {
   return (
     <div className="bg-white rounded shadow border border-gray-200 overflow-x-auto">
@@ -129,38 +260,11 @@ function TicketsTable({ tickets, projectId }) {
             </tr>
           )}
           {tickets.map(ticket => (
-            <tr key={ticket.ticket_id} className="border-t border-gray-100">
-              <td className="p-3">
-                <Link
-                  to={projectId
-                    ? `/projects/${projectId}/tickets/${ticket.ticket_id}`
-                    : `/tickets/${ticket.ticket_id}`}
-                  className="text-blue-600 hover:underline font-mono font-medium"
-                >
-                  {ticket.ticket_id}
-                </Link>
-              </td>
-              <td className="p-3 text-xs text-gray-700">
-                {ticket.title || '—'}
-              </td>
-              <td className="p-3 text-xs font-mono text-gray-700">
-                {ticket.status || '—'}
-              </td>
-              <td className="p-3 text-xs">
-                {ticket.execution_phase == null ? '—' : ticket.execution_phase}
-              </td>
-              <td className="p-3 text-xs text-gray-600">
-                {ticket.depends_on?.length
-                  ? ticket.depends_on.join(', ')
-                  : '—'}
-              </td>
-              <td className="p-3 text-xs text-gray-600">
-                {ticket.readiness_state || '—'}
-              </td>
-              <td className="p-3 text-xs text-gray-700">
-                {ticket.dispatcher_state || '—'}
-              </td>
-            </tr>
+            <TicketRow
+              key={ticket.ticket_id}
+              ticket={ticket}
+              projectId={projectId}
+            />
           ))}
         </tbody>
       </table>
@@ -221,9 +325,17 @@ export default function BatchDetailPage() {
       )}
 
       <section className="mb-6">
+        <BatchAnalysisSummaryPanel summary={detail.analysis_summary} />
+      </section>
+
+      <section className="mb-6">
         <h2 className="text-lg font-semibold mb-2">Tickets</h2>
         <TicketsTable tickets={detail.tickets || []} projectId={projectId} />
         <ColorLegend />
+      </section>
+
+      <section className="mb-6">
+        <RawAnalyzerOutputPanel raw={detail.raw_analyzer_output} />
       </section>
 
       <section className="mb-6">

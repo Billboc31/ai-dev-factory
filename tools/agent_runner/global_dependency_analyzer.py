@@ -125,12 +125,43 @@ The final JSON output MUST satisfy these invariants:
 4. Foundation position: foundation/bootstrap tickets occupy the earliest
    phase(s).
 
+## Explain your reasoning
+
+Every decision must be explainable. Alongside the structural fields, produce:
+
+- a top-level ``analysis_summary`` describing your overall plan, the
+  foundation / bootstrap tickets you detected, important inferred
+  dependencies, parallel execution opportunities, conflicts you resolved,
+  and any warnings or assumptions you made;
+- per-ticket reasoning fields (``why_this_phase``, ``dependencies_inferred``,
+  ``reasoning``, and optionally ``confidence``) so a human operator can
+  understand each phase assignment and each depended-on ticket.
+
+Keep every explanation short and grounded in the batch content.
+
 ## Required JSON output
 
 Return exactly this structure:
 
 ```json
 {
+  "analysis_summary": {
+    "strategy": "One paragraph describing the overall implementation plan.",
+    "foundation_tickets": ["T001"],
+    "bootstrap_tickets": ["T004", "T005"],
+    "important_inferred_dependencies": [
+      "T010 depends on T001 because it consumes the shared architecture."
+    ],
+    "parallel_opportunities": [
+      "T011 and T012 can run in parallel — no shared modules."
+    ],
+    "conflicts_resolved": [
+      "T001 and T010 were declared conflicting; T010 moved to phase 2."
+    ],
+    "warnings": [
+      "T020 is under-specified; the dependency inference is best-effort."
+    ]
+  },
   "tickets": [
     {
       "ticket_id": "T011",
@@ -138,7 +169,13 @@ Return exactly this structure:
       "blocks": [],
       "parallel_group": "foundation",
       "conflicting_tickets": [],
-      "execution_phase": 1
+      "execution_phase": 1,
+      "why_this_phase": "Sits on top of the backend API delivered by T010.",
+      "dependencies_inferred": [
+        "T010 — declares the /orders endpoint T011 consumes."
+      ],
+      "reasoning": "T011 wires the frontend to the API introduced by T010.",
+      "confidence": "high"
     }
   ],
   "relationships": [
@@ -149,6 +186,9 @@ Return exactly this structure:
 
 ``type`` must be one of: HARD_DEPENDENCY, SOFT_DEPENDENCY, FOUNDATION_DEPENDENCY,
 PARALLEL_COMPATIBLE, CONFLICTING_SCOPE.
+
+``confidence`` is optional and, when present, must be one of ``low``, ``medium``
+or ``high``.
 """
 
 
@@ -271,9 +311,72 @@ def _coerce_execution_phase(value) -> str | None:
     return None
 
 
-def _normalize_response(raw: dict) -> tuple[list[dict], list[dict]]:
+def _coerce_str(value) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip()
+    return text or None
+
+
+_VALID_CONFIDENCE_LEVELS = frozenset({"low", "medium", "high"})
+
+
+def _coerce_confidence(value) -> str | None:
+    if not isinstance(value, str):
+        return None
+    text = value.strip().lower()
+    return text if text in _VALID_CONFIDENCE_LEVELS else None
+
+
+def _normalize_summary(raw_summary) -> dict:
+    """Coerce ``analysis_summary`` into a safe, structurally-fixed dict.
+
+    Missing or malformed fields become ``None`` / ``[]`` — the analyzer must
+    never crash on partial JSON. Empty summaries collapse to ``{}`` so the API
+    layer can distinguish "no summary" from "empty summary" cleanly.
+    """
+    if not isinstance(raw_summary, dict):
+        return {}
+    out = {
+        "strategy": _coerce_str(raw_summary.get("strategy")),
+        "foundation_tickets": _coerce_str_list(raw_summary.get("foundation_tickets")),
+        "bootstrap_tickets": _coerce_str_list(raw_summary.get("bootstrap_tickets")),
+        "important_inferred_dependencies": _coerce_str_list(
+            raw_summary.get("important_inferred_dependencies")
+        ),
+        "parallel_opportunities": _coerce_str_list(
+            raw_summary.get("parallel_opportunities")
+        ),
+        "conflicts_resolved": _coerce_str_list(raw_summary.get("conflicts_resolved")),
+        "warnings": _coerce_str_list(raw_summary.get("warnings")),
+    }
+    if (
+        out["strategy"] is None
+        and not any(
+            out[key] for key in (
+                "foundation_tickets",
+                "bootstrap_tickets",
+                "important_inferred_dependencies",
+                "parallel_opportunities",
+                "conflicts_resolved",
+                "warnings",
+            )
+        )
+    ):
+        return {}
+    return out
+
+
+def _normalize_response(raw: dict) -> tuple[dict, list[dict], list[dict]]:
+    """Normalise the raw analyzer JSON into ``(summary, tickets, relationships)``.
+
+    The summary is a defensive dict — missing fields fall back to ``None`` /
+    ``[]`` and a wholly-empty summary collapses to ``{}``. The tickets list is
+    the same shape as before, extended with the new reasoning fields.
+    """
     tickets = raw.get("tickets")
     relationships = raw.get("relationships") or []
+    summary = _normalize_summary(raw.get("analysis_summary"))
 
     if not isinstance(tickets, list):
         raise ValueError("missing or non-list 'tickets'")
@@ -299,6 +402,12 @@ def _normalize_response(raw: dict) -> tuple[list[dict], list[dict]]:
             ),
             "conflicting_tickets": _coerce_str_list(entry.get("conflicting_tickets")),
             "execution_phase": _coerce_execution_phase(entry.get("execution_phase")),
+            "why_this_phase": _coerce_str(entry.get("why_this_phase")),
+            "dependencies_inferred": _coerce_str_list(
+                entry.get("dependencies_inferred")
+            ),
+            "reasoning": _coerce_str(entry.get("reasoning")),
+            "confidence": _coerce_confidence(entry.get("confidence")),
         })
 
     norm_relationships: list[dict] = []
@@ -317,7 +426,7 @@ def _normalize_response(raw: dict) -> tuple[list[dict], list[dict]]:
             continue
         norm_relationships.append({"from": rfrom, "to": rto, "type": rtype})
 
-    return norm_tickets, norm_relationships
+    return summary, norm_tickets, norm_relationships
 
 
 # ── Coherence pass ────────────────────────────────────────────────────────────
@@ -653,9 +762,32 @@ def _persist(
             execution_phase=entry["execution_phase"],
             relationship_classifications=rels_by_from.get(entry["ticket_id"], []),
             analyzed_at=now,
+            why_this_phase=entry.get("why_this_phase"),
+            dependencies_inferred=entry.get("dependencies_inferred") or [],
+            reasoning=entry.get("reasoning"),
+            confidence=entry.get("confidence"),
         )
         persisted += 1
     return persisted
+
+
+_RAW_STDOUT_MAX_CHARS = 20000
+
+
+def _build_raw_analyzer_output(stdout: str, parsed: dict) -> dict:
+    """Package the analyzer's raw output for persistence.
+
+    ``stdout_excerpt`` is truncated to bound row size in the DB; ``parsed`` is
+    the JSON dict returned by the LLM so operators can inspect the full
+    (parsed) structure without hitting the daemon logs.
+    """
+    excerpt = stdout or ""
+    if len(excerpt) > _RAW_STDOUT_MAX_CHARS:
+        excerpt = excerpt[:_RAW_STDOUT_MAX_CHARS]
+    return {
+        "stdout_excerpt": excerpt,
+        "parsed": parsed if isinstance(parsed, dict) else {},
+    }
 
 
 def run_global_analysis(
@@ -723,7 +855,7 @@ def run_global_analysis(
         return AnalysisOutcome(success=False, error=f"malformed JSON: {exc}")
 
     try:
-        norm_tickets, norm_relationships = _normalize_response(raw)
+        analysis_summary, norm_tickets, norm_relationships = _normalize_response(raw)
     except ValueError as exc:
         return AnalysisOutcome(success=False, error=f"invalid response shape: {exc}")
 
@@ -746,12 +878,28 @@ def run_global_analysis(
     except Exception as exc:
         logger.warning("coherence pass failed; persisting raw output: %s", exc)
 
+    now = _now_iso()
     try:
         persisted = _persist(
-            db_path, batch_id, norm_tickets, norm_relationships, now=_now_iso(),
+            db_path, batch_id, norm_tickets, norm_relationships, now=now,
         )
     except Exception as exc:
         return AnalysisOutcome(success=False, error=f"persist failed: {exc}")
+
+    raw_output = _build_raw_analyzer_output(stdout, raw)
+    try:
+        runtime_db.update_batch_analysis_summary(
+            db_path,
+            batch_id,
+            analysis_summary=analysis_summary,
+            raw_analyzer_output=raw_output,
+            generated_at=now,
+        )
+    except Exception as exc:
+        # Persisting the summary is best-effort — the structural analysis
+        # already lives in ticket_dependency_analysis so a summary write
+        # failure must not fail the whole run.
+        logger.warning("failed to persist analysis summary: %s", exc)
 
     return AnalysisOutcome(success=True, persisted_ticket_count=persisted)
 
@@ -761,6 +909,9 @@ __all__ = [
     "ROLE_ORDER",
     "_enforce_coherence",
     "_infer_ticket_role",
+    "_normalize_response",
+    "_normalize_summary",
     "_resolve_conflict_pair",
+    "_build_raw_analyzer_output",
     "run_global_analysis",
 ]

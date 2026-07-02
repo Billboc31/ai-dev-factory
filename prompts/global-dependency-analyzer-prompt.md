@@ -84,6 +84,20 @@ PARALLEL_COMPATIBLE
 CONFLICTING_SCOPE
 ```
 
+## Explain your reasoning
+
+Every decision must be explainable. Alongside the structural fields, produce:
+
+- a top-level `analysis_summary` that captures the overall plan, the
+  foundation and bootstrap tickets you detected, important inferred
+  dependencies, parallel execution opportunities, conflicts you resolved,
+  and any warnings or assumptions you made;
+- per-ticket reasoning fields (`why_this_phase`, `dependencies_inferred`,
+  `reasoning`, and optionally `confidence`) so a human operator can
+  understand each phase assignment and each depended-on ticket.
+
+Keep every explanation short and grounded in the batch content.
+
 ## Output invariants
 
 The final JSON output MUST satisfy these invariants. Check them before writing
@@ -115,6 +129,23 @@ text.
 
 ```json
 {
+  "analysis_summary": {
+    "strategy": "One paragraph describing the overall implementation plan.",
+    "foundation_tickets": ["T001"],
+    "bootstrap_tickets": ["T004", "T005"],
+    "important_inferred_dependencies": [
+      "T010 depends on T001 because it consumes the shared architecture."
+    ],
+    "parallel_opportunities": [
+      "T011 and T012 can run in parallel — no shared modules."
+    ],
+    "conflicts_resolved": [
+      "T001 and T010 were declared conflicting; T010 moved to phase 2."
+    ],
+    "warnings": [
+      "T020 is under-specified; the dependency inference is best-effort."
+    ]
+  },
   "tickets": [
     {
       "ticket_id": "T011",
@@ -122,7 +153,13 @@ text.
       "blocks": [],
       "parallel_group": "foundation",
       "conflicting_tickets": [],
-      "execution_phase": 1
+      "execution_phase": 1,
+      "why_this_phase": "Sits on top of the backend API delivered by T010.",
+      "dependencies_inferred": [
+        "T010 — declares the /orders endpoint T011 consumes."
+      ],
+      "reasoning": "T011 wires the frontend to the API introduced by T010.",
+      "confidence": "high"
     }
   ],
   "relationships": [
@@ -141,3 +178,5 @@ Constraints:
 - `execution_phase` is required; lower numbers run earlier. Phase `1` is the
   earliest.
 - `type` must be one of the five classifications above.
+- `confidence` is optional. When present, it must be one of `low`, `medium`
+  or `high`.
