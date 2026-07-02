@@ -85,6 +85,8 @@ def _make_app(tmp_path: Path):
         "get_ticket_readiness",
         "update_backlog_batch",
         "append_runtime_event",
+        # T222 — reasoning summary reachable from the batch-detail endpoint.
+        "get_batch_analysis_summary",
         # Project-scoped resolver: in Postgres mode the live module returns a
         # PgHandle whose __str__ is "postgres:adf#<project>". The route then
         # hands that string to the SQLite functions reinjected above, and
@@ -164,6 +166,10 @@ def _seed_analysis(
     blocks: list[str] | None = None,
     conflicting: list[str] | None = None,
     parallel_group: str | None = None,
+    why_this_phase: str | None = None,
+    dependencies_inferred: list[str] | None = None,
+    reasoning: str | None = None,
+    confidence: str | None = None,
 ) -> None:
     _sqlite_db.upsert_dependency_analysis(
         db_path,
@@ -176,6 +182,26 @@ def _seed_analysis(
         execution_phase=str(execution_phase) if execution_phase is not None else None,
         relationship_classifications=[],
         analyzed_at="2026-06-30T10:00:00Z",
+        why_this_phase=why_this_phase,
+        dependencies_inferred=dependencies_inferred or [],
+        reasoning=reasoning,
+        confidence=confidence,
+    )
+
+
+def _seed_batch_analysis_summary(
+    db_path,
+    batch_id: str,
+    summary: dict | None = None,
+    raw: dict | None = None,
+    generated_at: str = "2026-06-30T10:05:00Z",
+) -> None:
+    _sqlite_db.update_batch_analysis_summary(
+        db_path,
+        batch_id,
+        analysis_summary=summary or {},
+        raw_analyzer_output=raw or {},
+        generated_at=generated_at,
     )
 
 
@@ -494,3 +520,74 @@ def test_project_scoped_list_uses_project_router(tmp_path):
     assert r.status_code == 200, r.text
     body = r.json()
     assert [b["batch_id"] for b in body["batches"]] == ["B0001"]
+
+
+# ── T222: dependency analyzer reasoning summary ──────────────────────────────
+
+def test_detail_endpoint_surfaces_analysis_summary_and_reasoning(tmp_path):
+    app = _make_app(tmp_path)
+    db = app.state.db_path
+    _seed_batch(db, "B0001", status="dispatching")
+    _seed_ticket_runtime(db, "T1", state="DONE")
+    _seed_membership(db, "B0001", "T1")
+    _seed_analysis(
+        db,
+        batch_id="B0001",
+        ticket_id="T1",
+        execution_phase=1,
+        why_this_phase="Foundation ticket.",
+        dependencies_inferred=["T0 — vision"],
+        reasoning="Baseline architecture.",
+        confidence="high",
+    )
+    _seed_batch_analysis_summary(
+        db,
+        "B0001",
+        summary={
+            "strategy": "Foundation first, then layers.",
+            "foundation_tickets": ["T1"],
+            "bootstrap_tickets": [],
+            "important_inferred_dependencies": ["T1 blocks everyone else"],
+            "parallel_opportunities": [],
+            "conflicts_resolved": [],
+            "warnings": [],
+        },
+        raw={"stdout_excerpt": "…", "parsed": {"tickets": []}},
+    )
+
+    client = TestClient(app)
+    r = client.get("/dispatcher/batches/B0001")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["analysis_summary"] is not None
+    assert body["analysis_summary"]["strategy"].startswith("Foundation")
+    assert body["analysis_summary"]["foundation_tickets"] == ["T1"]
+    assert body["analysis_summary"]["generated_at"] == "2026-06-30T10:05:00Z"
+    assert body["raw_analyzer_output"]["parsed"] == {"tickets": []}
+
+    ticket = body["tickets"][0]
+    assert ticket["why_this_phase"] == "Foundation ticket."
+    assert ticket["dependencies_inferred"] == ["T0 — vision"]
+    assert ticket["reasoning"] == "Baseline architecture."
+    assert ticket["confidence"] == "high"
+
+
+def test_detail_endpoint_returns_null_summary_when_not_persisted(tmp_path):
+    """A batch that has never been analyzed should surface null summary/raw."""
+    app = _make_app(tmp_path)
+    db = app.state.db_path
+    _seed_batch(db, "B0001", status="collecting")
+    _seed_ticket_runtime(db, "T1", state="INIT")
+    _seed_membership(db, "B0001", "T1")
+
+    client = TestClient(app)
+    r = client.get("/dispatcher/batches/B0001")
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["analysis_summary"] is None
+    assert body["raw_analyzer_output"] is None
+    ticket = body["tickets"][0]
+    assert ticket["why_this_phase"] is None
+    assert ticket["dependencies_inferred"] == []
+    assert ticket["reasoning"] is None
+    assert ticket["confidence"] is None

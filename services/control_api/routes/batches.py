@@ -18,6 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from ..dependencies import resolve_project, resolve_project_runtime_root
 from ..models.schemas import (
     BatchActionResponse,
+    BatchAnalysisSummary,
     BatchBlockedTicket,
     BatchConflict,
     BatchCurrentResponse,
@@ -374,9 +375,45 @@ def _build_ticket_details(
                 conflicting_tickets=list(analysis.get("conflicting_tickets") or []),
                 readiness_state=readiness_state,
                 dispatcher_state=dispatcher_state,
+                why_this_phase=analysis.get("why_this_phase"),
+                dependencies_inferred=list(analysis.get("dependencies_inferred") or []),
+                reasoning=analysis.get("reasoning"),
+                confidence=analysis.get("confidence"),
             )
         )
     return out
+
+
+def _build_analysis_summary(
+    db_path, batch_id: str
+) -> tuple[BatchAnalysisSummary | None, dict | None]:
+    """Fetch the persisted analyzer summary + raw output for the batch.
+
+    Returns ``(summary, raw)`` where each half is ``None`` when nothing has
+    been persisted yet. Empty structural dicts still produce a summary object
+    so the UI can distinguish "no analysis" from "analysis with no fields".
+    """
+    payload = _safe(runtime_db.get_batch_analysis_summary, db_path, batch_id)
+    if not payload:
+        return None, None
+    summary_dict = payload.get("analysis_summary") or {}
+    raw_output = payload.get("raw_analyzer_output")
+    generated_at = payload.get("generated_at")
+    summary = BatchAnalysisSummary(
+        strategy=summary_dict.get("strategy"),
+        foundation_tickets=list(summary_dict.get("foundation_tickets") or []),
+        bootstrap_tickets=list(summary_dict.get("bootstrap_tickets") or []),
+        important_inferred_dependencies=list(
+            summary_dict.get("important_inferred_dependencies") or []
+        ),
+        parallel_opportunities=list(
+            summary_dict.get("parallel_opportunities") or []
+        ),
+        conflicts_resolved=list(summary_dict.get("conflicts_resolved") or []),
+        warnings=list(summary_dict.get("warnings") or []),
+        generated_at=generated_at,
+    )
+    return summary, raw_output
 
 
 def _build_graph(
@@ -597,7 +634,13 @@ def _detail_payload(
         worktrees_dir=worktrees_dir,
         dispatcher_payload=dispatcher_payload,
     )
-    return BatchDetailResponse(batch=_build_summary(db_path, row), tickets=tickets)
+    analysis_summary, raw_analyzer_output = _build_analysis_summary(db_path, batch_id)
+    return BatchDetailResponse(
+        batch=_build_summary(db_path, row),
+        tickets=tickets,
+        analysis_summary=analysis_summary,
+        raw_analyzer_output=raw_analyzer_output,
+    )
 
 
 def _graph_payload(

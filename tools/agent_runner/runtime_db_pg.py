@@ -261,6 +261,10 @@ CREATE TABLE IF NOT EXISTS backlog_batches (
     last_dependency_analysis_error    TEXT,
     next_dependency_analysis_retry_at TEXT,
     notes                             TEXT,
+    -- T222: analyzer reasoning summary + raw output persisted per batch.
+    analysis_summary_json             TEXT,
+    raw_analyzer_output_json          TEXT,
+    analysis_summary_generated_at     TEXT,
     PRIMARY KEY (project_id, batch_id)
 );
 
@@ -287,6 +291,11 @@ CREATE TABLE IF NOT EXISTS ticket_dependency_analysis (
     execution_phase                   TEXT,
     relationship_classifications_json TEXT NOT NULL,
     analyzed_at                       TEXT NOT NULL,
+    -- T222: reasoning fields surfaced on the Batch dashboard.
+    why_this_phase                    TEXT,
+    dependencies_inferred_json        TEXT,
+    reasoning                         TEXT,
+    confidence                        TEXT,
     PRIMARY KEY (project_id, ticket_id, batch_id)
 );
 """
@@ -302,6 +311,20 @@ ALTER TABLE ticket_intelligence ADD COLUMN IF NOT EXISTS completed_at TEXT;
 ALTER TABLE ticket_intelligence ADD COLUMN IF NOT EXISTS failed_at TEXT;
 ALTER TABLE ticket_intelligence ADD COLUMN IF NOT EXISTS failure_origin TEXT;
 ALTER TABLE ticket_intelligence ADD COLUMN IF NOT EXISTS stage TEXT;
+"""
+
+# T222 — additive migration for reasoning fields. Backlog batches gain the
+# analyzer summary + raw output columns; per-ticket analysis rows gain the
+# reasoning fields. Additive ``ADD COLUMN IF NOT EXISTS`` so re-running is a
+# no-op on databases that already have the columns.
+_T222_REASONING_MIGRATION = """
+ALTER TABLE backlog_batches ADD COLUMN IF NOT EXISTS analysis_summary_json TEXT;
+ALTER TABLE backlog_batches ADD COLUMN IF NOT EXISTS raw_analyzer_output_json TEXT;
+ALTER TABLE backlog_batches ADD COLUMN IF NOT EXISTS analysis_summary_generated_at TEXT;
+ALTER TABLE ticket_dependency_analysis ADD COLUMN IF NOT EXISTS why_this_phase TEXT;
+ALTER TABLE ticket_dependency_analysis ADD COLUMN IF NOT EXISTS dependencies_inferred_json TEXT;
+ALTER TABLE ticket_dependency_analysis ADD COLUMN IF NOT EXISTS reasoning TEXT;
+ALTER TABLE ticket_dependency_analysis ADD COLUMN IF NOT EXISTS confidence TEXT;
 """
 
 
@@ -403,6 +426,7 @@ def init_runtime_db(handle: PgHandle) -> None:
         with _connect(handle) as conn:
             conn.execute(_DDL)
             conn.execute(_TICKET_INTELLIGENCE_LIFECYCLE_MIGRATION)
+            conn.execute(_T222_REASONING_MIGRATION)
     except Exception:
         # Database may not exist yet (fresh server without POSTGRES_DB) — create
         # it once, then retry the DDL.
@@ -410,6 +434,7 @@ def init_runtime_db(handle: PgHandle) -> None:
         with _connect(handle) as conn:
             conn.execute(_DDL)
             conn.execute(_TICKET_INTELLIGENCE_LIFECYCLE_MIGRATION)
+            conn.execute(_T222_REASONING_MIGRATION)
 
 
 def check_and_recover_db(handle: PgHandle) -> bool:
@@ -1390,6 +1415,7 @@ _DEPENDENCY_ANALYSIS_JSON_FIELDS = (
     "blocks_json",
     "conflicting_tickets_json",
     "relationship_classifications_json",
+    "dependencies_inferred_json",
 )
 
 
@@ -1405,19 +1431,26 @@ def upsert_dependency_analysis(
     execution_phase: str | None,
     relationship_classifications: list[dict],
     analyzed_at: str,
+    why_this_phase: str | None = None,
+    dependencies_inferred: list[str] | None = None,
+    reasoning: str | None = None,
+    confidence: str | None = None,
 ) -> None:
     depends_on_json = json.dumps(depends_on or [])
     blocks_json = json.dumps(blocks or [])
     conflicting_json = json.dumps(conflicting_tickets or [])
     rels_json = json.dumps(relationship_classifications or [])
+    dep_inferred_json = json.dumps(dependencies_inferred or [])
     with _connect(handle) as conn:
         conn.execute(
             """
             INSERT INTO ticket_dependency_analysis
                 (project_id, ticket_id, batch_id, depends_on_json, blocks_json,
                  parallel_group, conflicting_tickets_json, execution_phase,
-                 relationship_classifications_json, analyzed_at)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                 relationship_classifications_json, analyzed_at,
+                 why_this_phase, dependencies_inferred_json,
+                 reasoning, confidence)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (project_id, ticket_id, batch_id) DO UPDATE SET
                 depends_on_json                   = EXCLUDED.depends_on_json,
                 blocks_json                       = EXCLUDED.blocks_json,
@@ -1425,7 +1458,11 @@ def upsert_dependency_analysis(
                 conflicting_tickets_json          = EXCLUDED.conflicting_tickets_json,
                 execution_phase                   = EXCLUDED.execution_phase,
                 relationship_classifications_json = EXCLUDED.relationship_classifications_json,
-                analyzed_at                       = EXCLUDED.analyzed_at
+                analyzed_at                       = EXCLUDED.analyzed_at,
+                why_this_phase                    = EXCLUDED.why_this_phase,
+                dependencies_inferred_json        = EXCLUDED.dependencies_inferred_json,
+                reasoning                         = EXCLUDED.reasoning,
+                confidence                        = EXCLUDED.confidence
             """,
             (
                 handle.project_id,
@@ -1438,6 +1475,10 @@ def upsert_dependency_analysis(
                 execution_phase,
                 rels_json,
                 analyzed_at,
+                why_this_phase,
+                dep_inferred_json,
+                reasoning,
+                confidence,
             ),
         )
 
@@ -1476,3 +1517,70 @@ def get_dependency_analysis(
         except (json.JSONDecodeError, TypeError):
             out[decoded_key] = []
     return out
+
+
+def update_batch_analysis_summary(
+    handle: PgHandle,
+    batch_id: str,
+    *,
+    analysis_summary: dict,
+    raw_analyzer_output: dict,
+    generated_at: str,
+) -> None:
+    """Persist the analyzer's structured summary + raw output onto a batch row.
+
+    Mirrors the SQLite helper of the same name so the caller code stays
+    backend-agnostic. The write is scoped to the handle's project_id — a batch
+    is unique per (project_id, batch_id).
+    """
+    summary_json = json.dumps(analysis_summary or {})
+    raw_json = json.dumps(raw_analyzer_output or {})
+    with _connect(handle) as conn:
+        conn.execute(
+            """
+            UPDATE backlog_batches
+               SET analysis_summary_json         = %s,
+                   raw_analyzer_output_json      = %s,
+                   analysis_summary_generated_at = %s
+             WHERE project_id = %s AND batch_id = %s
+            """,
+            (summary_json, raw_json, generated_at, handle.project_id, batch_id),
+        )
+
+
+def get_batch_analysis_summary(
+    handle: PgHandle, batch_id: str
+) -> dict | None:
+    """Return the persisted analyzer summary/raw output for ``batch_id``."""
+    with _connect(handle) as conn:
+        row = conn.execute(
+            "SELECT analysis_summary_json, raw_analyzer_output_json, "
+            "       analysis_summary_generated_at "
+            "  FROM backlog_batches "
+            " WHERE project_id = %s AND batch_id = %s",
+            (handle.project_id, batch_id),
+        ).fetchone()
+    if row is None:
+        return None
+    row = dict(row)
+    summary_raw = row.get("analysis_summary_json")
+    raw_raw = row.get("raw_analyzer_output_json")
+    generated_at = row.get("analysis_summary_generated_at")
+    if summary_raw is None and raw_raw is None and generated_at is None:
+        return None
+
+    def _decode(value):
+        if value in (None, ""):
+            return None
+        if isinstance(value, (dict, list)):
+            return value
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    return {
+        "analysis_summary": _decode(summary_raw),
+        "raw_analyzer_output": _decode(raw_raw),
+        "generated_at": generated_at,
+    }

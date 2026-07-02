@@ -778,11 +778,36 @@ class BatchTicketDetail(BaseModel):
     conflicting_tickets: list[str] = []
     readiness_state: str | None = None
     dispatcher_state: str | None = None
+    # T222 — dependency analyzer reasoning surfaced on the Batch dashboard.
+    why_this_phase: str | None = None
+    dependencies_inferred: list[str] = []
+    reasoning: str | None = None
+    confidence: str | None = None
+
+
+class BatchAnalysisSummary(BaseModel):
+    """Structured analyzer summary persisted per batch (T222).
+
+    Optional fields default to safe empties so the dashboard can render an
+    "analysis not available yet" fallback without extra branching. The
+    ``generated_at`` timestamp helps the UI show when analysis last ran.
+    """
+
+    strategy: str | None = None
+    foundation_tickets: list[str] = []
+    bootstrap_tickets: list[str] = []
+    important_inferred_dependencies: list[str] = []
+    parallel_opportunities: list[str] = []
+    conflicts_resolved: list[str] = []
+    warnings: list[str] = []
+    generated_at: str | None = None
 
 
 class BatchDetailResponse(BaseModel):
     batch: BatchSummary
     tickets: list[BatchTicketDetail] = []
+    analysis_summary: BatchAnalysisSummary | None = None
+    raw_analyzer_output: dict | None = None
 
 
 class BatchGraphNode(BaseModel):

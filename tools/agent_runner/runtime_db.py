@@ -210,7 +210,10 @@ CREATE TABLE IF NOT EXISTS backlog_batches (
     dependency_analysis_attempts      INTEGER NOT NULL DEFAULT 0,
     last_dependency_analysis_error    TEXT,
     next_dependency_analysis_retry_at TEXT,
-    notes                             TEXT
+    notes                             TEXT,
+    analysis_summary_json             TEXT,
+    raw_analyzer_output_json          TEXT,
+    analysis_summary_generated_at     TEXT
 );
 
 CREATE TABLE IF NOT EXISTS backlog_batch_tickets (
@@ -231,6 +234,10 @@ CREATE TABLE IF NOT EXISTS ticket_dependency_analysis (
     execution_phase                    TEXT,
     relationship_classifications_json  TEXT NOT NULL,
     analyzed_at                        TEXT NOT NULL,
+    why_this_phase                     TEXT,
+    dependencies_inferred_json         TEXT,
+    reasoning                          TEXT,
+    confidence                         TEXT,
     PRIMARY KEY (ticket_id, batch_id)
 );
 """
@@ -336,6 +343,10 @@ _BACKLOG_BATCHES_COLUMNS = (
     ("last_dependency_analysis_error", "TEXT"),
     ("next_dependency_analysis_retry_at", "TEXT"),
     ("notes", "TEXT"),
+    # T222: persisted analyzer reasoning surfaced on the Batch dashboard.
+    ("analysis_summary_json", "TEXT"),
+    ("raw_analyzer_output_json", "TEXT"),
+    ("analysis_summary_generated_at", "TEXT"),
 )
 
 
@@ -354,6 +365,30 @@ def _ensure_backlog_batches_columns(conn: sqlite3.Connection) -> None:
     for name, sql_type in _BACKLOG_BATCHES_COLUMNS:
         if name not in existing:
             conn.execute(f"ALTER TABLE backlog_batches ADD COLUMN {name} {sql_type}")
+
+
+# T222: reasoning fields added on ticket_dependency_analysis. Pre-existing
+# databases created before T222 lack these columns; the helper below mirrors
+# the backlog_batches pattern to add them idempotently.
+_TICKET_DEPENDENCY_ANALYSIS_COLUMNS = (
+    ("why_this_phase", "TEXT"),
+    ("dependencies_inferred_json", "TEXT"),
+    ("reasoning", "TEXT"),
+    ("confidence", "TEXT"),
+)
+
+
+def _ensure_ticket_dependency_analysis_columns(conn: sqlite3.Connection) -> None:
+    """Idempotent additive migration for ticket_dependency_analysis (T222)."""
+    rows = list(conn.execute("PRAGMA table_info('ticket_dependency_analysis')"))
+    if not rows:
+        return
+    existing = {row[1] for row in rows}
+    for name, sql_type in _TICKET_DEPENDENCY_ANALYSIS_COLUMNS:
+        if name not in existing:
+            conn.execute(
+                f"ALTER TABLE ticket_dependency_analysis ADD COLUMN {name} {sql_type}"
+            )
 
 
 def _ensure_runtime_settings_table(conn: sqlite3.Connection) -> None:
@@ -392,6 +427,7 @@ def init_runtime_db(db_path: Path) -> None:
         _ensure_ticket_intelligence_lifecycle_columns(conn)
         _ensure_runtime_settings_table(conn)
         _ensure_backlog_batches_columns(conn)
+        _ensure_ticket_dependency_analysis_columns(conn)
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
@@ -1352,19 +1388,26 @@ def upsert_dependency_analysis(
     execution_phase: str | None,
     relationship_classifications: list[dict],
     analyzed_at: str,
+    why_this_phase: str | None = None,
+    dependencies_inferred: list[str] | None = None,
+    reasoning: str | None = None,
+    confidence: str | None = None,
 ) -> None:
     depends_on_json = json.dumps(depends_on or [])
     blocks_json = json.dumps(blocks or [])
     conflicting_json = json.dumps(conflicting_tickets or [])
     rels_json = json.dumps(relationship_classifications or [])
+    dep_inferred_json = json.dumps(dependencies_inferred or [])
     with _connect(db_path) as conn:
         conn.execute(
             """
             INSERT INTO ticket_dependency_analysis
                 (ticket_id, batch_id, depends_on_json, blocks_json,
                  parallel_group, conflicting_tickets_json, execution_phase,
-                 relationship_classifications_json, analyzed_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 relationship_classifications_json, analyzed_at,
+                 why_this_phase, dependencies_inferred_json,
+                 reasoning, confidence)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(ticket_id, batch_id) DO UPDATE SET
                 depends_on_json                   = excluded.depends_on_json,
                 blocks_json                       = excluded.blocks_json,
@@ -1372,7 +1415,11 @@ def upsert_dependency_analysis(
                 conflicting_tickets_json          = excluded.conflicting_tickets_json,
                 execution_phase                   = excluded.execution_phase,
                 relationship_classifications_json = excluded.relationship_classifications_json,
-                analyzed_at                       = excluded.analyzed_at
+                analyzed_at                       = excluded.analyzed_at,
+                why_this_phase                    = excluded.why_this_phase,
+                dependencies_inferred_json        = excluded.dependencies_inferred_json,
+                reasoning                         = excluded.reasoning,
+                confidence                        = excluded.confidence
             """,
             (
                 ticket_id,
@@ -1384,6 +1431,10 @@ def upsert_dependency_analysis(
                 execution_phase,
                 rels_json,
                 analyzed_at,
+                why_this_phase,
+                dep_inferred_json,
+                reasoning,
+                confidence,
             ),
         )
 
@@ -1415,16 +1466,85 @@ def get_dependency_analysis(
         "blocks_json",
         "conflicting_tickets_json",
         "relationship_classifications_json",
+        "dependencies_inferred_json",
     ):
         raw = out.get(key)
+        decoded_key = key.removesuffix("_json")
         if raw is None or raw == "":
-            out[key.removesuffix("_json")] = []
+            out[decoded_key] = []
             continue
         try:
-            out[key.removesuffix("_json")] = json.loads(raw)
+            out[decoded_key] = json.loads(raw)
         except (json.JSONDecodeError, TypeError):
-            out[key.removesuffix("_json")] = []
+            out[decoded_key] = []
     return out
+
+
+def update_batch_analysis_summary(
+    db_path: Path,
+    batch_id: str,
+    *,
+    analysis_summary: dict,
+    raw_analyzer_output: dict,
+    generated_at: str,
+) -> None:
+    """Persist the analyzer's structured summary + raw output onto a batch row.
+
+    ``analysis_summary`` is normalised by the analyzer (empty ``{}`` when the
+    LLM omitted the block); ``raw_analyzer_output`` contains a truncated
+    stdout excerpt and the parsed JSON so operators can debug prompt quality
+    without inspecting logs.
+    """
+    summary_json = json.dumps(analysis_summary or {})
+    raw_json = json.dumps(raw_analyzer_output or {})
+    with _connect(db_path) as conn:
+        conn.execute(
+            """
+            UPDATE backlog_batches
+               SET analysis_summary_json         = ?,
+                   raw_analyzer_output_json      = ?,
+                   analysis_summary_generated_at = ?
+             WHERE batch_id = ?
+            """,
+            (summary_json, raw_json, generated_at, batch_id),
+        )
+
+
+def get_batch_analysis_summary(db_path: Path, batch_id: str) -> dict | None:
+    """Return the persisted analyzer summary/raw output for ``batch_id``.
+
+    Returns ``None`` when the batch has never been analyzed (no columns
+    populated). When persisted, returns a dict with decoded ``analysis_summary``
+    and ``raw_analyzer_output`` plus the ``generated_at`` timestamp.
+    """
+    with _connect(db_path) as conn:
+        row = conn.execute(
+            "SELECT analysis_summary_json, raw_analyzer_output_json, "
+            "       analysis_summary_generated_at "
+            "  FROM backlog_batches WHERE batch_id = ?",
+            (batch_id,),
+        ).fetchone()
+    if row is None:
+        return None
+    summary_raw = row["analysis_summary_json"] if "analysis_summary_json" in row.keys() else None
+    raw_raw = row["raw_analyzer_output_json"] if "raw_analyzer_output_json" in row.keys() else None
+    generated_at = row["analysis_summary_generated_at"] if "analysis_summary_generated_at" in row.keys() else None
+    if summary_raw is None and raw_raw is None and generated_at is None:
+        return None
+
+    def _decode(value):
+        if value in (None, ""):
+            return None
+        try:
+            return json.loads(value)
+        except (json.JSONDecodeError, TypeError):
+            return None
+
+    return {
+        "analysis_summary": _decode(summary_raw),
+        "raw_analyzer_output": _decode(raw_raw),
+        "generated_at": generated_at,
+    }
 
 
 # ── Backend selection ─────────────────────────────────────────────────────────
@@ -1553,6 +1673,9 @@ if _RUNTIME_DB_BACKEND == "postgres":
     get_batch_for_ticket = _pg.get_batch_for_ticket  # type: ignore[assignment]
     upsert_dependency_analysis = _pg.upsert_dependency_analysis  # type: ignore[assignment]
     get_dependency_analysis = _pg.get_dependency_analysis  # type: ignore[assignment]
+    # T222 — analyzer summary + raw output persisted per batch.
+    update_batch_analysis_summary = _pg.update_batch_analysis_summary  # type: ignore[assignment]
+    get_batch_analysis_summary = _pg.get_batch_analysis_summary  # type: ignore[assignment]
 elif _RUNTIME_DB_BACKEND not in ("", "sqlite"):
     raise RuntimeError(
         f"unknown RUNTIME_DB_BACKEND={_RUNTIME_DB_BACKEND!r} "
