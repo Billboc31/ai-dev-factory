@@ -1,7 +1,7 @@
 {
   "ticket_id": "T222",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T222-add-dependency-analyzer-reasoning-summary-to-batch",
   "issue_number": 301,
-  "updated_at": "2026-07-01T22:20:13Z"
+  "updated_at": "2026-07-02T06:41:27Z"
 }
