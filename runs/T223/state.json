@@ -1,7 +1,7 @@
 {
   "ticket_id": "T223",
-  "state": "IMPLEMENTATION_APPROVED",
+  "state": "TEST_COMPLETE",
   "branch": "ticket/T223-add-project-level-option-to-disable-human-plan-app",
   "issue_number": 303,
-  "updated_at": "2026-07-03T10:33:10Z"
+  "updated_at": "2026-07-03T10:38:04Z"
 }
