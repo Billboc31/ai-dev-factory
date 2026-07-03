@@ -424,6 +424,7 @@ def detect_pr_conflict(
             conflicted_files = [
                 f["path"] for f in files_data.get("files", [])
                 if isinstance(f, dict) and "path" in f
+                and not f["path"].startswith(f"runs/{ticket_id}/")
             ]
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         pass

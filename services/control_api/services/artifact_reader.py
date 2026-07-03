@@ -69,6 +69,19 @@ _CONFLICT_STATES = frozenset({
 })
 
 
+def _source_conflicted_files(data: dict, run_dir: Path | None) -> list[str] | None:
+    """Return conflict paths excluding per-ticket runtime artifacts."""
+    files = data.get("conflicted_files")
+    if not files:
+        return None
+    ticket_id = data.get("ticket_id") or (run_dir.name if run_dir else "")
+    if not ticket_id:
+        return files or None
+    prefix = f"runs/{ticket_id}/"
+    filtered = [f for f in files if isinstance(f, str) and not f.startswith(prefix)]
+    return filtered or None
+
+
 def _conflict_fields(data: dict, run_dir: Path | None = None) -> dict:
     """Extract conflict metadata from a state.json dict. All fields nullable."""
     state = data.get("state", "")
@@ -109,7 +122,7 @@ def _conflict_fields(data: dict, run_dir: Path | None = None) -> dict:
 
     return {
         "conflict_status": conflict_status,
-        "conflicted_files": data.get("conflicted_files") or None,
+        "conflicted_files": _source_conflicted_files(data, run_dir),
         "conflict_detected_at": data.get("conflict_detected_at") or None,
         "pre_conflict_state": data.get("pre_conflict_state") or None,
         "resolution_summary": resolution_summary,

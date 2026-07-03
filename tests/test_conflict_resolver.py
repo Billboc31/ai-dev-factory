@@ -378,6 +378,21 @@ def test_resolve_conflicts_multi_pass_success(tmp_path, monkeypatch):
     monkeypatch.setattr(_rcr, "_prepare_clean_tree_for_rebase", lambda _tid: True)
     monkeypatch.setattr(_rcr, "_scrub_runtime_noise_before_rebase", lambda _tid: None)
     monkeypatch.setattr(_rcr, "_rebase_in_progress", lambda: False)
+    advance_seq = iter([
+        ["file_a.py", "file_b.py"],
+        ["file_b.py"],
+        [],
+    ])
+    monkeypatch.setattr(
+        _rcr,
+        "_advance_past_runtime_conflicts",
+        lambda *args, **kwargs: next(advance_seq, []),
+    )
+    monkeypatch.setattr(
+        _rcr,
+        "_run_rebase_continue",
+        lambda _tid: MagicMock(returncode=0, stdout="", stderr=""),
+    )
 
     subprocess_calls = [
         # _get_current_branch
@@ -390,16 +405,8 @@ def test_resolve_conflicts_multi_pass_success(tmp_path, monkeypatch):
         _git_ok("file_a.py\nfile_b.py\n"),
         # Pass 1: git add -- file_a.py file_b.py
         _git_ok(),
-        # Pass 1: git rebase --continue → more conflicts from next commit
-        _git_fail("CONFLICT (next commit)"),
-        # Pass 1: _list_conflicted_files after failed continue
-        _git_ok("file_b.py\n"),
         # Pass 2: git add -- file_b.py
         _git_ok(),
-        # Pass 2: git rebase --continue → success
-        _git_ok(),
-        # Pass 2: _list_conflicted_files after successful continue
-        _git_ok(""),
         # git add -A (artifacts)
         _git_ok(),
         # git commit
@@ -433,6 +440,16 @@ def test_resolve_conflicts_max_pass_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(_rcr, "_prepare_clean_tree_for_rebase", lambda _tid: True)
     monkeypatch.setattr(_rcr, "_scrub_runtime_noise_before_rebase", lambda _tid: None)
     monkeypatch.setattr(_rcr, "_rebase_in_progress", lambda: False)
+    monkeypatch.setattr(
+        _rcr,
+        "_advance_past_runtime_conflicts",
+        lambda *args, **kwargs: ["file_a.py"],
+    )
+    monkeypatch.setattr(
+        _rcr,
+        "_run_rebase_continue",
+        lambda _tid: MagicMock(returncode=1, stdout="", stderr="CONFLICT"),
+    )
 
     max_passes = _rcr.MAX_RESOLVER_PASSES
 
@@ -488,6 +505,20 @@ def test_blocking_dirty_paths_ignores_runtime_noise():
         " M README.md",
     ])
     assert rcr._blocking_dirty_paths(porcelain, "T010") == ["README.md"]
+
+
+def test_split_conflicts_separates_runtime_paths():
+    import run_conflict_resolver as rcr
+
+    files = [
+        "README.md",
+        "runs/T010/state.json",
+        "runs/T010/plan.md",
+        "docs/architecture.md",
+    ]
+    source, runtime = rcr._split_conflicts("T010", files)
+    assert source == ["README.md", "docs/architecture.md"]
+    assert runtime == ["runs/T010/state.json", "runs/T010/plan.md"]
 
 
 def test_prepare_clean_tree_for_rebase_ignores_runtime_log(tmp_path, monkeypatch):
