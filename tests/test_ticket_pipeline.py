@@ -126,6 +126,29 @@ def test_process_ticket_runs_readiness_when_intel_already_completed(db, tmp_path
     assert ready_calls == ["T011"]
 
 
+def test_needs_readiness_reruns_when_blocked(db):
+    _db.upsert_ticket_intelligence(db, "T020", analysis_status="completed")
+    _db.upsert_ticket_readiness(
+        db,
+        "T020",
+        readiness_status="blocked",
+        blocking_reasons_json=["Dependency T001 not merged"],
+    )
+    assert pipeline.needs_readiness(
+        _db.get_ticket_intelligence(db, "T020"),
+        _db.get_ticket_readiness(db, "T020"),
+    ) is True
+
+
+def test_needs_readiness_skips_when_ready(db):
+    _db.upsert_ticket_intelligence(db, "T021", analysis_status="completed")
+    _db.upsert_ticket_readiness(db, "T021", readiness_status="ready_candidate")
+    assert pipeline.needs_readiness(
+        _db.get_ticket_intelligence(db, "T021"),
+        _db.get_ticket_readiness(db, "T021"),
+    ) is False
+
+
 def test_maybe_run_readiness_after_intelligence(db, tmp_path, monkeypatch):
     project_root = tmp_path / "repo"
     ready_calls: list[str] = []

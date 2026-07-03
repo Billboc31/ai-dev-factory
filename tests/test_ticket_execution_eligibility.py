@@ -96,6 +96,7 @@ def env(tmp_path, monkeypatch):
         "get_ticket_intelligence",
         "get_ticket_readiness",
         "get_latest_ticket_approval",
+        "get_dependency_analysis",
         "list_project_rules",
         "insert_ticket_approval",
     ):
@@ -342,3 +343,64 @@ def test_intelligence_blocks_before_dependencies(env, monkeypatch):
         db, root, "T108", ticket_content="Depends on T001."
     )
     assert result["blocking_step"] == "intelligence"
+
+
+def test_stale_readiness_dependency_block_passes_when_deps_merged_live(env, monkeypatch):
+    """Readiness blocked on an old dependency snapshot must not block when live
+    dependency checks already pass."""
+    db, root = env["db"], env["root"]
+    _write_ticket_md(root, "T109", body="Depends on T001.")
+    _seed_complete_intelligence(db, "T109")
+    _sqlite_db.upsert_ticket_readiness(
+        db,
+        "T109",
+        readiness_status="blocked",
+        blocking_reasons_json=["Dependency T001 not merged"],
+    )
+    _stub_deps(monkeypatch, {"T001": "merged"})
+
+    result = eligibility.evaluate_eligibility(
+        db, root, "T109", ticket_content="Depends on T001."
+    )
+    assert result["ready_to_take"] is True
+    assert result["blocking_step"] is None
+    assert result["checks"]["dependencies"]["status"] == "passed"
+    assert result["checks"]["readiness"]["status"] == "passed"
+    assert "stale" in result["checks"]["readiness"]["detail"].lower()
+
+
+def test_dependency_analysis_depends_on_blocks_eligibility(env, monkeypatch):
+    """``depends_on`` from ticket_dependency_analysis must gate eligibility even
+    when the ticket body declares no inline dependencies."""
+    db, root = env["db"], env["root"]
+    _write_ticket_md(root, "T110", body="Implement CRUD with no inline deps.")
+    _seed_complete_intelligence(db, "T110")
+    _sqlite_db.upsert_dependency_analysis(
+        db,
+        ticket_id="T110",
+        batch_id="B0001",
+        depends_on=["T002", "T004"],
+        blocks=[],
+        parallel_group="backend-api-phase-2",
+        conflicting_tickets=[],
+        execution_phase="3",
+        relationship_classifications=[],
+        analyzed_at="2026-07-03T00:00:00Z",
+    )
+    _sqlite_db.upsert_ticket_readiness(
+        db,
+        "T110",
+        readiness_status="blocked",
+        blocking_reasons_json=[
+            "Dependency T002 not merged",
+            "Dependency T004 not merged",
+        ],
+    )
+    _stub_deps(monkeypatch, {"T002": "not_merged", "T004": "not_merged"})
+
+    result = eligibility.evaluate_eligibility(
+        db, root, "T110", ticket_content="Implement CRUD with no inline deps."
+    )
+    assert result["ready_to_take"] is False
+    assert result["blocking_step"] == "dependencies"
+    assert result["checks"]["dependencies"]["unmet"] == ["T002", "T004"]

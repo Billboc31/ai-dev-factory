@@ -88,6 +88,24 @@ def _eval_intelligence(intelligence: dict | None) -> dict:
     }
 
 
+def _readiness_has_dependency_blockers(readiness: dict | None) -> bool:
+    """True when persisted readiness blocked on an unmerged dependency."""
+    if readiness is None:
+        return False
+    reasons = (
+        readiness.get("blocking_reasons_json")
+        or readiness.get("blocking_reasons")
+        or []
+    )
+    if not isinstance(reasons, list):
+        return False
+    for reason in reasons:
+        text = str(reason).lower()
+        if "dependency" in text and "not merged" in text:
+            return True
+    return False
+
+
 def _eval_dependencies(
     ticket_content: str | None,
     project_root: Path,
@@ -98,7 +116,9 @@ def _eval_dependencies(
     dependency_analysis: dict | None = None,
 ) -> dict:
     deps = collect_dependency_ticket_ids(
-        ticket_content or "", intelligence, dependency_analysis=dependency_analysis,
+        ticket_content or "",
+        intelligence,
+        dependency_analysis=dependency_analysis,
     )
     if not deps:
         return {
@@ -147,8 +167,25 @@ def _eval_dependencies(
     }
 
 
-def _eval_readiness(readiness: dict | None) -> dict:
+def _eval_readiness(
+    readiness: dict | None,
+    *,
+    entry_prerequisites_live: bool = False,
+    dependencies_detail: str | None = None,
+) -> dict:
+    """Evaluate the persisted readiness snapshot.
+
+    When ``entry_prerequisites_live`` is True, intelligence and dependencies
+    were verified live in this same call — a stale ``blocked``/``failed``
+    readiness row must not override that (e.g. dependency merged since the
+    last background evaluation).
+    """
     if readiness is None:
+        if entry_prerequisites_live:
+            return {
+                "status": "passed",
+                "detail": "Readiness not recorded; entry prerequisites verified live.",
+            }
         return {
             "status": "failed",
             "detail": "Readiness evaluation has not been run.",
@@ -158,6 +195,27 @@ def _eval_readiness(readiness: dict | None) -> dict:
         return {"status": "passed", "detail": f"Readiness status is '{status}'."}
     if status in {"queued", "running"}:
         return {"status": "pending", "detail": f"Readiness evaluation is {status}."}
+    if entry_prerequisites_live:
+        if (
+            status == "blocked"
+            and _readiness_has_dependency_blockers(readiness)
+            and dependencies_detail == "No declared dependencies."
+        ):
+            reasons = (
+                readiness.get("blocking_reasons_json")
+                or readiness.get("blocking_reasons")
+                or []
+            )
+            first = (
+                reasons[0]
+                if isinstance(reasons, list) and reasons
+                else "Readiness blocked."
+            )
+            return {"status": "failed", "detail": str(first)}
+        return {
+            "status": "passed",
+            "detail": "Readiness snapshot stale; entry prerequisites verified live.",
+        }
     if status == "blocked":
         reasons = readiness.get("blocking_reasons_json") or readiness.get("blocking_reasons") or []
         first = reasons[0] if isinstance(reasons, list) and reasons else "Readiness blocked."
@@ -165,7 +223,10 @@ def _eval_readiness(readiness: dict | None) -> dict:
     if status == "failed":
         return {"status": "failed", "detail": "Readiness evaluation failed."}
     if status in {"", "not_started"}:
-        return {"status": "failed", "detail": "Readiness evaluation has not been run."}
+        return {
+            "status": "failed",
+            "detail": "Readiness evaluation has not been run.",
+        }
     return {"status": "failed", "detail": f"Readiness status is '{status}'."}
 
 
@@ -272,22 +333,30 @@ def evaluate_eligibility(
 
     intelligence = _safe_get(runtime_db.get_ticket_intelligence, db_path, ticket_id)
     readiness = _safe_get(runtime_db.get_ticket_readiness, db_path, ticket_id)
-    dependency_analysis = None
-    if hasattr(runtime_db, "get_dependency_analysis"):
-        dependency_analysis = _safe_get(
-            runtime_db.get_dependency_analysis, db_path, ticket_id
-        )
+    dependency_analysis = _safe_get(
+        runtime_db.get_dependency_analysis, db_path, ticket_id,
+    )
 
+    intelligence_check = _eval_intelligence(intelligence)
+    dependencies_check = _eval_dependencies(
+        ticket_content,
+        project_root,
+        project_id=project_id,
+        intelligence=intelligence,
+        dependency_analysis=dependency_analysis,
+    )
+    entry_prerequisites_live = (
+        intelligence_check["status"] == "passed"
+        and dependencies_check["status"] == "passed"
+    )
     checks: dict[str, dict] = {
-        "intelligence": _eval_intelligence(intelligence),
-        "dependencies": _eval_dependencies(
-            ticket_content,
-            project_root,
-            project_id=project_id,
-            intelligence=intelligence,
-            dependency_analysis=dependency_analysis,
+        "intelligence": intelligence_check,
+        "dependencies": dependencies_check,
+        "readiness": _eval_readiness(
+            readiness,
+            entry_prerequisites_live=entry_prerequisites_live,
+            dependencies_detail=dependencies_check.get("detail"),
         ),
-        "readiness": _eval_readiness(readiness),
         "approval": _eval_approval(db_path, ticket_id, project_id),
     }
 

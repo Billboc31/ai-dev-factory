@@ -64,7 +64,8 @@ def needs_readiness(intel_row: dict | None, ready_row: dict | None) -> bool:
     if ready_row is None:
         return True
     status = ready_row.get("readiness_status") or ""
-    return status in {"queued", "running"}
+    # Re-run when blocked/failed so dependency merges refresh the snapshot.
+    return status in {"queued", "running", "blocked", "failed"}
 
 
 def _is_batch_ready_for_readiness(db_path, ticket_id: str) -> bool:

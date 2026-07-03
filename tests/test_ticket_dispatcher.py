@@ -147,12 +147,13 @@ def _seed_dependency_analysis(
     conflicting: list[str] | None = None,
     parallel_group: str | None = None,
     relationships: list[dict] | None = None,
+    depends_on: list[str] | None = None,
 ) -> None:
     _sqlite_db.upsert_dependency_analysis(
         db_path,
         ticket_id=ticket_id,
         batch_id=batch_id,
-        depends_on=[],
+        depends_on=depends_on or [],
         blocks=[],
         parallel_group=parallel_group,
         conflicting_tickets=conflicting or [],
@@ -445,7 +446,7 @@ def test_conflicting_candidates_lower_phase_wins(env):
     _seed_dispatching_batch(db, batch_id, ["T001", "T010"])
     _seed_dependency_analysis(
         db, batch_id=batch_id, ticket_id="T001",
-        execution_phase=1, conflicting=["T010"],
+        execution_phase=2, conflicting=["T010"],
     )
     _seed_dependency_analysis(
         db, batch_id=batch_id, ticket_id="T010",
@@ -471,7 +472,7 @@ def test_running_conflict_blocks_candidate(env):
     _seed_dispatching_batch(db, batch_id, ["T001", "T010"])
     _seed_dependency_analysis(
         db, batch_id=batch_id, ticket_id="T001",
-        execution_phase=1, conflicting=["T010"],
+        execution_phase=2, conflicting=["T010"],
     )
     _seed_dependency_analysis(
         db, batch_id=batch_id, ticket_id="T010",
@@ -555,3 +556,85 @@ def test_conflicting_scope_relationship_blocks_without_conflicting_tickets_field
     blocked = {b["ticket_id"]: b for b in result["blocked"]}
     assert blocked["T010"]["blocking_step"] == "conflicts"
     assert blocked["T010"]["blocked_by"] == ["T001"]
+
+
+# ── Phase wave gate ───────────────────────────────────────────────────────────
+
+def test_later_phase_blocked_while_earlier_phase_unfinished(env):
+    db, root = env["db"], env["root"]
+    batch_id = "B0001"
+    _seed_ticket_runtime(db, "T002", state="TEST_COMPLETE")
+    _seed_ticket_runtime(db, "T003", state="INIT")
+    _seed_ticket_runtime(db, "T005", state="INIT")
+    for ticket_id in ("T002", "T003", "T005"):
+        _write_ticket_md(root, ticket_id)
+        _seed_intelligence(db, ticket_id)
+        _seed_ready_candidate(db, ticket_id)
+    _seed_dispatching_batch(db, batch_id, ["T002", "T003", "T005"])
+    _seed_dependency_analysis(
+        db, batch_id=batch_id, ticket_id="T002", execution_phase=2,
+    )
+    _seed_dependency_analysis(
+        db, batch_id=batch_id, ticket_id="T003", execution_phase=2,
+    )
+    _seed_dependency_analysis(
+        db,
+        batch_id=batch_id,
+        ticket_id="T005",
+        execution_phase=3,
+        depends_on=["T002"],
+    )
+
+    result = dispatcher.get_recommended_tickets(db, root, mode="advisory")
+    runnable = [r["ticket_id"] for r in result["recommendations"]]
+    assert runnable == ["T003"]
+    blocked = {b["ticket_id"]: b for b in result["blocked"]}
+    assert blocked["T005"]["blocking_step"] == "phase"
+    assert blocked["T005"]["status"] == "PHASE_BLOCKED"
+    assert "phase 2" in blocked["T005"]["reason"]
+
+
+def test_phase_advances_when_current_wave_complete(env):
+    db, root = env["db"], env["root"]
+    batch_id = "B0001"
+    _seed_ticket_runtime(db, "T002", state="TEST_COMPLETE")
+    _seed_ticket_runtime(db, "T003", state="TEST_COMPLETE")
+    _seed_ticket_runtime(db, "T005", state="INIT")
+    for ticket_id in ("T002", "T003", "T005"):
+        _write_ticket_md(root, ticket_id)
+        _seed_intelligence(db, ticket_id)
+        _seed_ready_candidate(db, ticket_id)
+    _seed_dispatching_batch(db, batch_id, ["T002", "T003", "T005"])
+    _seed_dependency_analysis(
+        db, batch_id=batch_id, ticket_id="T002", execution_phase=2,
+    )
+    _seed_dependency_analysis(
+        db, batch_id=batch_id, ticket_id="T003", execution_phase=2,
+    )
+    _seed_dependency_analysis(
+        db, batch_id=batch_id, ticket_id="T005", execution_phase=3,
+    )
+
+    result = dispatcher.get_recommended_tickets(db, root, mode="advisory")
+    runnable = [r["ticket_id"] for r in result["recommendations"]]
+    assert runnable == ["T005"]
+
+
+def test_same_phase_parallel_candidates_survive_phase_gate(env):
+    db, root = env["db"], env["root"]
+    batch_id = "B0001"
+    _seed_full_ready(db, root, "T002")
+    _seed_full_ready(db, root, "T003")
+    _seed_dispatching_batch(db, batch_id, ["T002", "T003"])
+    _seed_dependency_analysis(
+        db, batch_id=batch_id, ticket_id="T002", execution_phase=2,
+        parallel_group="bootstrap-phase-1",
+    )
+    _seed_dependency_analysis(
+        db, batch_id=batch_id, ticket_id="T003", execution_phase=2,
+        parallel_group="bootstrap-phase-1",
+    )
+
+    result = dispatcher.get_recommended_tickets(db, root, mode="advisory")
+    runnable = sorted(r["ticket_id"] for r in result["recommendations"])
+    assert runnable == ["T002", "T003"]

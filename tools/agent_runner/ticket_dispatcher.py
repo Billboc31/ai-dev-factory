@@ -67,6 +67,17 @@ _ACTIVE_CONFLICT_STATES: frozenset[str] = frozenset({
     "RUNNING",
 })
 
+# Batch wave gate: a phase is complete when every ticket in that phase reaches
+# one of these terminal runtime states (mirrors ``batches._DONE_STATES``).
+_PHASE_DONE_STATES: frozenset[str] = frozenset({
+    "DONE",
+    "MERGED",
+    "ARCHIVED",
+    "TEST_COMPLETE",
+})
+
+_UNKNOWN_EXECUTION_PHASE = 10_000
+
 _ENV_VAR = "AI_DEV_FACTORY_DISPATCHER_MODE"
 
 
@@ -259,14 +270,172 @@ def _sort_key(rec: dict) -> tuple:
 def _phase_to_int(phase: str | int | None) -> int:
     """Coerce ``execution_phase`` to an int for ordering; unknown → large."""
     if phase is None:
-        return 10_000
+        return _UNKNOWN_EXECUTION_PHASE
     text = str(phase).strip()
     if not text:
-        return 10_000
+        return _UNKNOWN_EXECUTION_PHASE
     try:
         return int(text)
     except (TypeError, ValueError):
-        return 10_000
+        return _UNKNOWN_EXECUTION_PHASE
+
+
+def _ticket_wave_done(runtime_row: dict | None) -> bool:
+    """True when a batch ticket no longer blocks its execution phase."""
+    if not runtime_row:
+        return False
+    if bool(runtime_row.get("daemon_archived")):
+        return True
+    state = (runtime_row.get("state") or "").strip().upper()
+    return state in _PHASE_DONE_STATES
+
+
+def _active_wave_phase(
+    members: set[str],
+    runtime_map: dict[str, dict],
+    analyses: dict[str, dict],
+) -> int | None:
+    """Return the lowest ``execution_phase`` that still has unfinished tickets.
+
+    Tickets without a persisted ``execution_phase`` are ignored for wave
+    computation so legacy / partially analysed batches keep working.
+    """
+    by_phase: dict[int, list[str]] = {}
+    for ticket_id in members:
+        analysis = analyses.get(ticket_id, {})
+        phase = _phase_to_int(analysis.get("execution_phase"))
+        if phase >= _UNKNOWN_EXECUTION_PHASE:
+            continue
+        by_phase.setdefault(phase, []).append(ticket_id)
+    if not by_phase:
+        return None
+    for phase in sorted(by_phase):
+        if not all(
+            _ticket_wave_done(runtime_map.get(ticket_id))
+            for ticket_id in by_phase[phase]
+        ):
+            return phase
+    return None
+
+
+def _apply_phase_wave_filter(
+    db_path,
+    recommendations: list[dict],
+    blocked: list[dict],
+    runtime_rows: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """Keep only recommendations in the batch's current execution wave.
+
+    The batch dependency analyser assigns ``execution_phase`` so tickets in
+    the same phase can run in parallel while later phases stay sequential.
+    This filter enforces that model: no ticket from phase *N+1* is recommended
+    while phase *N* still has unfinished members, even when its ``depends_on``
+    prerequisites are already merged.
+    """
+    if not recommendations:
+        return recommendations, blocked
+
+    runtime_map: dict[str, dict] = {}
+    for row in runtime_rows:
+        ticket_id = (row.get("ticket_id") or "").strip()
+        if ticket_id:
+            runtime_map[ticket_id] = row
+
+    rec_by_id = {rec["ticket_id"]: rec for rec in recommendations}
+    batch_ids: dict[str, str] = {}
+    analyses: dict[str, dict] = {}
+    batch_members_cache: dict[str, set[str]] = {}
+    batch_analyses_cache: dict[str, dict[str, dict]] = {}
+
+    for ticket_id in rec_by_id:
+        batch_id, analysis = _load_ticket_batch_analysis(db_path, ticket_id)
+        if batch_id:
+            batch_ids[ticket_id] = batch_id
+            analyses[ticket_id] = analysis
+
+    def _batch_members(batch_id: str) -> set[str]:
+        if batch_id not in batch_members_cache:
+            members = _safe_call(
+                runtime_db.list_backlog_batch_ticket_ids, db_path, batch_id,
+            ) or []
+            batch_members_cache[batch_id] = set(members)
+        return batch_members_cache[batch_id]
+
+    def _analyses_for_batch(batch_id: str) -> dict[str, dict]:
+        if batch_id not in batch_analyses_cache:
+            batch_analyses: dict[str, dict] = {}
+            for member in _batch_members(batch_id):
+                if member in analyses:
+                    batch_analyses[member] = analyses[member]
+                else:
+                    batch_analyses[member] = (
+                        _safe_call(
+                            runtime_db.get_dependency_analysis,
+                            db_path,
+                            member,
+                            batch_id,
+                        )
+                        or {}
+                    )
+            batch_analyses_cache[batch_id] = batch_analyses
+        return batch_analyses_cache[batch_id]
+
+    active_wave_by_batch: dict[str, int | None] = {}
+
+    def _active_wave(batch_id: str) -> int | None:
+        if batch_id not in active_wave_by_batch:
+            active_wave_by_batch[batch_id] = _active_wave_phase(
+                _batch_members(batch_id),
+                runtime_map,
+                _analyses_for_batch(batch_id),
+            )
+        return active_wave_by_batch[batch_id]
+
+    selected: set[str] = set()
+    phase_blocked: dict[str, str] = {}
+
+    for ticket_id, rec in rec_by_id.items():
+        batch_id = batch_ids.get(ticket_id)
+        if not batch_id:
+            selected.add(ticket_id)
+            continue
+
+        active_wave = _active_wave(batch_id)
+        if active_wave is None:
+            selected.add(ticket_id)
+            continue
+
+        ticket_phase = _phase_to_int(
+            analyses.get(ticket_id, {}).get("execution_phase"),
+        )
+        if ticket_phase >= _UNKNOWN_EXECUTION_PHASE:
+            selected.add(ticket_id)
+            continue
+
+        if ticket_phase <= active_wave:
+            selected.add(ticket_id)
+            continue
+
+        phase_blocked[ticket_id] = (
+            f"blocked by batch execution phase {active_wave} "
+            f"(ticket is phase {ticket_phase})"
+        )
+
+    filtered_recs = [rec for rec in recommendations if rec["ticket_id"] in selected]
+    already_blocked = {entry["ticket_id"] for entry in blocked}
+
+    for ticket_id, reason in sorted(phase_blocked.items()):
+        if ticket_id in already_blocked:
+            continue
+        blocked.append({
+            "ticket_id": ticket_id,
+            "ready_to_take": False,
+            "status": "PHASE_BLOCKED",
+            "blocking_step": "phase",
+            "reason": reason,
+        })
+
+    return filtered_recs, blocked
 
 
 def _parallel_group_rank(parallel_group: str | None) -> int:
@@ -589,6 +758,9 @@ def get_recommended_tickets(
                 "reason": eligibility.get("reason"),
             })
 
+    recommendations, blocked = _apply_phase_wave_filter(
+        db_path, recommendations, blocked, rows,
+    )
     recommendations, blocked = _apply_conflict_filter(
         db_path, recommendations, blocked, rows,
     )
