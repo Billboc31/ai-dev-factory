@@ -738,6 +738,8 @@ from ticket_pr_lifecycle import (  # noqa: E402
 _CONFLICT_SKIP_STATES = frozenset({
     "CONFLICT_RESOLUTION_NEEDED",
     "CONFLICT_RESOLUTION_FAILED",
+    "CONFLICT_RESOLVING",
+    "CONFLICT_RESOLVED_REVIEW_NEEDED",
     "TEST_COMPLETE",
 })
 
@@ -1247,6 +1249,27 @@ def _maybe_auto_launch_conflict_resolution(
         _log(f"{ticket_id}: conflict auto-launch rule check failed: {exc}")
         return False
 
+    try:
+        import conflict_resolution_eligibility as _cre  # noqa: WPS433
+    except Exception as exc:
+        _log(f"{ticket_id}: conflict retry import failed: {exc}")
+        return False
+
+    retry_state = _load_retry_state(run_dir)
+    if _cre.conflict_resolution_auto_retries_exhausted(retry_state):
+        runs = _cre.conflict_resolution_auto_runs(retry_state)
+        reason = retry_state.get("conflict_resolution_stop_reason") or (
+            f"max auto runs ({_cre.MAX_CONFLICT_RESOLVER_AUTO_RUNS}) reached"
+        )
+        if not retry_state.get("conflict_resolution_auto_stopped"):
+            retry_state = _cre.mark_conflict_resolution_auto_exhausted(retry_state, reason)
+            _save_retry_state(run_dir, retry_state)
+        _log(
+            f"{ticket_id}: conflict auto-retry exhausted "
+            f"({runs}/{_cre.MAX_CONFLICT_RESOLVER_AUTO_RUNS}) — human required: {reason}",
+        )
+        return False
+
     if not _acquire_lock(run_dir):
         _log(f"skipping {ticket_id}: conflict resolver already running (lock held)")
         return False
@@ -1261,6 +1284,13 @@ def _maybe_auto_launch_conflict_resolution(
         _log(f"{ticket_id}: failed to transition to CONFLICT_RESOLVING: {exc}")
         _release_lock(run_dir)
         return False
+
+    retry_state, run_number = _cre.record_conflict_resolution_auto_run(retry_state)
+    _save_retry_state(run_dir, retry_state)
+    _log(
+        f"{ticket_id}: conflict auto-run {run_number}/"
+        f"{_cre.MAX_CONFLICT_RESOLVER_AUTO_RUNS}",
+    )
 
     cmd = [
         sys.executable,

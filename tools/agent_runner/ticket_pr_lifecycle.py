@@ -437,6 +437,12 @@ def detect_pr_conflict(
     state["conflicted_files"] = conflicted_files
     state["state"] = "CONFLICT_RESOLUTION_NEEDED"
     _save_state_json(run_dir, state)
+    try:
+        from conflict_resolution_eligibility import reset_conflict_resolution_auto_retry
+
+        reset_conflict_resolution_auto_retry(run_dir)
+    except Exception:
+        pass
     _log(
         f"{ticket_id}: PR #{pr_number} is CONFLICTING — transitioned to "
         f"CONFLICT_RESOLUTION_NEEDED (was {pre_conflict_state!r}, {len(conflicted_files)} files)"

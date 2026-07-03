@@ -1024,16 +1024,27 @@ def apply_approve_conflict_resolution(ticket_id: str) -> int:
         return 2
     target_state = state.get("pre_conflict_state")
     if not target_state or target_state not in VALID_STATES:
-        print(
-            f"error: pre_conflict_state is missing or invalid in state.json: {target_state!r}",
-            file=sys.stderr,
-        )
-        _log_runtime(
-            ticket_id,
-            f"human-approval: refused approve-conflict-resolution — "
-            f"pre_conflict_state={target_state!r} invalid",
-        )
-        return 2
+        # Rebase can rewind tracked state.json and drop conflict metadata.
+        # In the standard workflow, conflicts are detected after TEST_COMPLETE.
+        inferred = "TEST_COMPLETE"
+        if inferred in VALID_STATES:
+            _log_runtime(
+                ticket_id,
+                f"human-approval: pre_conflict_state missing — inferring {inferred!r}",
+            )
+            target_state = inferred
+        else:
+            print(
+                f"error: pre_conflict_state is missing or invalid in state.json: "
+                f"{state.get('pre_conflict_state')!r}",
+                file=sys.stderr,
+            )
+            _log_runtime(
+                ticket_id,
+                f"human-approval: refused approve-conflict-resolution — "
+                f"pre_conflict_state={state.get('pre_conflict_state')!r} invalid",
+            )
+            return 2
     save_state(ticket_id, {**state, "state": target_state})
     _append_workflow_journal(ticket_id, current_state, "approve-conflict-resolution", target_state)
     _log_runtime(

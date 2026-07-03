@@ -2489,6 +2489,7 @@ def project_ticket_resolve_conflicts(
     from conflict_resolution_eligibility import (  # noqa: WPS433
         conflict_resolution_eligible,
         git_conflicted_files,
+        reset_conflict_resolution_auto_retry,
     )
 
     if body is None:
@@ -2553,6 +2554,8 @@ def project_ticket_resolve_conflicts(
             state_data["conflict_detected_at"] = datetime.datetime.now(
                 datetime.timezone.utc,
             ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    reset_conflict_resolution_auto_retry(wt_cwd / "runs" / ticket_id)
 
     state_data["state"] = "CONFLICT_RESOLVING"
     state_data["updated_at"] = datetime.datetime.now(datetime.timezone.utc).strftime(

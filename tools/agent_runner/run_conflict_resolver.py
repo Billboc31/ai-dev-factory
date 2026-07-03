@@ -86,7 +86,27 @@ def _write_state(run_dir: Path, data: dict) -> None:
     tmp.replace(state_file)
 
 
-def _transition_state(ticket_id: str, run_dir: Path, new_state: str) -> None:
+def _transition_state(
+    ticket_id: str,
+    run_dir: Path,
+    new_state: str,
+    *,
+    backup: dict | None = None,
+    conflicted_files: list[str] | None = None,
+) -> None:
+    """Transition workflow state, restoring conflict metadata when ``backup`` is set.
+
+    During rebase, tracked ``runs/{ticket}/state.json`` can rewind to an older
+    commit — pass the resolver's in-memory snapshot so ``pre_conflict_state`` survives.
+    """
+    if backup is not None:
+        files = conflicted_files
+        if files is None:
+            raw = backup.get("conflicted_files")
+            files = list(raw) if isinstance(raw, list) else []
+        _persist_conflict_state(run_dir, backup, new_state, files)
+        _log(ticket_id, f"state → {new_state}")
+        return
     state_file = run_dir / "state.json"
     data = json.loads(state_file.read_text(encoding="utf-8"))
     data["state"] = new_state
@@ -424,6 +444,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
         return 2
 
     branch = data.get("branch", "")
+    state_backup = dict(data)
     _log(ticket_id, f"start branch={branch}")
 
     # Safety guard: never run on main
@@ -432,14 +453,14 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
     except RuntimeError as exc:
         _log(ticket_id, f"failed to read branch: {exc}")
         _write_error_log(run_dir, str(exc))
-        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
         return 2
 
     if current_branch == "main":
         msg = "safety: refusing to resolve conflicts on 'main' branch"
         _log(ticket_id, msg)
         _write_error_log(run_dir, msg)
-        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
         return 2
 
     # Verify branch matches state
@@ -447,7 +468,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
         msg = f"branch mismatch: current={current_branch!r} state={branch!r}"
         _log(ticket_id, msg)
         _write_error_log(run_dir, msg)
-        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
         return 2
 
     conflict_dir = _ensure_conflict_dir(run_dir)
@@ -459,7 +480,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
         msg = f"git fetch failed: {fetch.stderr.strip()}"
         _log(ticket_id, msg)
         _write_error_log(run_dir, msg, fetch.stderr)
-        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
         return 2
 
     # 2. git rebase origin/main (or resume an in-progress rebase)
@@ -474,7 +495,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
             msg = "rebase in progress but no unmerged files found"
             _log(ticket_id, msg)
             _write_error_log(run_dir, msg)
-            _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+            _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
             return 2
     else:
         if not _prepare_clean_tree_for_rebase(ticket_id):
@@ -490,7 +511,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
             )
             _log(ticket_id, msg)
             _write_error_log(run_dir, msg)
-            _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+            _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
             return 2
 
         _scrub_runtime_noise_before_rebase(ticket_id)
@@ -504,7 +525,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
                 _log(ticket_id, msg)
                 _write_error_log(run_dir, msg, rebase.stderr)
                 _abort_rebase(ticket_id)
-                _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+                _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
                 return 2
 
             _log(ticket_id, f"conflicts detected: {conflicted_files}")
@@ -515,7 +536,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
         conflicted_files = _advance_past_runtime_conflicts(ticket_id, run_dir, data)
         if conflicted_files is None:
             _abort_rebase(ticket_id)
-            _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+            _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
             return 2
         if not conflicted_files:
             rebase_had_conflicts = False
@@ -527,7 +548,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
             _log(ticket_id, msg)
             _write_error_log(run_dir, msg)
             _abort_rebase(ticket_id)
-            _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+            _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
             return 2
 
         pass_count = 0
@@ -544,7 +565,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
                 _log(ticket_id, f"context collection failed pass {pass_count}: {exc}")
                 _write_error_log(run_dir, f"context collection failed: {exc}")
                 _abort_rebase(ticket_id)
-                _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+                _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
                 return 2
 
             context_content = context_path.read_text(encoding="utf-8")
@@ -572,7 +593,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
                 _write_error_log(run_dir, msg, stderr_ai)
                 (conflict_dir / "resolution.md").write_text(stdout or "", encoding="utf-8")
                 _abort_rebase(ticket_id)
-                _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+                _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
                 return 2
 
             (conflict_dir / "resolution.md").write_text(stdout or "", encoding="utf-8")
@@ -597,7 +618,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
                 _log(ticket_id, msg)
                 _write_error_log(run_dir, msg, add.stderr)
                 _abort_rebase(ticket_id)
-                _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+                _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
                 return 2
 
             # git rebase --continue
@@ -612,14 +633,14 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
                     conflicted_files = _advance_past_runtime_conflicts(ticket_id, run_dir, data)
                     if conflicted_files is None:
                         _abort_rebase(ticket_id)
-                        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+                        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
                         return 2
                     continue
                 else:
                     new_conflicted = _advance_past_runtime_conflicts(ticket_id, run_dir, data)
                     if new_conflicted is None:
                         _abort_rebase(ticket_id)
-                        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+                        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
                         return 2
                     if new_conflicted:
                         _log(ticket_id, (
@@ -641,14 +662,14 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
                     _log(ticket_id, msg)
                     _write_error_log(run_dir, msg)
                     _abort_rebase(ticket_id)
-                    _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+                    _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
                     return 2
             else:
                 # Successful continue — check for conflicts from the next commit
                 conflicted_files = _advance_past_runtime_conflicts(ticket_id, run_dir, data)
                 if conflicted_files is None:
                     _abort_rebase(ticket_id)
-                    _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+                    _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
                     return 2
 
             _log(ticket_id, (
@@ -667,7 +688,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
             _log(ticket_id, msg)
             _write_error_log(run_dir, msg)
             _abort_rebase(ticket_id)
-            _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+            _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
             return 2
 
         _log(ticket_id, f"all conflicts resolved after {pass_count} pass(es)")
@@ -697,7 +718,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
         msg = "tests failed after conflict resolution"
         _log(ticket_id, msg)
         _write_error_log(run_dir, msg)
-        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
         return 2
 
     # 4. commit all artifacts
@@ -716,7 +737,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
             msg = f"commit failed: {commit.stderr.strip()}"
             _log(ticket_id, msg)
             _write_error_log(run_dir, msg, commit.stderr)
-            _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+            _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
             return 2
     else:
         sha_result = _run_git(["rev-parse", "--short", "HEAD"])
@@ -731,13 +752,21 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
         msg = f"push --force-with-lease failed: {push.stderr.strip()}"
         _log(ticket_id, msg)
         _write_error_log(run_dir, msg, push.stderr)
-        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+        _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
         return 2
 
     _log(ticket_id, "push succeeded")
 
     # 6. transition after clean rebase + passing tests
-    _transition_state(ticket_id, run_dir, "CONFLICT_RESOLVED_REVIEW_NEEDED")
+    _transition_state(
+        ticket_id, run_dir, "CONFLICT_RESOLVED_REVIEW_NEEDED", backup=state_backup,
+    )
+    try:
+        from conflict_resolution_eligibility import reset_conflict_resolution_auto_retry
+
+        reset_conflict_resolution_auto_retry(run_dir)
+    except Exception as exc:
+        _log(ticket_id, f"clear conflict retry state: skipped — {exc}")
     try:
         state_after = json.loads(state_file.read_text(encoding="utf-8"))
         rt_path = ROOT / "run_ticket.py"
