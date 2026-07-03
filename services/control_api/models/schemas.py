@@ -67,6 +67,7 @@ class TicketSummary(BaseModel):
     pre_conflict_state: str | None = None
     resolution_summary: str | None = None
     conflict_test_result: str | None = None
+    conflict_error: str | None = None
 
 
 class TicketDetail(TicketSummary):

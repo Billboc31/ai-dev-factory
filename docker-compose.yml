@@ -91,6 +91,8 @@ services:
       ai-dev-factory-runtime:
         aliases:
           - sandbox-${SANDBOX_ID:-default}-api
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # Networked runtime store. Replaces the corruption-prone SQLite-on-bind-mount
   # setup: a single Postgres server holds one database per project (created at

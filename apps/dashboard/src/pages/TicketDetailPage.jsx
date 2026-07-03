@@ -81,19 +81,19 @@ function ConflictResolutionPanel({ ticket, projectId, onRefresh }) {
         </div>
       )}
 
-      {state === 'CONFLICT_RESOLUTION_NEEDED' && (
+      {(state === 'CONFLICT_RESOLUTION_NEEDED' || state === 'CONFLICT_RESOLUTION_FAILED' || state === 'CONFLICT_RESOLVING') && (
         <button
           onClick={() => act(() => api.resolveConflicts(ticket.ticket_id, projectId))}
           disabled={busy}
           className="px-3 py-1.5 text-xs bg-orange-600 text-white rounded hover:bg-orange-700 disabled:opacity-50"
         >
-          {busy ? 'Starting…' : 'Resolve Conflicts'}
+          {busy ? 'Starting…' : state === 'CONFLICT_RESOLUTION_NEEDED' ? 'Resolve Conflicts' : 'Retry Resolve Conflicts'}
         </button>
       )}
 
       {state === 'CONFLICT_RESOLVING' && (
         <p className="text-xs text-yellow-700 font-medium animate-pulse">
-          Resolver running — polling for updates…
+          Resolver running — polling for updates… (use Retry if it appears stuck)
         </p>
       )}
 
@@ -135,9 +135,19 @@ function ConflictResolutionPanel({ ticket, projectId, onRefresh }) {
       )}
 
       {state === 'CONFLICT_RESOLUTION_FAILED' && (
-        <p className="text-xs text-red-700 font-medium">
-          Resolution failed. Check the logs tab for details. Manual intervention is required before this ticket can proceed.
-        </p>
+        <div className="space-y-2">
+          <p className="text-xs text-red-700 font-medium">
+            Resolution failed. Review the error below, then retry or intervene manually.
+          </p>
+          {ticket.conflict_error && (
+            <div>
+              <p className="text-xs font-medium text-gray-700 mb-1">Error details:</p>
+              <pre className="bg-red-50 border border-red-200 rounded p-2 text-xs overflow-auto whitespace-pre-wrap max-h-48 text-red-900">
+                {ticket.conflict_error}
+              </pre>
+            </div>
+          )}
+        </div>
       )}
     </div>
   )

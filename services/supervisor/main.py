@@ -2464,6 +2464,125 @@ def project_ticket_intelligence_analyze(
     return {"ticket_id": ticket_id, "analysis_status": "queued"}
 
 
+# ── conflict resolution (host-side git + claude) ─────────────────────────────
+#
+# The control API runs in Docker where worktree ``.git`` files point at host
+# paths, so ``git rev-parse`` fails in-container. POST resolve-conflicts is
+# proxied here — same pattern as ticket intelligence analyze above.
+
+
+class TicketResolveConflictsRequest(BaseModel):
+    exec_cmd: str = "claude --dangerously-skip-permissions"
+
+
+@app.post("/projects/{project_id}/tickets/{ticket_id}/resolve-conflicts")
+def project_ticket_resolve_conflicts(
+    project_id: str,
+    ticket_id: str,
+    body: TicketResolveConflictsRequest | None = None,
+):
+    from fastapi.responses import JSONResponse
+
+    tools_dir = _project_root_dir / "tools" / "agent_runner"
+    if str(tools_dir) not in sys.path:
+        sys.path.insert(0, str(tools_dir))
+    from conflict_resolution_eligibility import (  # noqa: WPS433
+        conflict_resolution_eligible,
+        git_conflicted_files,
+    )
+
+    if body is None:
+        body = TicketResolveConflictsRequest(exec_cmd=_default_exec_cmd())
+    elif body.exec_cmd == "claude --dangerously-skip-permissions":
+        body.exec_cmd = _default_exec_cmd()
+
+    project_root_str = _lookup_project_root_from_control_api(project_id)
+    if project_root_str is None:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"project not registered in workspace: {project_id!r}"},
+        )
+
+    project_root = Path(project_root_str)
+    worktrees_dir = _project_worktrees_dir(project_id)
+    wt_cwd = worktrees_dir / ticket_id
+    if not wt_cwd.is_dir():
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"worktree not found for ticket {ticket_id!r}"},
+        )
+
+    resolver = _project_root_dir / "tools" / "agent_runner" / "run_conflict_resolver.py"
+    if not resolver.is_file():
+        return JSONResponse(status_code=503, content={"error": "run_conflict_resolver.py not found"})
+
+    state_file = wt_cwd / "runs" / ticket_id / "state.json"
+    if not state_file.is_file():
+        return JSONResponse(status_code=404, content={"error": f"state.json not found for {ticket_id}"})
+    try:
+        state_data = json.loads(state_file.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError) as exc:
+        return JSONResponse(status_code=500, content={"error": f"state.json unreadable: {exc}"})
+
+    current = state_data.get("state")
+    conflicted = git_conflicted_files(wt_cwd)
+    if not conflict_resolution_eligible(state_data, wt_cwd):
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": (
+                    f"ticket {ticket_id} is not awaiting conflict resolution "
+                    f"(current: {current!r})"
+                ),
+            },
+        )
+
+    if current not in ("CONFLICT_RESOLUTION_NEEDED", "CONFLICT_RESOLUTION_FAILED", "CONFLICT_RESOLVING"):
+        pre = state_data.get("pre_conflict_state") or current
+        if pre in (
+            "CONFLICT_RESOLUTION_NEEDED",
+            "CONFLICT_RESOLVING",
+            "CONFLICT_RESOLVED_REVIEW_NEEDED",
+            "CONFLICT_RESOLUTION_FAILED",
+        ):
+            pre = "IMPLEMENTATION_REVIEW_NEEDED"
+        state_data["pre_conflict_state"] = pre
+        if conflicted:
+            state_data["conflicted_files"] = conflicted
+        if not state_data.get("conflict_detected_at"):
+            state_data["conflict_detected_at"] = datetime.datetime.now(
+                datetime.timezone.utc,
+            ).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    state_data["state"] = "CONFLICT_RESOLVING"
+    state_data["updated_at"] = datetime.datetime.now(datetime.timezone.utc).strftime(
+        "%Y-%m-%dT%H:%M:%SZ",
+    )
+    tmp = state_file.with_suffix(".tmp")
+    tmp.write_text(json.dumps(state_data, indent=2), encoding="utf-8")
+    tmp.replace(state_file)
+
+    def _bg() -> None:
+        try:
+            subprocess.run(
+                [sys.executable, str(resolver), ticket_id, "--exec-cmd", body.exec_cmd],
+                cwd=str(wt_cwd),
+                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                check=False,
+            )
+        except Exception:
+            logger.exception(
+                "supervisor: conflict resolution failed project_id=%s ticket_id=%s",
+                project_id, ticket_id,
+            )
+
+    threading.Thread(target=_bg, daemon=True).start()
+    logger.info(
+        "supervisor: conflict resolution queued project_id=%s ticket_id=%s cwd=%s",
+        project_id, ticket_id, wt_cwd,
+    )
+    return {"ticket_id": ticket_id, "state": "CONFLICT_RESOLVING"}
+
 
 # ── auto-fix proposal endpoints ───────────────────────────────────────────────
 #

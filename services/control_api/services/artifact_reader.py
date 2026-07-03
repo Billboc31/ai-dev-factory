@@ -76,6 +76,7 @@ def _conflict_fields(data: dict, run_dir: Path | None = None) -> dict:
 
     resolution_summary: str | None = None
     conflict_test_result: str | None = None
+    conflict_error: str | None = None
     if run_dir is not None:
         res_path = run_dir / "conflict" / "resolution.md"
         if res_path.exists():
@@ -89,6 +90,22 @@ def _conflict_fields(data: dict, run_dir: Path | None = None) -> dict:
                 conflict_test_result = test_path.read_text(encoding="utf-8")
             except OSError:
                 pass
+        error_path = run_dir / "conflict" / "error.log"
+        if error_path.exists():
+            try:
+                conflict_error = error_path.read_text(encoding="utf-8").strip() or None
+            except OSError:
+                pass
+        if not conflict_error:
+            log_path = run_dir / "runtime.log"
+            if log_path.exists():
+                try:
+                    for line in reversed(log_path.read_text(encoding="utf-8").splitlines()):
+                        if "conflict-resolver:" in line:
+                            conflict_error = line.strip()
+                            break
+                except OSError:
+                    pass
 
     return {
         "conflict_status": conflict_status,
@@ -97,6 +114,7 @@ def _conflict_fields(data: dict, run_dir: Path | None = None) -> dict:
         "pre_conflict_state": data.get("pre_conflict_state") or None,
         "resolution_summary": resolution_summary,
         "conflict_test_result": conflict_test_result,
+        "conflict_error": conflict_error,
     }
 
 

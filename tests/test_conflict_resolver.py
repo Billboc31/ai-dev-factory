@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -201,6 +202,25 @@ def test_ticket_summary_conflict_fields_default_to_none():
     assert ts.conflicted_files is None
     assert ts.conflict_detected_at is None
     assert ts.pre_conflict_state is None
+    assert ts.conflict_error is None
+
+
+def test_get_ticket_exposes_conflict_error_from_error_log(isolated_tmp):
+    from fastapi.testclient import TestClient
+
+    run_dir = _make_ticket(isolated_tmp, "T001", "CONFLICT_RESOLUTION_FAILED")
+    conflict_dir = run_dir / "conflict"
+    conflict_dir.mkdir(parents=True)
+    (conflict_dir / "error.log").write_text(
+        "[2026-07-03T14:32:34Z] failed to prepare clean tree before rebase\n",
+        encoding="utf-8",
+    )
+    client = TestClient(_make_app(isolated_tmp))
+    r = client.get("/tickets/T001")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["conflict_status"] == "CONFLICT_RESOLUTION_FAILED"
+    assert "failed to prepare clean tree" in body["conflict_error"]
 
 
 # ── GET /tickets/{id} returns conflict fields ─────────────────────────────────
@@ -355,6 +375,9 @@ def test_resolve_conflicts_multi_pass_success(tmp_path, monkeypatch):
     monkeypatch.setattr(_rcr, "execute_external_command", MagicMock(return_value=("ok", "", 0)))
     monkeypatch.setattr(_rcr, "compose_runtime_prompt", MagicMock(return_value="prompt"))
     monkeypatch.setattr(_rcr, "_run_tests", MagicMock(return_value="Exit code: 0\n"))
+    monkeypatch.setattr(_rcr, "_prepare_clean_tree_for_rebase", lambda _tid: True)
+    monkeypatch.setattr(_rcr, "_scrub_runtime_noise_before_rebase", lambda _tid: None)
+    monkeypatch.setattr(_rcr, "_rebase_in_progress", lambda: False)
 
     subprocess_calls = [
         # _get_current_branch
@@ -407,6 +430,9 @@ def test_resolve_conflicts_max_pass_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(_rcr, "collect_context", MagicMock(return_value=context_path))
     monkeypatch.setattr(_rcr, "execute_external_command", MagicMock(return_value=("ok", "", 0)))
     monkeypatch.setattr(_rcr, "compose_runtime_prompt", MagicMock(return_value="prompt"))
+    monkeypatch.setattr(_rcr, "_prepare_clean_tree_for_rebase", lambda _tid: True)
+    monkeypatch.setattr(_rcr, "_scrub_runtime_noise_before_rebase", lambda _tid: None)
+    monkeypatch.setattr(_rcr, "_rebase_in_progress", lambda: False)
 
     max_passes = _rcr.MAX_RESOLVER_PASSES
 
@@ -449,3 +475,51 @@ def test_resolve_conflicts_max_pass_failure(tmp_path, monkeypatch):
     state = json.loads((run_dir / "state.json").read_text())
     assert state["state"] == "CONFLICT_RESOLUTION_FAILED"
     assert len(abort_calls) >= 1, "git rebase --abort must be called on max-pass failure"
+
+
+def test_blocking_dirty_paths_ignores_runtime_noise():
+    import run_conflict_resolver as rcr
+
+    porcelain = "\n".join([
+        " M runs/T010/runtime.log",
+        " M runs/T010/daemon.lock",
+        " M README.md",
+    ])
+    assert rcr._blocking_dirty_paths(porcelain, "T010") == ["README.md"]
+
+
+def test_prepare_clean_tree_for_rebase_ignores_runtime_log(tmp_path, monkeypatch):
+    import run_conflict_resolver as rcr
+
+    ticket_id = "T010"
+    run_dir = tmp_path / "runs" / ticket_id
+    run_dir.mkdir(parents=True)
+    state_file = run_dir / "state.json"
+    state_file.write_text(
+        json.dumps({"ticket_id": ticket_id, "state": "CONFLICT_RESOLUTION_NEEDED"}),
+        encoding="utf-8",
+    )
+    (run_dir / "runtime.log").write_text("log\n", encoding="utf-8")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(rcr, "_run_git", lambda args: subprocess.CompletedProcess(args, 0, stdout="", stderr=""))
+    assert rcr._prepare_clean_tree_for_rebase(ticket_id) is True
+
+
+def test_conflict_resolution_eligible_from_git_conflicts(tmp_path):
+    import subprocess as sp
+    from conflict_resolution_eligibility import conflict_resolution_eligible, git_conflicted_files
+
+    wt = tmp_path / "wt"
+    wt.mkdir()
+    sp.run(["git", "init"], cwd=wt, capture_output=True, check=True)
+    sp.run(["git", "config", "user.email", "t@test"], cwd=wt, capture_output=True)
+    sp.run(["git", "config", "user.name", "t"], cwd=wt, capture_output=True)
+    (wt / "f.txt").write_text("<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n")
+    sp.run(["git", "add", "f.txt"], cwd=wt, capture_output=True)
+    sp.run(["git", "commit", "-m", "c"], cwd=wt, capture_output=True)
+
+    state = {"state": "IMPLEMENTATION_REVIEW_NEEDED"}
+    assert conflict_resolution_eligible(state, wt) is False
+    assert git_conflicted_files(wt) == []
+
