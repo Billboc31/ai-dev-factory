@@ -117,6 +117,10 @@ CREATE TABLE IF NOT EXISTS ticket_readiness (
     updated_at               TEXT NOT NULL
 );
 
+-- approval_type values in use: 'execution' (human execution approval),
+-- 'plan' (plan approval — human or auto-generated when the project rule
+-- 'require_human_plan_approval' is disabled). Column is TEXT with no CHECK
+-- constraint so additional types can be introduced without a schema change.
 CREATE TABLE IF NOT EXISTS ticket_approvals (
     id               INTEGER PRIMARY KEY AUTOINCREMENT,
     ticket_id        TEXT NOT NULL,

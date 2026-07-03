@@ -1,0 +1,33 @@
+[2026-07-03T09:39:26Z] auto-run start: state=INIT
+[2026-07-03T09:39:26Z] auto-run: running step=planner
+[2026-07-03T09:39:26Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-07-03T09:39:26Z] prompt: generic fallback — injecting runs/T223/ticket.md
+[2026-07-03T09:39:26Z] compose: global-context=docs/ai/global-context.md
+[2026-07-03T09:39:26Z] compose: role=ai/roles/planner.md
+[2026-07-03T09:39:26Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-07-03T09:39:26Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-07-03T09:39:26Z] compose: skill=ai/skills/documentation.md
+[2026-07-03T09:39:26Z] compose: task (canonical prompt)
+[2026-07-03T09:39:26Z] snapshot: runtime-prompt=runs/T223/prompts/planner-attempt-1.md
+[2026-07-03T09:43:12Z] auto-run: step=planner done rc=0
+[2026-07-03T10:33:32Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-07-03T10:33:32Z] auto-run: running step=tester
+[2026-07-03T10:33:32Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-07-03T10:33:32Z] prompt: generic fallback — injecting runs/T223/ticket.md
+[2026-07-03T10:33:32Z] compose: global-context=docs/ai/global-context.md
+[2026-07-03T10:33:32Z] compose: role=ai/roles/tester.md
+[2026-07-03T10:33:32Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-07-03T10:33:32Z] compose: skill=ai/skills/testing.md
+[2026-07-03T10:33:32Z] compose: skill=ai/skills/debugging.md
+[2026-07-03T10:33:32Z] compose: task (canonical prompt)
+[2026-07-03T10:33:32Z] snapshot: runtime-prompt=runs/T223/prompts/tester-attempt-1.md
+[2026-07-03T10:38:04Z] auto-run: step=tester done rc=0
+[2026-07-03T10:38:04Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-07-03T10:38:04Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-07-03T10:38:04Z] commit-checkpoint: unstaged runtime garbage: ['runs/T223/daemon.lock', 'runs/T223/runtime.log']
+[2026-07-03T10:38:04Z] commit-checkpoint: sha=a887dcaf files=6 title='test(T223/dashboard,workflow): tester — update 6 file(s)'
+[2026-07-03T10:38:04Z] auto-run: auto-push triggered
+[2026-07-03T10:38:04Z] push: tolerating runtime dirty files (not blocking): ['runs/T223/daemon.lock', 'runs/T223/runtime.log']
+[2026-07-03T10:38:04Z] push: pushing branch=ticket/T223-add-project-level-option-to-disable-human-plan-app
+[2026-07-03T10:38:06Z] push: done branch=ticket/T223-add-project-level-option-to-disable-human-plan-app
+[2026-07-03T10:38:07Z] auto-run: TEST_COMPLETE — running PR lifecycle

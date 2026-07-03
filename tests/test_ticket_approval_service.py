@@ -225,6 +225,48 @@ def test_eligibility_passes_through_when_no_decision(service, db):
     assert service.compute_execution_eligibility(db, "T032") == "ready_candidate"
 
 
+# ── auto_approve_plan ────────────────────────────────────────────────────────
+
+def test_auto_approve_plan_inserts_expected_audit_row(service, db):
+    row = service.auto_approve_plan(db, "T050")
+    assert row["approval_type"] == "plan"
+    assert row["approval_status"] == "approved"
+    assert row["approved_by"] == "SYSTEM"
+    assert row["approval_comment"] == "PROJECT_SETTING"
+    assert row["approved_at"] is not None
+    history = service.get_ticket_approvals(db, "T050")
+    plan_rows = [r for r in history if r["approval_type"] == "plan"]
+    assert len(plan_rows) == 1
+
+
+def test_auto_approve_plan_is_idempotent(service, db):
+    first = service.auto_approve_plan(db, "T051")
+    second = service.auto_approve_plan(db, "T051")
+    assert first["id"] == second["id"]
+    plan_rows = [
+        r for r in service.get_ticket_approvals(db, "T051") if r["approval_type"] == "plan"
+    ]
+    assert len(plan_rows) == 1
+
+
+def test_auto_approve_plan_accepts_custom_reason(service, db):
+    row = service.auto_approve_plan(db, "T052", reason="DEMO_MODE")
+    assert row["approval_comment"] == "DEMO_MODE"
+
+
+def test_auto_approve_plan_does_not_touch_execution_row(service, db):
+    _seed_ready_candidate(db, "T053")
+    service.approve_execution(db, "T053", approved_by="pierre")
+    service.auto_approve_plan(db, "T053")
+
+    history = service.get_ticket_approvals(db, "T053")
+    plan_rows = [r for r in history if r["approval_type"] == "plan"]
+    exec_rows = [r for r in history if r["approval_type"] == "execution"]
+    assert len(plan_rows) == 1
+    assert len(exec_rows) == 1
+    assert exec_rows[0]["approved_by"] == "pierre"
+
+
 # ── re-evaluation preserves ready_to_take ────────────────────────────────────
 
 @pytest.fixture()

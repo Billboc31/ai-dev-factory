@@ -29,6 +29,7 @@ import runtime_db  # noqa: E402
 
 
 _EXECUTION = "execution"
+_PLAN = "plan"
 
 
 def _serialize_row(row: dict) -> dict:
@@ -143,6 +144,32 @@ def reject_execution(
 def get_ticket_approvals(db_path, ticket_id: str) -> list[dict]:
     """Append-only approval history for ``ticket_id`` (oldest first)."""
     return [_serialize_row(r) for r in runtime_db.list_ticket_approvals(db_path, ticket_id)]
+
+
+def auto_approve_plan(
+    db_path,
+    ticket_id: str,
+    *,
+    reason: str = "PROJECT_SETTING",
+) -> dict:
+    """Insert a `plan` approval row marking the plan as auto-approved.
+
+    Idempotent: if the latest `plan` approval for the ticket is already
+    ``approved``, the existing row is returned without inserting a duplicate.
+    """
+    latest = runtime_db.get_latest_ticket_approval(db_path, ticket_id, _PLAN)
+    if latest and latest.get("approval_status") == "approved":
+        return _serialize_row(latest)
+    runtime_db.insert_ticket_approval(
+        db_path,
+        ticket_id,
+        approval_type=_PLAN,
+        approval_status="approved",
+        approved_by="SYSTEM",
+        approval_comment=reason,
+    )
+    new_latest = runtime_db.get_latest_ticket_approval(db_path, ticket_id, _PLAN)
+    return _serialize_row(new_latest)
 
 
 def compute_execution_eligibility(db_path, ticket_id: str) -> str:

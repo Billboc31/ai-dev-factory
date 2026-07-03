@@ -123,6 +123,18 @@ def _rule_block_when_human_review_required(ctx: RuleContext) -> RuleResult:
     )
 
 
+def _rule_require_human_plan_approval(ctx: RuleContext) -> RuleResult:
+    # Enforced by the runner state machine after the planner step, not here.
+    _ = ctx
+    return RuleResult(
+        passed=True,
+        reason=(
+            "Plan approval gate is enforced by run_ticket after the planner "
+            "step; this evaluator is a no-op."
+        ),
+    )
+
+
 def _rule_max_estimated_cost_usd(ctx: RuleContext) -> RuleResult:
     limit = ctx.configuration.get("max_cost_usd")
     intel = ctx.intelligence or {}
@@ -228,6 +240,17 @@ RULE_REGISTRY: dict[str, RuleSpec] = {
         default_configuration={},
         evaluator=_rule_block_when_human_review_required,
     ),
+    "require_human_plan_approval": RuleSpec(
+        key="require_human_plan_approval",
+        description=(
+            "Require Human Plan Approval. When disabled, implementation plans "
+            "are automatically approved after generation. Useful for demos and "
+            "fully automated projects."
+        ),
+        default_enabled=True,
+        default_configuration={},
+        evaluator=_rule_require_human_plan_approval,
+    ),
     "max_estimated_cost_usd": RuleSpec(
         key="max_estimated_cost_usd",
         description="Block tickets whose estimated AI cost exceeds max_cost_usd.",
@@ -300,6 +323,30 @@ def get_registry_default_rules() -> list[dict]:
         }
         for spec in RULE_REGISTRY.values()
     ]
+
+
+_PLAN_APPROVAL_RULE = "require_human_plan_approval"
+
+
+def is_human_plan_approval_required(db_path, project_id: str | None) -> bool:
+    """Return whether the human plan-approval gate is required for a project.
+
+    Falls back to the registry default (``True``) when there is no project
+    context, no stored row for the rule, or when any lookup raises — the safe
+    default is always to require human approval.
+    """
+    spec = RULE_REGISTRY.get(_PLAN_APPROVAL_RULE)
+    default = bool(spec.default_enabled) if spec else True
+    if project_id is None or db_path is None:
+        return default
+    try:
+        effective = _resolve_effective_rules(project_id, db_path)
+    except Exception:
+        return True
+    for rule in effective:
+        if rule.get("rule_key") == _PLAN_APPROVAL_RULE:
+            return bool(rule.get("enabled"))
+    return default
 
 
 # ── Evaluation ───────────────────────────────────────────────────────────────

@@ -342,6 +342,14 @@ export default function TicketDetailPage() {
     [workflowData.eligibility],
   )
 
+  const latestPlanApproval = useMemo(() => {
+    const plans = (workflowData.approvals ?? []).filter(a => a?.approval_type === 'plan')
+    return plans.length ? plans[plans.length - 1] : null
+  }, [workflowData.approvals])
+  const planAutoApproved =
+    latestPlanApproval?.approval_status === 'approved' &&
+    latestPlanApproval?.approved_by === 'SYSTEM'
+
   const stepStatuses = useMemo(() => deriveStepStatuses({
     intelligence: workflowData.intelligence,
     readiness: workflowData.readiness,
@@ -449,10 +457,25 @@ export default function TicketDetailPage() {
       <div className="bg-white border border-gray-200 rounded p-4 space-y-4">
         <div>
           <h2 className="text-sm font-semibold text-gray-700 mb-2">Workflow</h2>
+          {planAutoApproved && (
+            <div className="mb-2 flex items-center gap-2">
+              <span
+                data-testid="plan-auto-approved-badge"
+                className="px-2 py-0.5 rounded text-xs font-semibold border bg-purple-100 text-purple-800 border-purple-200"
+              >
+                Auto-approved (project setting)
+              </span>
+              <span className="text-xs text-gray-500">Plan was approved automatically by SYSTEM.</span>
+            </div>
+          )}
           <div className="flex flex-wrap gap-2">
             <ActionButton label="Run Next" action={() => api.runNextStep(id, projectId)} onSuccess={refreshTicket} />
-            <ActionButton label="Approve Plan" action={() => api.approvePlan(id, projectId)} variant="secondary" onSuccess={refreshTicket} />
-            <ActionButton label="Request Plan Fix" action={() => api.requestPlanFix(id, projectId)} variant="danger" onSuccess={refreshTicket} />
+            {!planAutoApproved && (
+              <>
+                <ActionButton label="Approve Plan" action={() => api.approvePlan(id, projectId)} variant="secondary" onSuccess={refreshTicket} />
+                <ActionButton label="Request Plan Fix" action={() => api.requestPlanFix(id, projectId)} variant="danger" onSuccess={refreshTicket} />
+              </>
+            )}
             <ActionButton label="Approve Implementation" action={() => api.approveImplementation(id, projectId)} variant="secondary" onSuccess={refreshTicket} />
             <ActionButton label="Request Impl Fix" action={() => api.requestImplementationFix(id, projectId)} variant="danger" onSuccess={refreshTicket} />
           </div>

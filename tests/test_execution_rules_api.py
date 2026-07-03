@@ -82,6 +82,7 @@ def test_get_rules_returns_registry_defaults_when_empty(tmp_path):
         "block_when_human_review_required",
         "max_estimated_cost_usd",
         "max_difficulty",
+        "require_human_plan_approval",
     }
     defaults_enabled = {
         rule["rule_key"]: rule["enabled"] for rule in body["rules"]
@@ -92,6 +93,7 @@ def test_get_rules_returns_registry_defaults_when_empty(tmp_path):
     assert defaults_enabled["block_when_human_review_required"] is False
     assert defaults_enabled["max_estimated_cost_usd"] is False
     assert defaults_enabled["max_difficulty"] is False
+    assert defaults_enabled["require_human_plan_approval"] is True
 
 
 def test_get_rules_merges_stored_with_defaults(tmp_path):
@@ -131,6 +133,30 @@ def test_put_rules_replaces_set(tmp_path):
     assert by_key["max_difficulty"]["enabled"] is True
     assert by_key["max_difficulty"]["configuration"] == {"max_difficulty": 3}
     assert by_key["require_ticket_intelligence"]["enabled"] is False
+
+
+def test_put_rules_roundtrips_require_human_plan_approval(tmp_path):
+    (tmp_path / "runs").mkdir()
+    client = TestClient(_make_app(tmp_path))
+    # Disable the plan-approval gate and confirm the value persists on GET.
+    r = client.put(
+        "/projects/proj-a/rules",
+        json={
+            "rules": [
+                {"rule_key": "require_human_plan_approval", "enabled": False, "configuration": {}},
+            ]
+        },
+    )
+    assert r.status_code == 200
+    r = client.get("/projects/proj-a/rules")
+    assert r.status_code == 200
+    by_key = {rule["rule_key"]: rule for rule in r.json()["rules"]}
+    assert by_key["require_human_plan_approval"]["enabled"] is False
+    # reset_defaults must restore the safe default (enabled=True).
+    r = client.put("/projects/proj-a/rules", json={"action": "reset_defaults"})
+    assert r.status_code == 200
+    by_key = {rule["rule_key"]: rule for rule in r.json()["rules"]}
+    assert by_key["require_human_plan_approval"]["enabled"] is True
 
 
 def test_put_rules_unknown_key_rejected(tmp_path):

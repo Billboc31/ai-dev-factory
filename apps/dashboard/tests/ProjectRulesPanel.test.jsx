@@ -42,6 +42,15 @@ const MIXED_RULES = {
       default_enabled: false,
       default_configuration: { max_difficulty: 7 },
     },
+    {
+      rule_key: 'require_human_plan_approval',
+      enabled: true,
+      configuration: {},
+      description:
+        'Require Human Plan Approval. When disabled, implementation plans are automatically approved after generation. Useful for demos and fully automated projects.',
+      default_enabled: true,
+      default_configuration: {},
+    },
   ],
 }
 
@@ -62,7 +71,11 @@ describe('ProjectRulesPanel', () => {
       expect(screen.getByText('require_human_approval')).toBeInTheDocument()
       expect(screen.getByText('max_estimated_cost_usd')).toBeInTheDocument()
       expect(screen.getByText('max_difficulty')).toBeInTheDocument()
+      expect(screen.getByText('require_human_plan_approval')).toBeInTheDocument()
       expect(screen.getByText(/Ticket Intelligence analysis must be completed/)).toBeInTheDocument()
+      expect(
+        screen.getByText(/Require Human Plan Approval/),
+      ).toBeInTheDocument()
     })
   })
 
