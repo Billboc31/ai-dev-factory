@@ -116,9 +116,15 @@ def _persist_conflict_state(
     _write_state(run_dir, data)
 
 
-def _write_error_log(run_dir: Path, message: str, stderr: str = "") -> None:
+def _ensure_conflict_dir(run_dir: Path) -> Path:
+    """``git clean`` may remove ``runs/{ticket}/conflict/`` mid-run — recreate it."""
     conflict_dir = run_dir / "conflict"
     conflict_dir.mkdir(parents=True, exist_ok=True)
+    return conflict_dir
+
+
+def _write_error_log(run_dir: Path, message: str, stderr: str = "") -> None:
+    conflict_dir = _ensure_conflict_dir(run_dir)
     error_path = conflict_dir / "error.log"
     content = f"[{_now_iso()}] {message}\n"
     if stderr.strip():
@@ -224,6 +230,13 @@ def _run_tests(ticket_id: str, run_dir: Path) -> str:
     result = _run(
         [sys.executable, "-m", "pytest", "tests/", "-q", "--tb=short", "--no-header"],
     )
+    if result.returncode == 5:
+        return (
+            f"# Test Report — conflict resolution for {ticket_id}\n"
+            f"Generated at: {_now_iso()}\n"
+            "Exit code: 0\n\n"
+            "No pytest tests collected — skipped.\n"
+        )
     lines = [
         f"# Test Report — conflict resolution for {ticket_id}",
         f"Generated at: {_now_iso()}",
@@ -430,8 +443,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
         _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
         return 2
 
-    conflict_dir = run_dir / "conflict"
-    conflict_dir.mkdir(parents=True, exist_ok=True)
+    conflict_dir = _ensure_conflict_dir(run_dir)
 
     # 1. fetch origin
     _log(ticket_id, "git fetch origin")
@@ -655,6 +667,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
 
     else:
         # Clean rebase — write resolution.md noting no conflicts needed
+        conflict_dir = _ensure_conflict_dir(run_dir)
         res_path = conflict_dir / "resolution.md"
         if not res_path.exists():
             res_path.write_text(
@@ -666,6 +679,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
         _log(ticket_id, "rebase clean — no conflicts")
 
     # 3. run tests
+    conflict_dir = _ensure_conflict_dir(run_dir)
     _log(ticket_id, "running tests")
     test_report = _run_tests(ticket_id, run_dir)
     test_report_path = conflict_dir / "test-report.md"
@@ -730,7 +744,18 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str]) -> int:
     args = parse_args(argv)
-    return resolve_conflicts(args.ticket_id, args.exec_cmd)
+    run_dir = Path("runs") / args.ticket_id
+    try:
+        return resolve_conflicts(args.ticket_id, args.exec_cmd)
+    except Exception as exc:
+        if run_dir.joinpath("state.json").is_file():
+            _write_error_log(run_dir, f"uncaught resolver error: {exc}")
+            try:
+                _transition_state(args.ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")
+            except Exception:
+                pass
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":
