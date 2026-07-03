@@ -253,32 +253,31 @@ def _run_tests(ticket_id: str, run_dir: Path) -> str:
 
 
 def _blocking_dirty_paths(porcelain: str, ticket_id: str) -> list[str]:
-    """Return dirty paths that should block ``git rebase`` (ignore runtime noise)."""
+    """Return dirty paths outside ``runs/{ticket}/`` that should block rebase."""
     runtime_prefix = f"runs/{ticket_id}/"
-    ignore = {
-        f"{runtime_prefix}runtime.log",
-        f"{runtime_prefix}daemon.lock",
-    }
     blocking: list[str] = []
     for line in porcelain.splitlines():
         if not line.strip():
             continue
         path = line[3:].strip().split(" -> ")[-1]
-        if path in ignore or path.startswith(runtime_prefix):
+        if path.startswith(runtime_prefix):
             continue
         blocking.append(path)
     return blocking
 
 
-def _scrub_ticket_runtime_dir(ticket_id: str) -> None:
-    """Reset resolver scratch under ``runs/{ticket}/`` without wiping ``runtime.log``."""
+def _runtime_tree_porcelain(ticket_id: str) -> str:
     prefix = _runtime_path_prefix(ticket_id)
-    state_path = f"{prefix}state.json"
-    if Path(state_path).exists():
-        _run_git(["checkout", "HEAD", "--", state_path])
-    lock_path = f"{prefix}daemon.lock"
-    if Path(lock_path).exists():
-        _run_git(["checkout", "--", lock_path])
+    result = _run_git(["status", "--porcelain", "--", prefix])
+    if result.returncode != 0:
+        return "<git status failed>"
+    return result.stdout
+
+
+def _scrub_ticket_runtime_dir(ticket_id: str) -> None:
+    """Reset tracked runtime artifacts and drop resolver scratch before rebase."""
+    prefix = _runtime_path_prefix(ticket_id)
+    _run_git(["checkout", "HEAD", "--", prefix])
     _run_git(["clean", "-fd", f"{prefix}conflict", f"{prefix}prompts"])
 
 
@@ -293,13 +292,21 @@ def _rebase_in_progress() -> bool:
 
 
 def _prepare_clean_tree_for_rebase(ticket_id: str) -> bool:
-    """Ensure only non-runtime paths remain dirty before ``git rebase``.
+    """Ensure the worktree is clean enough for ``git rebase``.
 
-    ``state.json`` is tracked on ticket branches; committing it before rebase
-    causes git replay to rewind the file to an older workflow state. Reset the
-    whole ``runs/{ticket}/`` tree instead — the caller keeps an in-memory backup.
+    The in-memory ``state.json`` backup lives outside git — reset the tracked
+    ``runs/{ticket}/`` tree so ``runtime.log``, deleted locks, and workflow
+    state edits do not block the rebase.
     """
     _scrub_ticket_runtime_dir(ticket_id)
+
+    runtime_dirty = _runtime_tree_porcelain(ticket_id).strip()
+    if runtime_dirty:
+        _log(
+            ticket_id,
+            f"runtime tree still dirty after scrub: {runtime_dirty}",
+        )
+        return False
 
     remaining = _run_git(["status", "--porcelain"])
     if remaining.returncode != 0:

@@ -521,22 +521,38 @@ def test_split_conflicts_separates_runtime_paths():
     assert runtime == ["runs/T010/state.json", "runs/T010/plan.md"]
 
 
-def test_prepare_clean_tree_for_rebase_ignores_runtime_log(tmp_path, monkeypatch):
+def test_scrub_ticket_runtime_dir_resets_whole_runtime_prefix(tmp_path, monkeypatch):
+    import run_conflict_resolver as rcr
+
+    calls: list[list[str]] = []
+
+    def _fake_git(args):
+        calls.append(list(args))
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(rcr, "_run_git", _fake_git)
+    rcr._scrub_ticket_runtime_dir("T010")
+    assert ["checkout", "HEAD", "--", "runs/T010/"] in calls
+    assert ["clean", "-fd", "runs/T010/conflict", "runs/T010/prompts"] in calls
+
+
+def test_prepare_clean_tree_for_rebase_fails_when_runtime_still_dirty(tmp_path, monkeypatch):
     import run_conflict_resolver as rcr
 
     ticket_id = "T010"
     run_dir = tmp_path / "runs" / ticket_id
     run_dir.mkdir(parents=True)
-    state_file = run_dir / "state.json"
-    state_file.write_text(
-        json.dumps({"ticket_id": ticket_id, "state": "CONFLICT_RESOLUTION_NEEDED"}),
-        encoding="utf-8",
-    )
-    (run_dir / "runtime.log").write_text("log\n", encoding="utf-8")
+
+    def _fake_git(args):
+        if args[:3] == ["status", "--porcelain", "--"]:
+            return subprocess.CompletedProcess(
+                args, 0, stdout=" M runs/T010/state.json\n", stderr="",
+            )
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
 
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(rcr, "_run_git", lambda args: subprocess.CompletedProcess(args, 0, stdout="", stderr=""))
-    assert rcr._prepare_clean_tree_for_rebase(ticket_id) is True
+    monkeypatch.setattr(rcr, "_run_git", _fake_git)
+    assert rcr._prepare_clean_tree_for_rebase(ticket_id) is False
 
 
 def test_conflict_resolution_eligible_from_git_conflicts(tmp_path):

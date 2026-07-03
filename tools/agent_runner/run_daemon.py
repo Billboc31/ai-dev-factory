@@ -45,6 +45,7 @@ ROOT = Path(__file__).resolve().parent
 _SCRIPT_REPO_ROOT = ROOT.parent.parent
 REPO_ROOT = _SCRIPT_REPO_ROOT
 RUN_TICKET = ROOT / "run_ticket.py"
+RUN_CONFLICT_RESOLVER = ROOT / "run_conflict_resolver.py"
 RUN_ISSUE_INTAKE = ROOT / "run_issue_intake.py"
 RUN_ISSUE_MAPPER = ROOT / "run_issue_mapper.py"
 ISSUE_INDEX_FILENAME = ".issue-intake.json"
@@ -1201,6 +1202,83 @@ def launch_ticket(
             _release_lock(run_dir)
 
 
+def _maybe_auto_launch_conflict_resolution(
+    ticket_id: str,
+    exec_cmd: str,
+    dry_run: bool,
+    run_dir: Path,
+    worktree_cwd: str | None,
+    project_id: str | None,
+    db_path: "Path | None",
+) -> bool:
+    """Start ``run_conflict_resolver.py`` when the post-conflict human gate is off."""
+    state = _load_state_json(run_dir)
+    current = state.get("state")
+    if current == "CONFLICT_RESOLVING":
+        _log(f"{ticket_id}: conflict resolution already in progress")
+        return False
+    if current not in ("CONFLICT_RESOLUTION_NEEDED", "CONFLICT_RESOLUTION_FAILED"):
+        return False
+
+    if dry_run:
+        _log(f"dry-run: would auto-launch conflict resolution for {ticket_id}")
+        return True
+
+    if not worktree_cwd:
+        _log(f"{ticket_id}: cannot auto-launch conflict resolution without worktree")
+        return False
+
+    try:
+        import execution_rules_engine as _ere  # noqa: WPS433
+    except Exception as exc:
+        _log(f"{ticket_id}: conflict auto-launch import failed: {exc}")
+        return False
+
+    if db_path is None:
+        return False
+    try:
+        if _ere.is_human_conflict_resolution_approval_required(db_path, project_id):
+            _log(
+                f"{ticket_id}: conflict resolution waiting for human action "
+                f"(require_human_conflict_resolution_approval enabled)",
+            )
+            return False
+    except Exception as exc:
+        _log(f"{ticket_id}: conflict auto-launch rule check failed: {exc}")
+        return False
+
+    if not _acquire_lock(run_dir):
+        _log(f"skipping {ticket_id}: conflict resolver already running (lock held)")
+        return False
+
+    try:
+        data = dict(state)
+        if not data.get("pre_conflict_state"):
+            data["pre_conflict_state"] = "TEST_COMPLETE"
+        data["state"] = "CONFLICT_RESOLVING"
+        _save_state_json(run_dir, data)
+    except Exception as exc:
+        _log(f"{ticket_id}: failed to transition to CONFLICT_RESOLVING: {exc}")
+        _release_lock(run_dir)
+        return False
+
+    cmd = [
+        sys.executable,
+        str(RUN_CONFLICT_RESOLVER),
+        ticket_id,
+        "--exec-cmd",
+        exec_cmd,
+    ]
+    _log(
+        f"auto-launching conflict resolver for {ticket_id} "
+        f"in worktree={worktree_cwd}: {shlex.join(cmd)}",
+    )
+    proc = _spawn_worker_process(cmd, cwd=worktree_cwd, env=_no_bytecode_env())
+    _set_lock_holder_pid(run_dir, proc.pid)
+    _log(f"{ticket_id}: conflict resolver started pid={proc.pid} (background)")
+    return True
+
+
 # ── issue polling ─────────────────────────────────────────────────────────────
 
 def load_issue_index(state_dir: Path) -> dict[str, str]:
@@ -2313,8 +2391,22 @@ def run_once(
                     _checkpoint_and_push_before_pr(ticket_id, cwd=worktree_cwd)
                 else:
                     _log(f"dry-run: would checkpoint/push {ticket_id} for PLAN_REVIEW_NEEDED")
-            elif state == "CONFLICT_RESOLUTION_NEEDED":
-                _log(f"Ticket {ticket_id} already in CONFLICT_RESOLUTION_NEEDED, skipping re-detection")
+            elif state in ("CONFLICT_RESOLUTION_NEEDED", "CONFLICT_RESOLUTION_FAILED"):
+                if _maybe_auto_launch_conflict_resolution(
+                    ticket_id,
+                    exec_cmd,
+                    dry_run,
+                    run_dir,
+                    worktree_cwd,
+                    project_id or os.environ.get("PROJECT_NAME"),
+                    _db_path,
+                ):
+                    continue
+                if state == "CONFLICT_RESOLUTION_NEEDED":
+                    _log(
+                        f"Ticket {ticket_id} already in CONFLICT_RESOLUTION_NEEDED, "
+                        "skipping re-detection",
+                    )
             _log(f"skipping {ticket_id} state={state} (human gate)")
         else:
             _log(f"skipping {ticket_id} state={state}")
