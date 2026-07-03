@@ -201,6 +201,73 @@ def test_max_difficulty_passes_when_no_config_set():
     assert res.passed is True
 
 
+# ── require_human_plan_approval (runner-enforced no-op) ─────────────────────
+
+def test_require_human_plan_approval_registered_and_default_enabled():
+    spec = engine.RULE_REGISTRY["require_human_plan_approval"]
+    assert spec.default_enabled is True
+    assert spec.default_configuration == {}
+    assert "plan" in spec.description.lower()
+
+
+def test_require_human_plan_approval_evaluator_is_noop_pass():
+    spec = engine.RULE_REGISTRY["require_human_plan_approval"]
+    res = spec.evaluator(_ctx())
+    assert res.passed is True
+
+
+def test_is_human_plan_approval_required_default_when_no_row(tmp_path):
+    db_path = tmp_path / ".runtime" / "plan_gate.sqlite"
+    _db.init_runtime_db(db_path)
+    import runtime_db as live_db
+    original = live_db.list_project_rules
+    live_db.list_project_rules = _db.list_project_rules
+    try:
+        assert engine.is_human_plan_approval_required(db_path, "proj-a") is True
+    finally:
+        live_db.list_project_rules = original
+
+
+def test_is_human_plan_approval_required_false_when_project_disables():
+    class _StubDB:
+        def __init__(self):
+            self.rows = [
+                {
+                    "rule_key": "require_human_plan_approval",
+                    "enabled": 0,
+                    "configuration": {},
+                }
+            ]
+
+    stub = _StubDB()
+    import runtime_db as live_db
+    original = live_db.list_project_rules
+    live_db.list_project_rules = lambda _db_path, _pid: stub.rows
+    try:
+        assert engine.is_human_plan_approval_required(stub, "proj-a") is False
+    finally:
+        live_db.list_project_rules = original
+
+
+def test_is_human_plan_approval_required_true_when_project_id_missing():
+    # No project context → fall back to the safe default (require approval).
+    assert engine.is_human_plan_approval_required("ignored", None) is True
+
+
+def test_is_human_plan_approval_required_true_on_lookup_error():
+    import runtime_db as live_db
+    original = live_db.list_project_rules
+
+    def _boom(_db_path, _pid):
+        raise RuntimeError("db unreachable")
+
+    live_db.list_project_rules = _boom
+    try:
+        assert engine.is_human_plan_approval_required("ignored", "proj-a") is True
+    finally:
+        live_db.list_project_rules = original
+
+
 # ── Integration via evaluate_ticket ─────────────────────────────────────────
 
 @pytest.fixture()

@@ -147,4 +147,93 @@ describe('TicketDetailPage — runtime state change', () => {
       expect(ticketsApi.getTicketLogs.mock.calls.length).toBeGreaterThan(callsBefore)
     })
   })
+
+})
+
+describe('TicketDetailPage — plan approval badge', () => {
+  // Capture the first two distinct polling callbacks: the page mounts a poller
+  // for the ticket fetch (1st call) and one for the workflow data fetch that
+  // populates `approvals` (2nd call).
+  let firstPoll
+  let secondPoll
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    firstPoll = undefined
+    secondPoll = undefined
+    usePolling.mockImplementation((callback) => {
+      if (firstPoll === undefined) {
+        firstPoll = callback
+      } else if (secondPoll === undefined && callback !== firstPoll) {
+        secondPoll = callback
+      }
+    })
+    ticketsApi.getTicketState.mockResolvedValue({ data: MOCK_STATE })
+    ticketsApi.getTicketLogs.mockResolvedValue({ data: '' })
+    ticketsApi.getTicketTimeline.mockResolvedValue({ data: MOCK_TIMELINE })
+    ticketsApi.getTicketPlan.mockResolvedValue({ data: '' })
+    ticketsApi.getTicketIntelligence.mockResolvedValue({ data: null })
+    ticketsApi.getTicketReadiness.mockResolvedValue({ data: null })
+    ticketsApi.getTicketDiagnostics.mockResolvedValue({ data: null })
+    ticketsApi.listTicketOperations.mockResolvedValue({ data: { operations: [] } })
+    ticketsApi.getTicketEligibility.mockResolvedValue({ data: null })
+    ticketsApi.getTicket.mockResolvedValue({ data: MOCK_TICKET })
+  })
+
+  const pollAll = async () => {
+    await act(async () => { firstPoll && firstPoll() })
+    await act(async () => { secondPoll && secondPoll() })
+  }
+
+  it('renders an Auto-approved badge and hides plan approve buttons when the plan was SYSTEM-approved', async () => {
+    ticketsApi.getTicketApprovals.mockResolvedValue({
+      data: {
+        approvals: [
+          {
+            id: 1,
+            approval_type: 'plan',
+            approval_status: 'approved',
+            approved_by: 'SYSTEM',
+            approval_comment: 'PROJECT_SETTING',
+          },
+        ],
+      },
+    })
+
+    renderPage()
+    await pollAll()
+
+    await waitFor(() => {
+      expect(screen.getByTestId('plan-auto-approved-badge')).toBeInTheDocument()
+    })
+    expect(screen.queryByRole('button', { name: /Approve Plan$/i })).toBeNull()
+    expect(screen.queryByRole('button', { name: /Request Plan Fix/i })).toBeNull()
+    // Implementation approval buttons remain visible.
+    expect(screen.getByRole('button', { name: /Approve Implementation/i })).toBeInTheDocument()
+  })
+
+  it('keeps manual plan approve buttons when the latest plan approval is human', async () => {
+    ticketsApi.getTicketApprovals.mockResolvedValue({
+      data: {
+        approvals: [
+          {
+            id: 1,
+            approval_type: 'plan',
+            approval_status: 'approved',
+            approved_by: 'pierre',
+            approval_comment: 'looks good',
+          },
+        ],
+      },
+    })
+
+    renderPage()
+    await pollAll()
+
+    await waitFor(() => {
+      expect(screen.getByText('PLAN_APPROVED')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('plan-auto-approved-badge')).toBeNull()
+    expect(screen.getByRole('button', { name: /Approve Plan$/i })).toBeInTheDocument()
+  })
 })

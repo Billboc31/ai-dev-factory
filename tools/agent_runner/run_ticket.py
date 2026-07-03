@@ -894,6 +894,80 @@ def _append_workflow_journal(ticket_id: str, prev_state: str, step: str, next_st
         fh.write(entry)
 
 
+def _resolve_project_id_from_state(state: dict) -> str | None:
+    """Pick the project id used for runtime DB scoping.
+
+    Prefers an explicit ``project_id`` in ``state.json``; falls back to the
+    ``PROJECT_NAME`` env var — the same fallback used by ``run_daemon``.
+    """
+    project_id = state.get("project_id") if isinstance(state, dict) else None
+    if project_id:
+        return str(project_id)
+    env_pid = os.environ.get("PROJECT_NAME")
+    return env_pid or None
+
+
+def _maybe_auto_approve_plan(ticket_id: str, state: dict) -> str | None:
+    """Auto-approve the plan if the project has disabled the human plan gate.
+
+    Returns the new state (``"PLAN_APPROVED"``) when auto-approval fires,
+    ``None`` when the gate is kept (default behaviour) or when the lookup
+    fails safely. All errors fall back to the human gate — the safe default.
+    """
+    try:
+        # Deferred imports keep the CLI startup cost identical when the toggle
+        # is untouched and avoid a circular import via the tools package.
+        _tools_dir = Path(__file__).resolve().parent
+        if str(_tools_dir) not in sys.path:
+            sys.path.insert(0, str(_tools_dir))
+        import execution_rules_engine  # noqa: WPS433
+        import runtime_db  # noqa: WPS433
+        import ticket_approval_service  # noqa: WPS433
+    except Exception as exc:
+        _log_runtime(ticket_id, f"auto-approve: skipped — import failed: {exc}")
+        return None
+
+    project_id = _resolve_project_id_from_state(state)
+    try:
+        db_path = runtime_db.get_db_path(project_id=project_id)
+    except Exception as exc:
+        _log_runtime(ticket_id, f"auto-approve: skipped — db path lookup failed: {exc}")
+        return None
+    if db_path is None:
+        _log_runtime(ticket_id, "auto-approve: skipped — runtime DB not available")
+        return None
+
+    try:
+        required = execution_rules_engine.is_human_plan_approval_required(
+            db_path, project_id
+        )
+    except Exception as exc:
+        _log_runtime(ticket_id, f"auto-approve: skipped — rule lookup failed: {exc}")
+        return None
+    if required:
+        return None
+
+    _log_runtime(
+        ticket_id,
+        f"auto-approve: plan approval gate disabled for project={project_id!r}",
+    )
+    try:
+        ticket_approval_service.auto_approve_plan(db_path, ticket_id)
+    except Exception as exc:
+        _log_runtime(ticket_id, f"auto-approve: failed — {exc}")
+        return None
+
+    save_state(ticket_id, {**state, "state": "PLAN_APPROVED"})
+    _append_workflow_journal(
+        ticket_id, "PLAN_REVIEW_NEEDED", "auto-approve", "PLAN_APPROVED",
+    )
+    _log_runtime(
+        ticket_id,
+        "auto-run: transition PLAN_REVIEW_NEEDED → PLAN_APPROVED (auto, PROJECT_SETTING)",
+    )
+    return "PLAN_APPROVED"
+
+
 # ── human approval ───────────────────────────────────────────────────────────
 
 # Maps CLI command name → (required_current_state, target_state)
@@ -1234,6 +1308,14 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
     _append_workflow_journal(ticket_id, current_state, step, next_state)
     _log_runtime(ticket_id, f"auto-run: transition {current_state} → {next_state}")
     print(f"[auto] {current_state} → {next_state}")
+
+    if step == "planner" and next_state == "PLAN_REVIEW_NEEDED":
+        auto_next = _maybe_auto_approve_plan(
+            ticket_id, {**state, "state": next_state}
+        )
+        if auto_next is not None:
+            next_state = auto_next
+            print(f"[auto] PLAN_REVIEW_NEEDED → {next_state}")
 
     if next_state.endswith("_FIX_REQUIRED"):
         _write_fix_artifact(ticket_id, next_state, output_path)

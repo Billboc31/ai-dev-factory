@@ -237,6 +237,18 @@ Ne pas éditer `state.json` directement.
 
 Cette commande valide l'état, met à jour `state.json`, et produit une entrée explicite dans `runtime.log` avec la mention `(human)`.
 
+### Auto-approbation du plan (setting projet)
+
+Le gate `PLAN_REVIEW_NEEDED` peut être désactivé par projet via la règle
+`require_human_plan_approval` (activée par défaut). Quand la règle est
+désactivée, `run_ticket.py` bascule automatiquement
+`PLAN_REVIEW_NEEDED → PLAN_APPROVED` juste après la génération du plan, et
+persiste une ligne d'audit dans `ticket_approvals` avec
+`approval_type=plan`, `approval_status=approved`, `approved_by=SYSTEM`,
+`approval_comment=PROJECT_SETTING`. Le `plan.md` reste écrit et commité par
+`_checkpoint_planner_artifacts`. La règle se pilote via
+`GET/PUT /projects/{project_id}/rules` (UI: Project Settings → Rules).
+
 ## Règle de fallback
 
 Si un agent doute, il doit choisir l’option la plus sûre :
