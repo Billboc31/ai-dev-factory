@@ -1044,6 +1044,79 @@ def apply_approve_conflict_resolution(ticket_id: str) -> int:
     return 0
 
 
+def _maybe_auto_finalize_conflict_resolution(ticket_id: str, state: dict) -> str | None:
+    """Auto-approve conflict resolution and run PR lifecycle when configured.
+
+    Returns the new workflow state (typically ``TEST_COMPLETE``) when
+    auto-finalization runs, ``None`` when the human review gate is kept.
+    """
+    current_state = state.get("state")
+    if current_state != "CONFLICT_RESOLVED_REVIEW_NEEDED":
+        return None
+
+    try:
+        _tools_dir = Path(__file__).resolve().parent
+        if str(_tools_dir) not in sys.path:
+            sys.path.insert(0, str(_tools_dir))
+        import execution_rules_engine  # noqa: WPS433
+        import runtime_db  # noqa: WPS433
+    except Exception as exc:
+        _log_runtime(ticket_id, f"auto-finalize-conflict: skipped — import failed: {exc}")
+        return None
+
+    project_id = _resolve_project_id_from_state(state)
+    try:
+        db_path = runtime_db.get_db_path(project_id=project_id)
+    except Exception as exc:
+        _log_runtime(ticket_id, f"auto-finalize-conflict: skipped — db lookup failed: {exc}")
+        return None
+    if db_path is None:
+        _log_runtime(ticket_id, "auto-finalize-conflict: skipped — runtime DB not available")
+        return None
+
+    try:
+        required = execution_rules_engine.is_human_conflict_resolution_approval_required(
+            db_path, project_id,
+        )
+    except Exception as exc:
+        _log_runtime(ticket_id, f"auto-finalize-conflict: skipped — rule lookup failed: {exc}")
+        return None
+    if required:
+        return None
+
+    target_state = state.get("pre_conflict_state")
+    if not target_state or target_state not in VALID_STATES:
+        _log_runtime(
+            ticket_id,
+            f"auto-finalize-conflict: refused — invalid pre_conflict_state={target_state!r}",
+        )
+        return None
+
+    _log_runtime(
+        ticket_id,
+        f"auto-finalize-conflict: gate disabled for project={project_id!r}",
+    )
+    save_state(ticket_id, {**state, "state": target_state})
+    _append_workflow_journal(
+        ticket_id,
+        current_state,
+        "auto-approve-conflict-resolution",
+        target_state,
+    )
+    _log_runtime(
+        ticket_id,
+        f"conflict-resolver: transition {current_state} → {target_state} (auto, PROJECT_SETTING)",
+    )
+
+    if target_state == "TEST_COMPLETE":
+        try:
+            _finalize_test_complete_pr(ticket_id)
+        except TicketRunnerError as exc:
+            _log_runtime(ticket_id, f"auto-finalize-conflict: PR lifecycle failed: {exc}")
+
+    return target_state
+
+
 # ── --set-state ───────────────────────────────────────────────────────────────
 
 def set_workflow_state(ticket_id: str, new_state: str) -> int:

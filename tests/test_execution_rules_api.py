@@ -83,6 +83,7 @@ def test_get_rules_returns_registry_defaults_when_empty(tmp_path):
         "max_estimated_cost_usd",
         "max_difficulty",
         "require_human_plan_approval",
+        "require_human_conflict_resolution_approval",
     }
     defaults_enabled = {
         rule["rule_key"]: rule["enabled"] for rule in body["rules"]
@@ -94,6 +95,7 @@ def test_get_rules_returns_registry_defaults_when_empty(tmp_path):
     assert defaults_enabled["max_estimated_cost_usd"] is False
     assert defaults_enabled["max_difficulty"] is False
     assert defaults_enabled["require_human_plan_approval"] is True
+    assert defaults_enabled["require_human_conflict_resolution_approval"] is True
 
 
 def test_get_rules_merges_stored_with_defaults(tmp_path):

@@ -729,9 +729,25 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
 
     _log(ticket_id, "push succeeded")
 
-    # 6. transition only after clean rebase + passing tests
+    # 6. transition after clean rebase + passing tests
     _transition_state(ticket_id, run_dir, "CONFLICT_RESOLVED_REVIEW_NEEDED")
-    _log(ticket_id, "done → CONFLICT_RESOLVED_REVIEW_NEEDED")
+    try:
+        state_after = json.loads(state_file.read_text(encoding="utf-8"))
+        rt_path = ROOT / "run_ticket.py"
+        spec = importlib.util.spec_from_file_location("_run_ticket_finalize", rt_path)
+        rt_mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+        spec.loader.exec_module(rt_mod)  # type: ignore[union-attr]
+        final_state = rt_mod._maybe_auto_finalize_conflict_resolution(
+            ticket_id, state_after,
+        )
+    except Exception as exc:
+        _log(ticket_id, f"auto-finalize-conflict: skipped — {exc}")
+        final_state = None
+
+    if final_state:
+        _log(ticket_id, f"done → {final_state} (auto-finalize)")
+    else:
+        _log(ticket_id, "done → CONFLICT_RESOLVED_REVIEW_NEEDED")
     return 0
 
 

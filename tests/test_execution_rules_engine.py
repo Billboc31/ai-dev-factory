@@ -249,6 +249,32 @@ def test_is_human_plan_approval_required_false_when_project_disables():
         live_db.list_project_rules = original
 
 
+def test_require_human_conflict_resolution_approval_registered_and_default_enabled():
+    spec = engine.RULE_REGISTRY["require_human_conflict_resolution_approval"]
+    assert spec.default_enabled is True
+
+
+def test_is_human_conflict_resolution_approval_required_false_when_disabled():
+    class _StubDB:
+        def __init__(self):
+            self.rows = [
+                {
+                    "rule_key": "require_human_conflict_resolution_approval",
+                    "enabled": 0,
+                    "configuration": {},
+                }
+            ]
+
+    stub = _StubDB()
+    import runtime_db as live_db
+    original = live_db.list_project_rules
+    live_db.list_project_rules = lambda _db_path, _pid: stub.rows
+    try:
+        assert engine.is_human_conflict_resolution_approval_required(stub, "proj-a") is False
+    finally:
+        live_db.list_project_rules = original
+
+
 def test_is_human_plan_approval_required_true_when_project_id_missing():
     # No project context → fall back to the safe default (require approval).
     assert engine.is_human_plan_approval_required("ignored", None) is True

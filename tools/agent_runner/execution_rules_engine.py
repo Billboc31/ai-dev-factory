@@ -135,6 +135,18 @@ def _rule_require_human_plan_approval(ctx: RuleContext) -> RuleResult:
     )
 
 
+def _rule_require_human_conflict_resolution_approval(ctx: RuleContext) -> RuleResult:
+    # Enforced by run_conflict_resolver after a successful resolution, not here.
+    _ = ctx
+    return RuleResult(
+        passed=True,
+        reason=(
+            "Conflict resolution approval is enforced after the resolver "
+            "finishes; this evaluator is a no-op."
+        ),
+    )
+
+
 def _rule_max_estimated_cost_usd(ctx: RuleContext) -> RuleResult:
     limit = ctx.configuration.get("max_cost_usd")
     intel = ctx.intelligence or {}
@@ -251,6 +263,17 @@ RULE_REGISTRY: dict[str, RuleSpec] = {
         default_configuration={},
         evaluator=_rule_require_human_plan_approval,
     ),
+    "require_human_conflict_resolution_approval": RuleSpec(
+        key="require_human_conflict_resolution_approval",
+        description=(
+            "Require Human Conflict Resolution Approval. When disabled, a "
+            "successful conflict resolution auto-approves and runs the "
+            "TEST_COMPLETE PR lifecycle (merge/retry)."
+        ),
+        default_enabled=True,
+        default_configuration={},
+        evaluator=_rule_require_human_conflict_resolution_approval,
+    ),
     "max_estimated_cost_usd": RuleSpec(
         key="max_estimated_cost_usd",
         description="Block tickets whose estimated AI cost exceeds max_cost_usd.",
@@ -326,6 +349,7 @@ def get_registry_default_rules() -> list[dict]:
 
 
 _PLAN_APPROVAL_RULE = "require_human_plan_approval"
+_CONFLICT_RESOLUTION_APPROVAL_RULE = "require_human_conflict_resolution_approval"
 
 
 def is_human_plan_approval_required(db_path, project_id: str | None) -> bool:
@@ -345,6 +369,24 @@ def is_human_plan_approval_required(db_path, project_id: str | None) -> bool:
         return True
     for rule in effective:
         if rule.get("rule_key") == _PLAN_APPROVAL_RULE:
+            return bool(rule.get("enabled"))
+    return default
+
+
+def is_human_conflict_resolution_approval_required(
+    db_path, project_id: str | None,
+) -> bool:
+    """Return whether the post-conflict human review gate is required."""
+    spec = RULE_REGISTRY.get(_CONFLICT_RESOLUTION_APPROVAL_RULE)
+    default = bool(spec.default_enabled) if spec else True
+    if project_id is None or db_path is None:
+        return default
+    try:
+        effective = _resolve_effective_rules(project_id, db_path)
+    except Exception:
+        return True
+    for rule in effective:
+        if rule.get("rule_key") == _CONFLICT_RESOLUTION_APPROVAL_RULE:
             return bool(rule.get("enabled"))
     return default
 
