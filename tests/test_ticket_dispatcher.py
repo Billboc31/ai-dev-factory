@@ -119,6 +119,49 @@ def _seed_rules_eligible(db_path, ticket_id: str, project_id: str = "proj-a") ->
     )
 
 
+def _seed_dispatching_batch(
+    db_path,
+    batch_id: str,
+    ticket_ids: list[str],
+) -> None:
+    _sqlite_db.insert_backlog_batch(
+        db_path,
+        batch_id,
+        status="collecting",
+        created_at="2026-06-30T10:00:00Z",
+        last_activity_at="2026-06-30T10:00:00Z",
+    )
+    _sqlite_db.update_backlog_batch(db_path, batch_id, status="dispatching")
+    for ticket_id in ticket_ids:
+        _sqlite_db.insert_backlog_batch_ticket(
+            db_path, batch_id, ticket_id, "2026-06-30T10:00:00Z",
+        )
+
+
+def _seed_dependency_analysis(
+    db_path,
+    *,
+    batch_id: str,
+    ticket_id: str,
+    execution_phase: int | None = None,
+    conflicting: list[str] | None = None,
+    parallel_group: str | None = None,
+    relationships: list[dict] | None = None,
+) -> None:
+    _sqlite_db.upsert_dependency_analysis(
+        db_path,
+        ticket_id=ticket_id,
+        batch_id=batch_id,
+        depends_on=[],
+        blocks=[],
+        parallel_group=parallel_group,
+        conflicting_tickets=conflicting or [],
+        execution_phase=str(execution_phase) if execution_phase is not None else None,
+        relationship_classifications=relationships or [],
+        analyzed_at="2026-06-30T10:00:00Z",
+    )
+
+
 def _seed_full_ready(
     db_path,
     project_root: Path,
@@ -161,9 +204,17 @@ def env(tmp_path, monkeypatch):
         "get_ticket_rule_evaluation",
         "get_latest_ticket_approval",
         "list_ticket_runtime",
+        "get_batch_for_ticket",
+        "get_dependency_analysis",
+        "list_backlog_batch_ticket_ids",
+        "insert_backlog_batch",
+        "insert_backlog_batch_ticket",
+        "update_backlog_batch",
     ):
         monkeypatch.setattr(live_db, name, getattr(_sqlite_db, name))
     monkeypatch.setattr(eligibility, "is_ticket_merged", _raise_default_dep_stub)
+    import backlog_batch as _bb
+    _bb.runtime_db = live_db
     return {"db": db_path, "root": tmp_path}
 
 
@@ -382,3 +433,125 @@ def test_manual_mode_recommendations_match_advisory(env):
         r["ticket_id"] for r in manual["recommendations"]
     ]
     assert manual["mode"] == "manual"
+
+
+# ── Conflict filtering within a batch ────────────────────────────────────────
+
+def test_conflicting_candidates_lower_phase_wins(env):
+    db, root = env["db"], env["root"]
+    batch_id = "B0001"
+    _seed_full_ready(db, root, "T001")
+    _seed_full_ready(db, root, "T010")
+    _seed_dispatching_batch(db, batch_id, ["T001", "T010"])
+    _seed_dependency_analysis(
+        db, batch_id=batch_id, ticket_id="T001",
+        execution_phase=1, conflicting=["T010"],
+    )
+    _seed_dependency_analysis(
+        db, batch_id=batch_id, ticket_id="T010",
+        execution_phase=2, conflicting=["T001"],
+    )
+
+    result = dispatcher.get_recommended_tickets(db, root, mode="advisory")
+    runnable = [r["ticket_id"] for r in result["recommendations"]]
+    assert runnable == ["T001"]
+
+    blocked = {b["ticket_id"]: b for b in result["blocked"]}
+    assert "T010" in blocked
+    assert blocked["T010"]["blocking_step"] == "conflicts"
+    assert blocked["T010"]["blocked_by"] == ["T001"]
+    assert "T001" in blocked["T010"]["reason"]
+
+
+def test_running_conflict_blocks_candidate(env):
+    db, root = env["db"], env["root"]
+    batch_id = "B0001"
+    _sqlite_db.upsert_ticket_runtime(db, "T001", state="CODING")
+    _seed_full_ready(db, root, "T010")
+    _seed_dispatching_batch(db, batch_id, ["T001", "T010"])
+    _seed_dependency_analysis(
+        db, batch_id=batch_id, ticket_id="T001",
+        execution_phase=1, conflicting=["T010"],
+    )
+    _seed_dependency_analysis(
+        db, batch_id=batch_id, ticket_id="T010",
+        execution_phase=2, conflicting=["T001"],
+    )
+
+    result = dispatcher.get_recommended_tickets(db, root, mode="advisory")
+    assert result["recommendations"] == []
+
+    blocked = {b["ticket_id"]: b for b in result["blocked"]}
+    assert "T010" in blocked
+    assert blocked["T010"]["blocking_step"] == "conflicts"
+    assert blocked["T010"]["blocked_by"] == ["T001"]
+    assert "running" in blocked["T010"]["reason"].lower()
+
+
+def test_non_conflicting_parallel_candidates_still_run_together(env):
+    db, root = env["db"], env["root"]
+    batch_id = "B0001"
+    _seed_full_ready(db, root, "T002")
+    _seed_full_ready(db, root, "T003")
+    _seed_dispatching_batch(db, batch_id, ["T002", "T003"])
+    _seed_dependency_analysis(
+        db, batch_id=batch_id, ticket_id="T002", execution_phase=1,
+    )
+    _seed_dependency_analysis(
+        db, batch_id=batch_id, ticket_id="T003", execution_phase=1,
+    )
+
+    result = dispatcher.get_recommended_tickets(db, root, mode="advisory")
+    runnable = sorted(r["ticket_id"] for r in result["recommendations"])
+    assert runnable == ["T002", "T003"]
+    assert not any(b["blocking_step"] == "conflicts" for b in result["blocked"])
+
+
+def test_same_phase_conflict_uses_stable_tiebreak(env):
+    db, root = env["db"], env["root"]
+    batch_id = "B0001"
+    _seed_full_ready(db, root, "T100")
+    _seed_full_ready(db, root, "T101")
+    _seed_dispatching_batch(db, batch_id, ["T100", "T101"])
+    _seed_dependency_analysis(
+        db, batch_id=batch_id, ticket_id="T100",
+        execution_phase=3, conflicting=["T101"],
+    )
+    _seed_dependency_analysis(
+        db, batch_id=batch_id, ticket_id="T101",
+        execution_phase=3, conflicting=["T100"],
+    )
+
+    result_a = dispatcher.get_recommended_tickets(db, root, mode="advisory")
+    result_b = dispatcher.get_recommended_tickets(db, root, mode="advisory")
+    runnable_a = [r["ticket_id"] for r in result_a["recommendations"]]
+    runnable_b = [r["ticket_id"] for r in result_b["recommendations"]]
+    assert runnable_a == runnable_b == ["T100"]
+    blocked = {b["ticket_id"]: b for b in result_a["blocked"]}
+    assert blocked["T101"]["blocked_by"] == ["T100"]
+
+
+def test_conflicting_scope_relationship_blocks_without_conflicting_tickets_field(env):
+    """CONFLICTING_SCOPE in relationship_classifications must block dispatch."""
+    db, root = env["db"], env["root"]
+    batch_id = "B0001"
+    _seed_full_ready(db, root, "T001")
+    _seed_full_ready(db, root, "T010")
+    _seed_dispatching_batch(db, batch_id, ["T001", "T010"])
+    _seed_dependency_analysis(
+        db,
+        batch_id=batch_id,
+        ticket_id="T001",
+        execution_phase=1,
+        relationships=[{"from": "T001", "to": "T010", "type": "CONFLICTING_SCOPE"}],
+    )
+    _seed_dependency_analysis(
+        db, batch_id=batch_id, ticket_id="T010", execution_phase=1,
+    )
+
+    result = dispatcher.get_recommended_tickets(db, root, mode="advisory")
+    runnable = [r["ticket_id"] for r in result["recommendations"]]
+    assert runnable == ["T001"]
+    blocked = {b["ticket_id"]: b for b in result["blocked"]}
+    assert blocked["T010"]["blocking_step"] == "conflicts"
+    assert blocked["T010"]["blocked_by"] == ["T001"]

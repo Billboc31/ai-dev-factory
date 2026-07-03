@@ -429,6 +429,143 @@ def _normalize_response(raw: dict) -> tuple[dict, list[dict], list[dict]]:
     return summary, norm_tickets, norm_relationships
 
 
+def _merge_conflict_relationships(
+    norm_tickets: list[dict],
+    norm_relationships: list[dict],
+) -> None:
+    """Mirror ``CONFLICTING_SCOPE`` relationships into ``conflicting_tickets``.
+
+    The LLM sometimes declares a conflict only in ``relationships``; downstream
+    consumers read ``conflicting_tickets``. Mutates ``norm_tickets`` in place.
+    """
+    by_id = {entry["ticket_id"]: entry for entry in norm_tickets}
+    ticket_set = set(by_id)
+    for rel in norm_relationships:
+        if rel.get("type") != "CONFLICTING_SCOPE":
+            continue
+        src, dst = rel.get("from"), rel.get("to")
+        if src not in ticket_set or dst not in ticket_set or src == dst:
+            continue
+        for a, b in ((src, dst), (dst, src)):
+            conflicts = list(by_id[a].get("conflicting_tickets") or [])
+            if b not in conflicts:
+                conflicts.append(b)
+            by_id[a]["conflicting_tickets"] = sorted(set(conflicts))
+
+
+_FOUNDATION_GROUP_RE = re.compile(r"^foundation-([a-z]+)$", re.IGNORECASE)
+
+_VISION_ARCH_RE = re.compile(
+    r"product vision|overall vision|define.{0,40}vision|architecture|"
+    r"technical stack|technical foundations|scope and architecture",
+    re.IGNORECASE,
+)
+
+_BASELINE_DOCS_RE = re.compile(
+    r"baseline documentation|baseline doc|global[- ]context|readme|"
+    r"local development|confirm the product vision|folder structure|"
+    r"repository structure|project foundation and baseline",
+    re.IGNORECASE,
+)
+
+
+def _foundation_group_suffix(parallel_group: str | None) -> str | None:
+    if not parallel_group or not isinstance(parallel_group, str):
+        return None
+    match = _FOUNDATION_GROUP_RE.match(parallel_group.strip())
+    return match.group(1).lower() if match else None
+
+
+def _classify_foundation_track(ticket: dict, text: str) -> str | None:
+    """Classify a ticket as vision/arch anchor or baseline/docs track.
+
+    Returns ``anchor``, ``baseline``, or ``None`` when the rule does not apply.
+    """
+    suffix = _foundation_group_suffix(ticket.get("parallel_group"))
+    if suffix == "a":
+        return "anchor"
+    if suffix is not None:
+        return "baseline"
+
+    body = text or ""
+    has_vision = bool(_VISION_ARCH_RE.search(body))
+    has_baseline = bool(_BASELINE_DOCS_RE.search(body))
+    if has_vision and not has_baseline:
+        return "anchor"
+    if has_baseline and not has_vision:
+        return "baseline"
+    if has_vision and has_baseline:
+        if re.search(
+            r"define.{0,40}vision|vision, scope|architecture for",
+            body,
+            re.IGNORECASE,
+        ):
+            return "anchor"
+        return "baseline"
+    return None
+
+
+def _apply_foundation_track_dependencies(
+    norm_tickets: list[dict],
+    norm_relationships: list[dict],
+    ticket_texts: dict[str, str],
+    deps: dict[str, set[str]],
+    ticket_set: set[str],
+) -> list[str]:
+    """Make baseline/doc foundation tracks depend on the vision/arch anchor.
+
+    When the LLM splits the batch into ``foundation-a`` (vision/architecture)
+    and ``foundation-b`` (baseline docs), or when ticket text matches those
+    roles, downstream baseline tickets must wait for the anchor so operators
+    operators do not run parallel incompatible foundations.
+    """
+    by_id = {entry["ticket_id"]: entry for entry in norm_tickets}
+    anchors = sorted(
+        ticket_id
+        for ticket_id in ticket_set
+        if _classify_foundation_track(by_id[ticket_id], ticket_texts.get(ticket_id, ""))
+        == "anchor"
+    )
+    baselines = sorted(
+        ticket_id
+        for ticket_id in ticket_set
+        if _classify_foundation_track(by_id[ticket_id], ticket_texts.get(ticket_id, ""))
+        == "baseline"
+    )
+    if not anchors or not baselines:
+        return []
+
+    primary_anchor = anchors[0]
+    existing_rels = {
+        (rel.get("from"), rel.get("to"), rel.get("type"))
+        for rel in norm_relationships
+        if isinstance(rel, dict)
+    }
+    added: list[str] = []
+
+    for baseline_id in baselines:
+        if baseline_id == primary_anchor:
+            continue
+        current_deps = deps.get(baseline_id, set())
+        if any(anchor in current_deps for anchor in anchors):
+            continue
+        if _transitively_depends(primary_anchor, baseline_id, deps):
+            continue
+
+        deps.setdefault(baseline_id, set()).add(primary_anchor)
+        rel_key = (baseline_id, primary_anchor, "FOUNDATION_DEPENDENCY")
+        if rel_key not in existing_rels:
+            norm_relationships.append({
+                "from": baseline_id,
+                "to": primary_anchor,
+                "type": "FOUNDATION_DEPENDENCY",
+            })
+            existing_rels.add(rel_key)
+        added.append(f"{baseline_id}->{primary_anchor}")
+
+    return added
+
+
 # ── Coherence pass ────────────────────────────────────────────────────────────
 
 ROLE_ORDER = (
@@ -641,6 +778,16 @@ def _enforce_coherence(
     cycles_broken = _break_cycles(deps)
     if cycles_broken:
         notes.append(f"cycles_broken={cycles_broken}")
+
+    foundation_deps = _apply_foundation_track_dependencies(
+        norm_tickets,
+        norm_relationships,
+        ticket_texts,
+        deps,
+        ticket_set,
+    )
+    if foundation_deps:
+        notes.append(f"foundation_track_deps={foundation_deps}")
 
     roles: dict[str, str] = {}
     for tid in ticket_ids:
@@ -870,6 +1017,8 @@ def run_global_analysis(
             original_phases[entry["ticket_id"]] = 0
 
     ticket_texts = _load_ticket_texts(runs_dir, ticket_ids)
+
+    _merge_conflict_relationships(norm_tickets, norm_relationships)
 
     try:
         norm_tickets, norm_relationships, _coherence_notes = _enforce_coherence(

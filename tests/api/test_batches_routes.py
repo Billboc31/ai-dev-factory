@@ -417,6 +417,45 @@ def test_insights_uses_dispatcher_recommendations(tmp_path, monkeypatch):
     assert conflict_ids["T3"] == ["T2"]
 
 
+def test_insights_conflict_blocked_ticket(tmp_path, monkeypatch):
+    app = _make_app(tmp_path)
+    db = app.state.db_path
+    _seed_batch(db, "B0001", status="dispatching")
+    for ticket_id in ("T001", "T010"):
+        _seed_ticket_runtime(db, ticket_id, state="INIT")
+        _seed_membership(db, "B0001", ticket_id)
+    _seed_analysis(
+        db,
+        batch_id="B0001",
+        ticket_id="T001",
+        execution_phase=1,
+        conflicting=["T010"],
+    )
+    _seed_analysis(
+        db,
+        batch_id="B0001",
+        ticket_id="T010",
+        execution_phase=2,
+        conflicting=["T001"],
+    )
+
+    import ticket_execution_eligibility as _elig
+
+    def _always_ready(*_args, **_kwargs):
+        return {"ready_to_take": True, "status": "READY_TO_TAKE"}
+
+    monkeypatch.setattr(_elig, "evaluate_eligibility", _always_ready)
+
+    client = TestClient(app)
+    body = client.get("/dispatcher/batches/B0001/insights").json()
+    assert body["runnable"] == ["T001"]
+    blocked = {b["ticket_id"]: b["blocked_by"] for b in body["blocked"]}
+    assert blocked["T010"] == ["T001"]
+    conflict_ids = {c["ticket_id"]: c["conflicts_with"] for c in body["conflicts"]}
+    assert conflict_ids["T001"] == ["T010"]
+    assert conflict_ids["T010"] == ["T001"]
+
+
 # ── action guards ────────────────────────────────────────────────────────────
 
 def test_freeze_succeeds_from_collecting(tmp_path):

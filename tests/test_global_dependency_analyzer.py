@@ -247,6 +247,136 @@ def test_invalid_relationship_type_dropped(db, runs_dir, monkeypatch):
 # ── Coherence pass tests (T220) ───────────────────────────────────────────────
 
 
+def test_conflicting_scope_relationship_populates_conflicting_tickets(
+    db, runs_dir, monkeypatch,
+):
+    batch_id = _seed_batch_with_bodies(db, runs_dir, {
+        "T001": "architecture and product vision",
+        "T010": "project foundation and baseline documentation",
+    })
+    payload = json.dumps({
+        "tickets": [
+            {
+                "ticket_id": "T001",
+                "depends_on": [],
+                "blocks": [],
+                "parallel_group": None,
+                "conflicting_tickets": [],
+                "execution_phase": 1,
+            },
+            {
+                "ticket_id": "T010",
+                "depends_on": [],
+                "blocks": [],
+                "parallel_group": None,
+                "conflicting_tickets": [],
+                "execution_phase": 1,
+            },
+        ],
+        "relationships": [
+            {"from": "T001", "to": "T010", "type": "CONFLICTING_SCOPE"},
+        ],
+    })
+    _configure_stub(monkeypatch, stdout=payload)
+    outcome = gda.run_global_analysis(db, runs_dir, batch_id, exec_cmd="echo fake")
+    assert outcome.success is True
+    row_t001 = _db.get_dependency_analysis(db, "T001", batch_id)
+    row_t010 = _db.get_dependency_analysis(db, "T010", batch_id)
+    assert row_t001["conflicting_tickets"] == ["T010"]
+    assert row_t010["conflicting_tickets"] == ["T001"]
+
+
+def test_foundation_b_track_depends_on_foundation_a_vision(db, runs_dir, monkeypatch):
+    """foundation-b baseline docs must depend on foundation-a vision/arch anchor."""
+    batch_id = _seed_batch_with_bodies(db, runs_dir, {
+        "T001": (
+            "Define product vision, scope, and architecture for the project. "
+            "Establish the technical stack."
+        ),
+        "T010": (
+            "Establish project foundation and baseline documentation. "
+            "Confirm the product vision. README and global-context docs."
+        ),
+        "T011": "Bootstrap backend express typescript foundation",
+    })
+    payload = json.dumps({
+        "tickets": [
+            {
+                "ticket_id": "T001",
+                "depends_on": [],
+                "blocks": ["T002"],
+                "parallel_group": "foundation-a",
+                "conflicting_tickets": [],
+                "execution_phase": 1,
+            },
+            {
+                "ticket_id": "T010",
+                "depends_on": [],
+                "blocks": ["T011"],
+                "parallel_group": "foundation-b",
+                "conflicting_tickets": [],
+                "execution_phase": 1,
+            },
+            {
+                "ticket_id": "T011",
+                "depends_on": ["T010"],
+                "blocks": [],
+                "parallel_group": None,
+                "conflicting_tickets": [],
+                "execution_phase": 2,
+            },
+        ],
+        "relationships": [
+            {"from": "T011", "to": "T010", "type": "HARD_DEPENDENCY"},
+        ],
+    })
+    _configure_stub(monkeypatch, stdout=payload)
+    outcome = gda.run_global_analysis(db, runs_dir, batch_id, exec_cmd="echo fake")
+    assert outcome.success is True
+    row_t001 = _db.get_dependency_analysis(db, "T001", batch_id)
+    row_t010 = _db.get_dependency_analysis(db, "T010", batch_id)
+    assert row_t001["depends_on"] == []
+    assert row_t010["depends_on"] == ["T001"]
+    assert int(row_t010["execution_phase"]) > int(row_t001["execution_phase"])
+    rel_types = {r["type"] for r in row_t010["relationship_classifications"]}
+    assert "FOUNDATION_DEPENDENCY" in rel_types
+
+
+def test_foundation_baseline_text_without_parallel_group_depends_on_vision(
+    db, runs_dir, monkeypatch,
+):
+    batch_id = _seed_batch_with_bodies(db, runs_dir, {
+        "T001": "Product vision and system architecture",
+        "T010": "Baseline documentation and README for local development",
+    })
+    payload = json.dumps({
+        "tickets": [
+            {
+                "ticket_id": "T001",
+                "depends_on": [],
+                "blocks": [],
+                "parallel_group": None,
+                "conflicting_tickets": [],
+                "execution_phase": 1,
+            },
+            {
+                "ticket_id": "T010",
+                "depends_on": [],
+                "blocks": [],
+                "parallel_group": None,
+                "conflicting_tickets": [],
+                "execution_phase": 1,
+            },
+        ],
+        "relationships": [],
+    })
+    _configure_stub(monkeypatch, stdout=payload)
+    outcome = gda.run_global_analysis(db, runs_dir, batch_id, exec_cmd="echo fake")
+    assert outcome.success is True
+    row_t010 = _db.get_dependency_analysis(db, "T010", batch_id)
+    assert row_t010["depends_on"] == ["T001"]
+
+
 def test_conflicting_pair_gets_split_across_phases(db, runs_dir, monkeypatch):
     batch_id = _seed_batch_with_bodies(db, runs_dir, {
         "T001": "architecture and technical stack",

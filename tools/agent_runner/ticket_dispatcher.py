@@ -36,6 +36,7 @@ if str(_TOOLS_DIR) not in sys.path:
 import runtime_db  # noqa: E402
 import runtime_settings as _runtime_settings  # noqa: E402
 import ticket_execution_eligibility as _eligibility  # noqa: E402
+from dependency_conflicts import build_conflict_map  # noqa: E402
 from ticket_readiness_evaluator import read_ticket_markdown  # noqa: E402
 
 try:
@@ -56,6 +57,14 @@ _EXCLUDED_RUNTIME_STATES: frozenset[str] = frozenset({
     "CODING",
     "CANCELLED",
     "TEST_COMPLETE",
+})
+
+# Active tickets in the same batch block conflicting recommendations.
+_ACTIVE_CONFLICT_STATES: frozenset[str] = frozenset({
+    "PLANNING",
+    "CODING",
+    "REVIEWING",
+    "RUNNING",
 })
 
 _ENV_VAR = "AI_DEV_FACTORY_DISPATCHER_MODE"
@@ -247,6 +256,230 @@ def _sort_key(rec: dict) -> tuple:
     return (-int(rec["score"]), queue_rank_key, updated_at, rec["ticket_id"])
 
 
+def _phase_to_int(phase: str | int | None) -> int:
+    """Coerce ``execution_phase`` to an int for ordering; unknown → large."""
+    if phase is None:
+        return 10_000
+    text = str(phase).strip()
+    if not text:
+        return 10_000
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        return 10_000
+
+
+def _parallel_group_rank(parallel_group: str | None) -> int:
+    """Lower rank wins tie-breaks among same-phase conflicting tickets."""
+    if not parallel_group:
+        return 2
+    norm = parallel_group.strip().lower()
+    if norm == "foundation":
+        return 0
+    if norm == "bootstrap":
+        return 1
+    return 1
+
+
+def _conflict_priority_key(ticket_id: str, analysis: dict | None) -> tuple:
+    analysis = analysis or {}
+    return (
+        _phase_to_int(analysis.get("execution_phase")),
+        _parallel_group_rank(analysis.get("parallel_group")),
+        ticket_id,
+    )
+
+
+def _load_ticket_batch_analysis(db_path, ticket_id: str) -> tuple[str | None, dict]:
+    batch_id = _safe_call(runtime_db.get_batch_for_ticket, db_path, ticket_id)
+    if not batch_id:
+        return None, {}
+    analysis = _safe_call(
+        runtime_db.get_dependency_analysis, db_path, ticket_id, batch_id,
+    ) or {}
+    return batch_id, analysis
+
+
+def _same_batch_conflicts(
+    ticket_id: str,
+    analysis: dict,
+    *,
+    batch_members: set[str],
+    conflict_map: dict[str, set[str]] | None = None,
+) -> list[str]:
+    if conflict_map is not None:
+        return sorted(
+            other
+            for other in conflict_map.get(ticket_id, set())
+            if other in batch_members
+        )
+    from dependency_conflicts import conflict_partners
+
+    return conflict_partners(ticket_id, analysis, ticket_set=batch_members)
+
+
+def _conflict_block_reason(
+    *,
+    blocker_id: str,
+    blocker_analysis: dict | None,
+    blocked_analysis: dict | None,
+    running: bool,
+) -> str:
+    if running:
+        return f"blocked by conflicting ticket {blocker_id} (currently running)"
+    blocker_phase = _phase_to_int((blocker_analysis or {}).get("execution_phase"))
+    blocked_phase = _phase_to_int((blocked_analysis or {}).get("execution_phase"))
+    if blocker_phase < blocked_phase:
+        return f"blocked by conflict with earlier-phase ticket {blocker_id}"
+    return f"blocked by conflicting ticket {blocker_id}"
+
+
+def _apply_conflict_filter(
+    db_path,
+    recommendations: list[dict],
+    blocked: list[dict],
+    runtime_rows: list[dict],
+) -> tuple[list[dict], list[dict]]:
+    """Remove conflicting recommendations within the same batch.
+
+    Consumes dependency-analysis rows (``conflicting_tickets``,
+    ``execution_phase``, ``parallel_group``) read-only. Never mutates analysis
+    data. Tickets outside a batch, or with no recorded conflicts, pass through.
+    """
+    if not recommendations:
+        return recommendations, blocked
+
+    runtime_map: dict[str, str] = {}
+    for row in runtime_rows:
+        ticket_id = (row.get("ticket_id") or "").strip()
+        if ticket_id:
+            runtime_map[ticket_id] = (row.get("state") or "").strip().upper()
+
+    rec_by_id = {rec["ticket_id"]: rec for rec in recommendations}
+    analyses: dict[str, dict] = {}
+    batch_ids: dict[str, str] = {}
+    batch_members_cache: dict[str, set[str]] = {}
+    batch_conflict_maps: dict[str, dict[str, set[str]]] = {}
+
+    for ticket_id in rec_by_id:
+        batch_id, analysis = _load_ticket_batch_analysis(db_path, ticket_id)
+        if batch_id:
+            batch_ids[ticket_id] = batch_id
+            analyses[ticket_id] = analysis
+
+    def _batch_members(batch_id: str) -> set[str]:
+        if batch_id not in batch_members_cache:
+            members = _safe_call(
+                runtime_db.list_backlog_batch_ticket_ids, db_path, batch_id,
+            ) or []
+            batch_members_cache[batch_id] = set(members)
+        return batch_members_cache[batch_id]
+
+    def _conflict_map_for_batch(batch_id: str) -> dict[str, set[str]]:
+        if batch_id not in batch_conflict_maps:
+            members = sorted(_batch_members(batch_id))
+            batch_analyses: dict[str, dict] = {}
+            for member in members:
+                if member in analyses:
+                    batch_analyses[member] = analyses[member]
+                else:
+                    row = _safe_call(
+                        runtime_db.get_dependency_analysis,
+                        db_path,
+                        member,
+                        batch_id,
+                    ) or {}
+                    batch_analyses[member] = row
+            batch_conflict_maps[batch_id] = build_conflict_map(
+                members, batch_analyses,
+            )
+        return batch_conflict_maps[batch_id]
+
+    running_by_batch: dict[str, set[str]] = {}
+
+    def _running_in_batch(batch_id: str) -> set[str]:
+        if batch_id not in running_by_batch:
+            active = {
+                member
+                for member in _batch_members(batch_id)
+                if runtime_map.get(member, "") in _ACTIVE_CONFLICT_STATES
+            }
+            running_by_batch[batch_id] = active
+        return running_by_batch[batch_id]
+
+    candidate_ids = sorted(
+        rec_by_id,
+        key=lambda tid: _conflict_priority_key(tid, analyses.get(tid)),
+    )
+
+    selected: set[str] = set()
+    conflict_blocked: dict[str, tuple[str, str]] = {}
+
+    for ticket_id in candidate_ids:
+        batch_id = batch_ids.get(ticket_id)
+        if not batch_id:
+            selected.add(ticket_id)
+            continue
+
+        analysis = analyses.get(ticket_id, {})
+        members = _batch_members(batch_id)
+        conflict_map = _conflict_map_for_batch(batch_id)
+        conflicts = _same_batch_conflicts(
+            ticket_id, analysis, batch_members=members, conflict_map=conflict_map,
+        )
+
+        running_conflict = next(
+            (other for other in conflicts if other in _running_in_batch(batch_id)),
+            None,
+        )
+        if running_conflict is not None:
+            conflict_blocked[ticket_id] = (
+                running_conflict,
+                _conflict_block_reason(
+                    blocker_id=running_conflict,
+                    blocker_analysis=analyses.get(running_conflict),
+                    blocked_analysis=analysis,
+                    running=True,
+                ),
+            )
+            continue
+
+        selected_conflict = next(
+            (other for other in conflicts if other in selected),
+            None,
+        )
+        if selected_conflict is not None:
+            conflict_blocked[ticket_id] = (
+                selected_conflict,
+                _conflict_block_reason(
+                    blocker_id=selected_conflict,
+                    blocker_analysis=analyses.get(selected_conflict),
+                    blocked_analysis=analysis,
+                    running=False,
+                ),
+            )
+            continue
+
+        selected.add(ticket_id)
+
+    filtered_recs = [rec for rec in recommendations if rec["ticket_id"] in selected]
+    already_blocked = {entry["ticket_id"] for entry in blocked}
+
+    for ticket_id, (blocker_id, reason) in sorted(conflict_blocked.items()):
+        if ticket_id in already_blocked:
+            continue
+        blocked.append({
+            "ticket_id": ticket_id,
+            "ready_to_take": False,
+            "status": "CONFLICT_BLOCKED",
+            "blocking_step": "conflicts",
+            "reason": reason,
+            "blocked_by": [blocker_id],
+        })
+
+    return filtered_recs, blocked
+
+
 def get_recommended_tickets(
     db_path,
     project_root: Path,
@@ -355,6 +588,10 @@ def get_recommended_tickets(
                 "blocking_step": eligibility.get("blocking_step"),
                 "reason": eligibility.get("reason"),
             })
+
+    recommendations, blocked = _apply_conflict_filter(
+        db_path, recommendations, blocked, rows,
+    )
 
     recommendations.sort(key=_sort_key)
     for index, rec in enumerate(recommendations, start=1):

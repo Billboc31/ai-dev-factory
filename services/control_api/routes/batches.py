@@ -42,6 +42,7 @@ if str(_TOOLS_DIR) not in sys.path:
 
 import backlog_batch as _backlog_batch  # noqa: E402
 import runtime_db  # noqa: E402
+import dependency_conflicts as _dep_conflicts  # noqa: E402
 import ticket_dispatcher as _dispatcher  # noqa: E402
 
 logger = logging.getLogger("control-api")
@@ -462,9 +463,9 @@ def _build_graph(
                 continue
             seen.add(key)
             edges.append(BatchGraphEdge(from_id=dep, to_id=ticket_id, type="depends_on"))
-        for other in analysis.get("conflicting_tickets") or []:
-            if other not in ticket_set or other == ticket_id:
-                continue
+        for other in _dep_conflicts.conflict_partners(
+            ticket_id, analysis, ticket_set=ticket_set,
+        ):
             key = tuple(sorted([ticket_id, other])) + ("conflicts_with",)
             if key in seen:
                 continue
@@ -516,6 +517,23 @@ def _build_insights(
     runnable.sort()
 
     runtime_map = _ticket_runtime_map(db_path)
+    conflict_blocked: dict[str, list[str]] = {}
+    if dispatcher_payload:
+        for entry in dispatcher_payload.get("blocked") or []:
+            if entry.get("blocking_step") != "conflicts":
+                continue
+            ticket_id = entry.get("ticket_id")
+            if not ticket_id:
+                continue
+            blockers = list(entry.get("blocked_by") or [])
+            if not blockers and entry.get("reason"):
+                # Fallback: keep insights usable if only ``reason`` is present.
+                for token in str(entry["reason"]).split():
+                    if token.startswith("T") and token[1:].isdigit():
+                        blockers.append(token.rstrip(".,;"))
+            if blockers:
+                conflict_blocked[ticket_id] = sorted(set(blockers))
+
     blocked: list[BatchBlockedTicket] = []
     for ticket_id in ticket_ids:
         deps = list(analyses.get(ticket_id, {}).get("depends_on") or [])
@@ -526,20 +544,26 @@ def _build_insights(
             continue
         if ticket_id in runnable:
             continue
+        if ticket_id in conflict_blocked:
+            blocked.append(
+                BatchBlockedTicket(
+                    ticket_id=ticket_id,
+                    blocked_by=conflict_blocked[ticket_id],
+                )
+            )
+            continue
         if not deps:
             continue
         blocked.append(BatchBlockedTicket(ticket_id=ticket_id, blocked_by=sorted(set(deps))))
 
     conflicts: list[BatchConflict] = []
     for ticket_id in ticket_ids:
-        others = [
-            other
-            for other in analyses.get(ticket_id, {}).get("conflicting_tickets") or []
-            if other in ticket_set and other != ticket_id
-        ]
+        others = _dep_conflicts.conflict_partners(
+            ticket_id, analyses.get(ticket_id), ticket_set=ticket_set,
+        )
         if others:
             conflicts.append(
-                BatchConflict(ticket_id=ticket_id, conflicts_with=sorted(set(others)))
+                BatchConflict(ticket_id=ticket_id, conflicts_with=others)
             )
 
     return BatchInsightsResponse(
