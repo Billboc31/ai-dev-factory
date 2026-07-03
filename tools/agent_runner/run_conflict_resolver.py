@@ -545,7 +545,10 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
             stdout, stderr_ai, rc = execute_external_command(exec_cmd, runtime_prompt)
 
             if rc != 0:
+                detail = (stdout or stderr_ai or "").strip()
                 msg = f"AI resolver failed (rc={rc}) pass {pass_count}"
+                if detail:
+                    msg = f"{msg}: {detail[:800]}"
                 _log(ticket_id, msg)
                 _write_error_log(run_dir, msg, stderr_ai)
                 (conflict_dir / "resolution.md").write_text(stdout or "", encoding="utf-8")
