@@ -198,19 +198,29 @@ def _run_tests(ticket_id: str, run_dir: Path) -> str:
 
 def _blocking_dirty_paths(porcelain: str, ticket_id: str) -> list[str]:
     """Return dirty paths that should block ``git rebase`` (ignore runtime noise)."""
+    runtime_prefix = f"runs/{ticket_id}/"
     ignore = {
-        f"runs/{ticket_id}/runtime.log",
-        f"runs/{ticket_id}/daemon.lock",
+        f"{runtime_prefix}runtime.log",
+        f"{runtime_prefix}daemon.lock",
     }
     blocking: list[str] = []
     for line in porcelain.splitlines():
         if not line.strip():
             continue
         path = line[3:].strip().split(" -> ")[-1]
-        if path in ignore or path.startswith(f"runs/{ticket_id}/conflict"):
+        if path in ignore or path.startswith(runtime_prefix):
             continue
         blocking.append(path)
     return blocking
+
+
+def _scrub_ticket_runtime_dir(ticket_id: str) -> None:
+    """Reset ``runs/{ticket}/`` so resolver artifacts never block ``git rebase``."""
+    prefix = f"runs/{ticket_id}/"
+    if not Path(prefix).exists():
+        return
+    _run_git(["checkout", "HEAD", "--", prefix])
+    _run_git(["clean", "-fd", prefix.rstrip("/")])
 
 
 def _rebase_in_progress() -> bool:
@@ -224,19 +234,13 @@ def _rebase_in_progress() -> bool:
 
 
 def _prepare_clean_tree_for_rebase(ticket_id: str) -> bool:
-    """Ensure only runtime noise remains dirty before ``git rebase``.
+    """Ensure only non-runtime paths remain dirty before ``git rebase``.
 
     ``state.json`` is tracked on ticket branches; committing it before rebase
-    causes git replay to rewind the file to an older workflow state. Reset it
-    to HEAD instead — the caller keeps an in-memory backup.
+    causes git replay to rewind the file to an older workflow state. Reset the
+    whole ``runs/{ticket}/`` tree instead — the caller keeps an in-memory backup.
     """
-    prefix = f"runs/{ticket_id}/"
-    state_path = f"{prefix}state.json"
-    if Path(state_path).exists():
-        _run_git(["checkout", "HEAD", "--", state_path])
-
-    _run_git(["clean", "-fd", f"{prefix}conflict"])
-    _run_git(["checkout", "--", f"{prefix}runtime.log", f"{prefix}daemon.lock"])
+    _scrub_ticket_runtime_dir(ticket_id)
 
     remaining = _run_git(["status", "--porcelain"])
     if remaining.returncode != 0:
@@ -327,7 +331,16 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
             return 2
     else:
         if not _prepare_clean_tree_for_rebase(ticket_id):
-            msg = "failed to prepare clean tree before rebase (see runtime.log for blocking paths)"
+            remaining = _run_git(["status", "--porcelain"])
+            blocking = (
+                _blocking_dirty_paths(remaining.stdout, ticket_id)
+                if remaining.returncode == 0
+                else ["<git status failed>"]
+            )
+            msg = (
+                "failed to prepare clean tree before rebase"
+                f" — blocking paths: {blocking}"
+            )
             _log(ticket_id, msg)
             _write_error_log(run_dir, msg)
             _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED")

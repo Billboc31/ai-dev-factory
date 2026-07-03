@@ -483,6 +483,8 @@ def test_blocking_dirty_paths_ignores_runtime_noise():
     porcelain = "\n".join([
         " M runs/T010/runtime.log",
         " M runs/T010/daemon.lock",
+        "?? runs/T010/conflict/error.log",
+        "?? runs/T010/prompts/conflict-resolver-attempt-1.md",
         " M README.md",
     ])
     assert rcr._blocking_dirty_paths(porcelain, "T010") == ["README.md"]
