@@ -236,6 +236,12 @@ def _spawn_daemon(exec_cmd: str) -> tuple[int | None, str | None, str | None]:
     ]
     if _legacy_project:
         cmd += ["--project", _legacy_project]
+    tools_dir = _project_root_dir / "tools" / "agent_runner"
+    if str(tools_dir) not in sys.path:
+        sys.path.insert(0, str(tools_dir))
+    import runtime_settings as _runtime_settings  # noqa: E402
+
+    cmd += _runtime_settings.daemon_max_workers_argv_for_project(_legacy_project)
     try:
         # Daemon inherits the supervisor env (incl. RUNTIME_DB_* from deploy/.env)
         # so it shares the same runtime DB backend as the API — no split-brain.
@@ -2078,6 +2084,14 @@ def project_daemon_start(project_id: str, body: ProjectDaemonStartRequest = None
         # Scope this daemon's runtime DB rows to its project (Postgres backend).
         "--project", project_id,
     ]
+    tools_dir = _project_root_dir / "tools" / "agent_runner"
+    if str(tools_dir) not in sys.path:
+        sys.path.insert(0, str(tools_dir))
+    import runtime_settings as _runtime_settings  # noqa: E402
+
+    cmd += _runtime_settings.daemon_max_workers_argv_for_project(
+        project_id, project_runtime_root=project_runtime_root,
+    )
     try:
         # The daemon inherits the supervisor's environment, which carries the
         # runtime DB config (RUNTIME_DB_BACKEND/HOST/PORT/USER/PASSWORD/NAME)

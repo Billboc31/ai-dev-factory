@@ -117,5 +117,17 @@ def test_delete_removes_row(db: Path) -> None:
 def test_list_returns_rows_ordered(db: Path) -> None:
     _db.upsert_runtime_setting(db, "Z_KEY", value="z", value_type="string")
     _db.upsert_runtime_setting(db, "A_KEY", value="a", value_type="string")
-    rows = _db.list_runtime_settings(db)
-    assert [r["key"] for r in rows] == ["A_KEY", "Z_KEY"]
+    keys = [r["key"] for r in _db.list_runtime_settings(db)]
+    assert keys == ["A_KEY", "Z_KEY"]
+
+
+def test_resolve_daemon_max_workers_reads_setting(db: Path) -> None:
+    import runtime_settings as rs
+
+    assert rs.resolve_daemon_max_workers(db) == 1
+    _db.upsert_runtime_setting(
+        db, "MAX_WORKERS", value="5", value_type="int", requires_restart=True,
+    )
+    assert rs.resolve_daemon_max_workers(db) == 5
+    _db.upsert_runtime_setting(db, "MAX_WORKERS", value="0", value_type="int")
+    assert rs.resolve_daemon_max_workers(db) == 1

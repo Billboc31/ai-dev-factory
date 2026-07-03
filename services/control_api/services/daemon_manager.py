@@ -106,6 +106,8 @@ def _recommended_host_command(
     project_root: Path,
     exec_cmd: str,
     repo_slug: str | None = None,
+    project_id: str | None = None,
+    project_runtime_root: Path | None = None,
 ) -> str:
     """Build the canonical multi-line host command for the dashboard to copy.
 
@@ -132,6 +134,19 @@ def _recommended_host_command(
     runtime_root_display = _expand_user(runtime_root)
     issue_repo = repo_slug or os.environ.get("AI_DEV_FACTORY_ISSUE_REPO", "<owner>/<repo>")
 
+    max_workers_suffix = " --max-workers 1"
+    try:
+        if str(_TOOLS_DIR) not in sys.path:
+            sys.path.insert(0, str(_TOOLS_DIR))
+        import runtime_settings as _runtime_settings  # noqa: E402
+
+        argv = _runtime_settings.daemon_max_workers_argv_for_project(
+            project_id, project_runtime_root=project_runtime_root,
+        )
+        max_workers_suffix = f" {argv[0]} {argv[1]}"
+    except Exception:
+        pass
+
     # Poll interval is resolved per-cycle from the GITHUB_POLL_INTERVAL_SECONDS
     # runtime setting so admins can change it from the settings UI without
     # editing this command. Pass an explicit ``--interval N`` to pin the value.
@@ -146,6 +161,7 @@ def _recommended_host_command(
         f"--auto-commit "
         f"--auto-push "
         f"--auto-include-code"
+        f"{max_workers_suffix}"
     )
 
 
@@ -501,7 +517,10 @@ def start(project_root: Path, exec_cmd: str, restart_policy: str = "no-restart",
 
     # ── path 2: Docker without a host launcher → hard refusal ─────────────
     if in_docker:
-        recommended = _recommended_host_command(project_root, exec_cmd)
+        recommended = _recommended_host_command(
+            project_root, exec_cmd, project_id=project_id,
+            project_runtime_root=project_runtime_root,
+        )
         message = (
             "Daemon cannot start inside Docker. Run it on the host (where "
             "gh, claude and the git worktrees live), or configure "
@@ -563,6 +582,13 @@ def start(project_root: Path, exec_cmd: str, restart_policy: str = "no-restart",
         "--worktrees-dir",
         facts["worktrees_dir"],
     ]
+    if str(_TOOLS_DIR) not in sys.path:
+        sys.path.insert(0, str(_TOOLS_DIR))
+    import runtime_settings as _runtime_settings  # noqa: E402
+
+    cmd += _runtime_settings.daemon_max_workers_argv_for_project(
+        project_id, project_runtime_root=project_runtime_root,
+    )
 
     try:
         # Suppress .pyc generation for the entire daemon process tree so the

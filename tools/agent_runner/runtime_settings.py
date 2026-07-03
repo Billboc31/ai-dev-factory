@@ -575,6 +575,46 @@ def get_setting_int_positive(db_path, key: str, safe_default: int) -> int:
     return safe_default
 
 
+def resolve_daemon_max_workers(db_path) -> int:
+    """Return ``MAX_WORKERS`` for ``run_daemon.py --max-workers`` at spawn time.
+
+    Read once when the supervisor/API starts the daemon; live UI changes
+    require a daemon restart (``requires_restart=True`` on the setting).
+    """
+    try:
+        raw = get_setting(db_path, "MAX_WORKERS")
+    except Exception:
+        raw = None
+    if raw is None:
+        return 1
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return 1
+    return max(1, value)
+
+
+def daemon_max_workers_argv(db_path) -> list[str]:
+    return ["--max-workers", str(resolve_daemon_max_workers(db_path))]
+
+
+def daemon_max_workers_argv_for_project(
+    project_id: str | None = None,
+    *,
+    project_runtime_root=None,
+) -> list[str]:
+    """Build ``--max-workers N`` argv for a project-scoped daemon spawn."""
+    try:
+        db = runtime_db.resolve_db_path_for_project(
+            project_id, project_runtime_root=project_runtime_root,
+        )
+        if db is None:
+            return ["--max-workers", "1"]
+        return daemon_max_workers_argv(db)
+    except Exception:
+        return ["--max-workers", "1"]
+
+
 __all__ = [
     "SettingSpec",
     "SETTING_SPECS",
@@ -583,6 +623,9 @@ __all__ = [
     "SensitiveSettingWriteError",
     "get_setting",
     "get_setting_int_positive",
+    "resolve_daemon_max_workers",
+    "daemon_max_workers_argv",
+    "daemon_max_workers_argv_for_project",
     "resolve_effective_setting",
     "list_effective_settings",
     "set_setting",
