@@ -163,11 +163,51 @@ def _list_conflicted_files() -> list[str]:
     return [line.strip() for line in result.stdout.splitlines() if line.strip()]
 
 
+def _runtime_path_prefix(ticket_id: str) -> str:
+    return f"runs/{ticket_id}/"
+
+
+def _split_conflicts(ticket_id: str, files: list[str]) -> tuple[list[str], list[str]]:
+    prefix = _runtime_path_prefix(ticket_id)
+    source = [f for f in files if not f.startswith(prefix)]
+    runtime = [f for f in files if f.startswith(prefix)]
+    return source, runtime
+
+
 def _has_conflict_markers(path: str) -> bool:
     try:
         return "<<<<<<< " in Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
+
+
+def _scan_source_marker_conflicts(ticket_id: str) -> list[str]:
+    """Return source paths that still contain conflict markers on disk."""
+    prefix = _runtime_path_prefix(ticket_id)
+    found: list[str] = []
+    for path in Path(".").rglob("*"):
+        if not path.is_file():
+            continue
+        rel = path.as_posix()
+        if rel.startswith(".git/") or rel.startswith(prefix):
+            continue
+        if _has_conflict_markers(rel):
+            found.append(rel)
+    return sorted(found)
+
+
+def _effective_source_conflicts(ticket_id: str) -> list[str]:
+    """Merge git unmerged paths with on-disk marker scan (source files only)."""
+    unmerged = _list_conflicted_files()
+    source, runtime = _split_conflicts(ticket_id, unmerged)
+    marker_paths = _scan_source_marker_conflicts(ticket_id)
+    merged: list[str] = []
+    seen: set[str] = set()
+    for path in source + marker_paths:
+        if path not in seen:
+            seen.add(path)
+            merged.append(path)
+    return merged
 
 
 def _abort_rebase(ticket_id: str) -> None:
@@ -218,12 +258,15 @@ def _blocking_dirty_paths(porcelain: str, ticket_id: str) -> list[str]:
 
 
 def _scrub_ticket_runtime_dir(ticket_id: str) -> None:
-    """Reset ``runs/{ticket}/`` so resolver artifacts never block ``git rebase``."""
-    prefix = f"runs/{ticket_id}/"
-    if not Path(prefix).exists():
-        return
-    _run_git(["checkout", "HEAD", "--", prefix])
-    _run_git(["clean", "-fd", prefix.rstrip("/")])
+    """Reset resolver scratch under ``runs/{ticket}/`` without wiping ``runtime.log``."""
+    prefix = _runtime_path_prefix(ticket_id)
+    state_path = f"{prefix}state.json"
+    if Path(state_path).exists():
+        _run_git(["checkout", "HEAD", "--", state_path])
+    lock_path = f"{prefix}daemon.lock"
+    if Path(lock_path).exists():
+        _run_git(["checkout", "--", lock_path])
+    _run_git(["clean", "-fd", f"{prefix}conflict", f"{prefix}prompts"])
 
 
 def _rebase_in_progress() -> bool:
@@ -253,17 +296,6 @@ def _prepare_clean_tree_for_rebase(ticket_id: str) -> bool:
         _log(ticket_id, f"blocking dirty paths before rebase: {blocking}")
         return False
     return True
-
-
-def _runtime_path_prefix(ticket_id: str) -> str:
-    return f"runs/{ticket_id}/"
-
-
-def _split_conflicts(ticket_id: str, files: list[str]) -> tuple[list[str], list[str]]:
-    prefix = _runtime_path_prefix(ticket_id)
-    source = [f for f in files if not f.startswith(prefix)]
-    runtime = [f for f in files if f.startswith(prefix)]
-    return source, runtime
 
 
 def _auto_resolve_runtime_conflicts(ticket_id: str, paths: list[str]) -> None:
@@ -310,43 +342,43 @@ def _advance_past_runtime_conflicts(
     """Auto-resolve ``runs/{ticket}/`` conflicts and continue until source conflicts."""
     for step in range(max_steps):
         raw = _list_conflicted_files()
-        if not raw:
-            if not _rebase_in_progress():
-                return []
-            cont = _run_rebase_continue(ticket_id)
-            if cont.returncode == 0:
-                continue
-            raw = _list_conflicted_files()
-            if raw:
-                continue
-            detail = "\n".join(
-                x for x in (cont.stdout.strip(), cont.stderr.strip()) if x
-            ) or "<no output>"
-            _write_error_log(run_dir, f"rebase --continue failed (runtime step {step + 1}): {detail}")
-            return None
+        source = _effective_source_conflicts(ticket_id)
+        _, runtime = _split_conflicts(ticket_id, raw)
 
-        source, runtime = _split_conflicts(ticket_id, raw)
         if runtime:
             _log(ticket_id, f"auto-resolving runtime path conflicts: {runtime}")
             _auto_resolve_runtime_conflicts(ticket_id, runtime)
+
         if source:
             _persist_conflict_state(run_dir, data, "CONFLICT_RESOLVING", source)
             return source
 
+        if not _rebase_in_progress():
+            return []
+
+        if raw:
+            # Runtime-only unmerged paths were resolved; re-check before continue.
+            continue
+
         cont = _run_rebase_continue(ticket_id)
-        if cont.returncode != 0:
-            out_lower = (cont.stdout + cont.stderr).lower()
-            if "nothing to commit" in out_lower or "no changes" in out_lower:
-                _run_git(["rebase", "--skip"])
-                continue
-            raw = _list_conflicted_files()
-            if raw:
-                continue
-            detail = "\n".join(
-                x for x in (cont.stdout.strip(), cont.stderr.strip()) if x
-            ) or "<no output>"
-            _write_error_log(run_dir, f"rebase --continue failed after runtime resolve: {detail}")
-            return None
+        if cont.returncode == 0:
+            continue
+
+        out_lower = (cont.stdout + cont.stderr).lower()
+        if "nothing to commit" in out_lower or "no changes" in out_lower:
+            _run_git(["rebase", "--skip"])
+            continue
+
+        source = _effective_source_conflicts(ticket_id)
+        if source:
+            _persist_conflict_state(run_dir, data, "CONFLICT_RESOLVING", source)
+            return source
+
+        detail = "\n".join(
+            x for x in (cont.stdout.strip(), cont.stderr.strip()) if x
+        ) or "<no output>"
+        _write_error_log(run_dir, f"rebase --continue failed (runtime step {step + 1}): {detail}")
+        return None
 
     _write_error_log(run_dir, f"exceeded {max_steps} runtime conflict advance steps")
     return None
@@ -525,6 +557,15 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
 
             # Check which files still have markers after AI edit (before staging)
             still_unresolved_markers = [f for f in pass_conflicted if _has_conflict_markers(f)]
+            if still_unresolved_markers:
+                msg = (
+                    f"AI resolver pass {pass_count} finished but conflict markers remain in:"
+                    f" {still_unresolved_markers}"
+                )
+                _log(ticket_id, msg)
+                _write_error_log(run_dir, msg, stderr_ai)
+                conflicted_files = still_unresolved_markers
+                continue
 
             # Stage only the conflicted files (not git add -A)
             staged = list(pass_conflicted)
