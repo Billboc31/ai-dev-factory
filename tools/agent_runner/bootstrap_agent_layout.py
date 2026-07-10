@@ -10,7 +10,9 @@ from pathlib import Path
 logger = logging.getLogger(__name__)
 
 SETUP_BRANCH = "ai-dev-factory/bootstrap-agent-layout"
+INTEGRATION_BRANCH = "main"
 COMMIT_MESSAGE = "chore: add AI Dev Factory agent workspace"
+INITIAL_COMMIT_MESSAGE = "chore: initial commit"
 PR_TITLE = "Add AI Dev Factory agent workspace"
 
 _VALIDATION_COMMANDS: dict[str, list[str]] = {
@@ -47,7 +49,55 @@ def _get_default_branch(project_path: Path) -> str:
         result = _run_git(cmd, project_path)
         if result.returncode == 0:
             return result.stdout.strip().removeprefix("origin/")
-    return "main"
+    return INTEGRATION_BRANCH
+
+
+def _remote_branch_exists(project_path: Path, branch: str) -> bool:
+    result = _run_git(["ls-remote", "--heads", "origin", branch], project_path)
+    return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def _ensure_local_main_baseline(project_path: Path) -> None:
+    """Ensure a local ``main`` branch exists before creating the setup branch.
+
+  On virgin repos (no commits, or commits only on a transient HEAD) the ticket
+  daemon later needs ``origin/main``. We anchor ``main`` first so the setup PR
+  has a stable integration target.
+    """
+    if _run_git(["rev-parse", "--verify", "--quiet", "main"], project_path).returncode == 0:
+        return
+    if _run_git(["rev-parse", "--verify", "--quiet", "HEAD"], project_path).returncode != 0:
+        _run_git(["checkout", "-b", INTEGRATION_BRANCH], project_path)
+        _run_git(
+            ["commit", "--allow-empty", "-m", INITIAL_COMMIT_MESSAGE],
+            project_path,
+        )
+        return
+    _run_git(["branch", INTEGRATION_BRANCH, "HEAD"], project_path)
+
+
+def _ensure_main_on_remote(project_path: Path) -> None:
+    """Push ``main`` to origin when missing so virgin repos keep a ``main`` ref.
+
+    Without this, the first push of the setup branch becomes GitHub's default
+    branch and ticket intake fails with ``couldn't find remote ref main``.
+    """
+    if _remote_branch_exists(project_path, INTEGRATION_BRANCH):
+        return
+    if _run_git(["rev-parse", "--verify", "--quiet", INTEGRATION_BRANCH], project_path).returncode != 0:
+        return
+    logger.info(
+        "bootstrap_agent_layout: %r missing on origin — pushing local %s first",
+        INTEGRATION_BRANCH,
+        INTEGRATION_BRANCH,
+    )
+    push = _run_git(["push", "-u", "origin", INTEGRATION_BRANCH], project_path)
+    if push.returncode != 0:
+        logger.warning(
+            "bootstrap_agent_layout: failed to seed %s on origin: %s",
+            INTEGRATION_BRANCH,
+            push.stderr.strip(),
+        )
 
 
 def _layout_exists(project_path: Path) -> bool:
@@ -173,8 +223,20 @@ def bootstrap_agent_layout(
 
     repo_url = _get_remote_url(project_path) or ""
     default_branch = _get_default_branch(project_path)
+    integration_branch = (
+        INTEGRATION_BRANCH
+        if default_branch == INTEGRATION_BRANCH or not _remote_branch_exists(project_path, default_branch)
+        else default_branch
+    )
     project_name = project_id.replace("-", " ").title()
     validation_commands = _detect_validation_commands(stack)
+
+    _ensure_local_main_baseline(project_path)
+    on_main = _run_git(["checkout", INTEGRATION_BRANCH], project_path)
+    if on_main.returncode != 0:
+        error = f"git checkout {INTEGRATION_BRANCH} failed: {on_main.stderr.strip()}"
+        logger.warning("bootstrap_agent_layout: %s", error)
+        return {"branch": None, "pr_url": None, "pr_number": None, "error": error}
 
     result = _run_git(["checkout", "-b", SETUP_BRANCH], project_path)
     if result.returncode != 0:
@@ -209,6 +271,8 @@ def bootstrap_agent_layout(
         logger.info("bootstrap_agent_layout: no remote — skipping push/PR")
         return {"branch": SETUP_BRANCH, "pr_url": None, "pr_number": None, "error": None}
 
+    _ensure_main_on_remote(project_path)
+
     result = _run_git(["push", "-u", "origin", SETUP_BRANCH], project_path)
     if result.returncode != 0:
         error = f"git push failed: {result.stderr.strip()}"
@@ -221,7 +285,7 @@ def bootstrap_agent_layout(
             "gh", "pr", "create",
             "--title", PR_TITLE,
             "--body", pr_body,
-            "--base", default_branch,
+            "--base", integration_branch,
             "--head", SETUP_BRANCH,
         ],
         cwd=project_path,

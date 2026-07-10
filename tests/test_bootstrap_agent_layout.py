@@ -12,6 +12,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from tools.agent_runner.bootstrap_agent_layout import (
     SETUP_BRANCH,
+    INTEGRATION_BRANCH,
+    _ensure_local_main_baseline,
     _generate_global_context,
     _layout_exists,
     bootstrap_agent_layout,
@@ -33,6 +35,20 @@ def _init_git_repo(path: Path) -> Path:
     subprocess.run(["git", "add", "-A"], cwd=path, capture_output=True, check=True)
     subprocess.run(
         ["git", "commit", "-m", "init"],
+        cwd=path, capture_output=True, check=True,
+    )
+    return path
+
+
+def _init_empty_git_repo(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init"], cwd=path, capture_output=True, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=path, capture_output=True, check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test"],
         cwd=path, capture_output=True, check=True,
     )
     return path
@@ -66,6 +82,76 @@ def test_generate_global_context_contains_folder_list(tmp_path):
     assert "prompts/" in content
     assert "runs/" in content
     assert "tickets/" in content
+
+
+def test_ensure_local_main_baseline_on_empty_repo(tmp_path):
+    repo = _init_empty_git_repo(tmp_path / "empty")
+    _ensure_local_main_baseline(repo)
+
+    branch = subprocess.run(
+        ["git", "symbolic-ref", "--short", "HEAD"],
+        cwd=repo, capture_output=True, text=True, check=True,
+    )
+    assert branch.stdout.strip() == INTEGRATION_BRANCH
+    log = subprocess.run(
+        ["git", "log", "--oneline", "-1"],
+        cwd=repo, capture_output=True, text=True, check=True,
+    )
+    assert "initial commit" in log.stdout
+
+
+def test_bootstrap_virgin_repo_creates_local_main(tmp_path):
+    repo = _init_empty_git_repo(tmp_path / "virgin")
+    with patch("tools.agent_runner.bootstrap_agent_layout._get_remote_url", return_value=None):
+        result = bootstrap_agent_layout(repo, "virgin-project")
+
+    assert result["error"] is None
+    branches = subprocess.run(
+        ["git", "branch", "--list", INTEGRATION_BRANCH, SETUP_BRANCH],
+        cwd=repo, capture_output=True, text=True, check=True,
+    )
+    assert INTEGRATION_BRANCH in branches.stdout
+    assert SETUP_BRANCH in branches.stdout
+
+
+def test_bootstrap_pushes_main_before_setup_branch(tmp_path):
+    repo = _init_empty_git_repo(tmp_path / "remote-virgin")
+    fake_url = "https://github.com/org/virgin.git"
+    push_targets: list[str] = []
+
+    def fake_git(args, cwd):
+        if args[:2] == ["remote", "get-url"]:
+            r = MagicMock()
+            r.returncode = 0
+            r.stdout = fake_url
+            return r
+        if args[:2] == ["ls-remote", "--heads"]:
+            r = MagicMock()
+            r.returncode = 0
+            r.stdout = ""
+            return r
+        if args[0] == "push":
+            push_targets.append(args[-1])
+            r = MagicMock()
+            r.returncode = 0
+            r.stdout = ""
+            r.stderr = ""
+            return r
+        return subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True)
+
+    with patch("tools.agent_runner.bootstrap_agent_layout._run_git", side_effect=fake_git):
+        with patch("tools.agent_runner.bootstrap_agent_layout._get_remote_url", return_value=fake_url):
+            with patch("subprocess.run") as mock_run:
+                gh_result = MagicMock()
+                gh_result.returncode = 0
+                gh_result.stdout = "https://github.com/org/virgin/pull/1\n"
+                gh_result.stderr = ""
+                mock_run.return_value = gh_result
+                result = bootstrap_agent_layout(repo, "virgin-project")
+
+    assert result["error"] is None
+    assert push_targets[0] == INTEGRATION_BRANCH
+    assert push_targets[1] == SETUP_BRANCH
 
 
 # ── integration tests — real git repo ────────────────────────────────────────
@@ -170,36 +256,33 @@ def test_bootstrap_pr_creation_failure_captured(tmp_path):
             r.returncode = 0
             r.stdout = fake_url
             return r
+        if args[:2] == ["ls-remote", "--heads"]:
+            r = MagicMock()
+            r.returncode = 0
+            r.stdout = ""
+            return r
+        if args[0] == "push":
+            r = MagicMock()
+            r.returncode = 0
+            r.stdout = ""
+            r.stderr = ""
+            return r
         import subprocess as _sp
         return _sp.run(["git"] + args, cwd=cwd, capture_output=True, text=True)
+
+    gh_result = MagicMock()
+    gh_result.returncode = 1
+    gh_result.stdout = ""
+    gh_result.stderr = "gh: not authenticated"
 
     with patch("tools.agent_runner.bootstrap_agent_layout._run_git", side_effect=fake_git):
         with patch(
             "tools.agent_runner.bootstrap_agent_layout._get_remote_url",
             return_value=fake_url,
         ):
-            with patch("subprocess.run") as mock_run:
-                # Make gh pr create fail
-                push_result = MagicMock()
-                push_result.returncode = 0
-                push_result.stdout = ""
-                push_result.stderr = ""
+            with patch("subprocess.run", return_value=gh_result):
+                result = bootstrap_agent_layout(repo, "my-project")
 
-                gh_result = MagicMock()
-                gh_result.returncode = 1
-                gh_result.stdout = ""
-                gh_result.stderr = "gh: not authenticated"
-
-                mock_run.side_effect = [push_result, gh_result]
-
-                # Reset to use real git for file operations
-                with patch(
-                    "tools.agent_runner.bootstrap_agent_layout._get_remote_url",
-                    return_value=fake_url,
-                ):
-                    result = bootstrap_agent_layout(repo, "my-project")
-
-    # Either error captured or succeeded — just no uncaught exception
     assert isinstance(result, dict)
     assert "error" in result
     assert "branch" in result
