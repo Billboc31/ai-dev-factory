@@ -64,6 +64,13 @@ _cc_spec.loader.exec_module(_cc_mod)  # type: ignore[union-attr]
 collect_context = _cc_mod.collect_context
 del _cc_spec, _cc_mod
 
+_rc_spec = importlib.util.spec_from_file_location("_runtime_checkpoint", ROOT / "runtime_checkpoint.py")
+_rc_mod = importlib.util.module_from_spec(_rc_spec)  # type: ignore[arg-type]
+_rc_spec.loader.exec_module(_rc_mod)  # type: ignore[union-attr]
+is_ignorable_runtime_dirty_path = _rc_mod.is_ignorable_runtime_dirty_path
+parse_porcelain_paths = _rc_mod.parse_porcelain_paths
+del _rc_spec, _rc_mod
+
 
 def _now_iso() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -309,6 +316,28 @@ def _scrub_ticket_runtime_dir(ticket_id: str) -> None:
     prefix = _runtime_path_prefix(ticket_id)
     _run_git(["checkout", "HEAD", "--", prefix])
     _run_git(["clean", "-fd", f"{prefix}conflict", f"{prefix}prompts"])
+    untracked = _run_git(["ls-files", "--others", "--exclude-standard", prefix])
+    if untracked.returncode == 0:
+        for rel in untracked.stdout.splitlines():
+            rel = rel.strip()
+            if not rel or not is_ignorable_runtime_dirty_path(rel):
+                continue
+            path = Path(rel)
+            if path.is_file():
+                path.unlink(missing_ok=True)
+            elif path.is_dir():
+                import shutil
+                shutil.rmtree(path, ignore_errors=True)
+    _run_git(["checkout", "HEAD", "--", prefix])
+
+
+def _blocking_runtime_dirty(porcelain: str) -> list[str]:
+    """Return non-ignorable dirty paths under ``runs/{ticket}/``."""
+    return [
+        path
+        for path in parse_porcelain_paths(porcelain)
+        if not is_ignorable_runtime_dirty_path(path)
+    ]
 
 
 def _rebase_in_progress() -> bool:
@@ -331,10 +360,11 @@ def _prepare_clean_tree_for_rebase(ticket_id: str) -> bool:
     _scrub_ticket_runtime_dir(ticket_id)
 
     runtime_dirty = _runtime_tree_porcelain(ticket_id).strip()
-    if runtime_dirty:
+    blocking_runtime = _blocking_runtime_dirty(runtime_dirty) if runtime_dirty else []
+    if blocking_runtime:
         _log(
             ticket_id,
-            f"runtime tree still dirty after scrub: {runtime_dirty}",
+            f"runtime tree still dirty after scrub: {', '.join(blocking_runtime)}",
         )
         return False
 
@@ -360,12 +390,7 @@ def _auto_resolve_runtime_conflicts(ticket_id: str, paths: list[str]) -> None:
 
 def _scrub_before_rebase_continue(ticket_id: str) -> None:
     """Drop unstaged runtime noise so ``git rebase --continue`` is not blocked."""
-    prefix = _runtime_path_prefix(ticket_id)
-    for name in ("runtime.log", "daemon.lock", "state.json"):
-        path = f"{prefix}{name}"
-        if Path(path).exists():
-            _run_git(["checkout", "--", path])
-    _run_git(["clean", "-fd", f"{prefix}conflict"])
+    _scrub_ticket_runtime_dir(ticket_id)
 
 
 def _run_rebase_continue(ticket_id: str) -> subprocess.CompletedProcess[str]:
@@ -436,7 +461,7 @@ def _advance_past_runtime_conflicts(
 
 def _scrub_runtime_noise_before_rebase(ticket_id: str) -> None:
     """Drop volatile runtime paths immediately before ``git rebase``."""
-    _scrub_before_rebase_continue(ticket_id)
+    _scrub_ticket_runtime_dir(ticket_id)
 
 
 def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:

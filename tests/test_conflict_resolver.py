@@ -555,6 +555,25 @@ def test_prepare_clean_tree_for_rebase_fails_when_runtime_still_dirty(tmp_path, 
     assert rcr._prepare_clean_tree_for_rebase(ticket_id) is False
 
 
+def test_prepare_clean_tree_tolerates_retry_state_json(tmp_path, monkeypatch):
+    import run_conflict_resolver as rcr
+
+    ticket_id = "T010"
+    run_dir = tmp_path / "runs" / ticket_id
+    run_dir.mkdir(parents=True)
+
+    def _fake_git(args):
+        if args[:3] == ["status", "--porcelain", "--"]:
+            return subprocess.CompletedProcess(
+                args, 0, stdout="?? runs/T010/retry-state.json\n", stderr="",
+            )
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(rcr, "_run_git", _fake_git)
+    assert rcr._prepare_clean_tree_for_rebase(ticket_id) is True
+
+
 def test_conflict_resolution_eligible_from_git_conflicts(tmp_path):
     import subprocess as sp
     from conflict_resolution_eligibility import conflict_resolution_eligible, git_conflicted_files

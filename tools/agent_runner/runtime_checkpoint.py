@@ -137,9 +137,15 @@ def is_ignorable_runtime_dirty_path(path: str) -> bool:
     if path.startswith(_RUNTIME_IGNORABLE_PREFIXES):
         return True
 
-    # Ticket-scoped runtime/lock/log files: runs/<TID>/{runtime.log,*.lock,*.pid}
+    # Ticket-scoped runtime/lock/log files: runs/<TID>/{runtime.log,*.lock,*.pid,retry-state.json}
     if path.startswith("runs/"):
-        if path.endswith(("/runtime.log", "/daemon.lock", "/daemon.pid")):
+        if path.endswith((
+            "/runtime.log",
+            "/daemon.lock",
+            "/daemon.pid",
+            "/retry-state.json",
+            "/workflow-status.md",
+        )):
             return True
         if path.endswith((".lock", ".pid")) and "/" in path[len("runs/"):]:
             # e.g. runs/T120/.intake.lock
