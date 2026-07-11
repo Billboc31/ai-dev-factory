@@ -8,6 +8,7 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, str(Path(__file__).parent.parent / "tools" / "agent_runner"))
 
 from ticket_pr_lifecycle import (
+    INTEGRATION_BRANCH,
     _checkpoint_and_push_before_pr,
     _load_state_json,
     _pr_body,
@@ -15,7 +16,10 @@ from ticket_pr_lifecycle import (
     auto_merge_pr,
     check_and_close_issue,
     create_or_update_pr,
+    ensure_pr_base_branch,
     handle_test_complete,
+    rebase_onto_ref,
+    resolve_integration_branch,
 )
 
 
@@ -74,9 +78,42 @@ def test_create_or_update_pr_creates_new_pr(tmp_path):
     assert "gh" in create_args
     assert "pr" in create_args
     assert "create" in create_args
+    assert "--base" in create_args
+    assert INTEGRATION_BRANCH in create_args
     saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved["pr_number"] == 42
 
+
+def test_create_or_update_pr_targets_integration_branch(tmp_path):
+    run_dir = _make_run_dir(tmp_path)
+    mock_list = MagicMock(returncode=0, stdout="[]")
+    mock_fallback = MagicMock(returncode=0, stdout="[]")
+    mock_create = MagicMock(returncode=0, stdout="https://github.com/owner/repo/pull/5\n")
+    with patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_list, mock_fallback, mock_create]) as mock_sub:
+        create_or_update_pr("T001", run_dir, "owner/repo")
+    create_args = mock_sub.call_args_list[2][0][0]
+    base_idx = create_args.index("--base")
+    assert create_args[base_idx + 1] == "main"
+
+
+def test_ensure_pr_base_branch_retargests_when_needed(tmp_path):
+    run_dir = _make_run_dir(tmp_path, pr_number=34)
+    mock_view = MagicMock(returncode=0, stdout='{"baseRefName":"ai-dev-factory/bootstrap-agent-layout"}')
+    mock_edit = MagicMock(returncode=0, stdout="")
+    with patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_view, mock_edit]) as mock_sub:
+        assert ensure_pr_base_branch("T001", run_dir, "owner/repo") is True
+    edit_args = mock_sub.call_args_list[1][0][0]
+    assert edit_args == ["gh", "pr", "edit", "34", "--base", "main", "--repo", "owner/repo"]
+
+
+def test_rebase_onto_ref_normalizes_branch():
+    assert rebase_onto_ref("main") == "origin/main"
+    assert rebase_onto_ref("origin/main") == "origin/main"
+
+
+def test_resolve_integration_branch_defaults_to_main(tmp_path):
+    run_dir = _make_run_dir(tmp_path)
+    assert resolve_integration_branch("T001", run_dir) == "main"
 
 def test_create_or_update_pr_updates_existing_pr(tmp_path):
     run_dir = _make_run_dir(tmp_path, pr_number=55)

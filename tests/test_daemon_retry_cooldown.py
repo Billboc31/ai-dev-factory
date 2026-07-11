@@ -143,6 +143,16 @@ def test_apply_retry_policy_quota_exceeded_sets_cooldown(tmp_path):
     assert result["failure_class"] == "quota_exceeded"
 
 
+def test_apply_retry_policy_quota_exceeded_uses_provider_reset_when_available():
+    reset_at = _future_iso(1800)
+    result = _apply_retry_policy(
+        "T001",
+        "quota_exceeded",
+        {"quota_reset_at": reset_at},
+    )
+    assert result["cooldown_until"] == reset_at
+
+
 def test_apply_retry_policy_quota_exceeded_cooldown_roughly_one_hour():
     result = _apply_retry_policy("T001", "quota_exceeded", {})
     until = datetime.datetime.strptime(result["cooldown_until"], "%Y-%m-%dT%H:%M:%SZ").replace(
@@ -337,6 +347,32 @@ def _launch_preflight_ok(*, branch: str = "ticket/T001"):
         _ensure_clean_working_tree=MagicMock(return_value=True),
         _get_current_branch=MagicMock(return_value=branch),
     )
+
+
+def test_launch_ticket_reclassifies_claude_quota_from_output(tmp_path):
+    import run_daemon
+
+    runs = tmp_path / "runs"
+    run_dir = _write_state(runs, "T001", "PLAN_APPROVED")
+    (run_dir / "runtime.log").write_text(
+        "[2026-01-01T00:00:00Z] auto-run: runtime failure: process_failed (rc=1)\n",
+        encoding="utf-8",
+    )
+    (run_dir / "tester-output.md").write_text(
+        "You've hit your limit · resets 9:40pm (Europe/Paris)\n",
+        encoding="utf-8",
+    )
+    proc = _make_mock_result(1)
+    proc.poll.return_value = 1
+    run_daemon._ACTIVE_WORKERS.clear()
+    with _launch_preflight_ok(), \
+         patch("run_daemon._spawn_worker_process", return_value=proc):
+        launch_ticket("T001", "test-cmd", dry_run=False, runs_dir=runs)
+    reap_completed_workers(runs)
+    state = _load_retry_state(run_dir)
+    assert state.get("failure_class") == "quota_exceeded"
+    assert state.get("quota_message")
+    assert "cooldown_until" in state
 
 
 def test_launch_ticket_saves_retry_state_on_failure(tmp_path):

@@ -40,6 +40,11 @@ function RetrySection({ retryBlocked }) {
           {t.failure_class && (
             <span className="text-xs text-gray-400 ml-2">{t.failure_class}</span>
           )}
+          {t.failure_class === 'quota_exceeded' && t.quota_reset_at && (
+            <span className="text-xs text-amber-700 ml-2">
+              reset {new Date(t.quota_reset_at).toLocaleTimeString()}
+            </span>
+          )}
         </li>
       ))}
     </ul>

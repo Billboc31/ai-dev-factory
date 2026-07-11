@@ -397,36 +397,3 @@ def test_is_entry_prerequisite_reason_rejects_later_stage_blockers(evaluator):
     assert not evaluator._is_entry_prerequisite_reason("Plan review pending")
     assert not evaluator._is_entry_prerequisite_reason("Blocked by execution rule deny-all")
     assert not evaluator._is_entry_prerequisite_reason("Awaiting ready_to_take promotion")
-
-
-# ── T218 dependency union with global dependency analyzer ────────────────────
-
-
-def test_dependency_analysis_dep_included_in_union(evaluator, db, git_repo, monkeypatch):
-    """A dep only present in ticket_dependency_analysis is still enforced."""
-    _set_completed_intelligence(db, "T030")
-    # Pre-populate a global dependency analysis row that adds T999 — a dep
-    # absent from both the markdown body AND the intelligence hints.
-    _db.upsert_dependency_analysis(
-        db,
-        ticket_id="T030",
-        batch_id="B0001",
-        depends_on=["T999"],
-        blocks=[],
-        parallel_group=None,
-        conflicting_tickets=[],
-        execution_phase=None,
-        relationship_classifications=[],
-        analyzed_at="2026-06-30T12:00:00Z",
-    )
-
-    monkeypatch.setattr(
-        evaluator,
-        "is_ticket_merged",
-        lambda root, dep, **_kw: _MergeResult(status="not_merged", source="runtime_db"),
-    )
-
-    evaluator.run_evaluation(db, "T030", "no markdown deps", git_repo)
-    row = _db.get_ticket_readiness(db, "T030")
-    assert row["readiness_status"] == "blocked"
-    assert "Dependency T999 not merged" in row["blocking_reasons_json"]

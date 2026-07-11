@@ -33,14 +33,10 @@ done
 # deploy/.env is the single source of truth for runtime/project roots,
 # Docker → host path mappings, and the supervisor port. Edit that file on
 # a fresh machine — do NOT hardcode user-specific paths here.
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/load-env.sh"
 ENV_FILE="$SCRIPT_DIR/.env"
-if [ -f "$ENV_FILE" ]; then
-  # set -a exports every variable defined while sourcing, so the supervisor
-  # subprocess sees all of them. Restore the default behavior afterwards.
-  set -a
-  # shellcheck disable=SC1090,SC1091
-  source "$ENV_FILE"
-  set +a
+if load_deploy_env "$ENV_FILE"; then
   echo "supervisor: loaded $ENV_FILE"
 else
   echo "supervisor: WARNING — $ENV_FILE not found; copy deploy/.env.example and edit it" >&2

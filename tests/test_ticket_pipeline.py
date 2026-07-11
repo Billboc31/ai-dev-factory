@@ -134,10 +134,10 @@ def test_needs_readiness_reruns_when_blocked(db):
         readiness_status="blocked",
         blocking_reasons_json=["Dependency T001 not merged"],
     )
-    assert pipeline.needs_readiness(
-        _db.get_ticket_intelligence(db, "T020"),
-        _db.get_ticket_readiness(db, "T020"),
-    ) is True
+    intel = _db.get_ticket_intelligence(db, "T020")
+    ready = _db.get_ticket_readiness(db, "T020")
+    assert pipeline.needs_readiness(intel, ready, batch_status="dispatching") is True
+    assert pipeline.needs_readiness(intel, ready, batch_status="readiness_running") is False
 
 
 def test_needs_readiness_skips_when_ready(db):

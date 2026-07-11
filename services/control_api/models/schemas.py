@@ -224,6 +224,17 @@ class RetryBlockedTicket(BaseModel):
     failure_class: str | None = None
     retry_count: int = 0
     cooldown_until: str | None = None
+    quota_message: str | None = None
+    quota_reset_at: str | None = None
+
+
+class ProviderQuotaAlert(BaseModel):
+    active: bool = False
+    provider: str = "claude"
+    message: str | None = None
+    reset_at: str | None = None
+    cooldown_until: str | None = None
+    affected_tickets: list[str] = []
 
 
 class QueueEntry(BaseModel):
@@ -238,6 +249,7 @@ class RuntimeStatus(BaseModel):
     intake_queue: list[QueueEntry] = []
     last_action: str | None = None
     last_error: str | None = None
+    provider_quota_alert: ProviderQuotaAlert | None = None
 
 
 class DeployComponent(BaseModel):

@@ -74,6 +74,7 @@ checkpoint_transition = _rc_mod.checkpoint_transition
 CheckpointError = _rc_mod.CheckpointError
 DirtyTreeError = _rc_mod.DirtyTreeError
 is_runtime_ignored_path = _rc_mod.is_runtime_ignored_path
+runtime_metadata_dir_root = _rc_mod.runtime_metadata_dir_root
 classify_intake_dirty_paths = _rc_mod.classify_intake_dirty_paths
 parse_porcelain_paths = _rc_mod.parse_porcelain_paths
 del _rc_spec, _rc_mod
@@ -135,8 +136,7 @@ _claim_intelligence = _tp_mod.claim_intelligence
 _claim_readiness = _tp_mod.claim_readiness
 _record_intake_once = _tp_mod.record_intake_once
 _ticket_needs_intelligence = _tp_mod.needs_intelligence
-_ticket_needs_readiness = _tp_mod.needs_readiness
-_is_batch_ready_for_readiness = _tp_mod._is_batch_ready_for_readiness  # noqa: SLF001
+_ticket_needs_readiness = _tp_mod.ticket_needs_readiness
 del _tp_spec, _tp_mod
 
 _te_spec = importlib.util.spec_from_file_location(
@@ -169,6 +169,13 @@ sys.modules["_runtime_settings"] = _rs_mod
 _rs_spec.loader.exec_module(_rs_mod)  # type: ignore[union-attr]
 _runtime_settings = _rs_mod
 del _rs_spec, _rs_mod
+
+_rs_step_spec = importlib.util.spec_from_file_location("_run_step", ROOT / "run_step.py")
+_rs_step_mod = importlib.util.module_from_spec(_rs_step_spec)  # type: ignore[arg-type]
+sys.modules["_run_step"] = _rs_step_mod
+_rs_step_spec.loader.exec_module(_rs_step_mod)  # type: ignore[union-attr]
+extract_quota_alert_info = _rs_step_mod.extract_quota_alert_info
+del _rs_step_spec, _rs_step_mod
 
 # SQLite path and init are cached so _rdb_get_db_path() (subprocess) runs only once per daemon process.
 _DB_PATH_RESOLVED: bool = False
@@ -480,6 +487,35 @@ def _count_live_workers(state_dir: Path) -> int:
     return live
 
 
+def _collect_run_dir_output_text(run_dir: Path) -> str:
+    """Gather recent step output and logs for quota hint detection."""
+    parts: list[str] = []
+    log_path = run_dir / "runtime.log"
+    if log_path.exists():
+        try:
+            parts.append(log_path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            pass
+    for path in sorted(run_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.suffix not in {".md", ".txt", ".log"}:
+            continue
+        if path.name in {"state.json", "retry-state.json"}:
+            continue
+        try:
+            if path.stat().st_size > 100_000:
+                continue
+            parts.append(path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+    return "\n".join(parts)
+
+
+def _quota_hint_from_run_dir(run_dir: Path) -> dict[str, str] | None:
+    return extract_quota_alert_info(_collect_run_dir_output_text(run_dir))
+
+
 def _handle_worker_exit(
     ticket_id: str,
     run_dir: Path,
@@ -489,6 +525,13 @@ def _handle_worker_exit(
         failure_class = _read_last_failure_class(run_dir)
         if failure_class:
             retry_state = _load_retry_state(run_dir)
+            hint = _quota_hint_from_run_dir(run_dir)
+            if hint:
+                retry_state["quota_message"] = hint.get("message")
+                if hint.get("reset_at"):
+                    retry_state["quota_reset_at"] = hint["reset_at"]
+                if failure_class != "quota_exceeded":
+                    failure_class = "quota_exceeded"
             retry_state = _apply_retry_policy(ticket_id, failure_class, retry_state)
             _save_retry_state(run_dir, retry_state)
         else:
@@ -550,6 +593,23 @@ def _apply_retry_policy(ticket_id: str, failure_class: str, retry_state: dict) -
 
     elif action == "cooldown":
         seconds = policy["cooldown_seconds"]
+        reset_at = new_state.get("quota_reset_at")
+        if failure_class == "quota_exceeded" and reset_at:
+            try:
+                until = datetime.datetime.strptime(reset_at, "%Y-%m-%dT%H:%M:%SZ").replace(
+                    tzinfo=datetime.timezone.utc
+                )
+                now = datetime.datetime.now(datetime.timezone.utc)
+                if until > now:
+                    new_state["cooldown_until"] = reset_at
+                    new_state.pop("stopped", None)
+                    _log(
+                        f"{ticket_id}: retry policy=cooldown failure={failure_class} "
+                        f"until provider reset={reset_at}"
+                    )
+                    return new_state
+            except ValueError:
+                pass
         new_state["cooldown_until"] = _cooldown_until(seconds)
         new_state.pop("stopped", None)
         _log(f"{ticket_id}: retry policy=cooldown failure={failure_class} cooldown={seconds}s until={new_state['cooldown_until']}")
@@ -904,6 +964,7 @@ def _clean_runtime_before_sync(ticket_id: str, cwd: str | None = None) -> tuple[
     )
     cleaned: list[str] = []
     real_dirty: list[str] = []
+    removed_metadata_dirs: set[str] = set()
     if status.returncode != 0 or not status.stdout.strip():
         return cleaned, real_dirty
 
@@ -921,6 +982,18 @@ def _clean_runtime_before_sync(ticket_id: str, cwd: str | None = None) -> tuple[
 
         if not is_runtime_ignored_path(path):
             real_dirty.append(path)
+            continue
+
+        metadata_root = runtime_metadata_dir_root(path)
+        if metadata_root and metadata_root not in removed_metadata_dirs:
+            full_meta = base / metadata_root
+            try:
+                import shutil
+                shutil.rmtree(full_meta, ignore_errors=True)
+                cleaned.append(f"rm-dir:{metadata_root}")
+                removed_metadata_dirs.add(metadata_root)
+            except OSError:
+                pass
             continue
 
         full = base / path
@@ -1303,7 +1376,13 @@ def _maybe_auto_launch_conflict_resolution(
         f"auto-launching conflict resolver for {ticket_id} "
         f"in worktree={worktree_cwd}: {shlex.join(cmd)}",
     )
-    proc = _spawn_worker_process(cmd, cwd=worktree_cwd, env=_no_bytecode_env())
+    proc = _spawn_worker_process(
+        cmd,
+        cwd=worktree_cwd,
+        env=_no_bytecode_env(
+            {"PROJECT_NAME": project_id} if project_id else None,
+        ),
+    )
     _set_lock_holder_pid(run_dir, proc.pid)
     _log(f"{ticket_id}: conflict resolver started pid={proc.pid} (background)")
     return True
@@ -2125,9 +2204,7 @@ def poll_ticket_pipeline(
                 submitted_intel += 1
             continue
 
-        if _ticket_needs_readiness(intel, ready) and _is_batch_ready_for_readiness(
-            db_path, ticket_id,
-        ):
+        if _ticket_needs_readiness(db_path, ticket_id, intel, ready):
             content = _read_pipeline_ticket_content(
                 project_root, ticket_id, worktrees_dir, project_id,
             )
@@ -2334,20 +2411,20 @@ def run_once(
             dispatcher_mode,
             project_id=_resolved_project_id,
         )
-        if dispatcher_tickets:
-            tickets = dispatcher_tickets
-        else:
+        launch_tickets = dispatcher_tickets or []
+        if not launch_tickets:
             _log("dispatcher returned no runnable tickets; launching nothing")
-            return
     else:
-        _log(f"scheduling: legacy (dispatcher=off)")
-        tickets = legacy_tickets
+        _log("scheduling: legacy (dispatcher=off)")
+        launch_tickets = legacy_tickets
 
-    if not tickets:
+    launch_ids = {ticket_id for ticket_id, _ in launch_tickets}
+
+    if not all_tickets:
         _log("no tickets found")
         return
 
-    for ticket_id, state in tickets:
+    for ticket_id, state in all_tickets:
         run_dir = _get_run_dir(ticket_id, runs_dir, worktrees_dir)
         worktree_path = worktrees_dir / ticket_id if worktrees_dir else None
         worktree_cwd = str(worktree_path) if worktree_path and worktree_path.exists() else None
@@ -2388,6 +2465,8 @@ def run_once(
                     continue
 
         if state in AUTO_RUNNABLE_STATES:
+            if dispatcher_enabled and ticket_id not in launch_ids:
+                continue
             _log(f"detected {ticket_id} state={state}")
             active_count = _count_live_workers(_state_dir)
             if active_count >= max_workers:

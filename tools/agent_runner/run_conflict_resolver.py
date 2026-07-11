@@ -2,12 +2,12 @@
 """Conflict resolver executor for ai-dev-factory.
 
 Runs inside the ticket worktree:
-1. Fetches origin and rebases onto origin/main.
+1. Fetches origin and rebases onto the integration branch (``main`` by default).
 2. On rebase conflict: collects context, invokes AI agent to edit files.
 3. Loops until all conflicts cleared or MAX_RESOLVER_PASSES reached.
 4. Stages only conflicted files per pass.
 5. Runs tests.
-6. Commits artifacts with message conflict(T{id}): resolve conflicts against main.
+6. Commits artifacts with message conflict(T{id}): resolve conflicts against <base>.
 7. Pushes with --force-with-lease.
 8. Transitions state to CONFLICT_RESOLVED_REVIEW_NEEDED (success)
    or CONFLICT_RESOLUTION_FAILED (any failure).
@@ -40,6 +40,16 @@ _CONFLICT_STATES = frozenset({
 ROOT = Path(__file__).resolve().parent
 _RUN_STEP_PATH = ROOT / "run_step.py"
 _CONTEXT_COLLECTOR_PATH = ROOT / "conflict_context_collector.py"
+
+_tpl_spec = importlib.util.spec_from_file_location(
+    "_ticket_pr_lifecycle_cr", ROOT / "ticket_pr_lifecycle.py",
+)
+_tpl_mod = importlib.util.module_from_spec(_tpl_spec)  # type: ignore[arg-type]
+_tpl_spec.loader.exec_module(_tpl_mod)  # type: ignore[union-attr]
+resolve_integration_branch = _tpl_mod.resolve_integration_branch
+rebase_onto_ref = _tpl_mod.rebase_onto_ref
+ensure_pr_base_branch = _tpl_mod.ensure_pr_base_branch
+del _tpl_spec, _tpl_mod
 
 _rs_spec = importlib.util.spec_from_file_location("_run_step", _RUN_STEP_PATH)
 _rs_mod = importlib.util.module_from_spec(_rs_spec)  # type: ignore[arg-type]
@@ -483,7 +493,9 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
         _transition_state(ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED", backup=state_backup)
         return 2
 
-    # 2. git rebase origin/main (or resume an in-progress rebase)
+    # 2. git rebase onto the integration branch (or resume an in-progress rebase)
+    integration_branch = resolve_integration_branch(ticket_id, run_dir)
+    rebase_ref = rebase_onto_ref(integration_branch)
     rebase_had_conflicts = False
     if _rebase_in_progress():
         conflicted_files = _list_conflicted_files()
@@ -515,8 +527,8 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
             return 2
 
         _scrub_runtime_noise_before_rebase(ticket_id)
-        rebase = _run_git(["rebase", "origin/main"])
-        _log(ticket_id, f"git rebase origin/main exit={rebase.returncode}")
+        rebase = _run_git(["rebase", rebase_ref])
+        _log(ticket_id, f"git rebase {rebase_ref} exit={rebase.returncode}")
 
         if rebase.returncode != 0:
             conflicted_files = _list_conflicted_files()
@@ -700,7 +712,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
         if not res_path.exists():
             res_path.write_text(
                 f"# Resolution — {ticket_id}\n\n"
-                f"Rebase onto origin/main completed with no conflicts.\n"
+                f"Rebase onto {rebase_ref} completed with no conflicts.\n"
                 f"Generated at: {_now_iso()}\n",
                 encoding="utf-8",
             )
@@ -727,7 +739,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
     if add_all.returncode != 0:
         _log(ticket_id, f"git add before commit failed: {add_all.stderr.strip()}")
 
-    commit_msg = f"conflict({ticket_id}): resolve conflicts against main"
+    commit_msg = f"conflict({ticket_id}): resolve conflicts against {integration_branch}"
     commit = _run_git(["commit", "-m", commit_msg])
     if commit.returncode != 0:
         out = (commit.stdout + commit.stderr).lower()
@@ -756,6 +768,7 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
         return 2
 
     _log(ticket_id, "push succeeded")
+    ensure_pr_base_branch(ticket_id, run_dir, None)
 
     # 6. transition after clean rebase + passing tests
     _transition_state(

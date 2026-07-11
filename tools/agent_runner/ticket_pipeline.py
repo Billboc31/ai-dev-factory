@@ -58,14 +58,53 @@ def needs_intelligence(row: dict | None) -> bool:
     return True
 
 
-def needs_readiness(intel_row: dict | None, ready_row: dict | None) -> bool:
+def needs_readiness(
+    intel_row: dict | None,
+    ready_row: dict | None,
+    *,
+    batch_status: str | None = None,
+) -> bool:
     if intel_row is None or intel_row.get("analysis_status") != "completed":
         return False
     if ready_row is None:
         return True
     status = ready_row.get("readiness_status") or ""
-    # Re-run when blocked/failed so dependency merges refresh the snapshot.
-    return status in {"queued", "running", "blocked", "failed"}
+    if status in {"", "not_started", "queued", "running", "failed"}:
+        return True
+    if status == "ready_candidate":
+        return False
+    if status == "blocked":
+        # During the initial batch readiness pass, ``blocked`` is a terminal
+        # outcome — re-running would flip rows back to ``running`` and prevent
+        # ``readiness_running`` batches from advancing to ``dispatching``.
+        # Once dispatching starts, re-evaluate so dependency merges can unblock.
+        return batch_status not in (None, "readiness_running")
+    return False
+
+
+def _ticket_batch_status(db_path, ticket_id: str) -> str | None:
+    if _backlog_batch is None:
+        return None
+    try:
+        return _backlog_batch.get_ticket_batch_status(db_path, ticket_id)
+    except Exception:
+        return None
+
+
+def ticket_needs_readiness(
+    db_path,
+    ticket_id: str,
+    intel_row: dict | None,
+    ready_row: dict | None,
+) -> bool:
+    """Return whether readiness work should run for ``ticket_id``."""
+    if not _is_batch_ready_for_readiness(db_path, ticket_id):
+        return False
+    return needs_readiness(
+        intel_row,
+        ready_row,
+        batch_status=_ticket_batch_status(db_path, ticket_id),
+    )
 
 
 def _is_batch_ready_for_readiness(db_path, ticket_id: str) -> bool:
@@ -103,7 +142,7 @@ def find_next_ticket(db_path, ticket_ids: list[str]) -> str | None:
             continue
         if needs_intelligence(intel):
             return ticket_id
-        if needs_readiness(intel, ready) and _is_batch_ready_for_readiness(db_path, ticket_id):
+        if ticket_needs_readiness(db_path, ticket_id, intel, ready):
             return ticket_id
     return None
 
@@ -128,7 +167,7 @@ def maybe_run_readiness_after_intelligence(
     except Exception:
         ready = None
     intel = {"analysis_status": "completed"}
-    if not (needs_readiness(intel, ready) and _is_batch_ready_for_readiness(db_path, ticket_id)):
+    if not ticket_needs_readiness(db_path, ticket_id, intel, ready):
         return
     if not claim_readiness(db_path, ticket_id):
         logger.info(
@@ -224,7 +263,7 @@ def process_ticket(
     except Exception:
         ready = None
 
-    if needs_readiness(intel, ready) and _is_batch_ready_for_readiness(db_path, ticket_id):
+    if ticket_needs_readiness(db_path, ticket_id, intel, ready):
         logger.info("pipeline: running readiness for %s", ticket_id)
         run_evaluation(db_path, ticket_id, content, project_root, project_id=project_id)
         return True
@@ -240,6 +279,7 @@ __all__ = [
     "maybe_run_readiness_after_intelligence",
     "needs_intelligence",
     "needs_readiness",
+    "ticket_needs_readiness",
     "process_ticket",
     "record_intake_once",
 ]

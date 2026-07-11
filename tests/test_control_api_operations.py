@@ -41,14 +41,24 @@ def _isolate_env(monkeypatch):
     monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
 
 
-def _make_app(tmp_path: Path):
+def _make_app(tmp_path: Path, *, project_id: str = "proj-a"):
     from services.control_api.main import create_app
+    from services.control_api.services.project_registry import ProjectEntry, ProjectRegistry
     import services.control_api.routes.operations as _ops_route
 
     app = create_app(project_root=tmp_path)
     isolated_db = tmp_path / ".runtime" / "adf-test-operations.sqlite"
     _sqlite_db.init_runtime_db(isolated_db)
     app.state.db_path = isolated_db
+    app.state.project_registry = ProjectRegistry(
+        _entries=[
+            ProjectEntry(
+                id=project_id,
+                root=tmp_path,
+                project_runtime_root=tmp_path,
+            )
+        ],
+    )
 
     # Patch the route's runtime_db and the operations module's runtime_db to
     # share the isolated SQLite DB.
@@ -57,6 +67,7 @@ def _make_app(tmp_path: Path):
     _ops_route._ops.ticket_diagnostics.runtime_db = _sqlite_db
     if hasattr(_ops_route._ops.ticket_diagnostics, "ticket_approval_service"):
         _ops_route._ops.ticket_diagnostics.ticket_approval_service.runtime_db = _sqlite_db
+    _ops_route.runtime_db = _sqlite_db
     return app, isolated_db
 
 
@@ -215,14 +226,43 @@ def test_project_scoped_routes_work(tmp_path, monkeypatch):
     )
 
     client = TestClient(app)
-    r_get = client.get("/projects/pid/tickets/T001/operations")
+    r_get = client.get("/projects/proj-a/tickets/T001/operations")
     assert r_get.status_code == 200
 
     r_post = client.post(
-        "/projects/pid/tickets/T001/operations/rerun_diagnostics",
+        "/projects/proj-a/tickets/T001/operations/rerun_diagnostics",
         json={},
     )
     assert r_post.status_code == 200
+
+
+def _make_worktree_ticket(
+    tmp_path: Path,
+    ticket_id: str,
+    state: str = "IMPLEMENTATION_FIX_REQUIRED",
+) -> Path:
+    run_dir = tmp_path / "worktrees" / ticket_id / "runs" / ticket_id
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(
+        json.dumps({"ticket_id": ticket_id, "state": state, "branch": f"ticket/{ticket_id}"}),
+        encoding="utf-8",
+    )
+    (run_dir / "ticket.md").write_text(f"# {ticket_id}\n", encoding="utf-8")
+    (run_dir / "plan.md").write_text("plan", encoding="utf-8")
+    return run_dir
+
+
+def test_project_scoped_reset_to_planning_finds_worktree_run_dir(tmp_path):
+    run_dir = _make_worktree_ticket(tmp_path, "T027")
+    app, _ = _make_app(tmp_path)
+    client = TestClient(app)
+    r = client.post(
+        "/projects/proj-a/tickets/T027/operations/reset_to_planning",
+        json={"reason": "stale plan", "typed_ticket_id": "T027"},
+    )
+    assert r.status_code == 200, r.text
+    state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert state["state"] == "INIT"
 
 
 def test_audit_recorded_for_success(tmp_path, monkeypatch):

@@ -25,16 +25,19 @@ PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
 # ── Load centralised config ──────────────────────────────────────────────────
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/load-env.sh"
 ENV_FILE="$SCRIPT_DIR/.env"
-if [ -f "$ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090,SC1091
-  source "$ENV_FILE"
-  set +a
+if load_deploy_env "$ENV_FILE"; then
   echo "deploy: loaded $ENV_FILE (RUNTIME_DB_BACKEND=${RUNTIME_DB_BACKEND:-sqlite})"
 else
   echo "deploy: WARNING — $ENV_FILE not found; copy deploy/.env.example and edit it" >&2
 fi
+
+# Command passed to run_ticket / run_daemon workers (--exec-cmd). Without --model,
+# Claude Code defaults to Opus (expensive). Sonnet is the deploy default.
+export DAEMON_EXEC_CMD="${DAEMON_EXEC_CMD:-claude --dangerously-skip-permissions --model sonnet}"
+echo "deploy: DAEMON_EXEC_CMD=$DAEMON_EXEC_CMD"
 
 SUP_PORT="${AI_DEV_FACTORY_SUPERVISOR_PORT:-8090}"
 SUP_LOG="${TMPDIR:-/tmp}/adf-supervisor.log"

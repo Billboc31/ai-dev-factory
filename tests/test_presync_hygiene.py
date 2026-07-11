@@ -139,6 +139,28 @@ def test_real_code_dirty_files_before_sync_are_preserved(tmp_path: Path):
     )
 
 
+def test_egg_info_before_sync_is_cleaned(tmp_path: Path):
+    """``pip install -e .`` metadata must not block pre-sync rebase."""
+    _init_git_repo(tmp_path)
+    (tmp_path / "README.md").write_text("seed")
+    subprocess.run(["git", "add", "."], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "seed"], cwd=tmp_path, check=True
+    )
+
+    egg_dir = tmp_path / "backend" / "timizer_backend.egg-info"
+    egg_dir.mkdir(parents=True)
+    (egg_dir / "PKG-INFO").write_text("Metadata-Version: 2.1\n")
+    (egg_dir / "SOURCES.txt").write_text("setup.py\n")
+
+    daemon = _load_run_daemon()
+    cleaned, real = daemon._clean_runtime_before_sync("T001", cwd=str(tmp_path))
+
+    assert any("egg-info" in c for c in cleaned)
+    assert not egg_dir.exists(), "egg-info directory must be removed before sync"
+    assert real == []
+
+
 def test_mixed_dirty_only_cleans_runtime_and_logs_real(tmp_path: Path):
     """Runtime + real code dirty: hygiene cleans runtime, preserves real."""
     _init_git_repo(tmp_path)

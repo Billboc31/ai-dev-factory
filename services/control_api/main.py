@@ -51,7 +51,7 @@ def _resolve_default_project_root() -> Path:
 
 def create_app(
     project_root: Path | None = None,
-    daemon_exec_cmd: str = "claude --dangerously-skip-permissions",
+    daemon_exec_cmd: str | None = None,
     worktrees_dir: Path | None = None,
     projects_root: Path | None = None,
 ) -> FastAPI:
@@ -63,7 +63,10 @@ def create_app(
 
     _root = project_root or _resolve_default_project_root()
     app.state.project_root = _root
-    app.state.daemon_exec_cmd = daemon_exec_cmd
+    app.state.daemon_exec_cmd = daemon_exec_cmd or os.environ.get(
+        "DAEMON_EXEC_CMD",
+        "claude --dangerously-skip-permissions --model sonnet",
+    )
     app.state.worktrees_dir = worktrees_dir or resolve_worktrees_dir(_root)
     app.state.db_path = _runtime_db.get_db_path()
     # Diagnostics: make the active runtime DB backend completely unambiguous at

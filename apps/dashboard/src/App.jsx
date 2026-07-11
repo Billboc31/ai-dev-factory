@@ -23,6 +23,7 @@ import BatchesPage from './pages/BatchesPage'
 import BatchDetailPage from './pages/BatchDetailPage'
 import GlobalSettingsPage from './pages/GlobalSettingsPage'
 import ProjectRulesPage from './pages/ProjectRulesPage'
+import QuotaAlertBanner from './components/QuotaAlertBanner'
 import useProjects from './hooks/useProjects'
 
 export const ActiveProjectContext = createContext(null)
@@ -82,6 +83,7 @@ function AppLayout() {
       />
       <main className="flex-1 p-6 overflow-auto">
         <ActiveProjectContext.Provider value={activeProject}>
+          <QuotaAlertBanner />
           <Routes>
             <Route path="/" element={<SmartHomeRedirect />} />
             <Route path="/projects" element={<ProjectsPage />} />

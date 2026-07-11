@@ -357,8 +357,7 @@ def test_poll_github_issues_assigns_correct_next_ticket_id(tmp_path):
 
 
 def test_poll_github_issues_multiple_issues_sequential_ids(tmp_path):
-    # T221: batch intake — every candidate GitHub issue is processed in the
-    # same poll cycle (up to MAX_ISSUES_INTAKED_PER_POLL).
+    # poll_github_issues processes one issue per daemon cycle (candidates[:1])
     runs = _make_runs(tmp_path)
     worktrees_dir = tmp_path / "worktrees"
     issues = [
@@ -373,8 +372,9 @@ def test_poll_github_issues_multiple_issues_sequential_ids(tmp_path):
         poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir)
 
     index = load_issue_index(runs)
+    # Only the first candidate is processed per cycle
     assert index["1"] == "T001"
-    assert index["2"] == "T002"
+    assert "2" not in index
 
 
 def test_issue_intake_sort_key_orders_by_ticket_id_not_github_number():
@@ -402,12 +402,10 @@ def test_poll_github_issues_ingests_lowest_ticket_id_first(tmp_path):
          patch("run_daemon.clear_stale_run_dir", return_value=False):
         poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir)
 
-    # T221: batch intake now processes both issues in one poll. Verify the
-    # sort order (T001 first, T002 second) by inspecting the first call.
-    first_call = mock_intake.call_args_list[0][0]
-    assert first_call[0] == 24
-    assert first_call[1] == "T001"
-    assert load_issue_index(runs) == {"24": "T001", "5": "T002"}
+    issue_number, ticket_id, _, _ = mock_intake.call_args[0]
+    assert issue_number == 24
+    assert ticket_id == "T001"
+    assert load_issue_index(runs) == {"24": "T001"}
 
 
 def test_poll_github_issues_reconciles_existing_worktree_without_re_intake(tmp_path):
@@ -427,24 +425,18 @@ def test_poll_github_issues_reconciles_existing_worktree_without_re_intake(tmp_p
         {"number": 24, "title": "T001 - Define product vision"},
     ]
 
-    # T221: batch intake continues past the reconciled T001 and would try to
-    # intake T002. Stub the intake helpers so the T002 path resolves cleanly;
-    # the important assertion is that call_issue_intake was NOT invoked for
-    # the reconciled ticket #24.
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
-         patch("run_daemon.call_issue_intake", return_value=True) as mock_intake, \
-         patch("run_daemon.fetch_origin_main", return_value=(True, "fetched origin/main")), \
-         patch("run_daemon.create_ticket_branch_and_worktree", return_value=(True, "ok")):
+         patch("run_daemon.call_issue_intake") as mock_intake, \
+         patch("run_daemon.fetch_origin_main") as mock_fetch, \
+         patch("run_daemon.create_ticket_branch_and_worktree") as mock_create:
         poll_github_issues(
             runs, "ai-ready", None, worktrees_dir=worktrees_dir, state_dir=state_dir,
         )
 
-    # Only T002 (issue 5) should have gone through the intake path. Issue #24
-    # was reconciled from the existing worktree.
-    intake_numbers = [call[0][0] for call in mock_intake.call_args_list]
-    assert 24 not in intake_numbers
-    index = load_issue_index(state_dir)
-    assert index["24"] == "T001"
+    mock_intake.assert_not_called()
+    mock_fetch.assert_not_called()
+    mock_create.assert_not_called()
+    assert load_issue_index(state_dir) == {"24": "T001"}
 
 
 def test_clear_stale_run_dir_removes_existing_ticket_runs(tmp_path):

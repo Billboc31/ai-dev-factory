@@ -108,6 +108,8 @@ COMMIT_SCOPE: tuple[str, ...] = (
     "services/",
     "runs/",
     "apps/",
+    "backend/",
+    "frontend/",
     "README.md",
     ".gitignore",
     "package.json",

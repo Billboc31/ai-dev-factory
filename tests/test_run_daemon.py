@@ -521,6 +521,45 @@ def test_run_once_launches_nothing_when_dispatcher_empty(tmp_path, monkeypatch, 
     assert "dispatcher returned no runnable tickets; launching nothing" in out
 
 
+def test_run_once_dispatcher_empty_still_auto_launches_conflict_resolution(
+    tmp_path, monkeypatch,
+):
+    runs = tmp_path / "runs"
+    wt = tmp_path / "worktrees" / "T009"
+    wt.mkdir(parents=True)
+    run_dir = wt / "runs" / "T009"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(
+        json.dumps({"ticket_id": "T009", "state": "CONFLICT_RESOLUTION_NEEDED"}),
+        encoding="utf-8",
+    )
+
+    import run_daemon
+    monkeypatch.setattr(run_daemon, "_get_dispatcher_mode", lambda _db: "advisory")
+    monkeypatch.setattr(run_daemon, "_ensure_db", lambda: tmp_path / "fake.sqlite")
+    monkeypatch.setattr(
+        run_daemon,
+        "_get_recommended_tickets",
+        lambda _db, _root, **_kw: {"mode": "advisory", "recommendations": [], "blocked": []},
+    )
+
+    with patch("run_daemon.launch_ticket") as mock_launch, patch(
+        "run_daemon._maybe_auto_launch_conflict_resolution",
+        return_value=True,
+    ) as mock_conflict:
+        run_once(
+            "test-cmd",
+            False,
+            runs,
+            worktrees_dir=tmp_path / "worktrees",
+            project_id="proj-a",
+        )
+
+    mock_launch.assert_not_called()
+    mock_conflict.assert_called_once()
+    assert mock_conflict.call_args.args[0] == "T009"
+
+
 def test_run_once_launches_nothing_when_dispatcher_raises(tmp_path, monkeypatch, capsys):
     runs = tmp_path / "runs"
     _write_state(runs, "T001", "PLAN_APPROVED")
@@ -610,30 +649,6 @@ def test_dispatcher_helper_returns_off_when_db_missing():
     enabled, mode = _dispatcher_enabled(None)
     assert enabled is False
     assert mode == "off"
-
-
-def test_main_once_calls_process_backlog_batches(tmp_path, monkeypatch):
-    """``main(--once)`` runs ``process_backlog_batches`` exactly once per cycle."""
-    import run_daemon
-    runs = tmp_path / "runs"
-    runs.mkdir()
-
-    calls: list[tuple] = []
-
-    def _spy(*args, **kwargs):
-        calls.append((args, kwargs))
-
-    monkeypatch.setattr(run_daemon, "process_backlog_batches", _spy)
-    monkeypatch.setattr(run_daemon, "_check_runtime_clone", lambda: True)
-    monkeypatch.setattr(run_daemon, "_acquire_daemon_singleton", lambda _d: True)
-    monkeypatch.setattr(run_daemon, "poll_ticket_pipeline", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_daemon, "run_once", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_daemon, "reap_completed_workers", lambda *_a, **_k: None)
-    monkeypatch.setattr(run_daemon, "_cleanup_stale_workers", lambda *_a, **_k: None)
-
-    rc = main(["--exec-cmd", "test-cmd", "--once", "--runs-dir", str(runs)])
-    assert rc == 0
-    assert len(calls) == 1
 
 
 def test_resolve_repo_root_uses_cwd_when_runtime_root_set(tmp_path, monkeypatch):

@@ -211,7 +211,10 @@ class DaemonState:
 _daemon_state = DaemonState()
 _daemon_proc: subprocess.Popen | None = None
 _voluntary_stop: bool = False
-_daemon_exec_cmd: str = "claude --dangerously-skip-permissions"
+_daemon_exec_cmd: str = os.environ.get(
+    "DAEMON_EXEC_CMD",
+    "claude --dangerously-skip-permissions --model sonnet",
+)
 
 
 # ── Daemon spawn helper ───────────────────────────────────────────────────────
@@ -2020,7 +2023,7 @@ def _lookup_project_root_from_control_api(project_id: str) -> str | None:
 
 
 class ProjectDaemonStartRequest(BaseModel):
-    exec_cmd: str = "claude --dangerously-skip-permissions"
+    exec_cmd: str = "claude --dangerously-skip-permissions --model sonnet"
     restart_policy: str = "no-restart"
 
 
@@ -2219,7 +2222,10 @@ class TicketIntelligenceAnalyzeRequest(BaseModel):
 
 
 def _default_exec_cmd() -> str:
-    return os.environ.get("DAEMON_EXEC_CMD", "claude --dangerously-skip-permissions")
+    return os.environ.get(
+        "DAEMON_EXEC_CMD",
+        "claude --dangerously-skip-permissions --model sonnet",
+    )
 
 
 
@@ -2570,7 +2576,11 @@ def project_ticket_resolve_conflicts(
             subprocess.run(
                 [sys.executable, str(resolver), ticket_id, "--exec-cmd", body.exec_cmd],
                 cwd=str(wt_cwd),
-                env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"},
+                env={
+                    **os.environ,
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                    "PROJECT_NAME": project_id,
+                },
                 check=False,
             )
         except Exception:

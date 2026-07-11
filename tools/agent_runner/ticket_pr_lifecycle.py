@@ -28,6 +28,9 @@ del _rc_spec, _rc_mod
 LogFn = Callable[[str], None]
 _log_fn: LogFn | None = None
 
+# Branch tickets rebase onto and target when opening/updating PRs.
+INTEGRATION_BRANCH = "main"
+
 
 def configure_log(log: LogFn | None) -> None:
     """Optional sink (e.g. daemon ``_log``). Defaults to stderr."""
@@ -44,6 +47,70 @@ def _log(message: str) -> None:
 
 def _now_iso() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def resolve_integration_branch(
+    ticket_id: str,
+    run_dir: Path,
+    repo: str | None = None,
+) -> str:
+    """Return the branch name tickets integrate into (PR base / rebase target)."""
+    _ = (ticket_id, run_dir, repo)  # reserved for per-project overrides later
+    return INTEGRATION_BRANCH
+
+
+def rebase_onto_ref(integration_branch: str) -> str:
+    """Git ref to pass to ``git rebase`` for an integration branch."""
+    branch = integration_branch.removeprefix("origin/")
+    return f"origin/{branch}"
+
+
+def ensure_pr_base_branch(
+    ticket_id: str,
+    run_dir: Path,
+    repo: str | None,
+    *,
+    base_branch: str | None = None,
+) -> bool:
+    """Align an existing PR's GitHub base branch with the integration branch."""
+    state = _load_state_json(run_dir)
+    pr_number = state.get("pr_number")
+    if not pr_number:
+        return False
+    target = base_branch or resolve_integration_branch(ticket_id, run_dir, repo)
+    view_cmd = ["gh", "pr", "view", str(pr_number), "--json", "baseRefName"]
+    if repo:
+        view_cmd += ["--repo", repo]
+    try:
+        view = subprocess.run(view_cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        _log(f"{ticket_id}: ensure_pr_base: gh not found")
+        return False
+    if view.returncode != 0:
+        _log(f"{ticket_id}: ensure_pr_base: gh pr view failed: {view.stderr.strip()}")
+        return False
+    try:
+        current_base = json.loads(view.stdout).get("baseRefName") or ""
+    except json.JSONDecodeError:
+        _log(f"{ticket_id}: ensure_pr_base: invalid JSON from gh pr view")
+        return False
+    if current_base == target:
+        return True
+    edit_cmd = ["gh", "pr", "edit", str(pr_number), "--base", target]
+    if repo:
+        edit_cmd += ["--repo", repo]
+    try:
+        edit = subprocess.run(edit_cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        return False
+    if edit.returncode != 0:
+        _log(
+            f"{ticket_id}: ensure_pr_base: failed to retarget PR #{pr_number} "
+            f"{current_base!r} → {target!r}: {edit.stderr.strip()}"
+        )
+        return False
+    _log(f"{ticket_id}: PR #{pr_number} base retargeted {current_base!r} → {target!r}")
+    return True
 
 
 def _load_state_json(run_dir: Path) -> dict:
@@ -206,7 +273,12 @@ def create_or_update_pr(ticket_id: str, run_dir: Path, repo: str | None) -> None
         except FileNotFoundError:
             _log(f"{ticket_id}: gh not found — cannot update PR #{pr_number}")
     else:
-        create_cmd = ["gh", "pr", "create", "--head", branch, "--title", title, "--body", body]
+        base_branch = resolve_integration_branch(ticket_id, run_dir, repo)
+        create_cmd = [
+            "gh", "pr", "create", "--head", branch,
+            "--base", base_branch,
+            "--title", title, "--body", body,
+        ]
         if repo:
             create_cmd += ["--repo", repo]
         try:
@@ -461,6 +533,7 @@ def handle_test_complete(
     if not _checkpoint_and_push_before_pr(ticket_id, cwd=worktree_cwd):
         _log(f"{ticket_id}: pre-PR push failed — PR skipped")
         return
+    ensure_pr_base_branch(ticket_id, run_dir, repo)
     create_or_update_pr(ticket_id, run_dir, repo)
     if not auto_merge_pr(ticket_id, run_dir, repo):
         state_data = _load_state_json(run_dir)
@@ -484,13 +557,17 @@ def needs_pr_finalization(run_dir: Path) -> bool:
 
 
 __all__ = [
+    "INTEGRATION_BRANCH",
     "auto_merge_pr",
     "check_and_close_issue",
     "configure_log",
     "create_or_update_pr",
     "detect_pr_conflict",
+    "ensure_pr_base_branch",
     "handle_test_complete",
     "needs_pr_finalization",
+    "rebase_onto_ref",
+    "resolve_integration_branch",
     "_checkpoint_and_push_before_pr",
     "_load_state_json",
     "_pr_body",

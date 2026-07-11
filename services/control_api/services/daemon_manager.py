@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib.util
 import datetime
 import json
 import logging
@@ -15,14 +16,34 @@ from pathlib import Path
 
 import httpx
 
-from ..models.schemas import ActionResult, DaemonStatus, QueueEntry, RetryBlockedTicket, RuntimeStatus, WorkerInfo
-from .runtime_resolver import resolve_logs_dir, resolve_runs_dir, resolve_state_dir, resolve_worktrees_dir
+from ..models.schemas import (
+    ActionResult,
+    DaemonStatus,
+    ProviderQuotaAlert,
+    QueueEntry,
+    RetryBlockedTicket,
+    RuntimeStatus,
+    WorkerInfo,
+)
+from .runtime_resolver import (
+    resolve_logs_dir,
+    resolve_runs_dir,
+    resolve_state_dir,
+    resolve_ticket_run_dir,
+    resolve_worktrees_dir,
+)
 
 
 logger = logging.getLogger("control-api")
 
 _TOOLS_DIR = Path(__file__).resolve().parents[3] / "tools" / "agent_runner"
 _RUN_DAEMON = _TOOLS_DIR / "run_daemon.py"
+
+_run_step_spec = importlib.util.spec_from_file_location("_run_step", _TOOLS_DIR / "run_step.py")
+_run_step_mod = importlib.util.module_from_spec(_run_step_spec)  # type: ignore[arg-type]
+assert _run_step_spec.loader is not None
+_run_step_spec.loader.exec_module(_run_step_mod)
+extract_quota_alert_info = _run_step_mod.extract_quota_alert_info
 
 _PID_FILENAME = "daemon.pid"
 _LOG_FILENAME = "daemon.log"
@@ -696,15 +717,37 @@ def get_workers(project_root: Path, project_runtime_root: Path | None = None) ->
     return result
 
 
-def get_retry_blocked(project_root: Path, project_runtime_root: Path | None = None) -> list[RetryBlockedTicket]:
+def _iter_ticket_run_dirs(
+    project_root: Path,
+    project_runtime_root: Path | None = None,
+) -> list[tuple[str, Path]]:
+    """Return ``[(ticket_id, run_dir), ...]`` using worktree-aware resolution."""
     runs_dir = resolve_runs_dir(project_root, project_runtime_root=project_runtime_root)
-    if not runs_dir.exists():
-        return []
+    worktrees_dir = resolve_worktrees_dir(
+        project_root,
+        project_runtime_root=project_runtime_root,
+    )
+    ticket_ids: set[str] = set()
+    if runs_dir.exists():
+        ticket_ids.update(
+            p.name for p in runs_dir.iterdir() if _TICKET_RE.match(p.name)
+        )
+    if worktrees_dir.exists():
+        ticket_ids.update(
+            p.name for p in worktrees_dir.iterdir() if _TICKET_RE.match(p.name)
+        )
+    pairs: list[tuple[str, Path]] = []
+    for ticket_id in sorted(ticket_ids):
+        run_dir = resolve_ticket_run_dir(ticket_id, runs_dir, worktrees_dir)
+        if (run_dir / "state.json").exists():
+            pairs.append((ticket_id, run_dir))
+    return pairs
+
+
+def get_retry_blocked(project_root: Path, project_runtime_root: Path | None = None) -> list[RetryBlockedTicket]:
     result = []
-    for ticket_dir in sorted(runs_dir.iterdir()):
-        if not _TICKET_RE.match(ticket_dir.name):
-            continue
-        retry_file = ticket_dir / "retry-state.json"
+    for ticket_id, run_dir in _iter_ticket_run_dirs(project_root, project_runtime_root):
+        retry_file = run_dir / "retry-state.json"
         if not retry_file.exists():
             continue
         try:
@@ -716,12 +759,111 @@ def get_retry_blocked(project_root: Path, project_runtime_root: Path | None = No
         if retry_count == 0 and not cooldown_until:
             continue
         result.append(RetryBlockedTicket(
-            ticket_id=ticket_dir.name,
+            ticket_id=ticket_id,
             failure_class=data.get("failure_class"),
             retry_count=retry_count,
             cooldown_until=cooldown_until,
+            quota_message=data.get("quota_message"),
+            quota_reset_at=data.get("quota_reset_at"),
         ))
     return result
+
+
+def _cooldown_still_active(cooldown_until: str | None) -> bool:
+    if not cooldown_until:
+        return False
+    try:
+        until = datetime.datetime.strptime(cooldown_until, "%Y-%m-%dT%H:%M:%SZ").replace(
+            tzinfo=datetime.timezone.utc
+        )
+        return until > datetime.datetime.now(datetime.timezone.utc)
+    except ValueError:
+        return False
+
+
+def _collect_run_dir_output_text(run_dir: Path) -> str:
+    parts: list[str] = []
+    log_path = run_dir / "runtime.log"
+    if log_path.exists():
+        try:
+            parts.append(log_path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            pass
+    for path in sorted(run_dir.rglob("*")):
+        if not path.is_file():
+            continue
+        if path.suffix not in {".md", ".txt", ".log"}:
+            continue
+        if path.name in {"state.json", "retry-state.json"}:
+            continue
+        try:
+            if path.stat().st_size > 100_000:
+                continue
+            parts.append(path.read_text(encoding="utf-8", errors="replace"))
+        except OSError:
+            continue
+    return "\n".join(parts)
+
+
+def get_provider_quota_alert(project_root: Path, project_runtime_root: Path | None = None) -> ProviderQuotaAlert:
+    """Aggregate active provider quota blocks across ticket run dirs."""
+    inactive = ProviderQuotaAlert(active=False)
+    affected: list[str] = []
+    message: str | None = None
+    reset_at: str | None = None
+    cooldown_until: str | None = None
+
+    for ticket_id, run_dir in _iter_ticket_run_dirs(project_root, project_runtime_root):
+        retry_data: dict = {}
+        retry_file = run_dir / "retry-state.json"
+        if retry_file.exists():
+            try:
+                retry_data = json.loads(retry_file.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                retry_data = {}
+
+        if retry_data.get("stopped"):
+            continue
+
+        failure_class = retry_data.get("failure_class")
+        ticket_cooldown = retry_data.get("cooldown_until")
+        is_quota = failure_class == "quota_exceeded"
+        hint = None
+
+        if not is_quota:
+            hint = extract_quota_alert_info(_collect_run_dir_output_text(run_dir))
+            if hint:
+                is_quota = True
+
+        if not is_quota:
+            continue
+
+        if ticket_cooldown and not _cooldown_still_active(ticket_cooldown):
+            continue
+
+        if not ticket_cooldown and failure_class != "quota_exceeded":
+            continue
+
+        affected.append(ticket_id)
+        ticket_message = retry_data.get("quota_message") or (hint or {}).get("message")
+        ticket_reset = retry_data.get("quota_reset_at") or (hint or {}).get("reset_at")
+        if ticket_message and not message:
+            message = ticket_message
+        if ticket_reset and not reset_at:
+            reset_at = ticket_reset
+        if ticket_cooldown and (cooldown_until is None or ticket_cooldown < cooldown_until):
+            cooldown_until = ticket_cooldown
+
+    if not affected:
+        return inactive
+
+    return ProviderQuotaAlert(
+        active=True,
+        message=message or "Quota API provider atteint — reprise automatique après cooldown",
+        reset_at=reset_at,
+        cooldown_until=cooldown_until,
+        affected_tickets=affected,
+    )
 
 
 def get_intake_queue(project_root: Path, project_runtime_root: Path | None = None) -> list[QueueEntry]:
@@ -789,6 +931,7 @@ def get_runtime_status(project_root: Path, project_id: str | None = None, projec
         intake_queue=get_intake_queue(project_root, project_runtime_root=project_runtime_root),
         last_action=_last_heartbeat(project_root, project_runtime_root),
         last_error=get_last_error(project_root, project_runtime_root=project_runtime_root),
+        provider_quota_alert=get_provider_quota_alert(project_root, project_runtime_root=project_runtime_root),
     )
 
 

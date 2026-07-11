@@ -215,3 +215,29 @@ def test_max_attempts_emits_exhausted_event_once(db, runs_dir):
     events = _db.list_runtime_events(db, limit=200)
     exhausted = [e for e in events if e["event_type"] == "batch.dependency_analysis_exhausted"]
     assert len(exhausted) == 1
+
+
+def _add_ticket_to_batch(db: Path, runs_dir: Path, batch_id: str, ticket_id: str) -> None:
+    run_dir = runs_dir / ticket_id
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / "ticket.md").write_text(f"# {ticket_id}\n\nbody\n", encoding="utf-8")
+    _db.upsert_ticket_runtime(db, ticket_id, state="INIT")
+    bb.add_ticket_to_batch(db, batch_id, ticket_id)
+
+
+def test_blocked_readiness_not_resubmitted_while_batch_readiness_running(db, runs_dir):
+    """Blocked tickets must not re-enter readiness during the initial batch pass."""
+    batch_id = _intake_ticket(db, runs_dir, "T001")
+    _add_ticket_to_batch(db, runs_dir, batch_id, "T002")
+    for ticket_id, status in (("T001", "ready_candidate"), ("T002", "blocked")):
+        _db.upsert_ticket_intelligence(db, ticket_id, analysis_status="completed")
+        _db.upsert_ticket_readiness(db, ticket_id, readiness_status=status)
+
+    bb.transition_batch(db, batch_id, "collecting", "frozen")
+    bb.mark_dependency_analysis_attempt_started(db, batch_id)
+    bb.mark_dependency_analysis_succeeded(db, batch_id)
+
+    assert pipeline.find_next_ticket(db, ["T001", "T002"]) is None
+
+    bb.transition_batch(db, batch_id, "readiness_running", "dispatching")
+    assert pipeline.find_next_ticket(db, ["T001", "T002"]) == "T002"

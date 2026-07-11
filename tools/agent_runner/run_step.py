@@ -175,6 +175,14 @@ _QUOTA_PATTERNS: tuple[str, ...] = (
     "too many requests",
     "usage limit",
     "ratelimiterror",
+    r"hit your limit",
+    r"hit the limit",
+    r"you['']ve hit your limit",
+)
+
+_QUOTA_RESET_RE = re.compile(
+    r"resets?\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)(?:\s*\(([^)]+)\))?",
+    re.IGNORECASE,
 )
 
 _WRITE_PERMISSION_PATTERNS: tuple[str, ...] = (
@@ -522,6 +530,62 @@ def validate_planner_output(content: str, artifact_type: str = "plan") -> list[s
         reasons.append(META_REPORT_REASON)
 
     return reasons
+
+
+def parse_quota_reset_at(text: str) -> str | None:
+    """Return ISO-UTC reset time parsed from provider messages like 'resets 9:40pm (Europe/Paris)'."""
+    match = _QUOTA_RESET_RE.search(text)
+    if not match:
+        return None
+
+    hour = int(match.group(1))
+    minute = int(match.group(2) or 0)
+    ampm = match.group(3).lower()
+    tz_name = (match.group(4) or "UTC").strip()
+
+    if ampm == "pm" and hour != 12:
+        hour += 12
+    elif ampm == "am" and hour == 12:
+        hour = 0
+
+    try:
+        from zoneinfo import ZoneInfo
+
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = datetime.timezone.utc
+
+    now_local = datetime.datetime.now(tz)
+    candidate = now_local.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    if candidate <= now_local:
+        candidate += datetime.timedelta(days=1)
+
+    return candidate.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _quota_message_line(text: str) -> str | None:
+    for line in text.splitlines():
+        lower = line.lower()
+        for pattern in _QUOTA_PATTERNS:
+            if re.search(pattern, lower):
+                cleaned = line.strip()
+                return cleaned[:500] if cleaned else None
+    return None
+
+
+def extract_quota_alert_info(text: str) -> dict[str, str] | None:
+    """Return quota alert metadata when *text* indicates a provider quota/limit."""
+    if classify_runtime_failure(1, text, "") != "quota_exceeded":
+        return None
+
+    message = _quota_message_line(text)
+    reset_at = parse_quota_reset_at(text)
+    info: dict[str, str] = {}
+    if message:
+        info["message"] = message
+    if reset_at:
+        info["reset_at"] = reset_at
+    return info or {"message": "Provider quota limit reached"}
 
 
 def classify_runtime_failure(return_code: int, stdout: str, stderr: str) -> str:

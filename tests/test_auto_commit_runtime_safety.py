@@ -60,6 +60,9 @@ def test_is_runtime_ignored_path_covers_user_listed_paths():
         "runs/workers.json",
         "runs/.issue-intake.json",
         "runs/daemon.pid",
+        "backend/timizer_backend.egg-info/PKG-INFO",
+        "backend/timizer_backend.egg-info/SOURCES.txt",
+        "backend/pkg.dist-info/METADATA",
     ]
     for path in must_be_ignored:
         assert is_runtime_ignored_path(path), f"{path!r} must be runtime-ignored"

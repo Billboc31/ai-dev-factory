@@ -252,3 +252,61 @@ def test_runtime_status_retry_blocked(tmp_path, monkeypatch):
     assert len(blocked) == 1
     assert blocked[0]["ticket_id"] == "T001"
     assert blocked[0]["retry_count"] == 2
+
+
+def test_runtime_status_provider_quota_alert(tmp_path, monkeypatch):
+    import datetime
+
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    _make_ticket(tmp_path, "T001", "PLAN_APPROVED")
+    future = (
+        datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    (tmp_path / "runs" / "T001" / "retry-state.json").write_text(
+        json.dumps(
+            {
+                "failure_class": "quota_exceeded",
+                "cooldown_until": future,
+                "quota_message": "You've hit your limit",
+            }
+        )
+    )
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/daemon/runtime-status")
+    assert r.status_code == 200
+    alert = r.json()["provider_quota_alert"]
+    assert alert["active"] is True
+    assert "T001" in alert["affected_tickets"]
+    assert "hit your limit" in alert["message"].lower()
+
+
+def test_runtime_status_provider_quota_alert_worktree_layout(tmp_path, monkeypatch):
+    import datetime
+
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    wt = tmp_path / "worktrees" / "T009"
+    run_dir = wt / "runs" / "T009"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(
+        json.dumps({"ticket_id": "T009", "state": "PLAN_APPROVED"}),
+        encoding="utf-8",
+    )
+    future = (
+        datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=1)
+    ).strftime("%Y-%m-%dT%H:%M:%SZ")
+    (run_dir / "retry-state.json").write_text(
+        json.dumps(
+            {
+                "failure_class": "quota_exceeded",
+                "cooldown_until": future,
+                "quota_message": "You've hit your limit",
+            }
+        ),
+        encoding="utf-8",
+    )
+    client = TestClient(_make_app(tmp_path))
+    r = client.get("/daemon/runtime-status")
+    assert r.status_code == 200
+    alert = r.json()["provider_quota_alert"]
+    assert alert["active"] is True
+    assert "T009" in alert["affected_tickets"]

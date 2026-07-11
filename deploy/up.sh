@@ -19,12 +19,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
 cd "$PROJECT_ROOT"
 
+# shellcheck disable=SC1091
+source "$SCRIPT_DIR/load-env.sh"
 ENV_FILE="$SCRIPT_DIR/.env"
-if [ -f "$ENV_FILE" ]; then
-  set -a
-  # shellcheck disable=SC1090,SC1091
-  source "$ENV_FILE"
-  set +a
+if load_deploy_env "$ENV_FILE"; then
   echo "compose: loaded $ENV_FILE (HOST_RUNTIME_ROOT=${HOST_RUNTIME_ROOT:-<unset>})"
 else
   echo "compose: WARNING — $ENV_FILE not found; copy deploy/.env.example and edit it" >&2
