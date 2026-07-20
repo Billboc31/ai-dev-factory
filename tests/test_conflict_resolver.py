@@ -377,6 +377,8 @@ def test_resolve_conflicts_multi_pass_success(tmp_path, monkeypatch):
     monkeypatch.setattr(_rcr, "_run_tests", MagicMock(return_value="Exit code: 0\n"))
     monkeypatch.setattr(_rcr, "_prepare_clean_tree_for_rebase", lambda _tid: True)
     monkeypatch.setattr(_rcr, "_scrub_runtime_noise_before_rebase", lambda _tid: None)
+    monkeypatch.setattr(_rcr, "_purge_oversized_runtime_artifacts", lambda _tid: None)
+    monkeypatch.setattr(_rcr, "_unstage_noise_paths", lambda _tid: None)
     monkeypatch.setattr(_rcr, "_rebase_in_progress", lambda: False)
     advance_seq = iter([
         ["file_a.py", "file_b.py"],
@@ -439,6 +441,8 @@ def test_resolve_conflicts_max_pass_failure(tmp_path, monkeypatch):
     monkeypatch.setattr(_rcr, "compose_runtime_prompt", MagicMock(return_value="prompt"))
     monkeypatch.setattr(_rcr, "_prepare_clean_tree_for_rebase", lambda _tid: True)
     monkeypatch.setattr(_rcr, "_scrub_runtime_noise_before_rebase", lambda _tid: None)
+    monkeypatch.setattr(_rcr, "_purge_oversized_runtime_artifacts", lambda _tid: None)
+    monkeypatch.setattr(_rcr, "_unstage_noise_paths", lambda _tid: None)
     monkeypatch.setattr(_rcr, "_rebase_in_progress", lambda: False)
     monkeypatch.setattr(
         _rcr,
@@ -521,6 +525,69 @@ def test_split_conflicts_separates_runtime_paths():
     assert runtime == ["runs/T010/state.json", "runs/T010/plan.md"]
 
 
+def test_split_conflicts_treats_foreign_runs_and_node_modules_as_runtime():
+    import run_conflict_resolver as rcr
+
+    files = [
+        "frontend/src/App.tsx",
+        "runs/T011/conflict/context.md",
+        "runs/T014/prompts/conflict-resolver-attempt-1.md",
+        "runs/T025/state.json",
+        "frontend/node_modules/lru-cache/package.json",
+        "node_modules/.package-lock.json",
+        "backend/target/surefire-reports/TEST-Foo.xml",
+        "frontend/dist/index.html",
+    ]
+    source, runtime = rcr._split_conflicts("T025", files)
+    assert source == ["frontend/src/App.tsx"]
+    assert runtime == [
+        "runs/T011/conflict/context.md",
+        "runs/T014/prompts/conflict-resolver-attempt-1.md",
+        "runs/T025/state.json",
+        "frontend/node_modules/lru-cache/package.json",
+        "node_modules/.package-lock.json",
+        "backend/target/surefire-reports/TEST-Foo.xml",
+        "frontend/dist/index.html",
+    ]
+
+
+def test_auto_resolve_runtime_keeps_own_ticket_takes_upstream_for_foreign(
+    monkeypatch,
+):
+    import run_conflict_resolver as rcr
+
+    calls: list[list[str]] = []
+
+    def _fake_git(args):
+        calls.append(list(args))
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(rcr, "_run_git", _fake_git)
+    rcr._auto_resolve_runtime_conflicts(
+        "T025",
+        [
+            "runs/T025/state.json",
+            "runs/T011/conflict/context.md",
+            "frontend/node_modules/foo/package.json",
+        ],
+    )
+    assert ["checkout", "--theirs", "--", "runs/T025/state.json"] in calls
+    assert ["checkout", "--ours", "--", "runs/T011/conflict/context.md"] in calls
+    assert ["checkout", "--ours", "--", "frontend/node_modules/foo/package.json"] in calls
+
+
+def test_blocking_dirty_paths_ignores_foreign_runs_and_node_modules():
+    import run_conflict_resolver as rcr
+
+    porcelain = "\n".join([
+        " M runs/T011/state.json",
+        " M frontend/node_modules/lru-cache/package.json",
+        " M frontend/src/App.tsx",
+        " M runs/T025/runtime.log",
+    ])
+    assert rcr._blocking_dirty_paths(porcelain, "T025") == ["frontend/src/App.tsx"]
+
+
 def test_scrub_ticket_runtime_dir_resets_whole_runtime_prefix(tmp_path, monkeypatch):
     import run_conflict_resolver as rcr
 
@@ -533,7 +600,7 @@ def test_scrub_ticket_runtime_dir_resets_whole_runtime_prefix(tmp_path, monkeypa
     monkeypatch.setattr(rcr, "_run_git", _fake_git)
     rcr._scrub_ticket_runtime_dir("T010")
     assert ["checkout", "HEAD", "--", "runs/T010/"] in calls
-    assert ["clean", "-fd", "runs/T010/conflict", "runs/T010/prompts"] in calls
+    assert ["clean", "-fd", "--", "runs/T010"] in calls
 
 
 def test_prepare_clean_tree_for_rebase_fails_when_runtime_still_dirty(tmp_path, monkeypatch):
@@ -572,6 +639,68 @@ def test_prepare_clean_tree_tolerates_retry_state_json(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(rcr, "_run_git", _fake_git)
     assert rcr._prepare_clean_tree_for_rebase(ticket_id) is True
+
+
+def test_advance_past_runtime_retries_when_continue_hits_target_conflicts(
+    tmp_path, monkeypatch,
+):
+    """rebase --continue that only conflicts on build artifacts must not abort."""
+    import run_conflict_resolver as rcr
+
+    run_dir = tmp_path / "runs" / "T025"
+    run_dir.mkdir(parents=True)
+    data: dict = {}
+    calls = {"list": 0, "continue": 0, "auto": 0}
+    pending_target = ["backend/target/surefire-reports/x.xml"]
+
+    def _fake_list():
+        calls["list"] += 1
+        if calls["auto"] == 0 and calls["continue"] >= 1:
+            return list(pending_target)
+        return []
+
+    def _fake_continue(_tid):
+        calls["continue"] += 1
+        if calls["continue"] == 1:
+            return subprocess.CompletedProcess(
+                ["git", "rebase", "--continue"],
+                1,
+                stdout="",
+                stderr="CONFLICT (content): Merge conflict in backend/target/x\n",
+            )
+        return subprocess.CompletedProcess(
+            ["git", "rebase", "--continue"], 0, stdout="", stderr="",
+        )
+
+    def _fake_auto(_tid, paths):
+        calls["auto"] += 1
+        assert paths == pending_target
+        pending_target.clear()
+
+    rebase_alive = {"v": True}
+
+    def _fake_rebase_in_progress():
+        return rebase_alive["v"]
+
+    def _fake_continue_and_maybe_done(_tid):
+        result = _fake_continue(_tid)
+        if result.returncode == 0:
+            rebase_alive["v"] = False
+        return result
+
+    monkeypatch.setattr(rcr, "_list_conflicted_files", _fake_list)
+    monkeypatch.setattr(rcr, "_effective_source_conflicts", lambda _tid: [])
+    monkeypatch.setattr(rcr, "_rebase_in_progress", _fake_rebase_in_progress)
+    monkeypatch.setattr(rcr, "_run_rebase_continue", _fake_continue_and_maybe_done)
+    monkeypatch.setattr(rcr, "_auto_resolve_runtime_conflicts", _fake_auto)
+    monkeypatch.setattr(rcr, "_log", lambda *_a, **_k: None)
+    monkeypatch.setattr(rcr, "_write_error_log", lambda *_a, **_k: None)
+    monkeypatch.setattr(rcr, "_persist_conflict_state", lambda *_a, **_k: None)
+
+    result = rcr._advance_past_runtime_conflicts("T025", run_dir, data)
+    assert result == []
+    assert calls["auto"] >= 1
+    assert calls["continue"] >= 1
 
 
 def test_conflict_resolution_eligible_from_git_conflicts(tmp_path):
