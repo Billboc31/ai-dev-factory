@@ -149,6 +149,72 @@ def test_plan_without_any_section_is_rejected():
 
 # ── meta-report heuristic (T202) ─────────────────────────────────────────────
 
+def test_hard_meta_report_plan_written_to_is_rejected():
+    """Claude Code often Writes the real plan then prints this chatty summary."""
+    meta_report = (
+        "Plan written to `runs/T035/plan.md`. Key decisions made from "
+        "codebase exploration:\n\n"
+        "- **No routing library** — scope creep.\n"
+        "- **New `AppShell.tsx`** component.\n"
+        "- Targeting `docs/frontend-audit.md`.\n"
+    )
+    reasons = validate_planner_output(meta_report)
+    assert META_REPORT_REASON in reasons
+
+
+def test_hard_meta_report_runs_path_is_written_is_rejected():
+    meta_report = (
+        "`runs/T033/plan.md` is written. The plan covers:\n\n"
+        "- **Two inspectable views** (`selector` and `history`).\n"
+        "- Targeting `docs/frontend-audit.md`.\n"
+    )
+    reasons = validate_planner_output(meta_report)
+    assert META_REPORT_REASON in reasons
+
+
+def test_resolve_exec_output_prefers_valid_disk_over_meta_stdout(tmp_path, monkeypatch):
+    """When the agent Write()s a valid plan then prints a meta-report, keep disk."""
+    from run_step import resolve_exec_output_content
+
+    monkeypatch.chdir(tmp_path)
+    plan_path = tmp_path / "runs" / "T099" / "plan.md"
+    plan_path.parent.mkdir(parents=True)
+    valid = (
+        "## Objective\n"
+        "Configure Vite host binding for LAN access.\n\n"
+        "## Included\n"
+        "- `frontend/vite.config.ts`: server.host 0.0.0.0\n\n"
+        "## Excluded\n"
+        "- Production deploy.\n\n"
+        "## Acceptance criteria\n"
+        "- `npm run dev` binds 0.0.0.0:5173\n"
+    )
+    plan_path.write_text(valid)
+    meta = "`runs/T099/plan.md` is written. The plan covers LAN access."
+    chosen = resolve_exec_output_content("planner", plan_path, meta)
+    assert chosen == valid
+
+
+def test_resolve_exec_output_keeps_stdout_when_disk_invalid(tmp_path, monkeypatch):
+    from run_step import resolve_exec_output_content
+
+    monkeypatch.chdir(tmp_path)
+    plan_path = tmp_path / "runs" / "T099" / "plan.md"
+    plan_path.parent.mkdir(parents=True)
+    plan_path.write_text("garbage")
+    stdout = (
+        "## Objective\n"
+        "Do the thing.\n\n"
+        "## Included\n"
+        "- a.py\n\n"
+        "## Excluded\n"
+        "- b.py\n\n"
+        "## Acceptance criteria\n"
+        "- tests pass\n"
+    )
+    assert resolve_exec_output_content("planner", plan_path, stdout) == stdout
+
+
 def test_meta_report_t201_repro_is_rejected():
     """Reproduces the T201 failure mode: the planner returns a status report
     about its own work instead of the plan artifact itself."""

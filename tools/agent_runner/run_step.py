@@ -155,6 +155,8 @@ _MIN_PLAN_WORDS = 20
 # artifact instead of the artifact itself. Each pattern is anchored at the
 # start of the first prose line (after stripping leading headings). The
 # regexes are intentionally narrow to avoid false positives.
+# Soft openings: suppressed when the body carries real artifact signals
+# (bullets, paths, code fences).
 _META_REPORT_OPENING_PATTERNS: tuple[str, ...] = (
     r"^the plan(?:\s+(?:has been|was|now|is)\b|\s+rewritten\b)",
     r"^this plan\b",
@@ -162,6 +164,16 @@ _META_REPORT_OPENING_PATTERNS: tuple[str, ...] = (
     r"^key points covered\b",
     r"^the document now\b",
     r"^the artifact (?:was|has been) (?:rewritten|updated|revised)",
+)
+
+# Hard openings: always meta-reports — tool-using agents often Write the real
+# plan to disk then print one of these summaries to stdout. Bullets/paths in
+# the summary must NOT suppress the heuristic.
+_HARD_META_REPORT_OPENING_PATTERNS: tuple[str, ...] = (
+    r"^plan written to\b",
+    r"^the plan (?:is|has been|was) written(?:\s+to\b)?",
+    r"^`?runs/t\d+/plan\.md`?\s+(?:is|has been)\s+written",
+    r"^`?runs/t\d+/plan\.md`?\s+has been written\b",
 )
 
 # Human-readable reason emitted when the meta-report heuristic fires.
@@ -414,37 +426,43 @@ def compose_runtime_prompt(
     return "\n\n---\n\n".join(parts)
 
 
-def _looks_like_meta_report(content: str) -> bool:
-    """High-precision detector for outputs that describe the artifact rather
-    than *being* the artifact.
-
-    Returns ``True`` only when the whole file reads as a report:
-
-    1. The first non-empty, non-heading line matches one of the curated
-       suspicious opening patterns (``_META_REPORT_OPENING_PATTERNS``).
-    2. The file contains no fenced code block, no bullet list, and no
-       file-path-like token. These three signals are strong indicators that
-       the output is a real artifact (plan with concrete file references,
-       bullet items, examples), so their presence suppresses the heuristic.
-
-    A structured plan that happens to contain "The plan now ensures X"
-    inside a section will not trigger because it carries bullets / paths.
-    """
-    stripped = content.strip()
-    if not stripped:
-        return False
-
-    opening = ""
-    for line in stripped.splitlines():
+def _first_prose_line(content: str) -> str:
+    """Return the first non-empty, non-heading line lowercased, or ``\"\"``."""
+    for line in content.splitlines():
         line_stripped = line.strip()
         if not line_stripped:
             continue
         if line_stripped.startswith("#"):
             continue
-        opening = line_stripped.lower()
-        break
+        return line_stripped.lower()
+    return ""
+
+
+def _looks_like_meta_report(content: str) -> bool:
+    """High-precision detector for outputs that describe the artifact rather
+    than *being* the artifact.
+
+    Returns ``True`` when:
+
+    1. The first prose line matches a **hard** meta-report opening
+       (``_HARD_META_REPORT_OPENING_PATTERNS``) — always rejected, even if
+       the body has bullets/paths (chatty summaries about ``plan.md``).
+    2. Or it matches a **soft** opening (``_META_REPORT_OPENING_PATTERNS``)
+       *and* the file contains no fenced code block, no bullet list, and no
+       file-path-like token. Those three signals suppress soft matches so a
+       real plan that mentions "The plan now ensures X" inside a section
+       still passes.
+    """
+    stripped = content.strip()
+    if not stripped:
+        return False
+
+    opening = _first_prose_line(stripped)
     if not opening:
         return False
+
+    if any(re.match(pat, opening) for pat in _HARD_META_REPORT_OPENING_PATTERNS):
+        return True
 
     if not any(re.match(pat, opening) for pat in _META_REPORT_OPENING_PATTERNS):
         return False
@@ -466,6 +484,35 @@ def _looks_like_meta_report(content: str) -> bool:
     ):
         return False
     return True
+
+
+def resolve_exec_output_content(step: str, output_path: Path, stdout: str) -> str:
+    """Choose between agent stdout and an on-disk file the agent may have written.
+
+    Tool-using agents (Claude Code) often ``Write`` the real artifact to
+    ``output_path`` then print a chatty meta-summary to stdout. Blindly
+    overwriting with stdout destroys the valid artifact. Prefer the on-disk
+    file when it already validates as a plan and stdout does not.
+    """
+    if step != "planner":
+        return stdout
+    if not output_path.is_file():
+        return stdout
+    try:
+        disk = output_path.read_text(encoding="utf-8")
+    except OSError:
+        return stdout
+    if not disk.strip():
+        return stdout
+
+    disk_reasons = validate_planner_output(disk, artifact_type="plan")
+    if disk_reasons:
+        return stdout
+
+    stdout_reasons = validate_planner_output(stdout, artifact_type="plan")
+    if stdout_reasons or disk.strip() != stdout.strip():
+        return disk
+    return stdout
 
 
 def validate_planner_output(content: str, artifact_type: str = "plan") -> list[str]:
@@ -725,7 +772,14 @@ def main(argv: list[str]) -> int:
             else:
                 output_path = default_output_path(ticket_id, step)
 
-            write_output(output_path, stdout)
+            content = resolve_exec_output_content(step, output_path, stdout)
+            if content is not stdout:
+                _log_runtime(
+                    ticket_id,
+                    f"compose: preferring on-disk {output_path} over chatty stdout "
+                    f"(agent Write beat meta-report)",
+                )
+            write_output(output_path, content)
 
             if args.stderr_log:
                 stderr_path = ensure_safe_relative_path(args.stderr_log)

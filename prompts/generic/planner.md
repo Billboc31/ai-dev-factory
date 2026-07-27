@@ -10,7 +10,12 @@ Do not explain what changed. Do not produce a status report.
 This rule applies to both initial plans and rewrites after a review.
 Examples of forbidden openings: "The plan has been rewritten…",
 "This plan now covers…", "Plan rewritten as a real implementation
-document…", "Key points covered…", "The document now contains…".
+document…", "Key points covered…", "The document now contains…",
+"Plan written to `runs/…/plan.md`…", "`runs/…/plan.md` is written…".
+
+Do not use the Write tool on `plan.md` and then print a status summary —
+your stdout IS the artifact. If you do write the file, stdout must still
+be the full plan (same four headings), not a report about it.
 
 ## Required output structure (strict) Your reply **MUST** be a Markdown document containing **exactly** these four level-2 headings, in this order, spelled exactly as shown:
 ## Objective

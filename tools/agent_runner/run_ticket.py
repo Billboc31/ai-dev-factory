@@ -866,7 +866,9 @@ def _build_planner_meta_report_retry_context(ticket_id: str) -> Path:
         "Do not explain what changed. Do not produce a status report.\n"
         "Do not open with \"The plan has been rewritten\", \"This plan now\",\n"
         "\"Plan rewritten as\", \"Key points covered\", \"The document now\",\n"
+        "\"Plan written to\", \"`runs/<ticket>/plan.md` is written\",\n"
         "or any other meta-statement about your own work.\n"
+        "Your reply MUST start with `## Objective` (or the French equivalent).\n"
     )
     context_path.write_text(content, encoding="utf-8")
     return context_path
