@@ -1,7 +1,7 @@
 {
   "ticket_id": "T225",
-  "state": "IMPLEMENTATION_REVIEW_NEEDED",
+  "state": "IMPLEMENTATION_FIX_REQUIRED",
   "branch": "ticket/T225-add-persistent-ai-project-workspace-with-controlle",
   "issue_number": 308,
-  "updated_at": "2026-07-28T21:52:07Z"
+  "updated_at": "2026-07-28T21:57:16Z"
 }
