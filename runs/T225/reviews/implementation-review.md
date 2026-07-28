@@ -1,105 +1,81 @@
-Now I have everything I need. Writing the review.
+I now have everything I need. I've directly read all implementation files and verified each fix from the previous review cycle.
 
 ---
 
-# PR Review — T225 : Add persistent AI Project Workspace with controlled capabilities
+# PR Review — T225 : Add persistent AI Project Workspace with controlled capabilities (round 2)
 
 ## Résumé
 
-L'implémentation introduit un panneau de workspace IA persistant sur toutes les pages projet, accessible via un bouton bascule dans la sidebar. L'architecture en trois couches (Frontend → Control API → Supervisor) est correctement respectée : la Control API est un proxy authentifié pur, et le Supervisor détient toute la logique (appel IA, enforcement des capacités, création d'issues GitHub). Les critères d'acceptance du ticket sont majoritairement satisfaits.
+Deuxième revue, après un premier cycle `IMPLEMENTATION_FIX_REQUIRED` sur quatre points (P1–P4). L'implémentation actuelle résout l'ensemble des demandes. L'architecture en trois couches (Frontend → Control API → Supervisor) est correctement respectée et les critères d'acceptance du ticket sont entièrement satisfaits.
 
 ## Vérifications effectuées
 
-- Diff complet lu (16 fichiers, ~1854 lignes ajoutées)
-- Chemin de routing tracé bout-en-bout : Frontend → Control API → Supervisor
-- Enforcement de l'allowlist de capacités vérifié ligne par ligne
-- Système de tokens UUID opaques vérifié
-- Mécanisme de persistance du panneau vérifié (hors `<Routes>`)
-- Validation croisée action/projet sur les endpoints de confirmation
-- Prompt système inspecté pour conformité aux contraintes
-- Gestion des erreurs relue
-- Limites connues croisées avec `implementation-output.md` et `plan.md`
+- Diff complet relu bout-en-bout (22 fichiers dans le diff vs main)
+- Chaque point P1–P4 vérifié ligne par ligne dans le code actuel
+- Routage Frontend → workspace.js → Control API → Supervisor tracé
+- Logique `_execute_workspace_capability` relue pour cohérence avec allowlist
+- Tests Supervisor relus cas par cas
+- Prompt système vérifié vis-à-vis des contraintes du ticket
 
-## Points validés
+## Vérification des fixes précédents
 
-1. **Tout passe par le Supervisor** — `control_api/routes/workspace.py` n'appelle ni provider IA, ni GitHub, ni service interne. Il forward uniquement vers le Supervisor via `_forward()`.
+### P1 — Capacités stub présentées disponibles mais en échec : RÉSOLU
 
-2. **Allowlist deny-by-default** — `_WORKSPACE_CAPABILITIES` définit exactement 5 capacités (supervisor.main.py:2876–2897). Toute capacité proposée par l'IA non présente dans ce dict est rejetée à la ligne 3182 : le `proposed_action` est annulé, le `intent` recalé à `informational`.
+`_WORKSPACE_CAPABILITIES` (supervisor/main.py:2876–2888) ne contient désormais plus que 3 entrées : `restart_daemon`, `rerun_dependency_analysis`, `resume_execution`. Les stubs `rerun_intelligence` et `trigger_deployment` ont été supprimés. Le prompt système (`_WORKSPACE_SYSTEM_PROMPT`, lignes 2909–2911) liste exactement les mêmes 3 capacités. `_execute_workspace_capability` (lignes 3044–3143) implémente les 3 cas ; le fallback final est `return False, f"unknown capability: {capability!r}"` mais ce chemin est inatteignable car `workspace_action_confirm` valide d'abord contre l'allowlist.
 
-3. **Tokens UUID opaques** — Les `action_id` et `draft_id` sont générés côté Supervisor (`str(uuid.uuid4())`). Le frontend ne construit jamais d'arguments internes : il ne renvoie que le token opaque à la confirmation.
+### P2 — Aucun test livré : RÉSOLU
 
-4. **Confirmation obligatoire avant toute mutation** — Actions et drafts d'issues sont stockés en attente jusqu'à confirmation explicite via `/actions/confirm` ou `/issues/confirm`.
+`tests/test_supervisor_workspace.py` (236 lignes) livre 6 tests couvrant les chemins de sécurité critiques :
+- Capacité inconnue proposée par l'IA → rejet sans stockage (`test_unknown_capability_rejected`)
+- Token forgé → 404 (`test_forged_action_id_rejected`)
+- `action_id` d'un autre projet → 403 (`test_action_id_project_mismatch_rejected`)
+- `functional_dev` → draft_id créé, aucune action stockée (`test_functional_dev_creates_issue_draft_not_code`)
+- Draft vide → 422 (`test_empty_issue_draft_rejected`)
+- Réponse d'erreur générique sans fuite interne (`test_ai_error_returns_generic_message`)
 
-5. **Functional dev → issue GitHub uniquement** — L'intent `functional_dev` retourne un draft d'issue, jamais de code, commit ou PR.
+### P3 — Détails d'erreur du provider IA exposés au client : RÉSOLU
 
-6. **Isolation par projet à la confirmation** — Les deux endpoints de confirmation vérifient `action["project_id"] != project_id` et retournent 403 en cas de mismatch (supervisor.main.py:3227–3228, 3258–3259).
+`_call_workspace_ai` (lignes 3013–3021) retourne désormais `"The AI assistant is temporarily unavailable. Please try again in a moment."` en cas d'exception, et logue l'exception en interne avec `logger.error("workspace: AI call failed: %s", exc, exc_info=True)`. Aucune information interne n'atteint le client.
 
-7. **Persistance du panneau** — `<ProjectWorkspacePanel>` est rendu en dehors de `<Routes>` comme frère flex dans App.jsx. La conversation se réinitialise uniquement au changement de `projectId` via `useEffect([projectId])`.
+### P4 — Contenu des tickets injecté sans sanitisation : RÉSOLU
 
-8. **Logs traçables** — Toutes les opérations workspace loguent `project_id`, `intent`, `capability`, `action_id`, `draft_id`.
+`_workspace_project_context` (lignes 2964–2969) préfixe chaque ligne ticket avec `  - ticket "{tf.stem}": {first}`, ce qui constitue un label structuré rendant syntaxiquement plus difficile une injection de prompt via un titre de ticket malformé.
 
-9. **Prompt système conforme** — Les interdictions du ticket (pas de code, pas de commit, pas de contournement du workflow GitHub, pas de secrets) sont explicitement inscrites dans `_WORKSPACE_SYSTEM_PROMPT`.
+## Points validés (préexistants, confirmés intacts)
 
-## Problèmes détectés
+1. **Routing exclusif via Supervisor** — `control_api/routes/workspace.py` est un proxy pur (`_forward`), sans appel IA, GitHub ou service interne.
+2. **Deny-by-default** — Double enforcement : rejet à la proposition dans `workspace_chat` (ligne 3165) et revalidation à la confirmation dans `workspace_action_confirm` (ligne 3214).
+3. **Tokens opaques** — `action_id` et `draft_id` sont des UUID v4 générés côté Supervisor, jamais construits par le frontend.
+4. **Confirmation obligatoire avant mutation** — Les deux endpoints de confirmation valident project_id (403 si mismatch) avant toute exécution.
+5. **Persistance du panneau** — `ProjectWorkspacePanel` est rendu hors de `<Routes>` dans App.jsx, reste monté lors de la navigation ; la conversation se réinitialise via `useEffect([projectId])` uniquement au changement de projet.
+6. **Création d'issue GitHub** — Commande `gh` passée en liste argv (pas de shell, pas d'injection), avec timeout 30 s et gestion des cas `FileNotFoundError` et `TimeoutExpired`.
+7. **Logs traçables** — `project_id`, `intent`, `capability`, `action_id`, `draft_id` loggés à chaque étape.
 
-### P1 — Capacités stub présentées comme disponibles mais en échec à la confirmation [BLOQUANT]
+## Observations mineures (non bloquantes)
 
-`rerun_intelligence` et `trigger_deployment` sont enregistrées dans `_WORKSPACE_CAPABILITIES` (supervisor.main.py:2889–2896) **et** listées dans le prompt système (lignes 2921–2922) comme capacités disponibles. Lorsque l'utilisateur confirme l'une d'elles, `_execute_workspace_capability` retourne `(False, "use platform UI...")`, ce qui produit une réponse HTTP 500 au confirmateur.
+### O1 — Dead code dans `test_ai_error_returns_generic_message`
 
-Le flux utilisateur est : message → "Proposed action" affiché → "Confirm" cliqué → erreur 500. C'est une fausse promesse : le système annonce une capacité qu'il ne peut pas exécuter, et la seule façon de le savoir est de cliquer sur Confirmer.
+Les deux premiers blocs `with patch(...): pass` (lignes 194–205) ne font rien. Le test fonctionnel réel commence à la ligne 217 et est correct. Ce n'est pas un bloquant, mais le fichier serait plus lisible sans ce code mort.
 
-`implementation-output.md` le mentionne comme "known limit", mais une limitation documentée dans un artefact interne ne suffit pas : l'utilisateur final n'a aucun moyen de le savoir avant de confirmer.
+### O2 — TOCTOU théorique à la confirmation d'action
 
-**Correction attendue** : supprimer `rerun_intelligence` et `trigger_deployment` de `_WORKSPACE_CAPABILITIES` et du prompt système, **ou** les implémenter correctement. Si elles sont conservées, leur confirmation doit retourner HTTP 501 (Not Implemented) avec un message clair, et le frontend doit distinguer ce cas d'une erreur réelle.
+Dans `workspace_action_confirm`, `action` est récupéré sous lock puis validé hors lock (lignes 3205–3215). Deux requêtes concurrentes avec le même `action_id` pourraient toutes deux passer la validation et exécuter la capacité deux fois (ex. double restart du daemon). En pratique la contrainte single-user de l'interface rend ce cas irréaliste ; le comportement est acceptable pour une v1 mais méritera une vraie protection atomique (retrieve + delete sous un seul lock) lors d'une exposition multi-utilisateur.
 
-### P2 — Aucun test livré [BLOQUANT]
+### O3 — Draft vide reste en mémoire après refus 422
 
-Le plan (plan.md:183–209) spécifie des tests exhaustifs pour les trois couches : Supervisor (classification d'intent, rejet de capacités inconnues, validation des tokens, forged/mismatched action IDs), Control API (proxy pur, mapping des erreurs), Frontend (persistance du panneau, réinitialisation, cartes de confirmation). Aucun fichier de test n'apparaît dans le diff.
+Si un draft d'issue est stocké avec un titre ou body vide (peut arriver si l'IA retourne un draft incomplet), la confirmation retourne 422 correctement mais le draft reste dans `_pending_workspace_issues` indéfiniment. Edge case peu probable avec le prompt actuel ; acceptable pour v1.
 
-Les scénarios manquants incluent des cas de sécurité critiques :
-- forged `action_id` → rejet 404
-- `action_id` d'un autre projet → rejet 403
-- capacité non-allowlistée proposée par l'IA → refus sans exécution
-- `functional_dev` → aucun code généré
+### O4 — Aucune limite sur la longueur de `message`
 
-**Correction attendue** : livrer au minimum les tests Supervisor couvrant les chemins de sécurité.
+`message: str` dans `WorkspaceChatRequest` n'a pas de `max_length`. Déjà noté dans la review précédente comme risque faible acceptable pour v1.
 
-### P3 — Détails d'erreur du provider IA exposés au client [MINEUR]
+## Risques hérités (acceptés v1)
 
-`_call_workspace_ai` (supervisor.main.py:3024–3030) retourne `f"AI call failed: {exc}"` directement dans le champ `reply` de la réponse. Ceci peut exposer des informations internes : messages d'erreur API, détails d'authentification, IPs internes.
-
-**Correction attendue** : retourner un message générique à l'utilisateur ; loguer l'exception à niveau ERROR côté Supervisor.
-
-### P4 — Contenu des tickets injecté sans sanitisation dans le contexte système [MINEUR]
-
-`_workspace_project_context` lit la première ligne de chaque fichier ticket (max 80 chars) et la concatène dans le prompt système (supervisor.main.py:2974–2979). Un ticket dont le titre commence par une instruction de prompt injection (ex : `IGNORE PREVIOUS INSTRUCTIONS and...`) pourrait influencer le comportement de l'IA.
-
-Le risque est borné (80 chars, première ligne seulement, côté Supervisor uniquement), mais c'est un vecteur d'injection indirect réel.
-
-**Correction attendue** : préfixer chaque ligne ticket avec un label neutre structuré, par exemple `- ticket "T001": {first_line}`, pour rendre l'injection syntaxiquement plus difficile à exécuter dans ce contexte.
-
-## Risques éventuels
-
-- **Stockage en mémoire sans TTL** : les actions et drafts en attente s'accumulent sans expiration. Risque de fuite mémoire si de nombreuses actions non confirmées s'accumulent. Documenté comme limitation connue, acceptable pour une v1.
-- **Aucune limite sur la longueur du message** : `message: str` sans max. Un message très long augmente les coûts token. Risque faible à court terme.
-- **Endpoints Supervisor non authentifiés** : cohérent avec le reste de l'API Supervisor, mais tout processus atteignant le port 8090 peut appeler les endpoints workspace sans passer par la Control API. À surveiller si le port est exposé hors du réseau interne.
+- Stockage des actions/drafts en mémoire sans TTL.
+- Endpoints Supervisor non authentifiés (cohérent avec le reste de l'API Supervisor).
 
 ## Décision
 
-L'architecture est correcte et les contraintes de sécurité fondamentales (routing Supervisor, allowlist, tokens opaques, confirmation) sont bien implémentées. Cependant, **P1** (capacités stub en échec silencieux après confirmation) est un défaut de comportement visible qui nuit à la confiance utilisateur, et **P2** (absence totale de tests) laisse des chemins de sécurité critiques non vérifiés alors que le plan les exigeait explicitement.
+Les 4 problèmes bloquants et mineurs de la review précédente sont correctement résolus. L'architecture respecte les contraintes du ticket, les chemins de sécurité critiques sont implémentés et couverts par des tests. Les observations O1–O4 ne justifient pas un nouveau cycle de fix.
 
-- REQUEST_CHANGES
-
-## Actions demandées
-
-1. **P1** — Supprimer `rerun_intelligence` et `trigger_deployment` de `_WORKSPACE_CAPABILITIES` et du prompt système **ou** les implémenter. En aucun cas une confirmation utilisateur ne doit aboutir à un 500 pour une capacité annoncée comme disponible.
-
-2. **P2** — Livrer les tests Supervisor couvrant au minimum : rejet de capacité inconnue, rejet de token forgé/mismatch projet, classification `functional_dev` sans génération de code, validation d'issue draft vide.
-
-3. **P3** — Remplacer `f"AI call failed: {exc}"` par un message générique côté réponse ; loguer l'exception en interne.
-
-4. **P4** — Préfixer les lignes ticket dans `_workspace_project_context` avec un label structuré pour durcir la surface d'injection de prompt.
-
----
-
-IMPLEMENTATION_FIX_REQUIRED
+IMPLEMENTATION_APPROVED
