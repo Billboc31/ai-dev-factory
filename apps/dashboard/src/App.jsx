@@ -9,6 +9,7 @@ import DeployerPage from './pages/DeployerPage'
 import SandboxPanel from './components/SandboxPanel'
 import AutoFixPanel from './components/AutoFixPanel'
 import ProjectSidebar from './components/ProjectSidebar'
+import ProjectWorkspacePanel from './components/ProjectWorkspacePanel'
 import RuntimeDashboardPage from './pages/RuntimeDashboardPage'
 import EnvironmentsPage from './pages/EnvironmentsPage'
 import ProjectsPage from './pages/ProjectsPage'
@@ -48,6 +49,7 @@ function AppLayout() {
   const [activeProject, setActiveProject] = useState(
     () => localStorage.getItem('activeProject') || null
   )
+  const [workspaceOpen, setWorkspaceOpen] = useState(false)
 
   useEffect(() => {
     const match = location.pathname.match(/^\/projects\/([^/]+)/)
@@ -80,6 +82,8 @@ function AppLayout() {
         projects={projects}
         activeProject={activeProject}
         onSelect={handleSelectProject}
+        workspaceOpen={workspaceOpen}
+        onWorkspaceToggle={() => setWorkspaceOpen(o => !o)}
       />
       <main className="flex-1 p-6 overflow-auto">
         <ActiveProjectContext.Provider value={activeProject}>
@@ -112,6 +116,13 @@ function AppLayout() {
           </Routes>
         </ActiveProjectContext.Provider>
       </main>
+      {activeProject && (
+        <ProjectWorkspacePanel
+          projectId={activeProject}
+          isOpen={workspaceOpen}
+          onClose={() => setWorkspaceOpen(false)}
+        />
+      )}
     </div>
   )
 }
