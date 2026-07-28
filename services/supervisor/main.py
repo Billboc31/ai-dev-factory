@@ -2886,14 +2886,6 @@ _WORKSPACE_CAPABILITIES: dict[str, dict] = {
         "description": "Resume ticket execution (restart daemon)",
         "confirmation_required": True,
     },
-    "rerun_intelligence": {
-        "description": "Rerun ticket intelligence analysis",
-        "confirmation_required": True,
-    },
-    "trigger_deployment": {
-        "description": "Trigger project deployment",
-        "confirmation_required": True,
-    },
 }
 
 _WORKSPACE_SYSTEM_PROMPT = """\
@@ -2918,8 +2910,6 @@ ALLOWED_CAPABILITIES:
 - restart_daemon: Restart the project daemon
 - rerun_dependency_analysis: Rerun dependency analysis
 - resume_execution: Resume ticket execution
-- rerun_intelligence: Rerun ticket intelligence analysis
-- trigger_deployment: Trigger project deployment
 
 RESPONSE FORMAT — respond with a valid JSON object and nothing else:
 {
@@ -2974,9 +2964,9 @@ def _workspace_project_context(project_id: str) -> str:
             for tf in ticket_files[:10]:
                 try:
                     first = tf.read_text(encoding="utf-8", errors="replace").splitlines()[0][:80]
-                    parts.append(f"  {tf.stem}: {first}")
+                    parts.append(f'  - ticket "{tf.stem}": {first}')
                 except OSError:
-                    parts.append(f"  {tf.stem}")
+                    parts.append(f'  - ticket "{tf.stem}": (unreadable)')
 
     return "\n".join(parts)
 
@@ -3021,9 +3011,9 @@ def _call_workspace_ai(project_context: str, messages: list[dict]) -> dict:
         resp.raise_for_status()
         text = resp.json()["content"][0]["text"]
     except Exception as exc:
-        logger.error("workspace: AI call failed: %s", exc)
+        logger.error("workspace: AI call failed: %s", exc, exc_info=True)
         return {
-            "reply": f"AI call failed: {exc}",
+            "reply": "The AI assistant is temporarily unavailable. Please try again in a moment.",
             "intent": "informational",
             "proposed_action": None,
             "issue_draft": None,
@@ -3149,13 +3139,6 @@ def _execute_workspace_capability(project_id: str, capability: str) -> tuple[boo
             return False, str(exc)
         finally:
             lock.release()
-
-    elif capability in ("rerun_intelligence", "trigger_deployment"):
-        return (
-            False,
-            f"Capability '{capability}' requires additional context not available in the workspace. "
-            "Please use the platform UI for this action.",
-        )
 
     return False, f"unknown capability: {capability!r}"
 

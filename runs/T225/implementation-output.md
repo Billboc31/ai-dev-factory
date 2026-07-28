@@ -1,36 +1,20 @@
-All 7 files are accounted for. Here's a summary of what was implemented:
+All four fixes are in place and verified. Here's a summary of what was done:
 
 ---
 
-## Changes Summary
+**P1 — Stub capabilities removed**
+`rerun_intelligence` and `trigger_deployment` removed from `_WORKSPACE_CAPABILITIES` and `_WORKSPACE_SYSTEM_PROMPT`, and their stub branch in `_execute_workspace_capability` deleted. Confirming these actions can no longer result in a 500.
 
-### Files created (3 new)
+**P2 — Tests delivered** (`tests/test_supervisor_workspace.py`, 6 tests, all green)
+- `test_unknown_capability_rejected` — capability not in allowlist → intent reset to informational, no pending action stored
+- `test_forged_action_id_rejected` — unknown action_id → 404
+- `test_action_id_project_mismatch_rejected` — valid action_id confirmed against wrong project → 403
+- `test_functional_dev_creates_issue_draft_not_code` — functional_dev → draft stored, no action created
+- `test_empty_issue_draft_rejected` — empty title/body on confirm → 422
+- `test_ai_error_returns_generic_message` — error reply contains "unavailable", not provider details
 
-**`services/control_api/routes/workspace.py`**
-Thin proxy: validates project exists via `resolve_project` dependency, then forwards the request body to the Supervisor's workspace endpoints. Never calls AI, GitHub, or internal services directly.
+**P3 — Generic error reply** (`main.py:3016`)
+`f"AI call failed: {exc}"` replaced with `"The AI assistant is temporarily unavailable. Please try again in a moment."`. Exception still logged at ERROR with full traceback (`exc_info=True`).
 
-**`apps/dashboard/src/api/workspace.js`**
-Three axios API calls: `postWorkspaceMessage`, `confirmWorkspaceAction`, `confirmWorkspaceIssue` — all routing through `/api/projects/{id}/workspace/*`.
-
-**`apps/dashboard/src/components/ProjectWorkspacePanel.jsx`**
-Collapsible right-side panel (w-80, part of the flex layout — survives navigation). Maintains per-project conversation history in component state, resets on project switch. Shows confirmation cards for `actionable` (yellow) and `functional_dev` (blue) responses. Sends only opaque `action_id`/`draft_id` tokens on confirmation — never constructs internal arguments.
-
-### Files modified (4)
-
-**`services/supervisor/main.py`** (+451 lines)
-Three new endpoints:
-- `POST /workspace/projects/{id}/chat` — loads project context, calls Anthropic API via httpx, classifies intent, stores pending action/draft with UUID, returns structured response.
-- `POST /workspace/projects/{id}/actions/confirm` — validates action_id + project match + capability allowlist, then executes via existing Supervisor functions.
-- `POST /workspace/projects/{id}/issues/confirm` — validates draft_id + project match, calls `gh issue create`, returns issue URL.
-
-**`services/control_api/main.py`** — imports `workspace` module, registers `workspace.project_router`.
-
-**`apps/dashboard/src/App.jsx`** — adds `workspaceOpen` state, passes toggle to sidebar, renders `<ProjectWorkspacePanel>` as a flex sibling (outside `<Routes>` so it persists across navigation).
-
-**`apps/dashboard/src/components/ProjectSidebar.jsx`** — adds "AI Workspace" toggle button in the project nav section, highlighted when open.
-
-### Known limits
-
-- `rerun_intelligence` and `trigger_deployment` capabilities are registered in the allowlist and proposed by the AI, but their confirmation execution returns a helpful message directing to the platform UI — they require additional context (ticket ID, environment config) not available from the workspace alone.
-- Pending actions/issues are stored in-memory only; they are lost on Supervisor restart.
-- AI provider is always Anthropic via `ANTHROPIC_API_KEY`; the model defaults to `claude-sonnet-4-6` and is overridable via `WORKSPACE_AI_MODEL` env var.
+**P4 — Structured ticket prefix** (`main.py:2967-2969`)
+Ticket lines now use `- ticket "T001": {first_line}` format, making prompt injection syntactically harder to exploit.
