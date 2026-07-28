@@ -2853,3 +2853,437 @@ def auto_fix_loop_list(project_id: str):
     runtime_root = _auto_fix_runtime_root()
     sessions = _list_sessions_disk(project_id, runtime_root)
     return {"sessions": sessions}
+
+
+# ── workspace ─────────────────────────────────────────────────────────────────
+#
+# Architecture:
+#   Frontend → Control API /projects/{id}/workspace/* (proxy)
+#            → Supervisor /workspace/projects/{id}/* (this section)
+#            → Anthropic API (httpx, ANTHROPIC_API_KEY)
+#            → existing Supervisor capabilities for confirmed actions
+#
+# Security:
+#   - Deny by default: only explicitly listed capabilities may be executed.
+#   - Every mutating action requires an opaque action_id issued at proposal time.
+#   - Action IDs are validated for project match before execution.
+#   - Secrets are never forwarded to AI prompts or returned in responses.
+
+_pending_workspace_actions: dict[str, dict] = {}
+_pending_workspace_issues: dict[str, dict] = {}
+_workspace_lock = threading.Lock()
+
+_WORKSPACE_CAPABILITIES: dict[str, dict] = {
+    "restart_daemon": {
+        "description": "Restart the project daemon",
+        "confirmation_required": True,
+    },
+    "rerun_dependency_analysis": {
+        "description": "Rerun dependency analysis for the project",
+        "confirmation_required": True,
+    },
+    "resume_execution": {
+        "description": "Resume ticket execution (restart daemon)",
+        "confirmation_required": True,
+    },
+}
+
+_WORKSPACE_SYSTEM_PROMPT = """\
+You are an AI assistant embedded in AI Dev Factory, a platform that manages \
+AI-driven software development workflows through GitHub issues and a controlled pipeline.
+Your role is to help users understand and operate their project.
+
+ALLOWED:
+- Answer questions about project status, tickets, workflow, configuration, and logs.
+- Diagnose blocked tickets or execution problems.
+- Propose GitHub issue creation for feature requests or bug fixes (never implement directly).
+- Propose platform actions from the ALLOWED_CAPABILITIES list (require user confirmation).
+
+FORBIDDEN:
+- Do not write, suggest, or generate production source code.
+- Do not create commits, branches, or pull requests.
+- Do not bypass the GitHub issue workflow.
+- Do not include secrets, tokens, or credentials in any response.
+- Do not invent capability names not listed in ALLOWED_CAPABILITIES.
+
+ALLOWED_CAPABILITIES:
+- restart_daemon: Restart the project daemon
+- rerun_dependency_analysis: Rerun dependency analysis
+- resume_execution: Resume ticket execution
+
+RESPONSE FORMAT — respond with a valid JSON object and nothing else:
+{
+  "reply": "<natural language response to the user>",
+  "intent": "informational" | "actionable" | "functional_dev",
+  "proposed_action": null | {"capability": "<key>", "description": "<what will happen>"},
+  "issue_draft": null | {"title": "<short title>", "body": "<markdown body>"},
+  "confirmation_required": false | true
+}
+
+Rules:
+- intent=informational: answer the question; proposed_action=null, issue_draft=null, confirmation_required=false.
+- intent=actionable: describe the action; proposed_action={capability, description}, confirmation_required=true, issue_draft=null.
+- intent=functional_dev: explain this belongs in an issue; issue_draft={title, body}, confirmation_required=true, proposed_action=null.
+- For requests outside ALLOWED_CAPABILITIES: use intent=informational and explain why it cannot be done.
+"""
+
+
+class WorkspaceChatRequest(BaseModel):
+    message: str
+    conversation_history: list[dict] = Field(default_factory=list)
+
+
+class WorkspaceActionConfirmRequest(BaseModel):
+    action_id: str
+
+
+class WorkspaceIssueConfirmRequest(BaseModel):
+    draft_id: str
+
+
+def _workspace_project_context(project_id: str) -> str:
+    """Build a compact project context string for the AI system prompt."""
+    parts: list[str] = [f"project_id: {project_id}"]
+
+    state = _project_daemon_states.get(project_id)
+    if state is not None:
+        running = state.pid is not None and _is_alive(state.pid)
+        parts.append(f"daemon: {'running (pid=' + str(state.pid) + ')' if running else 'stopped'}")
+    else:
+        parts.append("daemon: unknown")
+
+    project_root_str = _lookup_project_root_from_control_api(project_id)
+    if project_root_str:
+        project_root = Path(mapper.map(project_root_str))
+        parts.append(f"project_root: {project_root}")
+
+        tickets_dir = project_root / "tickets"
+        if tickets_dir.exists():
+            ticket_files = sorted(tickets_dir.glob("*.md"))
+            parts.append(f"tickets: {len(ticket_files)} total")
+            for tf in ticket_files[:10]:
+                try:
+                    first = tf.read_text(encoding="utf-8", errors="replace").splitlines()[0][:80]
+                    parts.append(f'  - ticket "{tf.stem}": {first}')
+                except OSError:
+                    parts.append(f'  - ticket "{tf.stem}": (unreadable)')
+
+    return "\n".join(parts)
+
+
+def _call_workspace_ai(project_context: str, messages: list[dict]) -> dict:
+    """Call the Anthropic API via httpx and return a parsed workspace response."""
+    try:
+        import httpx as _httpx
+    except ImportError:
+        return {
+            "reply": "httpx is not installed; cannot reach the AI provider.",
+            "intent": "informational",
+            "proposed_action": None,
+            "issue_draft": None,
+            "confirmation_required": False,
+        }
+
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return {
+            "reply": "ANTHROPIC_API_KEY is not configured; AI workspace unavailable.",
+            "intent": "informational",
+            "proposed_action": None,
+            "issue_draft": None,
+            "confirmation_required": False,
+        }
+
+    model = os.environ.get("WORKSPACE_AI_MODEL", "claude-sonnet-4-6")
+    system = f"{_WORKSPACE_SYSTEM_PROMPT}\n\n## Live project context\n\n{project_context}"
+
+    try:
+        resp = _httpx.post(
+            "https://api.anthropic.com/v1/messages",
+            headers={
+                "x-api-key": api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={"model": model, "max_tokens": 2048, "system": system, "messages": messages},
+            timeout=60.0,
+        )
+        resp.raise_for_status()
+        text = resp.json()["content"][0]["text"]
+    except Exception as exc:
+        logger.error("workspace: AI call failed: %s", exc, exc_info=True)
+        return {
+            "reply": "The AI assistant is temporarily unavailable. Please try again in a moment.",
+            "intent": "informational",
+            "proposed_action": None,
+            "issue_draft": None,
+            "confirmation_required": False,
+        }
+
+    import re as _re
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        m = _re.search(r"\{[\s\S]*\}", text)
+        if m:
+            try:
+                return json.loads(m.group())
+            except json.JSONDecodeError:
+                pass
+    return {
+        "reply": text,
+        "intent": "informational",
+        "proposed_action": None,
+        "issue_draft": None,
+        "confirmation_required": False,
+    }
+
+
+def _execute_workspace_capability(project_id: str, capability: str) -> tuple[bool, str]:
+    """Execute an allowlisted capability. Returns (ok, message)."""
+    if capability in ("restart_daemon", "resume_execution"):
+        state = _project_daemon_states.get(project_id)
+        if state and state.pid and _is_alive(state.pid):
+            try:
+                os.kill(state.pid, signal.SIGTERM)
+            except OSError:
+                pass
+            state.pid = None
+            _remove_project_pid_file(project_id)
+
+        project_root_str = _lookup_project_root_from_control_api(project_id)
+        if not project_root_str:
+            return False, "project not found in registry"
+
+        project_root = Path(mapper.map(project_root_str))
+        project_runtime_root = _project_runtime_root(project_id)
+        exec_cmd = _project_daemon_exec_cmds.get(project_id, _daemon_exec_cmd)
+        logs_dir = _project_logs_dir(project_id)
+        logs_dir.mkdir(parents=True, exist_ok=True)
+        log = _project_log_path(project_id)
+        worktrees_dir = _project_worktrees_dir(project_id)
+        started_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+        cmd = [
+            sys.executable, str(_run_daemon_path()),
+            "--exec-cmd", exec_cmd,
+            "--poll-issues", "--issue-label", "ai-ready",
+            "--auto-commit", "--auto-push", "--auto-include-code",
+            "--worktrees-dir", str(worktrees_dir),
+            "--project-root", str(project_root),
+            "--project", project_id,
+        ]
+        tools_dir = _project_root_dir / "tools" / "agent_runner"
+        if str(tools_dir) not in sys.path:
+            sys.path.insert(0, str(tools_dir))
+        import runtime_settings as _rs
+        cmd += _rs.daemon_max_workers_argv_for_project(project_id, project_runtime_root=project_runtime_root)
+
+        try:
+            env = {
+                **os.environ,
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "AI_DEV_FACTORY_RUNTIME_ROOT": str(project_runtime_root),
+                "PROJECT_NAME": project_id,
+            }
+            with open(log, "a", encoding="utf-8") as fh:
+                fh.write(f"[{started_at}] workspace: (re)starting daemon for {project_id}\n")
+                proc = subprocess.Popen(
+                    cmd, cwd=str(project_root), stdout=fh, stderr=fh,
+                    start_new_session=True, env=env,
+                )
+            _project_daemon_procs[project_id] = proc
+            new_state = _project_daemon_states.setdefault(project_id, DaemonState())
+            new_state.pid = proc.pid
+            new_state.started_at = started_at
+            new_state.exit_unexpected = False
+            _write_project_pid_file(project_id, proc.pid, started_at, exec_cmd, new_state.restart_policy)
+            logger.info("workspace: daemon started pid=%d project_id=%s", proc.pid, project_id)
+            return True, f"daemon started (pid={proc.pid})"
+        except OSError as exc:
+            return False, str(exc)
+
+    elif capability == "rerun_dependency_analysis":
+        project_root_str = _lookup_project_root_from_control_api(project_id)
+        if not project_root_str:
+            return False, "project not found in registry"
+        exec_cmd = _project_daemon_exec_cmds.get(project_id, _daemon_exec_cmd)
+        lock = _get_analysis_lock(project_id)
+        if not lock.acquire(blocking=False):
+            return False, "analysis already running"
+        try:
+            if _analysis_current_pid(project_id) is not None:
+                return False, "analysis already running"
+            started_at = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            log = _analysis_log_path(project_id)
+            cmd = [
+                sys.executable, str(_run_analysis_path()),
+                "--project-root", mapper.map(project_root_str),
+                "--project-id", project_id,
+                "--exec-cmd", exec_cmd,
+                "--worktrees-dir", str(_worktrees_dir()),
+            ]
+            env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+            with open(log, "a", encoding="utf-8") as fh:
+                fh.write(f"[{started_at}] workspace: rerunning dependency analysis for {project_id}\n")
+                proc = subprocess.Popen(
+                    cmd, cwd=str(_project_root()), stdout=fh, stderr=fh,
+                    start_new_session=True, env=env,
+                )
+            pid_path = _analysis_pid_path(project_id)
+            pid_path.parent.mkdir(parents=True, exist_ok=True)
+            pid_path.write_text(json.dumps({"pid": proc.pid, "started_at": started_at}), encoding="utf-8")
+            logger.info("workspace: analysis started pid=%d project_id=%s", proc.pid, project_id)
+            return True, f"dependency analysis started (pid={proc.pid})"
+        except OSError as exc:
+            return False, str(exc)
+        finally:
+            lock.release()
+
+    return False, f"unknown capability: {capability!r}"
+
+
+@app.post("/workspace/projects/{project_id}/chat")
+def workspace_chat(project_id: str, body: WorkspaceChatRequest):
+    messages: list[dict] = []
+    for turn in body.conversation_history[-20:]:
+        role = turn.get("role", "")
+        content = turn.get("content", "")
+        if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+            messages.append({"role": role, "content": content})
+    messages.append({"role": "user", "content": body.message})
+
+    context = _workspace_project_context(project_id)
+    result = _call_workspace_ai(context, messages)
+
+    intent = result.get("intent", "informational")
+    proposed_action = result.get("proposed_action")
+    issue_draft = result.get("issue_draft")
+
+    if intent == "actionable" and isinstance(proposed_action, dict):
+        capability = proposed_action.get("capability", "")
+        if capability not in _WORKSPACE_CAPABILITIES:
+            result["reply"] += f"\n\n(Capability '{capability}' is not in the allowlist.)"
+            result["proposed_action"] = None
+            result["confirmation_required"] = False
+            result["intent"] = "informational"
+        else:
+            action_id = str(uuid.uuid4())
+            with _workspace_lock:
+                _pending_workspace_actions[action_id] = {
+                    "project_id": project_id,
+                    "capability": capability,
+                    "description": proposed_action.get("description", ""),
+                    "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                }
+            result["proposed_action"]["action_id"] = action_id
+            result["confirmation_required"] = True
+
+    if intent == "functional_dev" and isinstance(issue_draft, dict):
+        draft_id = str(uuid.uuid4())
+        with _workspace_lock:
+            _pending_workspace_issues[draft_id] = {
+                "project_id": project_id,
+                "title": issue_draft.get("title", ""),
+                "body": issue_draft.get("body", ""),
+                "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+            }
+        result["issue_draft"]["draft_id"] = draft_id
+        result["confirmation_required"] = True
+
+    logger.info(
+        "workspace: chat project_id=%s intent=%s confirmation_required=%s",
+        project_id, intent, result.get("confirmation_required"),
+    )
+    return result
+
+
+@app.post("/workspace/projects/{project_id}/actions/confirm")
+def workspace_action_confirm(project_id: str, body: WorkspaceActionConfirmRequest):
+    from fastapi.responses import JSONResponse
+
+    with _workspace_lock:
+        action = _pending_workspace_actions.get(body.action_id)
+
+    if action is None:
+        return JSONResponse(status_code=404, content={"detail": "action not found or expired"})
+    if action["project_id"] != project_id:
+        return JSONResponse(status_code=403, content={"detail": "action project mismatch"})
+
+    capability = action["capability"]
+    if capability not in _WORKSPACE_CAPABILITIES:
+        return JSONResponse(status_code=403, content={"detail": f"capability '{capability}' not allowed"})
+
+    logger.info(
+        "workspace: confirming capability=%s project_id=%s action_id=%s",
+        capability, project_id, body.action_id,
+    )
+
+    ok, message = _execute_workspace_capability(project_id, capability)
+
+    with _workspace_lock:
+        _pending_workspace_actions.pop(body.action_id, None)
+
+    if ok:
+        return {"ok": True, "capability": capability, "result": message}
+    return JSONResponse(status_code=500, content={"detail": message})
+
+
+@app.post("/workspace/projects/{project_id}/issues/confirm")
+def workspace_issue_confirm(project_id: str, body: WorkspaceIssueConfirmRequest):
+    from fastapi.responses import JSONResponse
+
+    with _workspace_lock:
+        draft = _pending_workspace_issues.get(body.draft_id)
+
+    if draft is None:
+        return JSONResponse(status_code=404, content={"detail": "issue draft not found or expired"})
+    if draft["project_id"] != project_id:
+        return JSONResponse(status_code=403, content={"detail": "draft project mismatch"})
+
+    title = draft.get("title", "").strip()
+    body_text = draft.get("body", "").strip()
+    if not title or not body_text:
+        return JSONResponse(status_code=422, content={"detail": "issue draft has empty title or body"})
+
+    project_root_str = _lookup_project_root_from_control_api(project_id)
+    if project_root_str is None:
+        return JSONResponse(status_code=404, content={"detail": f"project {project_id!r} not found"})
+    project_root = Path(mapper.map(project_root_str))
+
+    logger.info(
+        "workspace: creating GitHub issue project_id=%s draft_id=%s title=%r",
+        project_id, body.draft_id, title,
+    )
+
+    try:
+        result = subprocess.run(
+            ["gh", "issue", "create", "--title", title, "--body", body_text],
+            cwd=str(project_root),
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        return JSONResponse(status_code=504, content={"detail": "gh issue create timed out"})
+    except FileNotFoundError:
+        return JSONResponse(status_code=503, content={"detail": "gh CLI not found"})
+
+    if result.returncode != 0:
+        return JSONResponse(
+            status_code=500,
+            content={"detail": f"gh issue create failed: {result.stderr.strip()}"},
+        )
+
+    issue_url = result.stdout.strip()
+    import re as _re
+    issue_number = None
+    m = _re.search(r"/(\d+)$", issue_url)
+    if m:
+        issue_number = int(m.group(1))
+
+    with _workspace_lock:
+        _pending_workspace_issues.pop(body.draft_id, None)
+
+    logger.info("workspace: issue created url=%s project_id=%s", issue_url, project_id)
+    return {"ok": True, "issue_url": issue_url, "issue_number": issue_number}

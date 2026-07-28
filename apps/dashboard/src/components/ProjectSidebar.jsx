@@ -27,7 +27,7 @@ const navItemClass = ({ isActive }) =>
       : 'text-gray-300 hover:bg-gray-700 hover:text-white'
   }`
 
-export default function ProjectSidebar({ projects, activeProject, onSelect }) {
+export default function ProjectSidebar({ projects, activeProject, onSelect, workspaceOpen, onWorkspaceToggle }) {
   return (
     <aside className="w-56 bg-gray-800 text-white min-h-screen flex flex-col shrink-0">
       <div className="px-4 py-4 border-b border-gray-700">
@@ -84,6 +84,18 @@ export default function ProjectSidebar({ projects, activeProject, onSelect }) {
                 </NavLink>
               </li>
             ))}
+            <li>
+              <button
+                onClick={onWorkspaceToggle}
+                className={`w-full text-left px-3 py-1.5 rounded text-sm transition-colors ${
+                  workspaceOpen
+                    ? 'bg-gray-700 text-white font-medium'
+                    : 'text-gray-300 hover:bg-gray-700 hover:text-white'
+                }`}
+              >
+                AI Workspace
+              </button>
+            </li>
           </ul>
         </div>
       )}
