@@ -1,7 +1,7 @@
 {
   "ticket_id": "T226",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_FIX_REQUIRED",
   "branch": "ticket/T226-add-floating-and-dockable-ai-workspace-window",
   "issue_number": 310,
-  "updated_at": "2026-07-29T17:26:19Z"
+  "updated_at": "2026-07-30T07:24:01Z"
 }
