@@ -1,0 +1,24 @@
+{
+  "ticketId": "T226",
+  "artifactType": "PLAN_REVIEW",
+  "decision": "PLAN_FIX_REQUIRED",
+  "summary": "The plan must be regenerated to add pointer-event resizing, dynamic maximum dimensions and clamping, and drag-safe accessible header controls.",
+  "requiredChanges": [
+    {
+      "id": "pointer-events-docked-resize",
+      "title": "Use Pointer Events for docked resizing",
+      "description": "Replace mouse-only document listeners with pointerdown, pointermove, pointerup and pointercancel. Ensure listeners are cleaned up when resizing ends and on component unmount."
+    },
+    {
+      "id": "layout-bounds-and-clamping",
+      "title": "Add dynamic maximum dimensions and clamp restored layout",
+      "description": "Define maximum width and height constraints for floating and docked modes, preserve a usable minimum width for the main content, and clamp width, height, x and y on restoration and viewport resize."
+    },
+    {
+      "id": "drag-safe-accessible-header",
+      "title": "Prevent controls from initiating drag and add accessible labels",
+      "description": "Use a dedicated drag handle or a react-rnd cancel selector for buttons and other controls. Add explicit aria-label values to float, dock-left, dock-right and close buttons."
+    }
+  ],
+  "sourceArtifact": "runs/T226/plan.md"
+}
