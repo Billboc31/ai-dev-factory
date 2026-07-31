@@ -1,7 +1,7 @@
 {
   "ticket_id": "T227",
-  "state": "INIT",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T227-add-pull-and-local-backend-frontend-redeployment-a",
   "issue_number": 311,
-  "updated_at": "2026-07-31T16:35:54Z"
+  "updated_at": "2026-07-31T17:36:04Z"
 }
