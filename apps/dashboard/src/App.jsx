@@ -26,6 +26,7 @@ import GlobalSettingsPage from './pages/GlobalSettingsPage'
 import ProjectRulesPage from './pages/ProjectRulesPage'
 import QuotaAlertBanner from './components/QuotaAlertBanner'
 import useProjects from './hooks/useProjects'
+import useWorkspaceLayout from './hooks/useWorkspaceLayout'
 
 export const ActiveProjectContext = createContext(null)
 
@@ -50,6 +51,7 @@ function AppLayout() {
     () => localStorage.getItem('activeProject') || null
   )
   const [workspaceOpen, setWorkspaceOpen] = useState(false)
+  const { layout, setMode, setPosition, setSize } = useWorkspaceLayout()
 
   useEffect(() => {
     const match = location.pathname.match(/^\/projects\/([^/]+)/)
@@ -76,54 +78,66 @@ function AppLayout() {
     navigate(`/projects/${projectId}/tickets`)
   }
 
+  const mainStyle = {}
+  if (workspaceOpen) {
+    if (layout.mode === 'docked-left') mainStyle.marginLeft = layout.width
+    else if (layout.mode === 'docked-right') mainStyle.marginRight = layout.width
+  }
+
   return (
-    <div className="min-h-screen bg-gray-50 flex">
-      <ProjectSidebar
-        projects={projects}
-        activeProject={activeProject}
-        onSelect={handleSelectProject}
-        workspaceOpen={workspaceOpen}
-        onWorkspaceToggle={() => setWorkspaceOpen(o => !o)}
-      />
-      <main className="flex-1 p-6 overflow-auto">
-        <ActiveProjectContext.Provider value={activeProject}>
-          <QuotaAlertBanner />
-          <Routes>
-            <Route path="/" element={<SmartHomeRedirect />} />
-            <Route path="/projects" element={<ProjectsPage />} />
-            <Route path="/import-project" element={<ImportProjectPage />} />
-            <Route path="/projects/:projectId/dashboard" element={<ProjectDashboardPage />} />
-            <Route path="/projects/:projectId/tickets" element={<ProjectTicketsPage />} />
-            <Route path="/projects/:projectId/tickets/:id" element={<TicketDetailPage />} />
-            <Route path="/projects/:projectId/worktrees" element={<ProjectWorktreesPage />} />
-            <Route path="/projects/:projectId/logs" element={<ProjectLogsPage />} />
-            <Route path="/projects/:projectId/daemon" element={<ProjectDaemonPage />} />
-            <Route path="/projects/:projectId/agent-layout" element={<ProjectAgentLayoutPage />} />
-            <Route path="/projects/:projectId/dispatcher" element={<DispatcherPage />} />
-            <Route path="/projects/:projectId/dispatcher/batches" element={<BatchesPage />} />
-            <Route path="/projects/:projectId/dispatcher/batches/:batchId" element={<BatchDetailPage />} />
-            <Route path="/projects/:projectId/rules" element={<ProjectRulesPage />} />
-            {/* Legacy routes not yet migrated to project-scoped URLs */}
-            <Route path="/project-map" element={<ProjectMapPage projectId={activeProject} />} />
-            <Route path="/mapper-activity" element={<IssueMapperActivityPage projectId={activeProject} />} />
-            <Route path="/deployer" element={<DeployerPage projectId={activeProject} />} />
-            <Route path="/sandboxes" element={<SandboxPanel />} />
-            <Route path="/environments" element={<EnvironmentsPage projectId={activeProject} />} />
-            <Route path="/auto-fix" element={<AutoFixPanel projectId={activeProject} />} />
-            <Route path="/runtime-dashboard" element={<RuntimeDashboardPage />} />
-            <Route path="/settings" element={<GlobalSettingsPage />} />
-            <Route path="/board" element={<BoardPage projectId={activeProject} />} />
-          </Routes>
-        </ActiveProjectContext.Provider>
-      </main>
+    <>
+      <div className="min-h-screen bg-gray-50 flex">
+        <ProjectSidebar
+          projects={projects}
+          activeProject={activeProject}
+          onSelect={handleSelectProject}
+          workspaceOpen={workspaceOpen}
+          onWorkspaceToggle={() => setWorkspaceOpen(o => !o)}
+        />
+        <main style={mainStyle} className="flex-1 p-6 overflow-auto">
+          <ActiveProjectContext.Provider value={activeProject}>
+            <QuotaAlertBanner />
+            <Routes>
+              <Route path="/" element={<SmartHomeRedirect />} />
+              <Route path="/projects" element={<ProjectsPage />} />
+              <Route path="/import-project" element={<ImportProjectPage />} />
+              <Route path="/projects/:projectId/dashboard" element={<ProjectDashboardPage />} />
+              <Route path="/projects/:projectId/tickets" element={<ProjectTicketsPage />} />
+              <Route path="/projects/:projectId/tickets/:id" element={<TicketDetailPage />} />
+              <Route path="/projects/:projectId/worktrees" element={<ProjectWorktreesPage />} />
+              <Route path="/projects/:projectId/logs" element={<ProjectLogsPage />} />
+              <Route path="/projects/:projectId/daemon" element={<ProjectDaemonPage />} />
+              <Route path="/projects/:projectId/agent-layout" element={<ProjectAgentLayoutPage />} />
+              <Route path="/projects/:projectId/dispatcher" element={<DispatcherPage />} />
+              <Route path="/projects/:projectId/dispatcher/batches" element={<BatchesPage />} />
+              <Route path="/projects/:projectId/dispatcher/batches/:batchId" element={<BatchDetailPage />} />
+              <Route path="/projects/:projectId/rules" element={<ProjectRulesPage />} />
+              {/* Legacy routes not yet migrated to project-scoped URLs */}
+              <Route path="/project-map" element={<ProjectMapPage projectId={activeProject} />} />
+              <Route path="/mapper-activity" element={<IssueMapperActivityPage projectId={activeProject} />} />
+              <Route path="/deployer" element={<DeployerPage projectId={activeProject} />} />
+              <Route path="/sandboxes" element={<SandboxPanel />} />
+              <Route path="/environments" element={<EnvironmentsPage projectId={activeProject} />} />
+              <Route path="/auto-fix" element={<AutoFixPanel projectId={activeProject} />} />
+              <Route path="/runtime-dashboard" element={<RuntimeDashboardPage />} />
+              <Route path="/settings" element={<GlobalSettingsPage />} />
+              <Route path="/board" element={<BoardPage projectId={activeProject} />} />
+            </Routes>
+          </ActiveProjectContext.Provider>
+        </main>
+      </div>
       {activeProject && (
         <ProjectWorkspacePanel
           projectId={activeProject}
           isOpen={workspaceOpen}
           onClose={() => setWorkspaceOpen(false)}
+          layout={layout}
+          setMode={setMode}
+          setPosition={setPosition}
+          setSize={setSize}
         />
       )}
-    </div>
+    </>
   )
 }
 
