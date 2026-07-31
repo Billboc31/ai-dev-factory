@@ -10,3 +10,14 @@
 [2026-07-31T17:30:56Z] compose: task (canonical prompt)
 [2026-07-31T17:30:56Z] snapshot: runtime-prompt=runs/T227/prompts/planner-attempt-1.md
 [2026-07-31T17:36:02Z] auto-run: step=planner done rc=0
+[2026-07-31T17:36:04Z] planner checkpoint: committed
+[2026-07-31T17:36:04Z] planner checkpoint: pushed
+[2026-07-31T17:36:04Z] planner validation success
+[2026-07-31T17:36:04Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-07-31T17:36:04Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-07-31T17:36:04Z] commit-checkpoint: unstaged runtime garbage: ['runs/T227/runtime.log', 'runs/T227/workflow-status.md']
+[2026-07-31T17:36:04Z] commit-checkpoint: sha=86501657 files=1 title='docs(T227/workflow): planner — update 1 file(s)'
+[2026-07-31T17:36:04Z] auto-run: auto-push triggered
+[2026-07-31T17:36:05Z] push: tolerating runtime dirty files (not blocking): ['runs/T227/runtime.log', 'runs/T227/workflow-status.md']
+[2026-07-31T17:36:05Z] push: pushing branch=ticket/T227-add-pull-and-local-backend-frontend-redeployment-a
+[2026-07-31T17:36:07Z] push: done branch=ticket/T227-add-pull-and-local-backend-frontend-redeployment-a
