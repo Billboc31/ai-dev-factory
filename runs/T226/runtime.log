@@ -39,3 +39,13 @@
 [2026-07-31T16:20:26Z] compose: extra-context=runs/T226/fixes/context-20260731T162026Z.md
 [2026-07-31T16:20:26Z] snapshot: runtime-prompt=runs/T226/prompts/planner-attempt-2.md
 [2026-07-31T16:22:59Z] auto-run: step=planner done rc=0
+[2026-07-31T16:23:02Z] planner checkpoint: committed
+[2026-07-31T16:23:02Z] planner checkpoint: pushed
+[2026-07-31T16:23:02Z] planner validation success
+[2026-07-31T16:23:02Z] auto-run: transition PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED
+[2026-07-31T16:23:02Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-07-31T16:23:02Z] commit-checkpoint: unstaged runtime garbage: ['runs/T226/runtime.log', 'runs/T226/workflow-status.md']
+[2026-07-31T16:23:02Z] commit-checkpoint: sha=489ae776 files=1 title='docs(T226/workflow): planner — update 1 file(s)'
+[2026-07-31T16:23:02Z] auto-run: auto-push triggered
+[2026-07-31T16:23:02Z] push: tolerating runtime dirty files (not blocking): ['runs/T226/runtime.log', 'runs/T226/workflow-status.md']
+[2026-07-31T16:23:02Z] push: pushing branch=ticket/T226-add-floating-and-dockable-ai-workspace-window
