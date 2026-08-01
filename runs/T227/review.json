@@ -1,0 +1,15 @@
+{
+  "ticket_id": "T227",
+  "review_type": "plan",
+  "decision": "PLAN_FIX_REQUIRED",
+  "review_artifact": "runs/T227/reviews/plan-review-01.md",
+  "summary": "The redeployment plan requires stronger execution-time repository checks, strict configured-branch enforcement, non-blocking or explicitly safe long-running execution, correct conflict handling, configuration-derived command inputs, and expanded backend/frontend tests.",
+  "required_fixes": [
+    "Re-check the Git working tree after confirmation and immediately before execution.",
+    "Use only the configured project branch and reject mismatched current branches or arbitrary LLM-provided branches.",
+    "Avoid blocking the Supervisor for long Git and Docker operations, preferably through a background deployment job.",
+    "Return HTTP 409 for concurrent deployment and guarantee lock release on every failure path.",
+    "Reload Supervisor configuration at confirmation time and ignore frontend or stale metadata for paths, services and commands.",
+    "Add missing security, timeout, concurrency and frontend confirmation-card tests."
+  ]
+}
