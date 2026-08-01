@@ -17,3 +17,6 @@ export const confirmWorkspaceIssue = (projectId, draftId) =>
   client.post(`/projects/${projectId}/workspace/issues/confirm`, {
     draft_id: draftId,
   })
+
+export const getDeploymentStatus = (projectId, deploymentId) =>
+  client.get(`/projects/${projectId}/workspace/deployments/${deploymentId}`)

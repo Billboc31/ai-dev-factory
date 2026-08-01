@@ -1,8 +1,33 @@
 import { useState, useEffect, useRef } from 'react'
-import { postWorkspaceMessage, confirmWorkspaceAction, confirmWorkspaceIssue } from '../api/workspace'
+import { postWorkspaceMessage, confirmWorkspaceAction, confirmWorkspaceIssue, getDeploymentStatus } from '../api/workspace'
+
+const STAGE_LABELS = {
+  PULLING: 'Pulling…',
+  BUILDING_backend: 'Building backend…',
+  BUILDING_frontend: 'Building frontend…',
+  VERIFYING: 'Verifying…',
+  SUCCEEDED: 'Succeeded',
+  FAILED: 'Failed',
+}
 
 function ActionConfirmCard({ message, onConfirm, loading }) {
   if (!message.proposedAction) return null
+
+  const isRedeploy = message.proposedAction.capability === 'redeploy_project'
+
+  // Deployment in progress (background job running)
+  if (message.deploymentId && !message.confirmed && !message.confirmError) {
+    const stageLabel = STAGE_LABELS[message.deploymentStage] || `${message.deploymentStage}…`
+    return (
+      <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs">
+        <p className="font-medium text-yellow-800 flex items-center gap-1">
+          <span className="inline-block w-3 h-3 border-2 border-yellow-600 border-t-transparent rounded-full animate-spin" />
+          {stageLabel}
+        </p>
+      </div>
+    )
+  }
+
   if (message.confirmed) {
     return (
       <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-xs text-green-700">
@@ -10,10 +35,39 @@ function ActionConfirmCard({ message, onConfirm, loading }) {
       </div>
     )
   }
+
   return (
     <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs">
       <p className="font-medium text-yellow-800">Proposed action:</p>
       <p className="text-yellow-700 mt-0.5">{message.proposedAction.description}</p>
+      {isRedeploy && (
+        <table className="mt-1 w-full text-yellow-700 text-xs border-collapse">
+          <tbody>
+            <tr>
+              <td className="pr-2 font-medium">Project</td>
+              <td>{message.proposedAction.safe_identifier}</td>
+            </tr>
+            <tr>
+              <td className="pr-2 font-medium">Branch</td>
+              <td>{message.proposedAction.configured_branch}</td>
+            </tr>
+            <tr>
+              <td className="pr-2 font-medium">Pull</td>
+              <td>{message.proposedAction.pull ? 'Yes' : 'No'}</td>
+            </tr>
+            <tr>
+              <td className="pr-2 font-medium">Components</td>
+              <td>{(message.proposedAction.components || []).join(', ')}</td>
+            </tr>
+            {message.proposedAction.has_dirty_warning === true && (
+              <tr>
+                <td className="pr-2 font-medium">Local changes</td>
+                <td className="text-orange-600 font-semibold">⚠ Uncommitted changes detected</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      )}
       {message.confirmError && (
         <p className="text-red-600 mt-1">{message.confirmError}</p>
       )}
@@ -127,6 +181,73 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose }) {
     setLoading(true)
     try {
       const res = await confirmWorkspaceAction(projectId, actionId)
+      const deploymentId = res.data.deployment_id
+      if (deploymentId) {
+        setMessages(prev =>
+          prev.map(m =>
+            m.id === msg.id
+              ? { ...m, deploymentId, deploymentStage: 'RUNNING' }
+              : m
+          )
+        )
+        setLoading(false)
+
+        const deadline = Date.now() + 15 * 60 * 1000
+        const poll = async () => {
+          if (Date.now() > deadline) {
+            setMessages(prev =>
+              prev.map(m =>
+                m.id === msg.id
+                  ? { ...m, confirmError: 'Deployment timed out — check supervisor logs.' }
+                  : m
+              )
+            )
+            return
+          }
+          try {
+            const statusRes = await getDeploymentStatus(projectId, deploymentId)
+            const data = statusRes.data
+            setMessages(prev =>
+              prev.map(m =>
+                m.id === msg.id
+                  ? { ...m, deploymentStage: data.stage || data.status }
+                  : m
+              )
+            )
+            if (data.status === 'SUCCEEDED') {
+              const sha = data.deployed_sha ? ` (sha: ${data.deployed_sha})` : ''
+              const url = data.preview_url ? ` — ${data.preview_url}` : ''
+              setMessages(prev =>
+                prev.map(m =>
+                  m.id === msg.id
+                    ? { ...m, confirmed: true, confirmResult: `Deployed successfully${sha}${url}` }
+                    : m
+                )
+              )
+            } else if (data.status === 'FAILED') {
+              setMessages(prev =>
+                prev.map(m =>
+                  m.id === msg.id
+                    ? { ...m, confirmError: `${data.error_stage}: ${data.error_excerpt}` }
+                    : m
+                )
+              )
+            } else {
+              setTimeout(poll, 2000)
+            }
+          } catch (err) {
+            setMessages(prev =>
+              prev.map(m =>
+                m.id === msg.id
+                  ? { ...m, confirmError: err.response?.data?.detail || err.message }
+                  : m
+              )
+            )
+          }
+        }
+        setTimeout(poll, 2000)
+        return
+      }
       setMessages(prev =>
         prev.map(m =>
           m.id === msg.id
