@@ -1,15 +1,21 @@
 {
   "ticket_id": "T227",
   "review_type": "plan",
+  "review_iteration": 2,
   "decision": "PLAN_FIX_REQUIRED",
-  "review_artifact": "runs/T227/reviews/plan-review-01.md",
-  "summary": "The redeployment plan requires stronger execution-time repository checks, strict configured-branch enforcement, non-blocking or explicitly safe long-running execution, correct conflict handling, configuration-derived command inputs, and expanded backend/frontend tests.",
+  "review_artifact": "runs/T227/reviews/plan-review-02.md",
+  "fix_artifact": "runs/T227/fixes/plan-fix-02.md",
+  "source_plan_sha": "7905e35e9091f6c89fc9893247a2f74f0c2bbcfe",
+  "summary": "The first plan-fix requirements are integrated, but deployment polling still needs a Control API GET proxy, HTTP 409 must be preserved through the proxy, and every background-job exception or timeout must persist a terminal FAILED state.",
   "required_fixes": [
-    "Re-check the Git working tree after confirmation and immediately before execution.",
-    "Use only the configured project branch and reject mismatched current branches or arbitrary LLM-provided branches.",
-    "Avoid blocking the Supervisor for long Git and Docker operations, preferably through a background deployment job.",
-    "Return HTTP 409 for concurrent deployment and guarantee lock release on every failure path.",
-    "Reload Supervisor configuration at confirmation time and ignore frontend or stale metadata for paths, services and commands.",
-    "Add missing security, timeout, concurrency and frontend confirmation-card tests."
+    "Add the Control API deployment-status GET proxy used by frontend polling.",
+    "Propagate all Supervisor error statuses through the Control API, including HTTP 409 Conflict.",
+    "Guarantee status=FAILED, completed_at, error_stage and sanitized error_excerpt for every timeout and unexpected background-job exception while always releasing the project lock."
+  ],
+  "preserved_requirements": [
+    "Fresh dirty and branch checks at execution time.",
+    "Configured Supervisor values are authoritative for paths, branches, services and commands.",
+    "Background deployment with polling and safe frontend confirmation metadata.",
+    "Per-project locking and existing security/test requirements from plan review 01."
   ]
 }
