@@ -790,6 +790,7 @@ from ticket_pr_lifecycle import (  # noqa: E402
     auto_merge_pr,
     check_and_close_issue,
     create_or_update_pr,
+    clear_pr_conflict_if_resolved,
     detect_pr_conflict,
     handle_test_complete,
     needs_pr_finalization,
@@ -2501,6 +2502,14 @@ def run_once(
                 else:
                     _log(f"dry-run: would checkpoint/push {ticket_id} for PLAN_REVIEW_NEEDED")
             elif state in ("CONFLICT_RESOLUTION_NEEDED", "CONFLICT_RESOLUTION_FAILED"):
+                conflict_state = _load_state_json(run_dir)
+                pr_for_clear = conflict_state.get("pr_number") or conflict_state.get("conflict_pr_number")
+                if (
+                    not dry_run
+                    and isinstance(pr_for_clear, int)
+                    and clear_pr_conflict_if_resolved(ticket_id, pr_for_clear, run_dir, repo)
+                ):
+                    continue
                 if _maybe_auto_launch_conflict_resolution(
                     ticket_id,
                     exec_cmd,

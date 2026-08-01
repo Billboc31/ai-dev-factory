@@ -493,11 +493,19 @@ def detect_pr_conflict(
         files_result = subprocess.run(files_cmd, capture_output=True, text=True, check=False)
         if files_result.returncode == 0:
             files_data = json.loads(files_result.stdout)
-            conflicted_files = [
+            raw_files = [
                 f["path"] for f in files_data.get("files", [])
                 if isinstance(f, dict) and "path" in f
                 and not f["path"].startswith(f"runs/{ticket_id}/")
             ]
+            # Drop build/deps noise (backend/target, node_modules, …) so accidental
+            # tracked artifacts cannot inflate conflict loops (see timizer T060/T066).
+            try:
+                from conflict_context_collector import _filter_paths
+
+                conflicted_files = _filter_paths(raw_files, ticket_id)
+            except Exception:
+                conflicted_files = raw_files
     except (FileNotFoundError, json.JSONDecodeError, OSError):
         pass
 
@@ -518,6 +526,60 @@ def detect_pr_conflict(
     _log(
         f"{ticket_id}: PR #{pr_number} is CONFLICTING — transitioned to "
         f"CONFLICT_RESOLUTION_NEEDED (was {pre_conflict_state!r}, {len(conflicted_files)} files)"
+    )
+    return True
+
+
+def clear_pr_conflict_if_resolved(
+    ticket_id: str,
+    pr_number: int,
+    run_dir: Path,
+    repo: str | None = None,
+) -> bool:
+    """If the PR is no longer CONFLICTING, clear conflict state and restore pre_conflict_state.
+
+    Returns True when state was cleared (daemon should not keep looping the resolver).
+    """
+    state = _load_state_json(run_dir)
+    if state.get("state") not in ("CONFLICT_RESOLUTION_NEEDED", "CONFLICT_RESOLUTION_FAILED"):
+        return False
+
+    check_cmd = ["gh", "pr", "view", str(pr_number), "--json", "mergeable"]
+    if repo:
+        check_cmd += ["--repo", repo]
+    try:
+        result = subprocess.run(check_cmd, capture_output=True, text=True, check=False)
+    except FileNotFoundError:
+        return False
+    if result.returncode != 0:
+        return False
+    try:
+        pr_data = json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return False
+
+    mergeable = pr_data.get("mergeable")
+    if mergeable == "CONFLICTING":
+        return False
+    if mergeable not in ("MERGEABLE", "UNKNOWN"):
+        # Still computing — leave conflict state alone.
+        if mergeable is None:
+            return False
+
+    restored = state.get("pre_conflict_state") or "TEST_COMPLETE"
+    if restored in ("CONFLICT_RESOLUTION_NEEDED", "CONFLICT_RESOLUTION_FAILED", "CONFLICT_RESOLVING"):
+        restored = "TEST_COMPLETE"
+    state["state"] = restored
+    state.pop("conflicted_files", None)
+    state.pop("conflict_detected_at", None)
+    state.pop("conflict_pr_number", None)
+    state["updated_at"] = _now_iso()
+    state["conflict_cleared_at"] = _now_iso()
+    state["conflict_clear_reason"] = f"PR #{pr_number} mergeable={mergeable!r}"
+    _save_state_json(run_dir, state)
+    _log(
+        f"{ticket_id}: PR #{pr_number} is {mergeable} — cleared conflict loop, "
+        f"restored state={restored!r}"
     )
     return True
 
@@ -562,6 +624,7 @@ __all__ = [
     "check_and_close_issue",
     "configure_log",
     "create_or_update_pr",
+    "clear_pr_conflict_if_resolved",
     "detect_pr_conflict",
     "ensure_pr_base_branch",
     "handle_test_complete",
