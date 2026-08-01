@@ -1,0 +1,771 @@
+# GLOBAL CONTEXT
+
+# Global Context — ai-dev-factory
+
+## Vision
+
+ai-dev-factory est un framework générique d’orchestration de développement assisté par IA.
+
+Le système doit permettre :
+- création de tickets structurés
+- génération de prompts spécialisés
+- orchestration planner/coder/reviewer/tester
+- reviews IA intermédiaires
+- maintenance automatique de la mémoire projet
+- workflow GitHub-centric basé sur PR
+
+Détails lifecycle PR, branches et artefacts : [pr-lifecycle.md](./pr-lifecycle.md).
+
+## Principes
+
+- GitHub = source de vérité workflow
+- PR = protocole de communication agentique
+- mémoire versionnée dans le repository
+- architecture explicitement documentée
+- aucun merge sans validations IA requises
+
+## Reviews obligatoires
+
+Aucun merge sans :
+- PLAN_APPROVED
+- IMPLEMENTATION_APPROVED
+- MEMORY_APPROVED
+
+## Mémoire
+
+Le système mémoire est composé de :
+- global-context.md
+- project-life.md
+- decisions-log.md
+
+## Workflow cible
+
+1. Ticket
+2. Classification risque
+3. Planner
+4. Review plan
+5. Coder
+6. Reviewer
+7. Tester
+8. Review implémentation
+9. Memory updater
+10. Review mémoire
+11. Merge
+
+---
+
+# ROLE
+
+# Role — Planner
+
+## Mission
+
+Lire un ticket et produire un plan d’implémentation court, concret, borné et actionnable.
+
+## Tu dois
+
+- comprendre le ticket
+- proposer les étapes minimales
+- lister les fichiers à créer ou modifier
+- identifier les risques
+- expliciter le hors scope
+- produire un plan Markdown versionnable
+- signaler les hypothèses nécessaires
+
+## Tu ne dois pas
+
+- coder
+- réécrire le ticket
+- anticiper les tickets suivants
+- élargir le scope
+- masquer les incertitudes
+
+## Sortie attendue
+
+Un fichier de plan conforme à `ai/templates/plan-template.md`.
+
+## Règles
+
+- le plan doit rester court
+- le plan doit être exécutable par un Coder sans ambiguïté
+- toute hypothèse doit être explicite
+- toute dérive de scope doit être refusée
+
+## Structure obligatoire
+
+Tout plan doit contenir au minimum **les sections suivantes** (titres
+Markdown niveau 2 — `##`). Les variantes anglaises sont acceptées à l'identique :
+
+| Français (recommandé)         | English equivalent       |
+|-------------------------------|--------------------------|
+| `## Contexte`                 | `## Context`             |
+| `## Objectif`                 | `## Objective`           |
+| `## Inclus`                   | `## Included`            |
+| `## Hors scope`               | `## Excluded`            |
+| `## Critères d'acceptation`   | `## Acceptance criteria` |
+
+Choisis une langue par plan, ne mélange pas FR et EN dans un même plan.
+
+Ces titres sont obligatoires même si une section est courte : un ticket
+trivial peut produire un plan court, mais la structure doit rester stable.
+
+Ne jamais produire uniquement un résumé.
+Ne jamais produire un compte rendu d’implémentation.
+
+## Interdictions absolues
+
+Tu ne dois jamais écrire :
+- "implémentation terminée"
+- "syntaxe valide"
+- "changements appliqués"
+- "voici ce qui a été fait"
+
+Tu dois produire uniquement un plan futur, pas un compte rendu passé.
+
+---
+
+# SKILL: workflow-discipline
+
+# Skill — Workflow Discipline
+
+## Objectif
+
+Faire respecter le lifecycle officiel des tickets et PR IA.
+
+## Règles
+
+- respecter l’ordre des étapes du workflow
+- ne pas bypass les reviews obligatoires
+- maintenir les statuts cohérents
+- conserver les artefacts versionnés
+- séparer plan, implémentation et mémoire
+
+## Refuser si
+
+- une review obligatoire est sautée
+- la mémoire est mise à jour avant validation implémentation
+- le workflow officiel est contourné
+
+---
+
+# SKILL: architecture-discipline
+
+# Skill — Architecture Discipline
+
+## Objectif
+
+Préserver la cohérence architecture du projet dans le temps.
+
+## Règles
+
+- respecter les invariants documentés
+- éviter les couplages implicites
+- éviter les dépendances inutiles
+- éviter les refactors transversaux non demandés
+- documenter toute nouvelle règle structurante
+- privilégier les changements locaux et bornés
+
+## Refuser si
+
+- le scope dérive
+- plusieurs couches sont modifiées sans justification
+- des conventions existantes sont cassées
+- la mémoire projet devient incohérente
+
+---
+
+# SKILL: documentation
+
+# Skill — Documentation
+
+## Objectif
+
+Maintenir une documentation utile, concise et alignée avec le code réel.
+
+## Règles
+
+- documenter les décisions importantes
+- éviter les documentations vagues
+- garder la mémoire projet cohérente
+- expliciter les invariants architecture
+- préférer Markdown simple et versionnable
+
+## Refuser si
+
+- la documentation diverge du comportement réel
+- la mémoire contient des suppositions non validées
+- des décisions importantes ne sont pas tracées
+
+---
+
+# TASK
+
+The ticket follows.
+# Generic Planner Task Read the ticket below and produce a detailed implementation plan.
+
+## Artifact-only output (strict)
+
+Your response will be written verbatim to `runs/<ticket>/plan.md`.
+Rewrite the artifact itself. Do not describe the modifications.
+Do not explain what changed. Do not produce a status report.
+
+This rule applies to both initial plans and rewrites after a review.
+Examples of forbidden openings: "The plan has been rewritten…",
+"This plan now covers…", "Plan rewritten as a real implementation
+document…", "Key points covered…", "The document now contains…",
+"Plan written to `runs/…/plan.md`…", "`runs/…/plan.md` is written…".
+
+Do not use the Write tool on `plan.md` and then print a status summary —
+your stdout IS the artifact. If you do write the file, stdout must still
+be the full plan (same four headings), not a report about it.
+
+## Required output structure (strict) Your reply **MUST** be a Markdown document containing **exactly** these four level-2 headings, in this order, spelled exactly as shown:
+## Objective
+## Included
+## Excluded
+## Acceptance criteria
+These headings are mandatory even for trivial tickets. A short plan is acceptable — an unstructured plan is not. - ## Objective — one or two sentences describing what the change achieves. - ## Included — concrete changes (files, functions, logic, tests). - ## Excluded — what is explicitly out of scope for this ticket. - ## Acceptance criteria — verifiable conditions a reviewer can check. ## Invalid output Your reply is **invalid** if any of the four headings above is missing, renamed, mistyped, or replaced by a synonym (e.g. ## Goal, ## Scope, ## In scope, ## Out of scope, ## Plan, ## Tasks are **not** accepted). An invalid reply will be rejected by the automated validator and the ticket will be retried. You **MUST NOT** write: - "implementation done" - "changes applied" - "here is what was done" - any past-tense report of work already performed You produce a *future* plan, not a status report. ## Minimal valid example (for a trivial ticket)
+markdown
+## Objective
+Rename the helper `foo()` to `bar()` in `utils.py` to align with the new
+naming convention. Behaviour is preserved.
+
+## Included
+- `utils.py`: rename `foo` → `bar`, update the docstring.
+- `tests/test_utils.py`: update the single import and assertion.
+
+## Excluded
+- Renaming callers in other modules (tracked in a follow-up ticket).
+- Any logic change inside `foo` / `bar`.
+
+## Acceptance criteria
+- `utils.py` no longer defines `foo`.
+- `pytest tests/test_utils.py` passes.
+- No other file references the old name.
+
+The ticket follows.
+
+
+
+# T227 — Add pull and local backend/frontend redeployment action to AI Workspace chat
+
+**Source**: GitHub Issue #311
+
+## Description
+
+## Objective
+
+Allow the integrated AI Workspace chat to pull the latest code and redeploy the current project’s local backend and/or frontend from a natural-language request.
+
+## User story
+
+As a user accessing AI Dev Factory remotely, I want to tell the integrated Claude chat:
+
+> Pull the latest changes and redeploy the backend and frontend of this project.
+
+so that I can update the locally hosted test environment without connecting manually to the host machine.
+
+## Expected interaction
+
+Example request:
+
+> Pull and redeploy the backend and frontend of Timizer.
+
+The Workspace must:
+
+1. resolve the current or explicitly named project;
+2. resolve the configured repository, branch, backend service, and frontend service;
+3. prepare a structured redeployment action;
+4. show the exact target and operation for human confirmation;
+5. delegate the approved action to the Supervisor;
+6. pull the configured branch;
+7. rebuild and restart the requested local components;
+8. return execution status and useful logs to the conversation.
+
+## Structured action
+
+The LLM should produce a constrained action proposal similar to:
+
+```json
+{
+  "action": "redeploy_project",
+  "project_id": "timizer",
+  "pull": true,
+  "branch": "main",
+  "components": ["backend", "frontend"]
+}
+```
+
+The frontend must never provide arbitrary working directories, shell commands, or internal service endpoints.
+
+## Project configuration
+
+Each authorized project must define its local redeployment recipe outside the prompt, for example:
+
+```yaml
+projects:
+  timizer:
+    repository_path: /projects/timizer
+    default_branch: main
+    redeploy:
+      backend:
+        service: backend
+      frontend:
+        service: frontend
+```
+
+The implementation may translate these entries into the repository’s existing Docker Compose or approved deployment commands.
+
+## Requirements
+
+- Support natural-language requests targeting:
+  - backend only;
+  - frontend only;
+  - backend and frontend.
+- Use the active Workspace project when the request says “this project”.
+- Allow an explicit project name only when it resolves to an authorized configured project.
+- Use only server-side project configuration and allowlisted operations.
+- Route every action through the Supervisor.
+- Require human confirmation before running the pull or redeployment.
+- The confirmation card must display:
+  - project;
+  - repository path or safe project identifier;
+  - branch;
+  - whether a pull will occur;
+  - components to rebuild/restart;
+  - whether local uncommitted changes were detected.
+- Refuse execution when:
+  - the project is unknown or not authorized;
+  - no redeployment recipe exists;
+  - the branch is not allowed;
+  - the repository has unsafe local changes according to the configured policy;
+  - another deployment for the same project is already running.
+- Do not use an unrestricted LLM-generated shell command.
+- Stream or periodically return progress for pull, build, restart, and health verification.
+- Return concise success or failure output with useful log excerpts.
+- Record the request, confirmation, resolved action, executor result, and actor in the audit trail.
+- Keep the operation local to the AI Dev Factory host; production deployment is out of scope.
+
+## Suggested execution states
+
+- `PROPOSED`
+- `AWAITING_CONFIRMATION`
+- `PULLING`
+- `BUILDING`
+- `RESTARTING`
+- `VERIFYING`
+- `SUCCEEDED`
+- `FAILED`
+
+## Acceptance criteria
+
+- From a project Workspace, “pull and redeploy this project” resolves to that project.
+- The user can request backend only, frontend only, or both.
+- No repository mutation or service restart occurs before confirmation.
+- The Supervisor executes only the configured redeployment recipe.
+- The selected branch is pulled using the configured safe strategy.
+- Backend and frontend services are rebuilt/restarted according to the requested components.
+- Concurrent redeployment of the same project is prevented.
+- Pull, build, restart, and health-check progress is visible from the chat.
+- Success returns the deployed revision and local/preview URL when configured.
+- Failure returns the failed stage and actionable log excerpts.
+- Arbitrary shell commands, paths, branches, and endpoints supplied by the model or frontend are rejected.
+- Existing Workspace conversations and non-mutating chat behavior continue to work.
+
+## Out of scope
+
+- Production or cloud deployment.
+- Arbitrary remote shell access.
+- Allowing the LLM to compose unrestricted commands.
+- Rollback management.
+- Multi-host deployment orchestration.
+
+---
+
+## Contexte de retry injecté par run_ticket.py
+
+## Artifact-only instruction (mandatory)
+
+Your response will be written verbatim to `runs/T227/plan.md`.
+Rewrite the artifact itself. Do not describe the modifications.
+Do not explain what changed. Do not produce a status report.
+Openings such as "The plan has been rewritten…", "This plan now
+covers…", "Plan rewritten as…", "Key points covered…", "The
+document now…" make the output invalid.
+
+---
+
+## Output précédent
+
+Now I have everything I need. Let me write the plan.
+
+## Objective
+
+Add a `redeploy_project` capability to the AI Workspace chat that lets a user trigger a `git pull` followed by a `docker compose up --build` for the backend and/or frontend of a locally hosted project, through the existing confirmation-gated action flow.
+
+## Included
+
+### 1. New config file — `supervisor/workspace_projects.yml`
+
+Schema per project:
+```yaml
+projects:
+  <project_id>:
+    repository_path: /host/path/to/repo
+    default_branch: main
+    allow_dirty: false         # reject if local uncommitted changes exist
+    redeploy:
+      backend:
+        service: backend       # docker compose service name
+      frontend:
+        service: frontend
+    preview_url: http://localhost:3000   # optional, returned on success
+```
+
+Loaded once at capability execution time via `_load_workspace_projects_config()`. No hot-reload required.
+
+---
+
+### 2. `supervisor/main.py`
+
+**a. New constants / state:**
+- `_WORKSPACE_REDEPLOY_LOCKS: dict[str, threading.Lock]` — per-project lock, created lazily via `_get_redeploy_lock(project_id)`.
+
+**b. New helper functions:**
+- `_load_workspace_projects_config() -> dict` — reads `supervisor/workspace_projects.yml` (path resolvable via env var `WORKSPACE_PROJECTS_CONFIG`); returns `{}` on missing file.
+- `_git_has_local_changes(repo_path: str) -> bool` — runs `git status --porcelain` (subprocess, timeout=10); returns True if output is non-empty.
+- `_resolve_redeploy_project(project_id, config) -> dict | None` — looks up the project in the loaded config, returns the project block or None if not found.
+
+**c. `_WORKSPACE_CAPABILITIES`:** add entry:
+```python
+"redeploy_project": {
+    "description": "Pull the latest code and rebuild/restart selected services",
+    "confirmation_required": True,
+},
+```
+
+**d. `_WORKSPACE_SYSTEM_PROMPT`:** extend ALLOWED_CAPABILITIES block:
+```
+- redeploy_project: Pull latest code and rebuild/restart backend and/or frontend services.
+  Params: pull (bool, default true), branch (string, default configured branch),
+  components (array, allowed values: "backend", "frontend").
+  proposed_action format: {"capability": "redeploy_project", "description": "...",
+    "params": {"pull": true, "branch": "main", "components": ["backend", "frontend"]}}
+```
+
+Also update the RESPONSE FORMAT comment to document the optional `params` key.
+
+**e. `workspace_chat()` endpoint — after capability allowlist check, for `redeploy_project`:**
+1. Load project config; reject with `intent=informational` + explanation if project not in config or config missing redeploy recipes.
+2. Extract and validate `params`:
+   - `components`: must be a non-empty subset of configured services for that project; reject unknowns.
+   - `pull`: default `True`.
+   - `branch`: default `project_block["default_branch"]`.
+3. Check local changes: run `_git_has_local_changes(repo_path)` and store result as `has_dirty` in pending action metadata.
+4. Store full metadata in `_pending_workspace_actions[action_id]`:
+   ```python
+   {
+     "project_id": project_id,
+     "capability": "redeploy_project",
+     "description": ...,
+     "params": {"pull": True, "branch": "main", "components": ["backend", "frontend"]},
+     "repo_path": "/host/path/to/repo",
+     "has_dirty": False,
+     "created_at": ...,
+   }
+   ```
+5. Add `repo_path`, `has_dirty`, `params` to `result["proposed_action"]` so the frontend can render the rich confirmation card.
+
+**f. `workspace_action_confirm()` endpoint:**
+- Pass `action["params"]`, `action["repo_path"]`, `action["has_dirty"]` to `_execute_workspace_capability`.
+
+**g. `_execute_workspace_capability(project_id, capability, params=None, repo_path=None, has_dirty=None)`:**
+Add `elif capability == "redeploy_project":` branch:
+1. Re-load config; re-validate project and components (defense-in-depth).
+2. Reject if `has_dirty` is True and `allow_dirty` is False for the project.
+3. Acquire `_get_redeploy_lock(project_id).acquire(blocking=False)`; return `(False, "deployment already running for this project")` if already locked.
+4. Inside try/finally (release lock in finally):
+   - If `params["pull"]` is True: run `subprocess.run(["git", "pull", "--ff-only", "origin", branch], cwd=repo_path, timeout=120, capture_output=True, text=True)`. On non-zero returncode return `(False, f"PULLING failed: {stderr[:500]}")`.
+   - For each component in `params["components"]`, in order: run `subprocess.run(["docker", "compose", "up", "-d", "--build", service], cwd=repo_path, timeout=300, capture_output=True, text=True)`. On non-zero returncode return `(False, f"BUILDING {component} failed: {stderr[:500]}")`.
+   - After all components succeed: get deployed revision with `git rev-parse --short HEAD`.
+   - Return `(True, f"Deployed revision {sha}. Services restarted: {components}. {preview_url or ''}")`.
+5. Log each stage to `logger.info(...)` with project_id and action_id.
+
+---
+
+### 3. `apps/dashboard/src/components/ProjectWorkspacePanel.jsx`
+
+**Extend `ActionConfirmCard`** — when `message.proposedAction.capability === 'redeploy_project'`, render additional details below the description:
+- Project: `message.proposedAction.project_id` (the workspace project_id)
+- Repository: `message.proposedAction.repo_path` (or a safe short identifier)
+- Branch: `message.proposedAction.params.branch`
+- Pull: yes/no from `message.proposedAction.params.pull`
+- Components: comma-joined list from `message.proposedAction.params.components`
+- Local changes: warning badge if `message.proposedAction.has_dirty === true`
+
+No changes to the confirm button or API call — they use the existing `confirmWorkspaceAction` path.
+
+---
+
+### 4. `tests/supervisor/test_workspace_redeploy.py` (new test file)
+
+- `test_load_workspace_projects_config_missing` — missing file returns `{}`.
+- `test_load_workspace_projects_config_valid` — valid YAML parsed correctly.
+- `test_git_has_local_changes_clean` — empty git status → False.
+- `test_git_has_local_changes_dirty` — non-empty git status → True.
+- `test_redeploy_unknown_project_rejected` — project not in config → capability not proposed.
+- `test_redeploy_unknown_component_rejected` — component not in project config → rejected.
+- `test_redeploy_dirty_rejected_when_not_allowed` — dirty repo + allow_dirty=false → `(False, ...)`.
+- `test_redeploy_concurrent_rejected` — lock held → `(False, "deployment already running ...")`.
+- `test_redeploy_pull_failure_stops_early` — git pull fails → returns failure, no compose called.
+- `test_redeploy_backend_only` — only backend component → compose called once for backend service.
+- `test_redeploy_success_returns_sha_and_url` — full success path → result contains sha and preview_url.
+
+---
+
+## Excluded
+
+- True SSE/WebSocket streaming of deployment progress (synchronous execution with stage summaries in result is sufficient for this ticket).
+- Rollback on failure.
+- Production or cloud deployment.
+- Multi-host orchestration.
+- Arbitrary remote shell access or LLM-generated commands.
+- Allowing redeployment of a project other than the active workspace project.
+- Hot-reload of `workspace_projects.yml` without supervisor restart.
+
+## Acceptance criteria
+
+- From the workspace chat for project P, "pull and redeploy this project" resolves to P's configured recipe; requesting an unconfigured project returns a refusal explanation.
+- `components: ["backend"]`, `components: ["frontend"]`, and `components: ["backend", "frontend"]` each result in only the requested services being rebuilt.
+- No `git pull` or `docker compose` command runs before the user clicks Confirm in the chat.
+- The confirmation card displays: project id, repository path (or identifier), branch, whether pull is enabled, selected components, and a dirty-repo warning when applicable.
+- When `allow_dirty: false` and the repository has uncommitted changes, the confirm endpoint returns a failure with an explanation; no compose command is executed.
+- A second "Confirm" for the same project while the first is running returns HTTP 500 with "deployment already running."
+- On success, the chat bubble shows the deployed git SHA and, when configured, the preview URL.
+- On failure, the chat bubble shows the failed stage (PULLING or BUILDING \<component\>) and the first 500 characters of the relevant stderr.
+- The three existing capabilities (`restart_daemon`, `rerun_dependency_analysis`, `resume_execution`) and all non-actionable workspace chat behavior continue to work unchanged.
+- All new test cases in `test_workspace_redeploy.py` pass.
+
+---
+
+## Review
+
+# PLAN_FIX_REQUIRED
+
+## Summary
+
+The plan is well structured and keeps redeployment behind the AI Workspace confirmation flow, but it requires additional safety, execution, and test coverage before implementation.
+
+## Required fixes
+
+### 1. Re-check repository state at confirmation time
+
+The dirty-working-tree check performed while proposing the action is only informational. The Supervisor must run `git status --porcelain` again after the user confirms and immediately before any Git or Docker command.
+
+Do not rely on the stored `has_dirty` value as the final safety check.
+
+### 2. Enforce a strict branch policy
+
+The redeployment must not accept an arbitrary branch generated by the LLM.
+
+For the initial implementation:
+
+- Use the project `default_branch` from `workspace_projects.yml`.
+- Read the current branch with `git branch --show-current` at execution time.
+- Refuse redeployment when the current branch does not match the configured branch, unless a controlled checkout policy is explicitly designed.
+- Run the pull only after this validation, using fast-forward-only semantics.
+- Never merge a requested remote branch into an unrelated current local branch.
+
+### 3. Do not block the Supervisor request for the full deployment duration
+
+A Git pull and two Docker builds may take many minutes. The preferred architecture is to start a background deployment job and return a deployment identifier and running status immediately.
+
+The plan must define:
+
+- deployment job creation;
+- running/succeeded/failed status;
+- status retrieval from the workspace;
+- storage of the final message, deployed revision, preview URL, and failed stage.
+
+If synchronous execution is intentionally retained for this demo ticket, explicitly document the limitation and prove that other Supervisor requests remain serviceable during execution.
+
+### 4. Improve redeployment locking and conflict response
+
+- Document that the in-memory project lock is valid only for a single Supervisor process/worker.
+- Ensure the lock is always released in `finally`, including unexpected exceptions and timeouts.
+- Return HTTP `409 Conflict` when another deployment is already running for the project, not HTTP 500.
+- Avoid using user-controlled values as lock keys; use the resolved configured project id.
+
+### 5. Resolve all sensitive execution values from Supervisor configuration
+
+At confirmation time, reload `workspace_projects.yml` and resolve from `project_id`:
+
+- repository path;
+- configured/default branch;
+- allowed components;
+- Docker Compose service names;
+- dirty-repository policy;
+- preview URL.
+
+Do not trust or execute `repo_path`, service names, branch names, or commands received from the frontend, the LLM response, or stale pending-action metadata.
+
+The pending action should contain only safe identifiers and approved business parameters.
+
+### 6. Add missing backend and frontend tests
+
+Backend tests must also cover:
+
+- repository becomes dirty between proposal and confirmation;
+- current branch differs from configured branch;
+- unapproved branch is rejected;
+- repository path does not exist;
+- configured path is not a Git repository;
+- Git timeout;
+- Docker Compose timeout;
+- lock release after command failure, timeout, and unexpected exception;
+- failure of the first component prevents later components from starting;
+- concurrent deployment returns HTTP 409;
+- execution reloads configuration and ignores stale/tampered path or service values.
+
+Frontend tests must cover:
+
+- confirmation card renders project, safe repository identifier, configured branch, pull flag, components, and dirty warning;
+- the full sensitive host path is not displayed when a safe identifier is available;
+- Confirm submits only the pending `action_id` through the existing API;
+- no executable path, command, branch, or service override is submitted from editable client data.
+
+## Preserved requirements
+
+- No Git or Docker command runs before explicit user confirmation.
+- Commands are constructed by trusted Supervisor code only.
+- Components remain limited to configured backend/frontend recipes.
+- Functional development still goes through GitHub issues and the AI Dev Factory pipeline.
+- Existing workspace capabilities must continue working without regression.
+
+## Decision
+
+PLAN_FIX_REQUIRED
+
+---
+
+## Instructions de fix
+
+# Plan fix 01
+
+## Ticket
+
+T227 — Add pull and local backend/frontend redeployment action to AI Workspace
+
+## Source review
+
+`runs/T227/reviews/plan-review-01.md`
+
+## Decision
+
+PLAN_FIX_REQUIRED
+
+## Required plan corrections
+
+### 1. Re-check the repository state at execution time
+
+The dirty-working-tree value collected while the action is proposed is informational only.
+
+After confirmation and immediately before any Git or Docker command, the Supervisor must run `git status --porcelain` again and apply the configured dirty-repository policy to the fresh result.
+
+The regenerated plan must not use a stored `has_dirty` value as the final safety decision.
+
+### 2. Enforce the Supervisor-configured branch
+
+The LLM and frontend must not select an arbitrary executable branch.
+
+For this initial implementation:
+
+- resolve the branch from the project's `default_branch` in `workspace_projects.yml`;
+- read the current branch at execution time with `git branch --show-current`;
+- refuse execution when the current branch differs from the configured branch;
+- use fast-forward-only pull semantics only after the branch check succeeds;
+- never merge a requested remote branch into a different current local branch.
+
+The pending action may display the resolved branch but must not treat an LLM-provided or frontend-provided branch as authoritative.
+
+### 3. Avoid blocking the Supervisor during a long deployment
+
+Git pull and Docker builds can take several minutes. Regenerate the plan around a background deployment job that returns immediately with a deployment identifier and a running status.
+
+Define:
+
+- job creation;
+- deployment identifier;
+- running, succeeded, and failed states;
+- status retrieval or polling from the Workspace;
+- persisted or safely retained progress;
+- final deployed revision;
+- preview URL;
+- failed stage and sanitized log excerpt.
+
+If synchronous execution is intentionally kept for a limited demo, the plan must explicitly document the limitation and include a design/test proving that other Supervisor requests remain serviceable while deployment runs.
+
+### 4. Strengthen locking and conflict handling
+
+The regenerated plan must:
+
+- use the resolved configured project id as the lock key;
+- document that an in-memory lock protects only one Supervisor process/worker;
+- release the lock in `finally` after success, command failure, timeout, cancellation, or unexpected exception;
+- return HTTP `409 Conflict` when a deployment is already running for the project, not HTTP 500.
+
+### 5. Resolve all sensitive execution values from current Supervisor configuration
+
+At confirmation/execution time, reload `workspace_projects.yml` and resolve from the safe configured `project_id`:
+
+- repository path;
+- default/configured branch;
+- allowed components;
+- Docker Compose service names;
+- dirty-repository policy;
+- preview URL.
+
+Do not trust or execute paths, branches, service names, commands, or endpoints originating from:
+
+- the frontend;
+- the LLM response;
+- stale pending-action metadata.
+
+The pending action must contain only safe identifiers and approved business parameters. The frontend confirmation card may display a safe repository identifier, not necessarily the full sensitive host path.
+
+### 6. Complete backend and frontend test coverage
+
+Add backend tests for:
+
+- repository becoming dirty between proposal and confirmation;
+- current branch differing from the configured branch;
+- rejection of an unapproved branch;
+- missing repository path;
+- configured path that is not a Git repository;
+- Git timeout;
+- Docker Compose timeout;
+- lock release after command failure, timeout, and unexpected exception;
+- first-component failure preventing later components from starting;
+- concurrent deployment returning HTTP 409;
+- configuration being reloaded at execution;
+- stale or tampered paths and service values being ignored.
+
+Add frontend tests for:
+
+- rendering project, safe repository identifier, configured branch, pull flag, components, and dirty warning;
+- not displaying the full host path when a safe identifier exists;
+- Confirm submitting only the pending `action_id`;
+- no executable path, command, branch, or service override being submitted from editable client data.
+
+## Requirements that must remain preserved
+
+- No Git or Docker command runs before explicit confirmation.
+- Commands are constructed only by trusted Supervisor code.
+- Components remain limited to configured backend/frontend recipes.
+- The operation remains local; production/cloud deployment is out of scope.
+- Existing Workspace capabilities and informational chat behavior remain unchanged.
+- Functional development continues through GitHub issues and the AI Dev Factory pipeline.
+
+## Expected output
+
+Regenerate `runs/T227/plan.md` to incorporate every correction above. Do not implement application code during the plan-fix step.
