@@ -8,9 +8,15 @@ import datetime
 import os
 import re
 import shlex
+import signal
 import subprocess
 import sys
 from pathlib import Path
+
+# Default wall-clock limit for --exec-cmd agent invocations. Override with
+# AGENT_EXEC_TIMEOUT_SECONDS (0 = unlimited). Prevents perpetual hangs when an
+# agent waits forever on empty background shell task outputs.
+_DEFAULT_EXEC_TIMEOUT_SECONDS = 7200
 
 
 # Step processes (planner/coder/reviewer/tester) spawn an external agent
@@ -324,7 +330,31 @@ def update_status(ticket_id: str, status: str) -> None:
     status_path.write_text(existing.rstrip() + f"\n\n## Last Update\n\n{status}\n", encoding="utf-8")
 
 
-def execute_external_command(command_text: str, prompt_content: str) -> tuple[str, str, int]:
+def resolve_exec_timeout_seconds(explicit: int | None = None) -> int | None:
+    """Return timeout in seconds for ``execute_external_command``, or None if unlimited.
+
+    Priority: explicit arg > ``AGENT_EXEC_TIMEOUT_SECONDS`` > default (7200).
+    A value ``<= 0`` means unlimited.
+    """
+    if explicit is not None:
+        return None if explicit <= 0 else explicit
+    raw = os.environ.get("AGENT_EXEC_TIMEOUT_SECONDS")
+    if raw is not None and raw.strip() != "":
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise RunnerError(
+                f"AGENT_EXEC_TIMEOUT_SECONDS must be an integer, got {raw!r}"
+            ) from exc
+        return None if value <= 0 else value
+    return _DEFAULT_EXEC_TIMEOUT_SECONDS
+
+
+def execute_external_command(
+    command_text: str,
+    prompt_content: str,
+    timeout: int | None = None,
+) -> tuple[str, str, int]:
     command = shlex.split(command_text)
     if not command:
         raise RunnerError("external command must not be empty")
@@ -336,16 +366,35 @@ def execute_external_command(command_text: str, prompt_content: str) -> tuple[st
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
 
-    completed = subprocess.run(
+    effective_timeout = resolve_exec_timeout_seconds(timeout)
+
+    # Own process group so a timeout can kill Claude *and* its hung shell
+    # waiters (grandchildren), which subprocess.run alone would leave behind.
+    proc = subprocess.Popen(
         command,
-        input=prompt_content,
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
         text=True,
-        capture_output=True,
         shell=False,
-        check=False,
         env=env,
+        start_new_session=True,
     )
-    return completed.stdout, completed.stderr, completed.returncode
+    try:
+        stdout, stderr = proc.communicate(input=prompt_content, timeout=effective_timeout)
+        return stdout, stderr, proc.returncode or 0
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            try:
+                proc.kill()
+            except OSError:
+                pass
+        stdout, stderr = proc.communicate()
+        limit = effective_timeout if effective_timeout is not None else 0
+        msg = f"[timeout] external command exceeded {limit}s\n"
+        return stdout or "", (stderr or "") + msg, 124
 
 
 def _now_iso() -> str:
@@ -639,13 +688,16 @@ def classify_runtime_failure(return_code: int, stdout: str, stderr: str) -> str:
     """Return the most likely failure category for a step execution.
 
     Categories in priority order:
-      process_crashed, quota_exceeded, write_permission_missing,
+      process_crashed, process_timeout, quota_exceeded, write_permission_missing,
       provider_error, empty_output, process_failed, unknown
     """
     combined = (stdout + "\n" + stderr).lower()
 
     if return_code < 0:
         return "process_crashed"
+
+    if return_code == 124 or "[timeout]" in combined:
+        return "process_timeout"
 
     for pattern in _QUOTA_PATTERNS:
         if re.search(pattern, combined):
@@ -688,6 +740,15 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--show-prompt", action="store_true", help="Print the runtime prompt to stdout")
     parser.add_argument("--next", action="store_true", help="Show the next workflow step")
     parser.add_argument("--exec-cmd", help="Run an explicit external command, passing the prompt on stdin")
+    parser.add_argument(
+        "--exec-timeout",
+        type=int,
+        default=None,
+        help=(
+            "Wall-clock timeout in seconds for --exec-cmd "
+            "(default: AGENT_EXEC_TIMEOUT_SECONDS or 7200; 0 = unlimited)"
+        ),
+    )
     parser.add_argument("--output-path", help="Override output path when using --exec-cmd (relative to repo root)")
     parser.add_argument("--stderr-log", help="Relative path where stderr should be written")
     parser.add_argument(
@@ -759,7 +820,11 @@ def main(argv: list[str]) -> int:
 
         if args.exec_cmd:
             _write_prompt_snapshot(ticket_id, step, effective_prompt)
-            stdout, stderr, return_code = execute_external_command(args.exec_cmd, effective_prompt)
+            stdout, stderr, return_code = execute_external_command(
+                args.exec_cmd,
+                effective_prompt,
+                timeout=args.exec_timeout,
+            )
 
             failure_class = classify_runtime_failure(return_code, stdout, stderr)
             if return_code != 0:

@@ -257,6 +257,8 @@ _RETRY_POLICIES: dict[str, dict] = {
     "quota_exceeded":          {"action": "cooldown",    "cooldown_seconds": 3600},
     "provider_error":          {"action": "exponential", "base_seconds": 60, "max_retries": 5, "fallback_cooldown_seconds": 3600},
     "process_crashed":         {"action": "exponential", "base_seconds": 60, "max_retries": 5, "fallback_cooldown_seconds": 3600},
+    # Agent hung past AGENT_EXEC_TIMEOUT_SECONDS (e.g. empty shell task waits).
+    "process_timeout":         {"action": "fixed_delay", "delay_seconds": 120, "max_retries": 2},
     "process_failed":          {"action": "fixed_delay", "delay_seconds": 300, "max_retries": 3},
     "empty_output":            {"action": "fixed_delay", "delay_seconds": 300, "max_retries": 3},
     # planner_invalid: model produced a structurally bad plan. Bounded retries
@@ -305,11 +307,28 @@ def _lock_path(run_dir: Path) -> Path:
 
 
 def _is_pid_alive(pid: int) -> bool:
+    """Return True only for a live, non-zombie process.
+
+    Zombies still answer ``kill(pid, 0)`` and would otherwise hold
+    ``daemon.lock`` forever after a parent exits without reaping.
+    """
     try:
         os.kill(pid, 0)
-        return True
     except OSError:
         return False
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "state="],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        state = (result.stdout or "").strip()
+        if state.startswith("Z"):
+            return False
+    except OSError:
+        pass
+    return True
 
 
 def _acquire_lock(run_dir: Path) -> bool:
