@@ -720,3 +720,19 @@ def test_conflict_resolution_eligible_from_git_conflicts(tmp_path):
     assert conflict_resolution_eligible(state, wt) is False
     assert git_conflicted_files(wt) == []
 
+
+def test_has_conflict_markers_ignores_source_that_mentions_markers(tmp_path):
+    """Resolver source/fixtures mention <<<<<<< but must not fail every pass."""
+    import run_conflict_resolver as rcr
+
+    mention = tmp_path / "mention.py"
+    mention.write_text('return "<<<<<<< " in text\n')
+    real = tmp_path / "real.txt"
+    real.write_text("<<<<<<< ours\na\n=======\nb\n>>>>>>> theirs\n")
+
+    assert rcr._has_conflict_markers(str(mention)) is False
+    assert rcr._has_conflict_markers(str(real)) is True
+    # Live source files that previously caused perpetual CONFLICT_RESOLUTION_FAILED
+    assert rcr._has_conflict_markers("tools/agent_runner/run_conflict_resolver.py") is False
+    assert rcr._has_conflict_markers("tests/test_conflict_resolver.py") is False
+

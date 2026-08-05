@@ -248,20 +248,38 @@ def _split_conflicts(ticket_id: str, files: list[str]) -> tuple[list[str], list[
 
 
 def _has_conflict_markers(path: str) -> bool:
+    """Return True only for a real conflict marker *block*.
+
+    A bare substring check is too naive: ``run_conflict_resolver.py`` and
+    ``tests/test_conflict_resolver.py`` contain the literal ``<<<<<<< `` in
+    source/fixtures, which previously made every resolver pass fail forever.
+    """
     try:
-        return "<<<<<<< " in Path(path).read_text(encoding="utf-8", errors="replace")
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
     except OSError:
         return False
+    has_start = False
+    has_mid = False
+    for line in text.splitlines():
+        if line.startswith("<<<<<<< "):
+            has_start = True
+            has_mid = False
+        elif has_start and line.strip() == "=======":
+            has_mid = True
+        elif has_start and has_mid and line.startswith(">>>>>>> "):
+            return True
+    return False
 
 
 def _scan_source_marker_conflicts(ticket_id: str) -> list[str]:
-    """Return source paths that still contain conflict markers on disk."""
+    """Return *unmerged* source paths that still contain conflict marker blocks.
+
+    Intentionally does **not** rglob the whole tree: that falsely flagged
+    files that merely mention conflict markers in code or tests.
+    """
     found: list[str] = []
-    for path in Path(".").rglob("*"):
-        if not path.is_file():
-            continue
-        rel = path.as_posix()
-        if rel.startswith(".git/") or _is_runtime_artifact_path(rel, ticket_id):
+    for rel in _list_conflicted_files():
+        if _is_runtime_artifact_path(rel, ticket_id):
             continue
         if _has_conflict_markers(rel):
             found.append(rel)
