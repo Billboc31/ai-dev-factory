@@ -1,9 +1,10 @@
-"""Workspace routes — authenticated proxy to the Supervisor workspace endpoints (T225).
+"""Workspace routes — authenticated proxy to the Supervisor workspace endpoints (T225/T227).
 
 Endpoints:
     POST /projects/{project_id}/workspace/chat
     POST /projects/{project_id}/workspace/actions/confirm
     POST /projects/{project_id}/workspace/issues/confirm
+    GET  /projects/{project_id}/workspace/deployments/{deployment_id}
 
 Every request is forwarded to the Supervisor. This module must not invoke any
 AI provider, GitHub API, or internal operational service directly.
@@ -40,10 +41,25 @@ def _forward(path: str, body: dict) -> dict:
     except httpx.TimeoutException:
         raise HTTPException(status_code=504, detail="Supervisor request timed out")
 
-    if resp.status_code in (403, 404, 422):
+    if resp.status_code >= 400:
         detail = _extract_detail(resp)
         raise HTTPException(status_code=resp.status_code, detail=detail)
-    if resp.status_code >= 500:
+
+    return resp.json()
+
+
+def _forward_get(path: str) -> dict:
+    """GET from the Supervisor workspace endpoint. Raises HTTPException on failure."""
+    url = f"{_supervisor_url()}{path}"
+    try:
+        resp = httpx.get(url, timeout=10.0)
+    except httpx.ConnectError as exc:
+        logger.error("workspace: supervisor unreachable at %s: %s", url, exc)
+        raise HTTPException(status_code=503, detail="Supervisor is not reachable")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Supervisor request timed out")
+
+    if resp.status_code >= 400:
         detail = _extract_detail(resp)
         raise HTTPException(status_code=resp.status_code, detail=detail)
 
@@ -109,3 +125,16 @@ def workspace_issue_confirm(
         f"/workspace/projects/{project_id}/issues/confirm",
         body.model_dump(),
     )
+
+
+@project_router.get("/{project_id}/workspace/deployments/{deployment_id}")
+def workspace_get_deployment(
+    project_id: str,
+    deployment_id: str,
+    project_root: Path = Depends(resolve_project),
+) -> dict:
+    logger.info(
+        "workspace: forwarding deployment status project_id=%s deployment_id=%s",
+        project_id, deployment_id,
+    )
+    return _forward_get(f"/workspace/projects/{project_id}/deployments/{deployment_id}")

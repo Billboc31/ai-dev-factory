@@ -1,0 +1,9 @@
+{
+  "ticket_id": "T227",
+  "state": "TEST_COMPLETE",
+  "branch": "ticket/T227-add-pull-and-local-backend-frontend-redeployment-a",
+  "issue_number": 311,
+  "updated_at": "2026-08-05T19:36:03Z",
+  "pr_number": 314,
+  "pr_synced": true
+}

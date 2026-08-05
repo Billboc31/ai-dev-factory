@@ -1,0 +1,4 @@
+[2026-08-02T11:57:13Z] AI resolver pass 1 finished but conflict markers remain in: ['tests/test_conflict_resolver.py', 'tools/agent_runner/run_conflict_resolver.py']
+[2026-08-02T11:59:21Z] AI resolver pass 2 finished but conflict markers remain in: ['tests/test_conflict_resolver.py', 'tools/agent_runner/run_conflict_resolver.py']
+[2026-08-02T12:01:34Z] AI resolver pass 3 finished but conflict markers remain in: ['tests/test_conflict_resolver.py', 'tools/agent_runner/run_conflict_resolver.py']
+[2026-08-02T12:01:34Z] conflicts remain after 3/3 passes: ['tests/test_conflict_resolver.py', 'tools/agent_runner/run_conflict_resolver.py']

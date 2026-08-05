@@ -1,0 +1,5 @@
+# Local workspace project configuration for AI Dev Factory.
+# Loaded at runtime via WORKSPACE_PROJECTS_CONFIG env var.
+# See workspace_projects.example.yml for the full annotated schema.
+# Never commit secrets or production credentials here.
+projects: {}

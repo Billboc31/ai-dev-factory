@@ -383,6 +383,13 @@ def _get_analysis_lock(project_id: str) -> threading.Lock:
         return _analysis_locks[project_id]
 
 
+def _get_redeploy_lock(project_id: str) -> threading.Lock:
+    with _workspace_redeploy_locks_mutex:
+        if project_id not in _workspace_redeploy_locks:
+            _workspace_redeploy_locks[project_id] = threading.Lock()
+        return _workspace_redeploy_locks[project_id]
+
+
 def _analysis_pid_path(project_id: str) -> Path:
     return _runs_dir() / f"analysis-{project_id}.pid"
 
@@ -2873,6 +2880,44 @@ _pending_workspace_actions: dict[str, dict] = {}
 _pending_workspace_issues: dict[str, dict] = {}
 _workspace_lock = threading.Lock()
 
+# Per-project redeployment locks (in-memory; protects one Supervisor process/worker only)
+_workspace_redeploy_locks: dict[str, threading.Lock] = {}
+_workspace_redeploy_locks_mutex = threading.Lock()
+
+# Background deployment job registry keyed by deployment_id (UUID)
+_deployment_jobs: dict[str, dict] = {}
+_deployment_jobs_lock = threading.Lock()
+
+def _load_workspace_projects_config() -> dict:
+    """Load workspace_projects.yml; return {} on missing file or parse error."""
+    config_path = os.environ.get(
+        "WORKSPACE_PROJECTS_CONFIG",
+        str(Path(__file__).parent / "workspace_projects.yml"),
+    )
+    try:
+        import yaml as _yaml
+        with open(config_path, encoding="utf-8") as fh:
+            data = _yaml.safe_load(fh)
+            return data if isinstance(data, dict) else {}
+    except FileNotFoundError:
+        return {}
+    except Exception as exc:
+        logger.warning("workspace: failed to load projects config %s: %s", config_path, exc)
+        return {}
+
+
+def _git_has_local_changes(repo_path: str) -> bool:
+    """Return True if the repo has uncommitted changes. Raises on error."""
+    result = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=repo_path,
+        timeout=10,
+        capture_output=True,
+        text=True,
+    )
+    return bool(result.stdout.strip())
+
+
 _WORKSPACE_CAPABILITIES: dict[str, dict] = {
     "restart_daemon": {
         "description": "Restart the project daemon",
@@ -2884,6 +2929,10 @@ _WORKSPACE_CAPABILITIES: dict[str, dict] = {
     },
     "resume_execution": {
         "description": "Resume ticket execution (restart daemon)",
+        "confirmation_required": True,
+    },
+    "redeploy_project": {
+        "description": "Pull the latest code and rebuild/restart selected services",
         "confirmation_required": True,
     },
 }
@@ -2910,12 +2959,18 @@ ALLOWED_CAPABILITIES:
 - restart_daemon: Restart the project daemon
 - rerun_dependency_analysis: Rerun dependency analysis
 - resume_execution: Resume ticket execution
+- redeploy_project: Pull latest code and rebuild/restart backend and/or frontend services.
+  The branch is always the project's configured default branch (do not include a branch param).
+  Params: pull (bool, default true), components (array, values: "backend", "frontend").
+  proposed_action format: {"capability": "redeploy_project", "description": "...",
+    "params": {"pull": true, "components": ["backend", "frontend"]}}
 
 RESPONSE FORMAT — respond with a valid JSON object and nothing else:
 {
   "reply": "<natural language response to the user>",
   "intent": "informational" | "actionable" | "functional_dev",
-  "proposed_action": null | {"capability": "<key>", "description": "<what will happen>"},
+  "proposed_action": null | {"capability": "<key>", "description": "<what will happen>",
+                              "params": <optional object, only for redeploy_project>},
   "issue_draft": null | {"title": "<short title>", "body": "<markdown body>"},
   "confirmation_required": false | true
 }
@@ -3167,6 +3222,64 @@ def workspace_chat(project_id: str, body: WorkspaceChatRequest):
             result["proposed_action"] = None
             result["confirmation_required"] = False
             result["intent"] = "informational"
+        elif capability == "redeploy_project":
+            config = _load_workspace_projects_config()
+            project_block = config.get("projects", {}).get(project_id)
+            if project_block is None or "redeploy" not in project_block:
+                result["reply"] += "\n\n(Project not configured for redeployment.)"
+                result["proposed_action"] = None
+                result["confirmation_required"] = False
+                result["intent"] = "informational"
+            else:
+                configured_components = set(project_block["redeploy"].keys())
+                raw_params = proposed_action.get("params") or {}
+                raw_components = raw_params.get("components")
+                if not raw_components or not isinstance(raw_components, list):
+                    raw_components = list(configured_components)
+                unknown = [c for c in raw_components if c not in configured_components]
+                if unknown:
+                    result["reply"] += f"\n\n(Requested component(s) {unknown} not configured for this project.)"
+                    result["proposed_action"] = None
+                    result["confirmation_required"] = False
+                    result["intent"] = "informational"
+                else:
+                    pull = raw_params.get("pull", True)
+                    if not isinstance(pull, bool):
+                        pull = True
+                    components = [c for c in raw_components if c in configured_components]
+
+                    has_dirty_warning = None
+                    repo_path = project_block.get("repository_path", "")
+                    try:
+                        has_dirty_warning = _git_has_local_changes(repo_path)
+                    except Exception:
+                        has_dirty_warning = None
+
+                    configured_branch = project_block.get("default_branch", "")
+                    safe_identifier = project_block.get("display_name") or project_id
+
+                    action_id = str(uuid.uuid4())
+                    with _workspace_lock:
+                        _pending_workspace_actions[action_id] = {
+                            "project_id": project_id,
+                            "capability": "redeploy_project",
+                            "description": proposed_action.get("description", ""),
+                            "params": {"pull": pull, "components": components},
+                            "has_dirty_warning": has_dirty_warning,
+                            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        }
+                    result["proposed_action"] = {
+                        "capability": "redeploy_project",
+                        "description": proposed_action.get("description", ""),
+                        "action_id": action_id,
+                        "project_id": project_id,
+                        "safe_identifier": safe_identifier,
+                        "configured_branch": configured_branch,
+                        "pull": pull,
+                        "components": components,
+                        "has_dirty_warning": has_dirty_warning,
+                    }
+                    result["confirmation_required"] = True
         else:
             action_id = str(uuid.uuid4())
             with _workspace_lock:
@@ -3219,6 +3332,44 @@ def workspace_action_confirm(project_id: str, body: WorkspaceActionConfirmReques
         capability, project_id, body.action_id,
     )
 
+    if capability == "redeploy_project":
+        params = action.get("params", {})
+        components = params.get("components", [])
+        pull = params.get("pull", True)
+
+        lock = _get_redeploy_lock(project_id)
+        acquired = lock.acquire(blocking=False)
+        if not acquired:
+            return JSONResponse(status_code=409, content={"detail": "deployment already running for project"})
+
+        deployment_id = str(uuid.uuid4())
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with _deployment_jobs_lock:
+            _deployment_jobs[deployment_id] = {
+                "deployment_id": deployment_id,
+                "project_id": project_id,
+                "status": "RUNNING",
+                "stage": None,
+                "started_at": now,
+                "completed_at": None,
+                "result_message": None,
+                "deployed_sha": None,
+                "preview_url": None,
+                "error_stage": None,
+                "error_excerpt": None,
+            }
+
+        with _workspace_lock:
+            _pending_workspace_actions.pop(body.action_id, None)
+
+        threading.Thread(
+            target=_run_redeploy_job,
+            args=(deployment_id, project_id, components, pull, lock),
+            daemon=True,
+        ).start()
+
+        return {"ok": True, "deployment_id": deployment_id, "status": "RUNNING"}
+
     ok, message = _execute_workspace_capability(project_id, capability)
 
     with _workspace_lock:
@@ -3227,6 +3378,192 @@ def workspace_action_confirm(project_id: str, body: WorkspaceActionConfirmReques
     if ok:
         return {"ok": True, "capability": capability, "result": message}
     return JSONResponse(status_code=500, content={"detail": message})
+
+
+def _run_redeploy_job(
+    deployment_id: str,
+    project_id: str,
+    components: list,
+    pull: bool,
+    lock: threading.Lock,
+) -> None:
+    """Background deployment job. Holds *lock* on entry; always releases in finally."""
+
+    def _fail(stage: str, excerpt: str = "") -> None:
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with _deployment_jobs_lock:
+            _deployment_jobs[deployment_id].update({
+                "status": "FAILED",
+                "error_stage": stage,
+                "error_excerpt": excerpt[:500],
+                "completed_at": now,
+            })
+
+    def _set_stage(stage: str) -> None:
+        with _deployment_jobs_lock:
+            _deployment_jobs[deployment_id]["stage"] = stage
+
+    try:
+        config = _load_workspace_projects_config()
+        project_block = config.get("projects", {}).get(project_id)
+        if project_block is None:
+            _fail("CONFIG_MISSING")
+            return
+
+        repo_path = project_block["repository_path"]
+        default_branch = project_block["default_branch"]
+        allow_dirty = project_block.get("allow_dirty", False)
+        service_map = {k: v["service"] for k, v in project_block["redeploy"].items()}
+        preview_url = project_block.get("preview_url")
+
+        if not Path(repo_path).exists():
+            _fail("PATH_NOT_FOUND", f"repository path does not exist: {repo_path}")
+            return
+
+        unknown_components = [c for c in components if c not in service_map]
+        if unknown_components:
+            _fail("INVALID_COMPONENT", f"unknown components: {unknown_components}")
+            return
+
+        # Branch check
+        try:
+            branch_result = subprocess.run(
+                ["git", "branch", "--show-current"],
+                cwd=repo_path,
+                timeout=10,
+                capture_output=True,
+                text=True,
+            )
+        except FileNotFoundError:
+            _fail("GIT_NOT_FOUND", "git executable not found")
+            return
+        except subprocess.TimeoutExpired:
+            _fail("BRANCH_CHECK_TIMEOUT", "git branch --show-current timed out")
+            return
+        if branch_result.returncode != 0:
+            _fail("BRANCH_CHECK", branch_result.stderr[:500])
+            return
+        current_branch = branch_result.stdout.strip()
+        if current_branch != default_branch:
+            _fail(
+                "BRANCH_MISMATCH",
+                f"current branch '{current_branch}' differs from configured branch '{default_branch}'",
+            )
+            return
+
+        # Dirty check
+        try:
+            dirty = _git_has_local_changes(repo_path)
+        except FileNotFoundError:
+            _fail("GIT_NOT_FOUND", "git executable not found")
+            return
+        except subprocess.TimeoutExpired:
+            _fail("DIRTY_CHECK_TIMEOUT", "git status timed out")
+            return
+        if dirty and not allow_dirty:
+            _fail("DIRTY_CHECK", "uncommitted changes detected")
+            return
+
+        # Pull
+        if pull:
+            _set_stage("PULLING")
+            logger.info("redeploy %s: stage=PULLING", project_id)
+            try:
+                pull_result = subprocess.run(
+                    ["git", "pull", "--ff-only", "origin", default_branch],
+                    cwd=repo_path,
+                    timeout=120,
+                    capture_output=True,
+                    text=True,
+                )
+            except subprocess.TimeoutExpired:
+                _fail("PULLING", "git pull timed out after 120 s")
+                return
+            except FileNotFoundError:
+                _fail("PULLING", "git executable not found")
+                return
+            if pull_result.returncode != 0:
+                _fail("PULLING", pull_result.stderr[:500])
+                return
+
+        # Build/restart each component
+        for component in components:
+            service = service_map[component]
+            stage = f"BUILDING_{component}"
+            _set_stage(stage)
+            logger.info("redeploy %s: stage=%s service=%s", project_id, stage, service)
+            try:
+                compose_result = subprocess.run(
+                    ["docker", "compose", "up", "-d", "--build", service],
+                    cwd=repo_path,
+                    timeout=300,
+                    capture_output=True,
+                    text=True,
+                )
+            except subprocess.TimeoutExpired:
+                _fail(stage, "docker compose timed out after 300 s")
+                return
+            except FileNotFoundError:
+                _fail(stage, "docker executable not found")
+                return
+            if compose_result.returncode != 0:
+                _fail(stage, compose_result.stderr[:500])
+                return
+
+        # Get deployed SHA (non-fatal)
+        deployed_sha = None
+        try:
+            sha_result = subprocess.run(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=repo_path,
+                timeout=10,
+                capture_output=True,
+                text=True,
+            )
+            if sha_result.returncode == 0:
+                deployed_sha = sha_result.stdout.strip()
+        except Exception:
+            pass
+
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        component_list = ", ".join(components)
+        with _deployment_jobs_lock:
+            _deployment_jobs[deployment_id].update({
+                "status": "SUCCEEDED",
+                "stage": "SUCCEEDED",
+                "completed_at": now,
+                "deployed_sha": deployed_sha,
+                "preview_url": preview_url,
+                "result_message": f"Deployed {component_list} (sha={deployed_sha})",
+            })
+        logger.info("redeploy %s: stage=SUCCEEDED sha=%s", project_id, deployed_sha)
+
+    except Exception as exc:
+        logger.exception("redeploy %s: unexpected exception", project_id)
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with _deployment_jobs_lock:
+            job = _deployment_jobs.get(deployment_id, {})
+            if job.get("status") != "FAILED":
+                _deployment_jobs[deployment_id].update({
+                    "status": "FAILED",
+                    "error_stage": "INTERNAL_ERROR",
+                    "error_excerpt": str(exc)[:500],
+                    "completed_at": now,
+                })
+    finally:
+        lock.release()
+
+
+@app.get("/workspace/projects/{project_id}/deployments/{deployment_id}")
+def workspace_get_deployment(project_id: str, deployment_id: str):
+    from fastapi.responses import JSONResponse as _JSONResponse
+
+    with _deployment_jobs_lock:
+        job = _deployment_jobs.get(deployment_id)
+
+    if job is None or job.get("project_id") != project_id:
+        return _JSONResponse(status_code=404, content={"detail": "deployment not found"})
+    return job
 
 
 @app.post("/workspace/projects/{project_id}/issues/confirm")

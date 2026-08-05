@@ -1,0 +1,30 @@
+# workspace_projects.example.yml
+# Full annotated schema for AI Dev Factory workspace project configuration.
+# Copy to workspace_projects.yml and adapt for your environment.
+# This file is never loaded automatically; it is documentation only.
+#
+# Point the supervisor at your config:
+#   WORKSPACE_PROJECTS_CONFIG=/path/to/workspace_projects.yml
+
+projects:
+  # Project key — must match the project_id used in the Workspace chat.
+  timizer:
+    display_name: "Timizer"          # Optional. Shown in the confirmation card.
+    repository_path: /projects/timizer   # Absolute path to the git repo on the host.
+    default_branch: main             # Only this branch may be pulled; mismatch = FAILED.
+    allow_dirty: false               # false → fail if uncommitted changes exist at execution time.
+    redeploy:
+      backend:
+        service: backend             # Docker Compose service name for the backend.
+      frontend:
+        service: frontend            # Docker Compose service name for the frontend.
+    preview_url: http://localhost:3000   # Optional. Returned on successful deployment.
+
+  # Minimal example — backend only, no preview URL.
+  my-api:
+    repository_path: /home/dev/my-api
+    default_branch: main
+    allow_dirty: false
+    redeploy:
+      backend:
+        service: api
