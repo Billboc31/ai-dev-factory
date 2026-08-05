@@ -1,7 +1,7 @@
 {
   "ticket_id": "T228",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_FIX_REQUIRED",
   "branch": "ticket/T228-add-autonomous-unblock-this-ticket-recovery-action",
   "issue_number": 312,
-  "updated_at": "2026-08-05T20:16:06Z"
+  "updated_at": "2026-08-05T20:21:30Z"
 }
