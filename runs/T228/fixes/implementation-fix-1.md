@@ -1,3 +1,11 @@
+# Fix artifact — IMPLEMENTATION_FIX_REQUIRED
+
+- decision: IMPLEMENTATION_FIX_REQUIRED
+- review source: runs/T228/reviews/implementation-review.md
+- generated at: 2026-08-05T22:00:11Z
+
+---
+
 ---
 
 # PR Review — T228: Autonomous "Unblock this ticket" recovery action
