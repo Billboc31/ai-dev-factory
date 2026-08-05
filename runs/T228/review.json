@@ -1,0 +1,16 @@
+{
+  "ticket_id": "T228",
+  "review_type": "plan",
+  "decision": "PLAN_FIX_REQUIRED",
+  "artifact": "runs/T228/reviews/plan-review-01.md",
+  "summary": "Separate read-only recovery preparation from confirmed execution, protect against stale plans, define closed allowlisted operations, run recovery asynchronously, make concurrency atomic, and use deterministic bug deduplication.",
+  "required_fixes": [
+    "Build and present the exact recovery plan before confirmation.",
+    "Store and revalidate a ticket-state fingerprint before execution.",
+    "Define strict parameters, preconditions, effects, and success criteria for every allowlisted operation.",
+    "Execute recovery as a background job with polling and observable stages.",
+    "Protect active recovery sessions with an atomic lock and guaranteed cleanup.",
+    "Generate deterministic structured bug signatures and search only the configured project repository.",
+    "Add security, stale-state, concurrency, polling, approval-gate, and deduplication tests."
+  ]
+}
