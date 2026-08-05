@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import hashlib
 import importlib.util
 import json
 import os
@@ -802,15 +803,27 @@ def _write_fix_artifact(ticket_id: str, next_state: str, review_path: Path) -> N
     _log_runtime(ticket_id, f"auto-run: fix artifact written: {artifact_path}")
 
 
+PLAN_UNCHANGED_REASON = "plan.md unchanged after PLAN_FIX_REQUIRED"
+
 _PLAN_FIX_ARTIFACT_ONLY_PREAMBLE = (
     "## Artifact-only instruction (mandatory)\n\n"
     "Your response will be written verbatim to `{artifact_path}`.\n"
+    "You MUST rewrite that file with the corrected plan. Leaving it\n"
+    "unchanged is rejected by the factory.\n"
     "Rewrite the artifact itself. Do not describe the modifications.\n"
     "Do not explain what changed. Do not produce a status report.\n"
     "Openings such as \"The plan has been rewritten…\", \"This plan now\n"
     "covers…\", \"Plan rewritten as…\", \"Key points covered…\", \"The\n"
     "document now…\" make the output invalid."
 )
+
+
+def _plan_md_digest(ticket_id: str) -> str | None:
+    """Return a SHA-256 hex digest of ``runs/<ticket>/plan.md``, or None if missing."""
+    path = Path("runs") / ticket_id / "plan.md"
+    if not path.is_file():
+        return None
+    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def _build_fix_context_file(
@@ -861,7 +874,8 @@ def _build_planner_meta_report_retry_context(ticket_id: str) -> Path:
         "## Artifact-only retry instruction (mandatory)\n\n"
         f"Your previous response was classified as a meta-report about the\n"
         f"artifact rather than the artifact itself. Your next response will be\n"
-        f"written verbatim to `runs/{ticket_id}/plan.md`.\n\n"
+        f"written verbatim to `runs/{ticket_id}/plan.md`.\n"
+        "You MUST rewrite that file. Leaving it unchanged is rejected.\n\n"
         "Rewrite the artifact itself. Do not describe the modifications.\n"
         "Do not explain what changed. Do not produce a status report.\n"
         "Do not open with \"The plan has been rewritten\", \"This plan now\",\n"
@@ -1328,6 +1342,12 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
         extra_context_file = _build_review_decision_context_file(ticket_id, current_state)
         _log_runtime(ticket_id, f"auto-run: review decision context: context_file={extra_context_file}")
 
+    # Snapshot plan.md before a fix attempt so a chatty agent that leaves the
+    # file untouched cannot re-enter PLAN_REVIEW_NEEDED with the same plan.
+    prior_plan_digest: str | None = None
+    if step == "planner" and current_state == "PLAN_FIX_REQUIRED":
+        prior_plan_digest = _plan_md_digest(ticket_id)
+
     rc, output_content, output_path = _call_run_step(ticket_id, step, exec_cmd, extra_context_file, current_state, project_root)
     _log_runtime(ticket_id, f"auto-run: step={step} done rc={rc}")
 
@@ -1364,6 +1384,13 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
                 return 2
             _checkpoint_planner_artifacts(ticket_id, push=auto_push)
             reasons = validate_planner_output(output_content, artifact_type="plan")
+
+        if (
+            not reasons
+            and prior_plan_digest is not None
+            and _plan_md_digest(ticket_id) == prior_plan_digest
+        ):
+            reasons = [PLAN_UNCHANGED_REASON]
 
         if reasons:
             for reason in reasons:

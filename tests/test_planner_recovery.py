@@ -237,3 +237,98 @@ def test_planner_meta_report_retry_failing_again_logs_planner_invalid(tmp_path):
     log_text = (run_dir / "runtime.log").read_text(encoding="utf-8")
     assert "runtime warning: planner_meta_report_retry" in log_text
     assert "runtime failure: planner_invalid" in log_text
+
+
+# ── plan.md must change after PLAN_FIX_REQUIRED ──────────────────────────────
+
+
+def test_plan_fix_rejects_unchanged_plan_md(tmp_path):
+    """A chatty planner that leaves plan.md untouched must be rejected."""
+    ticket = "T997"
+    run_dir = _setup_auto_run_state(tmp_path, ticket)
+    plan_path = run_dir / "plan.md"
+    plan_path.write_text(_VALID_PLAN_OUTPUT, encoding="utf-8")
+
+    orig = os.getcwd()
+    os.chdir(tmp_path)
+
+    def fake_call_run_step(ticket_id, step, exec_cmd, extra_context_file, current_state, project_root):
+        # Simulate prefer-on-disk: return valid content without rewriting the file.
+        return 0, _VALID_PLAN_OUTPUT, Path(f"runs/{ticket_id}/plan.md")
+
+    fake_artifacts = {
+        "previous_output": tmp_path / "prev.md",
+        "review": tmp_path / "rev.md",
+        "fix_instructions": tmp_path / "fix.md",
+    }
+    for p in fake_artifacts.values():
+        p.write_text("placeholder", encoding="utf-8")
+
+    try:
+        with patch("run_ticket._get_current_branch", return_value=f"ticket/{ticket}-test"), \
+             patch("run_ticket._check_working_tree_clean"), \
+             patch("run_ticket._collect_fix_artifacts", return_value=fake_artifacts), \
+             patch("run_ticket._call_run_step", side_effect=fake_call_run_step), \
+             patch("run_ticket._checkpoint_planner_artifacts"):
+            rc = run_ticket.auto_run(ticket, "/bin/true")
+    finally:
+        os.chdir(orig)
+
+    assert rc == 2
+    log_text = (run_dir / "runtime.log").read_text(encoding="utf-8")
+    assert run_ticket.PLAN_UNCHANGED_REASON in log_text
+    assert "runtime failure: planner_invalid" in log_text
+    assert "PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED" not in log_text
+    state = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
+    assert state["state"] == "PLAN_FIX_REQUIRED"
+
+
+def test_plan_fix_accepts_changed_plan_md(tmp_path):
+    """When plan.md is rewritten, PLAN_FIX_REQUIRED may advance."""
+    ticket = "T996"
+    run_dir = _setup_auto_run_state(tmp_path, ticket)
+    plan_path = run_dir / "plan.md"
+    plan_path.write_text(_VALID_PLAN_OUTPUT + "\n# old\n", encoding="utf-8")
+
+    revised = (
+        "## Objective\n"
+        "Rename foo to bar and update callers — behaviour preserving.\n\n"
+        "## Included\n"
+        "- utils.py: rename helper\n"
+        "- callers: update imports\n\n"
+        "## Excluded\n"
+        "- unrelated modules\n\n"
+        "## Acceptance criteria\n"
+        "- tests pass; old name gone from public API\n"
+    )
+
+    orig = os.getcwd()
+    os.chdir(tmp_path)
+
+    def fake_call_run_step(ticket_id, step, exec_cmd, extra_context_file, current_state, project_root):
+        Path(f"runs/{ticket_id}/plan.md").write_text(revised, encoding="utf-8")
+        return 0, revised, Path(f"runs/{ticket_id}/plan.md")
+
+    fake_artifacts = {
+        "previous_output": tmp_path / "prev.md",
+        "review": tmp_path / "rev.md",
+        "fix_instructions": tmp_path / "fix.md",
+    }
+    for p in fake_artifacts.values():
+        p.write_text("placeholder", encoding="utf-8")
+
+    try:
+        with patch("run_ticket._get_current_branch", return_value=f"ticket/{ticket}-test"), \
+             patch("run_ticket._check_working_tree_clean"), \
+             patch("run_ticket._collect_fix_artifacts", return_value=fake_artifacts), \
+             patch("run_ticket._call_run_step", side_effect=fake_call_run_step), \
+             patch("run_ticket._checkpoint_planner_artifacts"):
+            rc = run_ticket.auto_run(ticket, "/bin/true")
+    finally:
+        os.chdir(orig)
+
+    assert rc == 0
+    log_text = (run_dir / "runtime.log").read_text(encoding="utf-8")
+    assert "planner validation success" in log_text
+    assert run_ticket.PLAN_UNCHANGED_REASON not in log_text
+    assert "PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED" in log_text
