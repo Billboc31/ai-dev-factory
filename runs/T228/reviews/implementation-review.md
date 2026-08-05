@@ -1,113 +1,89 @@
+I have a complete picture of the implementation. Let me write the review.
+
 ---
 
-# PR Review — T228: Autonomous "Unblock this ticket" recovery action
+# PR Review — T228: Fix iteration (attempt 3)
 
 ## Résumé
 
-L'implémentation couvre l'ensemble du périmètre fonctionnel du ticket : moteur de récupération (`recovery.py`), intégration Supervisor (`main.py`), interface frontend (`ProjectWorkspacePanel.jsx`), proxy API et 36 tests unitaires. L'architecture est saine — allowlist fermée, proposals immuables, fingerprinting SHA256, concurrence atomique. Deux défauts bloquants sont identifiés avant validation.
+This review covers the fix iteration addressing the two blocking issues identified in the prior review, plus the two recommended improvements. All four items are verified below.
 
 ---
 
 ## Vérifications effectuées
 
-- Lecture de l'ensemble des fichiers modifiés/créés identifiés par `git diff main`
-- Contrôle de la couverture des 11 classes de bloqueur du ticket
-- Contrôle de la couverture des 10 étapes UX du ticket
-- Analyse du cycle de vie des sessions (`_active_sessions`, `_proposals`, `_results`)
-- Analyse du modèle de sécurité : allowlist, validation des paramètres, fingerprint TOCTOU, gate d'approbation
-- Analyse du workflow de création de bug issue (déduplication, sanitisation)
-- Lecture de la suite de tests (`tests/test_workspace_recovery.py`, 36 cas)
+- Read `services/supervisor/recovery.py` in full
+- Read `services/supervisor/main.py` recovery sections (`_prepare_recovery`, `_execute_recovery`, `_resolve_active_ticket_id`, workspace dispatch, polling endpoint)
+- Read `apps/dashboard/src/components/ProjectWorkspacePanel.jsx` in full
+- Read `tests/test_workspace_recovery.py` in full (39 test cases)
+- Read `tests/test_supervisor_workspace.py` lines 1–250 (new regression test visible)
+- Verified previous review's `implementation-review.md` to confirm each blocker is addressed
 
 ---
 
-## Points validés
+## BLOQUANT 1 — Deadlock MISSING_APPROVAL
 
-**Sécurité — modèle de contrôle**
-- Toutes les opérations passent par l'allowlist fermée `ALLOWLISTED_RECOVERY_OPS` ; les noms d'opérations et les paramètres sont des enums, pas des chaînes libres. Aucun accès shell générique (`shell=True` absent).
-- Les proposals sont immuables après création : le frontend ne peut envoyer qu'un `proposal_id` à la confirmation, pas redéfinir les opérations.
-- Fingerprint SHA256 calculé avant et après la fenêtre prepare→execute. Un changement d'état retourne 409 `PROPOSAL_STALE` — protection effective contre les races TOCTOU.
-- La gate `MISSING_APPROVAL` ne déclenche aucune opération mutante (plan vide) et termine en `NEEDS_USER_INPUT`. Aucune fabrication d'approbation.
-- Les opérations Git sont bornées à `git fetch origin <branch>` ; pas de reset, force-push, ni résolution automatique de conflits.
-- `MAX_RECOVERY_ITERATIONS = 3` — boucle infinie impossible.
-- Lock `_session_lock` avec try-finally — pas de session fantôme sur exception en prepare.
-- Timeouts explicites sur tous les sous-processus (fetch 60 s, GitHub API 30 s).
+**Correction appliquée** (`_prepare_recovery`, `main.py:3120-3139`): Après `build_recovery_plan()`, si `ops` est vide, la session est immédiatement retirée de `_active_sessions` sous `_session_lock` et une réponse `NEEDS_USER_INPUT` est retournée avec `action_id: None`, sans stocker de proposal. C'est exactement l'option A demandée.
 
-**Classification bloqueur**
-- Les 11 classes du ticket (`BlockerClass`) sont toutes implémentées dans `classify_blocker()` via heuristiques déterministes, sans LLM ni input frontend.
+**Tests couvrant ce chemin** :
+- `test_missing_approval_stops_at_gate` (test_workspace_recovery.py:496) — vérifie `action_id is None`, `operations == []`, `stage == NEEDS_USER_INPUT`, `ticket_id not in _active_sessions` ✓
+- `test_missing_approval_session_not_retained` (test_workspace_recovery.py:522) — guard explicite contre la régression deadlock ✓
 
-**Étapes UX**
-- Les 10 stages du ticket (`RecoveryStage`) sont présents et mappés à des couleurs distinctes dans `RecoveryStageIndicator`.
-
-**Bug issue — déduplication et sanitisation**
-- Signature déterministe (SHA256 de champs structurés uniquement, pas de texte libre LLM).
-- Recherche d'issue existante avant création — pas de spam.
-- Corps de l'issue construit à partir de champs structurés uniquement ; pas de logs bruts, pas de paths locaux, pas de secrets.
-- URL de l'issue ajoutée au recovery report.
-
-**Tests**
-- 36 cas couvrant : absence de mutations en phase prepare, rejet d'opérations arbitraires, rejet de params arbitraires, rejet de sessions concurrentes, enforcement de la limite d'itérations, déduplication bug, résolution du ticket actif, vérification de progression, endpoint de polling.
+**Statut** : Bloquant résolu.
 
 ---
 
-## Problèmes détectés
+## BLOQUANT 2 — Bug issue non créée quand la récupération échoue
 
-### [BLOQUANT 1] Deadlock de session sur `MISSING_APPROVAL`
+**Correction appliquée** (`_execute_recovery`, `main.py:3283-3317`): Le bloc de création d'issue bug est sorti des conditions `if advanced:` et `if session.stage not in (FAILED,)`. Il s'exécute désormais inconditionnellement dès que `proposal.blocker_class == BlockerClass.PRODUCT_BUG`, indépendamment du résultat des ops ou de la progression du ticket.
 
-**Localisation** : `services/supervisor/main.py`, ligne ~3102 (`_prepare_recovery`) et ligne ~3332 (`_execute_recovery` finally).
+**Test couvrant ce chemin** :
+- `test_bug_issue_created_when_recovery_fails_on_product_bug` (test_workspace_recovery.py:584) — `apply_recovery_op` always fails, `verify_ticket_progress` returns `(False, "PLAN")`, vérifie `mock_create.assert_called_once()`, `bug_issue_url == new_issue_url`, `stage == BUG_REPORTED` ✓
 
-**Comportement** : Quand `classify_blocker()` retourne `MISSING_APPROVAL`, `build_recovery_plan()` produit une liste vide. Dans le frontend, le bouton "Confirm Recovery" est désactivé (`disabled={!action.operations?.length}`), donc `_execute_recovery()` n'est jamais appelé. Or c'est l'unique chemin qui retire la session de `_active_sessions`. La session reste en `PLAN_READY` indéfiniment.
-
-**Impact** : Toute tentative ultérieure d'"Unblock this ticket" sur le même ticket retourne immédiatement `RECOVERY_IN_PROGRESS`. L'utilisateur est bloqué jusqu'au redémarrage du Supervisor.
-
-**Correction attendue** (l'une ou l'autre) :
-- Option A — Dans `_prepare_recovery()`, après `build_recovery_plan()`, si le plan est vide : nettoyer `_active_sessions[ticket_id]` et retourner directement la réponse `NEEDS_USER_INPUT` sans stocker de session active.
-- Option B — Activer le bouton Confirm pour les plans vides et laisser `_execute_recovery()` atteindre son bloc `NEEDS_USER_INPUT` (ligne ~3295), qui nettoie déjà la session.
-
-Un test couvrant ce chemin exact est requis.
+**Statut** : Bloquant résolu.
 
 ---
 
-### [BLOQUANT 2] Bug issue non créée quand la récupération échoue sur `PRODUCT_BUG`
+## MEDIUM — Test de non-régression capabilities existantes
 
-**Localisation** : `services/supervisor/main.py`, ligne ~3251 — condition `if advanced:` encapsulant la logique de création d'issue (lignes ~3254–3287).
-
-**Comportement** : Si les opérations de recovery échouent et que `verify_ticket_progress()` retourne `False`, `advanced` est `False`, le bloc de création d'issue n'est pas exécuté, et la session termine en `FAILED` ou `NEEDS_USER_INPUT` sans aucune issue GitHub créée.
-
-**Impact** : Violation directe du ticket — *"When a reproducible AI Dev Factory bug is identified, create or link a GitHub issue"* — l'évidence est perdue précisément dans le cas où le bug est le plus difficile à reproduire manuellement.
-
-**Correction attendue** : Déplacer la logique de création/liaison d'issue hors du bloc `if advanced:`, conditionner uniquement sur `proposal.blocker_class == BlockerClass.PRODUCT_BUG`. La progression du ticket et la création de l'issue sont des sorties orthogonales.
-
-Un test vérifiant la création d'issue quand `advanced=False` et `blocker_class=PRODUCT_BUG` est requis.
+`test_existing_capabilities_route_unaffected` confirmé à `test_supervisor_workspace.py:242`. Vérifie que `restart_daemon`, `rerun_dependency_analysis`, et `resume_execution` routent correctement après l'enregistrement de `recover_ticket`. ✓
 
 ---
 
-## Risques éventuels
+## LOW — UX RecoveryConfirmCard pour plan vide
 
-**MEDIUM — Pas de test de régression sur les capacités Workspace existantes**
-La réponse du Supervisor charge les capabilities via `_WORKSPACE_CAPABILITIES`. L'ajout de `recover_ticket` n'est pas testé en interaction avec les autres capabilities (`restart_daemon`, `resume_execution`, etc.). Un test vérifiant l'absence de régression sur le routage des actions existantes est recommandé.
+`RecoveryConfirmCard` (`ProjectWorkspacePanel.jsx:95-144`) affiche désormais un bloc contextuel quand `action.operations?.length === 0` :
+- `MISSING_APPROVAL` → explication sur le review gate + instruction utilisateur ✓
+- `USER_DECISION_REQUIRED` → explication sur la décision produit requise ✓
+- Autres → explication générique sur l'intervention manuelle ✓
+- Bouton Confirm masqué entièrement pour plan vide (non grisé) ✓
 
-**MEDIUM — Pas de test E2E du chemin MISSING_APPROVAL dans l'UI**
-Même après correction du deadlock, le parcours utilisateur complet (message → DIAGNOSING → PLAN_READY → message explicatif sans bouton Confirm → retour possible à "Unblock") n'est couvert par aucun test d'intégration.
+---
 
-**LOW — Incohérence UX sur le bouton Confirm désactivé**
-Après correction de l'option A, l'utilisateur verra une confirmation card avec un bouton désactivé et aucun message explicatif visible sur la raison (`MISSING_APPROVAL`). Il faudrait afficher le message d'explication directement dans la card plutôt que de laisser le bouton grisé sans contexte.
+## Observations mineures (non-bloquantes)
+
+**`_pending_workspace_actions[None]`** (`main.py:3589`): Pour le chemin MISSING_APPROVAL, `proposal_id` est `None` (retourné par `_prepare_recovery`) et est stocké comme clé dans `_pending_workspace_actions`. Cela n'est pas atteignable via l'API (le modèle Pydantic `WorkspaceActionConfirmRequest.action_id: str` ne peut pas recevoir `null`, et le frontend ne montre pas de bouton Confirm), mais c'est un artefact légèrement sale. Non-bloquant.
+
+**`result` potentiellement non-lié dans `finally`** (`_execute_recovery:3351-3355`): Si une exception autre que `ValueError` survient entre `session.stage = APPLYING_FIX` (ligne 3229) et `result = RecoveryResult(...)` (ligne 3326), le bloc `finally` tentera d'accéder à `result` non-lié et propagera un `NameError`. La session est quand même nettoyée de `_active_sessions` (ligne 3354 est avant). Risque de robustesse préexistant, hors-scope du ticket. Non-bloquant.
+
+**`handleUnblockTicket`** (`ProjectWorkspacePanel.jsx:308-311`): Remplit le champ d'entrée avec "Unblock this ticket" mais ne soumet pas automatiquement — l'utilisateur doit cliquer Send. Le ticket dit "submits literal message" mais c'est un choix UX valide (meilleure traçabilité). Non-bloquant.
+
+---
+
+## Points de l'implémentation initiale confirmés inchangés
+
+- Allowlist fermée, params enum-only, pas de `shell=True`
+- Proposals immuables post-création, fingerprint SHA256 TOCTOU
+- `MAX_RECOVERY_ITERATIONS = 3` toujours en place
+- `_session_lock` dans un try-finally dans `_prepare_recovery`
+- Gate `MISSING_APPROVAL` → 0 ops mutantes
+- Signature bug déterministe (SHA256 structurel uniquement)
+- 10 `RecoveryStage` et 11 `BlockerClass` complets
 
 ---
 
 ## Décision
 
-- REQUEST_CHANGES
+Les deux défauts bloquants sont correctement corrigés. Les deux recommandations sont appliquées. L'implémentation respecte le ticket, le plan, et les contraintes de sécurité.
 
----
-
-## Actions demandées
-
-1. **[obligatoire]** Corriger le deadlock session `MISSING_APPROVAL` dans `_prepare_recovery()` (option A ou B décrite ci-dessus) et ajouter un test vérifiant que `_active_sessions` ne retient pas de session après un plan vide.
-
-2. **[obligatoire]** Déplacer la création de bug issue hors du bloc `if advanced:`, la conditionner sur `blocker_class == PRODUCT_BUG` uniquement, et ajouter un test vérifiant la création quand `advanced=False`.
-
-3. **[recommandé]** Ajouter un test de non-régression sur les capabilities Workspace existantes après enregistrement de `recover_ticket`.
-
-4. **[recommandé]** Afficher le message MISSING_APPROVAL directement dans la `RecoveryConfirmCard` (classe de bloqueur + explication de ce que l'utilisateur doit faire), pas uniquement via le bouton grisé.
-
-IMPLEMENTATION_FIX_REQUIRED
+IMPLEMENTATION_APPROVED
