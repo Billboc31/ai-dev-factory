@@ -97,3 +97,14 @@
 [2026-08-05T20:21:38Z] snapshot: runtime-prompt=runs/T228/prompts/planner-attempt-4.md
 [2026-08-05T20:22:46Z] compose: preferring on-disk runs/T228/plan.md over chatty stdout (agent Write beat meta-report)
 [2026-08-05T20:22:46Z] auto-run: step=planner done rc=0
+[2026-08-05T20:22:49Z] planner checkpoint: committed
+[2026-08-05T20:22:49Z] planner checkpoint: pushed
+[2026-08-05T20:22:49Z] planner validation success
+[2026-08-05T20:22:49Z] auto-run: transition PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED
+[2026-08-05T20:22:49Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-08-05T20:22:49Z] commit-checkpoint: unstaged runtime garbage: ['runs/T228/runtime.log', 'runs/T228/workflow-status.md']
+[2026-08-05T20:22:49Z] commit-checkpoint: sha=3f16f93b files=1 title='docs(T228/workflow): planner — update 1 file(s)'
+[2026-08-05T20:22:49Z] auto-run: auto-push triggered
+[2026-08-05T20:22:49Z] push: tolerating runtime dirty files (not blocking): ['runs/T228/runtime.log', 'runs/T228/workflow-status.md']
+[2026-08-05T20:22:49Z] push: pushing branch=ticket/T228-add-autonomous-unblock-this-ticket-recovery-action
+[2026-08-05T20:22:51Z] push: done branch=ticket/T228-add-autonomous-unblock-this-ticket-recovery-action
