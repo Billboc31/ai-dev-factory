@@ -54,6 +54,14 @@ def _cp(stdout: str = "", stderr: str = "", returncode: int = 0) -> MagicMock:
         ".runtime/ai-dev-factory.sqlite-wal",
         ".runtime/ai-dev-factory.sqlite-shm",
         "some/other.sqlite",
+        # Build / deps noise — must never be auto-committed (LLM + conflict tax)
+        "frontend/node_modules/lodash/package.json",
+        "apps/dashboard/node_modules/react/index.js",
+        "node_modules/.package-lock.json",
+        "backend/target/classes/Foo.class",
+        "frontend/dist/assets/index.js",
+        "apps/dashboard/dist/index.html",
+        "frontend/node_modules/.vite/vitest/results.json",
     ],
 )
 def test_is_ignorable_runtime_dirty_path_recognises_runtime_files(path: str) -> None:
