@@ -257,6 +257,8 @@ _RETRY_POLICIES: dict[str, dict] = {
     "quota_exceeded":          {"action": "cooldown",    "cooldown_seconds": 3600},
     "provider_error":          {"action": "exponential", "base_seconds": 60, "max_retries": 5, "fallback_cooldown_seconds": 3600},
     "process_crashed":         {"action": "exponential", "base_seconds": 60, "max_retries": 5, "fallback_cooldown_seconds": 3600},
+    # Agent hung past AGENT_EXEC_TIMEOUT_SECONDS (e.g. empty shell task waits).
+    "process_timeout":         {"action": "fixed_delay", "delay_seconds": 120, "max_retries": 2},
     "process_failed":          {"action": "fixed_delay", "delay_seconds": 300, "max_retries": 3},
     "empty_output":            {"action": "fixed_delay", "delay_seconds": 300, "max_retries": 3},
     # planner_invalid: model produced a structurally bad plan. Bounded retries
@@ -305,11 +307,28 @@ def _lock_path(run_dir: Path) -> Path:
 
 
 def _is_pid_alive(pid: int) -> bool:
+    """Return True only for a live, non-zombie process.
+
+    Zombies still answer ``kill(pid, 0)`` and would otherwise hold
+    ``daemon.lock`` forever after a parent exits without reaping.
+    """
     try:
         os.kill(pid, 0)
-        return True
     except OSError:
         return False
+    try:
+        result = subprocess.run(
+            ["ps", "-p", str(pid), "-o", "state="],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        state = (result.stdout or "").strip()
+        if state.startswith("Z"):
+            return False
+    except OSError:
+        pass
+    return True
 
 
 def _acquire_lock(run_dir: Path) -> bool:
@@ -790,6 +809,7 @@ from ticket_pr_lifecycle import (  # noqa: E402
     auto_merge_pr,
     check_and_close_issue,
     create_or_update_pr,
+    clear_pr_conflict_if_resolved,
     detect_pr_conflict,
     handle_test_complete,
     needs_pr_finalization,
@@ -2501,6 +2521,14 @@ def run_once(
                 else:
                     _log(f"dry-run: would checkpoint/push {ticket_id} for PLAN_REVIEW_NEEDED")
             elif state in ("CONFLICT_RESOLUTION_NEEDED", "CONFLICT_RESOLUTION_FAILED"):
+                conflict_state = _load_state_json(run_dir)
+                pr_for_clear = conflict_state.get("pr_number") or conflict_state.get("conflict_pr_number")
+                if (
+                    not dry_run
+                    and isinstance(pr_for_clear, int)
+                    and clear_pr_conflict_if_resolved(ticket_id, pr_for_clear, run_dir, repo)
+                ):
+                    continue
                 if _maybe_auto_launch_conflict_resolution(
                     ticket_id,
                     exec_cmd,

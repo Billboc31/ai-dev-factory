@@ -1,0 +1,26 @@
+{
+  "ticketId": "T226",
+  "artifactType": "PLAN_REVIEW",
+  "reviewId": "01",
+  "decision": "PLAN_FIX_REQUIRED",
+  "summary": "Regenerate the plan with pointer-event resizing, bounded and clamped layout dimensions, and drag-safe accessible header controls.",
+  "requiredChanges": [
+    {
+      "id": "pointer-events-docked-resize",
+      "title": "Use Pointer Events for docked resizing",
+      "description": "Replace mouse-only listeners with pointerdown, pointermove, pointerup and pointercancel, supporting mouse, touch and pen with cleanup on completion, cancellation and unmount."
+    },
+    {
+      "id": "layout-bounds-and-clamping",
+      "title": "Add dynamic maximum dimensions and clamp restored layout",
+      "description": "Define maximum width and height constraints, preserve usable main-content width in docked mode, and clamp width, height, x and y on restoration and viewport resize."
+    },
+    {
+      "id": "drag-safe-accessible-header",
+      "title": "Prevent controls from initiating drag and add accessible labels",
+      "description": "Use a dedicated drag handle or react-rnd cancel selector for interactive controls and add explicit aria-label values to icon-only actions."
+    }
+  ],
+  "sourceArtifact": "runs/T226/plan.md",
+  "markdownArtifact": "runs/T226/reviews/plan-review-01.md"
+}

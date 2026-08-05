@@ -298,17 +298,66 @@ def test_run_step_execute_external_command_passes_env_with_no_bytecode():
 
     captured_env: dict = {}
 
-    def fake_run(args, **kwargs):
+    def fake_popen(args, **kwargs):
         captured_env.update(kwargs.get("env") or {})
-        r = MagicMock()
-        r.stdout = ""
-        r.stderr = ""
-        r.returncode = 0
-        return r
+        proc = MagicMock()
+        proc.pid = 1
+        proc.returncode = 0
+        proc.communicate.return_value = ("", "")
+        return proc
 
-    with patch.object(mod.subprocess, "run", side_effect=fake_run):
+    with patch.object(mod.subprocess, "Popen", side_effect=fake_popen):
         mod.execute_external_command("echo hi", "prompt")
     assert captured_env.get("PYTHONDONTWRITEBYTECODE") == "1"
+
+
+def test_run_step_execute_external_command_timeout_kills_process_group(monkeypatch):
+    spec = importlib.util.spec_from_file_location(
+        "_test_run_step_timeout", TOOLS_DIR / "run_step.py"
+    )
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+
+    killed: list[tuple[int, int]] = []
+
+    def fake_popen(args, **kwargs):
+        assert kwargs.get("start_new_session") is True
+        proc = MagicMock()
+        proc.pid = 4242
+        proc.returncode = None
+
+        def communicate(input=None, timeout=None):
+            if timeout is not None:
+                raise mod.subprocess.TimeoutExpired(cmd=args, timeout=timeout)
+            return ("partial", "err")
+
+        proc.communicate.side_effect = communicate
+        return proc
+
+    monkeypatch.setattr(mod.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(mod.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+
+    stdout, stderr, rc = mod.execute_external_command("sleep 99", "prompt", timeout=1)
+    assert rc == 124
+    assert killed == [(4242, mod.signal.SIGKILL)]
+    assert "[timeout]" in stderr
+    assert mod.classify_runtime_failure(rc, stdout, stderr) == "process_timeout"
+
+
+def test_run_step_resolve_exec_timeout_env(monkeypatch):
+    spec = importlib.util.spec_from_file_location(
+        "_test_run_step_timeout_env", TOOLS_DIR / "run_step.py"
+    )
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+
+    monkeypatch.delenv("AGENT_EXEC_TIMEOUT_SECONDS", raising=False)
+    assert mod.resolve_exec_timeout_seconds() == 7200
+    monkeypatch.setenv("AGENT_EXEC_TIMEOUT_SECONDS", "0")
+    assert mod.resolve_exec_timeout_seconds() is None
+    monkeypatch.setenv("AGENT_EXEC_TIMEOUT_SECONDS", "90")
+    assert mod.resolve_exec_timeout_seconds() == 90
+    assert mod.resolve_exec_timeout_seconds(explicit=30) == 30
 
 
 def test_daemon_manager_spawn_propagates_no_bytecode_env(tmp_path: Path):

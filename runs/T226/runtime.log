@@ -1,0 +1,73 @@
+[2026-07-29T17:22:36Z] auto-run start: state=INIT
+[2026-07-29T17:22:36Z] auto-run: running step=planner
+[2026-07-29T17:22:36Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-07-29T17:22:36Z] prompt: generic fallback — injecting runs/T226/ticket.md
+[2026-07-29T17:22:36Z] compose: global-context=docs/ai/global-context.md
+[2026-07-29T17:22:36Z] compose: role=ai/roles/planner.md
+[2026-07-29T17:22:36Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-07-29T17:22:36Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-07-29T17:22:36Z] compose: skill=ai/skills/documentation.md
+[2026-07-29T17:22:36Z] compose: task (canonical prompt)
+[2026-07-29T17:22:36Z] snapshot: runtime-prompt=runs/T226/prompts/planner-attempt-1.md
+[2026-07-29T17:26:16Z] compose: preferring on-disk runs/T226/plan.md over chatty stdout (agent Write beat meta-report)
+[2026-07-29T17:26:16Z] auto-run: step=planner done rc=0
+[2026-07-29T17:26:19Z] planner checkpoint: committed
+[2026-07-29T17:26:19Z] planner checkpoint: pushed
+[2026-07-29T17:26:19Z] planner validation success
+[2026-07-29T17:26:19Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-07-29T17:26:19Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-07-29T17:26:19Z] commit-checkpoint: unstaged runtime garbage: ['runs/T226/runtime.log', 'runs/T226/workflow-status.md']
+[2026-07-29T17:26:19Z] commit-checkpoint: sha=223a8557 files=1 title='docs(T226/workflow): planner — update 1 file(s)'
+[2026-07-29T17:26:19Z] auto-run: auto-push triggered
+[2026-07-29T17:26:19Z] push: tolerating runtime dirty files (not blocking): ['runs/T226/runtime.log', 'runs/T226/workflow-status.md']
+[2026-07-29T17:26:19Z] push: pushing branch=ticket/T226-add-floating-and-dockable-ai-workspace-window
+[2026-07-29T17:26:21Z] push: done branch=ticket/T226-add-floating-and-dockable-ai-workspace-window
+[2026-07-31T16:20:26Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-07-31T16:20:26Z] auto-run: running step=planner
+[2026-07-31T16:20:26Z] auto-run: fix context: previous_output=runs/T226/plan.md
+[2026-07-31T16:20:26Z] auto-run: fix context: review=runs/T226/reviews/plan-review-01.md
+[2026-07-31T16:20:26Z] auto-run: fix context: fix_instructions=runs/T226/fixes/plan-fix-01.md
+[2026-07-31T16:20:26Z] auto-run: fix context: context_file=runs/T226/fixes/context-20260731T162026Z.md
+[2026-07-31T16:20:26Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-07-31T16:20:26Z] prompt: generic fallback — injecting runs/T226/ticket.md
+[2026-07-31T16:20:26Z] compose: global-context=docs/ai/global-context.md
+[2026-07-31T16:20:26Z] compose: role=ai/roles/planner.md
+[2026-07-31T16:20:26Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-07-31T16:20:26Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-07-31T16:20:26Z] compose: skill=ai/skills/documentation.md
+[2026-07-31T16:20:26Z] compose: task (canonical prompt)
+[2026-07-31T16:20:26Z] compose: extra-context=runs/T226/fixes/context-20260731T162026Z.md
+[2026-07-31T16:20:26Z] snapshot: runtime-prompt=runs/T226/prompts/planner-attempt-2.md
+[2026-07-31T16:22:59Z] auto-run: step=planner done rc=0
+[2026-07-31T16:23:02Z] planner checkpoint: committed
+[2026-07-31T16:23:02Z] planner checkpoint: pushed
+[2026-07-31T16:23:02Z] planner validation success
+[2026-07-31T16:23:02Z] auto-run: transition PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED
+[2026-07-31T16:23:02Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-07-31T16:23:02Z] commit-checkpoint: unstaged runtime garbage: ['runs/T226/runtime.log', 'runs/T226/workflow-status.md']
+[2026-07-31T16:23:02Z] commit-checkpoint: sha=489ae776 files=1 title='docs(T226/workflow): planner — update 1 file(s)'
+[2026-07-31T16:23:02Z] auto-run: auto-push triggered
+[2026-07-31T16:23:02Z] push: tolerating runtime dirty files (not blocking): ['runs/T226/runtime.log', 'runs/T226/workflow-status.md']
+[2026-07-31T16:23:02Z] push: pushing branch=ticket/T226-add-floating-and-dockable-ai-workspace-window
+[2026-07-31T16:23:04Z] push: done branch=ticket/T226-add-floating-and-dockable-ai-workspace-window
+[2026-07-31T17:12:26Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-07-31T17:12:26Z] auto-run: running step=tester
+[2026-07-31T17:12:26Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-07-31T17:12:26Z] prompt: generic fallback — injecting runs/T226/ticket.md
+[2026-07-31T17:12:26Z] compose: global-context=docs/ai/global-context.md
+[2026-07-31T17:12:26Z] compose: role=ai/roles/tester.md
+[2026-07-31T17:12:26Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-07-31T17:12:26Z] compose: skill=ai/skills/testing.md
+[2026-07-31T17:12:26Z] compose: skill=ai/skills/debugging.md
+[2026-07-31T17:12:26Z] compose: task (canonical prompt)
+[2026-07-31T17:12:26Z] snapshot: runtime-prompt=runs/T226/prompts/tester-attempt-1.md
+[2026-07-31T17:24:43Z] auto-run: step=tester done rc=0
+[2026-07-31T17:24:43Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-07-31T17:24:43Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-07-31T17:24:43Z] commit-checkpoint: unstaged runtime garbage: ['runs/T226/daemon.lock', 'runs/T226/runtime.log', 'runs/T226/workflow-status.md']
+[2026-07-31T17:24:43Z] commit-checkpoint: sha=b2928fbb files=4 title='test(T226/dashboard,workflow): tester — update 4 file(s)'
+[2026-07-31T17:24:43Z] auto-run: auto-push triggered
+[2026-07-31T17:24:43Z] push: tolerating runtime dirty files (not blocking): ['runs/T226/daemon.lock', 'runs/T226/runtime.log', 'runs/T226/workflow-status.md']
+[2026-07-31T17:24:43Z] push: pushing branch=ticket/T226-add-floating-and-dockable-ai-workspace-window
+[2026-07-31T17:24:46Z] push: done branch=ticket/T226-add-floating-and-dockable-ai-workspace-window
+[2026-07-31T17:24:46Z] auto-run: TEST_COMPLETE — running PR lifecycle

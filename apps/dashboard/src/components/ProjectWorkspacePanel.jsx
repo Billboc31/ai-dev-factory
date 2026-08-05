@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { Rnd } from 'react-rnd'
 import { postWorkspaceMessage, confirmWorkspaceAction, confirmWorkspaceIssue, getDeploymentStatus } from '../api/workspace'
 
 const STAGE_LABELS = {
@@ -8,6 +9,36 @@ const STAGE_LABELS = {
   VERIFYING: 'Verifying…',
   SUCCEEDED: 'Succeeded',
   FAILED: 'Failed',
+}
+
+const MIN_WIDTH = 280
+const MIN_HEIGHT = 400
+
+function FloatIcon() {
+  return (
+    <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <rect x="1" y="2" width="10" height="8" rx="1" />
+      <line x1="1" y1="5" x2="11" y2="5" />
+    </svg>
+  )
+}
+
+function DockLeftIcon() {
+  return (
+    <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <rect x="1" y="1" width="10" height="10" rx="1" />
+      <line x1="4" y1="1" x2="4" y2="11" />
+    </svg>
+  )
+}
+
+function DockRightIcon() {
+  return (
+    <svg viewBox="0 0 12 12" width="12" height="12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+      <rect x="1" y="1" width="10" height="10" rx="1" />
+      <line x1="8" y1="1" x2="8" y2="11" />
+    </svg>
+  )
 }
 
 function ActionConfirmCard({ message, onConfirm, loading }) {
@@ -118,13 +149,15 @@ function IssueConfirmCard({ message, onConfirm, loading }) {
   )
 }
 
-export default function ProjectWorkspacePanel({ projectId, isOpen, onClose }) {
+export default function ProjectWorkspacePanel({ projectId, isOpen, onClose, layout, setMode, setPosition, setSize }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [viewportWidth, setViewportWidth] = useState(window.innerWidth)
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
+  const resizeStartRef = useRef(null)
 
   useEffect(() => {
     setMessages([])
@@ -139,6 +172,12 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose }) {
   useEffect(() => {
     if (isOpen) inputRef.current?.focus()
   }, [isOpen])
+
+  useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth)
+    window.addEventListener('resize', onResize)
+    return () => window.removeEventListener('resize', onResize)
+  }, [])
 
   const conversationHistory = messages.map(m => ({ role: m.role, content: m.content }))
 
@@ -296,24 +335,91 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose }) {
 
   if (!isOpen) return null
 
-  return (
-    <div className="w-80 bg-white border-l border-gray-200 flex flex-col shrink-0 h-screen sticky top-0">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-gray-200 bg-gray-50 shrink-0">
-        <span className="text-sm font-semibold text-gray-800">AI Workspace</span>
-        {projectId && (
-          <span className="text-xs text-gray-400 truncate max-w-[8rem]" title={projectId}>
-            {projectId}
-          </span>
+  const isSmallScreen = viewportWidth < 768
+
+  function handleResizePointerDown(e) {
+    e.preventDefault()
+    e.currentTarget.setPointerCapture(e.pointerId)
+    resizeStartRef.current = { startX: e.clientX, startWidth: layout.width }
+  }
+
+  function handleResizePointerMove(e) {
+    if (!resizeStartRef.current) return
+    const { startX, startWidth } = resizeStartRef.current
+    const delta = e.clientX - startX
+    const sign = layout.mode === 'docked-left' ? 1 : -1
+    const maxW = Math.min(800, window.innerWidth - 320)
+    const newWidth = Math.max(MIN_WIDTH, Math.min(maxW, startWidth + sign * delta))
+    setSize({ width: newWidth, height: layout.height })
+  }
+
+  function handleResizePointerUp() {
+    resizeStartRef.current = null
+  }
+
+  const modeButtonClass = (mode) =>
+    `p-1 rounded text-gray-500 hover:text-gray-700 hover:bg-gray-100${layout.mode === mode ? ' ring-2 ring-blue-500' : ''}`
+
+  const header = (
+    <div className="flex items-center border-b border-gray-200 bg-gray-50 shrink-0 h-11">
+      {!isSmallScreen && (
+        <div
+          className="ws-drag-handle flex-none flex items-center justify-center gap-0.5 px-1.5 h-full cursor-grab"
+          style={{ width: 24 }}
+        >
+          <span className="block w-0.5 h-4 bg-gray-300 rounded" />
+          <span className="block w-0.5 h-4 bg-gray-300 rounded" />
+        </div>
+      )}
+      <span className="text-sm font-semibold text-gray-800 px-2 shrink-0">AI Workspace</span>
+      {projectId && (
+        <span className="text-xs text-gray-400 truncate max-w-[7rem]" title={projectId}>
+          {projectId}
+        </span>
+      )}
+      <div className="flex items-center gap-0.5 ml-auto pr-2" data-no-drag>
+        {!isSmallScreen && (
+          <>
+            <button
+              aria-label="Switch to floating window"
+              onClick={() => setMode('floating')}
+              data-no-drag
+              className={modeButtonClass('floating')}
+            >
+              <FloatIcon />
+            </button>
+            <button
+              aria-label="Dock to left side"
+              onClick={() => setMode('docked-left')}
+              data-no-drag
+              className={modeButtonClass('docked-left')}
+            >
+              <DockLeftIcon />
+            </button>
+            <button
+              aria-label="Dock to right side"
+              onClick={() => setMode('docked-right')}
+              data-no-drag
+              className={modeButtonClass('docked-right')}
+            >
+              <DockRightIcon />
+            </button>
+          </>
         )}
         <button
           onClick={onClose}
-          className="text-gray-400 hover:text-gray-600 text-xl leading-none ml-2"
+          className="p-1 text-gray-400 hover:text-gray-600 text-xl leading-none"
           aria-label="Close workspace"
+          data-no-drag
         >
           ×
         </button>
       </div>
+    </div>
+  )
 
+  const body = (
+    <>
       <div className="flex-1 overflow-y-auto p-3 space-y-3 min-h-0">
         {messages.length === 0 && (
           <p className="text-xs text-gray-400 text-center mt-6 px-2">
@@ -329,18 +435,10 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose }) {
             >
               <p className="whitespace-pre-wrap break-words">{msg.content}</p>
               {msg.role === 'assistant' && msg.intent === 'actionable' && (
-                <ActionConfirmCard
-                  message={msg}
-                  onConfirm={handleConfirmAction}
-                  loading={loading}
-                />
+                <ActionConfirmCard message={msg} onConfirm={handleConfirmAction} loading={loading} />
               )}
               {msg.role === 'assistant' && msg.intent === 'functional_dev' && (
-                <IssueConfirmCard
-                  message={msg}
-                  onConfirm={handleConfirmIssue}
-                  loading={loading}
-                />
+                <IssueConfirmCard message={msg} onConfirm={handleConfirmIssue} loading={loading} />
               )}
             </div>
           </div>
@@ -379,6 +477,72 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose }) {
           Send
         </button>
       </form>
+    </>
+  )
+
+  if (isSmallScreen) {
+    return (
+      <div
+        style={{ position: 'fixed', bottom: 0, left: 0, right: 0, height: '60vh', zIndex: 50 }}
+        className="bg-white border-t border-gray-200 flex flex-col shadow-lg"
+      >
+        {header}
+        {body}
+      </div>
+    )
+  }
+
+  if (layout.mode === 'floating') {
+    return (
+      <Rnd
+        bounds="window"
+        minWidth={MIN_WIDTH}
+        minHeight={MIN_HEIGHT}
+        position={{ x: layout.x, y: layout.y }}
+        size={{ width: layout.width, height: layout.height }}
+        onDragStop={(_, d) => setPosition({ x: d.x, y: d.y })}
+        onResizeStop={(_, __, ref, ___, pos) => {
+          setSize({ width: ref.offsetWidth, height: ref.offsetHeight })
+          setPosition(pos)
+        }}
+        dragHandleClassName="ws-drag-handle"
+        cancel="button, input, textarea, [data-no-drag]"
+        style={{ position: 'fixed', zIndex: 50 }}
+      >
+        <div className="h-full bg-white border border-gray-200 flex flex-col rounded shadow-lg overflow-hidden">
+          {header}
+          {body}
+        </div>
+      </Rnd>
+    )
+  }
+
+  const side = layout.mode === 'docked-left' ? 'left' : 'right'
+  const isDockedLeft = layout.mode === 'docked-left'
+
+  return (
+    <div
+      style={{ position: 'fixed', top: 0, [side]: 0, height: '100vh', width: layout.width, zIndex: 40 }}
+      className="bg-white border border-gray-200 flex flex-col shadow-lg overflow-hidden"
+    >
+      <div
+        style={{
+          position: 'absolute',
+          top: 0,
+          [isDockedLeft ? 'right' : 'left']: 0,
+          width: 4,
+          height: '100%',
+          cursor: 'ew-resize',
+          zIndex: 1,
+          touchAction: 'none',
+        }}
+        onPointerDown={handleResizePointerDown}
+        onPointerMove={handleResizePointerMove}
+        onPointerUp={handleResizePointerUp}
+        onPointerCancel={handleResizePointerUp}
+      />
+      {header}
+      {body}
     </div>
   )
 }
