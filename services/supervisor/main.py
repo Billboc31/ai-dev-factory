@@ -3172,6 +3172,27 @@ def _prepare_recovery(project_id: str, project_root: Path) -> dict:
         ops = build_recovery_plan(blocker, state_data)
         fingerprint = compute_state_fingerprint(ticket_id, project_root, ops)
 
+        # Empty plan: blocker requires human action, no automated ops possible.
+        # Release the session immediately so the user can re-trigger without
+        # hitting RECOVERY_IN_PROGRESS after addressing the blocker.
+        if not ops:
+            with _session_lock:
+                _active_sessions.pop(ticket_id, None)
+            logger.info(
+                "recovery: no ops for session=%s ticket=%s blocker=%s — returning NEEDS_USER_INPUT",
+                session.session_id, ticket_id, blocker.value,
+            )
+            return {
+                "capability": "recover_ticket",
+                "action_id": None,
+                "ticket_id": ticket_id,
+                "blocker_class": blocker.value,
+                "operations": [],
+                "current_state": state_data.get("state", ""),
+                "blocked_stage": fingerprint.blocked_stage,
+                "stage": RecoveryStage.NEEDS_USER_INPUT.value,
+            }
+
         proposal_id = str(_uuid.uuid4())
         proposal = RecoveryProposal(
             proposal_id=proposal_id,
@@ -3305,41 +3326,6 @@ def _execute_recovery(proposal_id: str, project_root: Path) -> dict:
 
             if advanced:
                 session.stage = RecoveryStage.RECOVERED
-
-                # Bug issue creation for PRODUCT_BUG blocker
-                if proposal.blocker_class == BlockerClass.PRODUCT_BUG:
-                    sig = compute_bug_signature(
-                        project_id=proposal.project_id,
-                        blocker_class=proposal.blocker_class,
-                        failed_stage=proposal.state_fingerprint.blocked_stage,
-                        error_code=None,
-                        affected_component=None,
-                    )
-                    project_root_str = _lookup_project_root_from_control_api(proposal.project_id)
-                    repo = None
-                    if project_root_str:
-                        try:
-                            r = subprocess.run(
-                                ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
-                                cwd=str(project_root),
-                                capture_output=True, text=True, timeout=10,
-                            )
-                            if r.returncode == 0:
-                                repo = r.stdout.strip()
-                        except Exception:
-                            pass
-                    if repo:
-                        existing_url = search_existing_bug_issues(repo, sig)
-                        if existing_url:
-                            bug_issue_url = existing_url
-                        else:
-                            error_summary = last_error or "See operations log"
-                            try:
-                                bug_issue_url = create_bug_issue(repo, session, proposal, error_summary)
-                            except Exception as exc:
-                                logger.error("recovery: create_bug_issue failed: %s", exc)
-                        if bug_issue_url:
-                            session.stage = RecoveryStage.BUG_REPORTED
             else:
                 # State did not advance
                 needs_user = proposal.blocker_class in (
@@ -3348,6 +3334,42 @@ def _execute_recovery(proposal_id: str, project_root: Path) -> dict:
                     BlockerClass.WORKING_TREE_CONFLICT,
                 )
                 session.stage = RecoveryStage.NEEDS_USER_INPUT if needs_user else RecoveryStage.FAILED
+
+        # Bug issue creation for PRODUCT_BUG blocker — independent of ticket progress
+        # and stage (evidence must be preserved even when ops fail or stage is FAILED).
+        if proposal.blocker_class == BlockerClass.PRODUCT_BUG:
+            sig = compute_bug_signature(
+                project_id=proposal.project_id,
+                blocker_class=proposal.blocker_class,
+                failed_stage=proposal.state_fingerprint.blocked_stage,
+                error_code=None,
+                affected_component=None,
+            )
+            project_root_str = _lookup_project_root_from_control_api(proposal.project_id)
+            repo = None
+            if project_root_str:
+                try:
+                    r = subprocess.run(
+                        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+                        cwd=str(project_root),
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    if r.returncode == 0:
+                        repo = r.stdout.strip()
+                except Exception:
+                    pass
+            if repo:
+                existing_url = search_existing_bug_issues(repo, sig)
+                if existing_url:
+                    bug_issue_url = existing_url
+                else:
+                    error_summary = last_error or "See operations log"
+                    try:
+                        bug_issue_url = create_bug_issue(repo, session, proposal, error_summary)
+                    except Exception as exc:
+                        logger.error("recovery: create_bug_issue failed: %s", exc)
+                if bug_issue_url:
+                    session.stage = RecoveryStage.BUG_REPORTED
 
         # Determine final state
         final_state_file = _ticket_run_dir(project_root, ticket_id) / "state.json"

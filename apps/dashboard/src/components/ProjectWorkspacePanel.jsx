@@ -155,18 +155,31 @@ function RecoveryConfirmCard({ message, onConfirm, loading }) {
           </tbody>
         </table>
       ) : (
-        <p className="text-yellow-700 mb-2 italic">No automated operations — human input required.</p>
+        <div className="mb-2 p-2 bg-yellow-100 border border-yellow-300 rounded text-yellow-800 text-xs">
+          <p className="font-semibold mb-0.5">Human action required</p>
+          {action.blocker_class === 'MISSING_APPROVAL' && (
+            <p>This ticket is waiting for a human review or approval. Check the PR or the ticket artifacts for the pending approval gate, then return here to retry.</p>
+          )}
+          {action.blocker_class === 'USER_DECISION_REQUIRED' && (
+            <p>Recovery cannot proceed automatically. A product or scope decision is needed from you before the pipeline can continue.</p>
+          )}
+          {action.blocker_class !== 'MISSING_APPROVAL' && action.blocker_class !== 'USER_DECISION_REQUIRED' && (
+            <p>No automated operations are available for this blocker type (<code>{action.blocker_class}</code>). Manual intervention is required.</p>
+          )}
+        </div>
       )}
       {message.confirmError && (
         <p className="text-red-600 mb-1">{message.confirmError}</p>
       )}
-      <button
-        onClick={() => onConfirm(message)}
-        disabled={loading || !action.operations?.length}
-        className="px-3 py-1 bg-yellow-500 hover:bg-yellow-600 text-white rounded text-xs disabled:opacity-50"
-      >
-        Confirm Recovery
-      </button>
+      {action.operations?.length > 0 && (
+        <button
+          onClick={() => onConfirm(message)}
+          disabled={loading}
+          className="px-3 py-1 bg-yellow-500 hover:bg-yellow-600 text-white rounded text-xs disabled:opacity-50"
+        >
+          Confirm Recovery
+        </button>
+      )}
     </div>
   )
 }

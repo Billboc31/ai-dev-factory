@@ -494,6 +494,8 @@ def test_arbitrary_service_name_rejected():
 
 
 def test_missing_approval_stops_at_gate(project_root, ticket_id, run_dir):
+    """MISSING_APPROVAL: _prepare_recovery returns NEEDS_USER_INPUT immediately,
+    no proposal stored, no session retained."""
     import services.supervisor.main as sup_main
 
     state_file = run_dir / "state.json"
@@ -505,25 +507,37 @@ def test_missing_approval_stops_at_gate(project_root, ticket_id, run_dir):
         prep = sup_main._prepare_recovery("proj1", project_root)
 
     assert "error" not in prep
-    proposal_id = prep["action_id"]
-    proposal = sup_main._proposals[proposal_id]
+    # Empty plan: action_id is None, stage is NEEDS_USER_INPUT
+    assert prep["action_id"] is None
+    assert prep["operations"] == []
+    assert prep["stage"] == RecoveryStage.NEEDS_USER_INPUT.value
 
-    # No mutating ops in plan
-    mutating = [op for op in proposal.operations if ALLOWLISTED_RECOVERY_OPS[op.name].risk_level != "LOW" or
-                ALLOWLISTED_RECOVERY_OPS[op.name].mutation_description.lower().startswith("read")]
-    assert len(proposal.operations) == 0, f"Expected empty plan, got {[op.name for op in proposal.operations]}"
-
-    apply_mock = MagicMock()
-    with patch("services.supervisor.main.apply_recovery_op", apply_mock):
-        with patch("services.supervisor.main.verify_ticket_progress", return_value=(False, "PLAN_PENDING_REVIEW")):
-            result = sup_main._execute_recovery(proposal_id, project_root)
-
-    apply_mock.assert_not_called()
-    report = result.get("recovery_report", {})
-    assert report.get("stage") == RecoveryStage.NEEDS_USER_INPUT.value
+    # Session must be released — re-triggering must not hit RECOVERY_IN_PROGRESS
+    assert ticket_id not in sup_main._active_sessions
 
     sup_main._proposals.clear()
     sup_main._results.clear()
+
+
+def test_missing_approval_session_not_retained(project_root, ticket_id, run_dir):
+    """After MISSING_APPROVAL prepare, _active_sessions must be empty so the
+    user can re-trigger 'Unblock this ticket' without restarting the Supervisor."""
+    import services.supervisor.main as sup_main
+
+    sup_main._active_sessions.clear()
+    (run_dir / "state.json").write_text(
+        json.dumps({"ticket_id": ticket_id, "state": "PLAN_PENDING_REVIEW"}),
+        encoding="utf-8",
+    )
+
+    with patch.object(sup_main, "_resolve_active_ticket_id", return_value=ticket_id):
+        sup_main._prepare_recovery("proj1", project_root)
+
+    assert ticket_id not in sup_main._active_sessions, (
+        "Session must not persist after NEEDS_USER_INPUT — would deadlock subsequent attempts"
+    )
+
+    sup_main._active_sessions.clear()
 
 
 # ── Test: bug deduplication prevents duplicate issue ─────────────────────────
@@ -559,6 +573,46 @@ def test_bug_deduplication_prevents_duplicate_issue(project_root, ticket_id, run
     mock_create.assert_not_called()
     report = result.get("recovery_report", {})
     assert report.get("bug_issue_url") == existing_url
+
+    sup_main._proposals.clear()
+    sup_main._results.clear()
+
+
+# ── Test: bug issue created when recovery fails (advanced=False) ──────────────
+
+
+def test_bug_issue_created_when_recovery_fails_on_product_bug(project_root, ticket_id, run_dir):
+    """PRODUCT_BUG: bug issue must be created even when verify_ticket_progress
+    returns False (advanced=False).  Issue creation is orthogonal to progress."""
+    import services.supervisor.main as sup_main
+
+    state_file = run_dir / "state.json"
+    state_file.write_text(json.dumps({
+        "ticket_id": ticket_id, "state": "PLAN", "product_bug": True,
+    }), encoding="utf-8")
+
+    with patch.object(sup_main, "_resolve_active_ticket_id", return_value=ticket_id):
+        prep = sup_main._prepare_recovery("proj1", project_root)
+
+    proposal_id = prep["action_id"]
+    new_issue_url = "https://github.com/org/repo/issues/99"
+
+    def fake_apply(op, project_root, project_id, ticket_id):
+        return rec.OpResult(op_name=op.name, success=False, detail="op failed", mutated=False)
+
+    with patch("services.supervisor.main.apply_recovery_op", side_effect=fake_apply):
+        with patch("services.supervisor.main.verify_ticket_progress", return_value=(False, "PLAN")):
+            with patch("services.supervisor.main.search_existing_bug_issues", return_value=None):
+                with patch("services.supervisor.main.create_bug_issue", return_value=new_issue_url) as mock_create:
+                    with patch("services.supervisor.main._lookup_project_root_from_control_api", return_value=str(project_root)):
+                        with patch("subprocess.run") as mock_run:
+                            mock_run.return_value = MagicMock(returncode=0, stdout="org/repo")
+                            result = sup_main._execute_recovery(proposal_id, project_root)
+
+    mock_create.assert_called_once()
+    report = result.get("recovery_report", {})
+    assert report.get("bug_issue_url") == new_issue_url
+    assert report.get("stage") == RecoveryStage.BUG_REPORTED.value
 
     sup_main._proposals.clear()
     sup_main._results.clear()
