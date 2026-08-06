@@ -3,5 +3,18 @@
   "state": "TEST_COMPLETE",
   "branch": "ticket/T228-add-autonomous-unblock-this-ticket-recovery-action",
   "issue_number": 312,
-  "updated_at": "2026-08-05T22:23:21Z"
+  "updated_at": "2026-08-06T07:34:47Z",
+  "pr_number": 315,
+  "pr_synced": true,
+  "pre_conflict_state": "TEST_COMPLETE",
+  "conflict_detected_at": "2026-08-05T22:34:01Z",
+  "conflict_pr_number": 315,
+  "conflicted_files": [
+    "apps/dashboard/src/components/ProjectWorkspacePanel.jsx",
+    "services/supervisor/main.py",
+    "services/supervisor/recovery.py",
+    "tests/test_supervisor_workspace.py",
+    "tests/test_workspace_recovery.py"
+  ],
+  "conflict_resolution_note": "Local rebase succeeded; post-merge pytest gate was a false failure (tests/control_api shadowing + full-suite gate). Force-pushed after rename fix."
 }

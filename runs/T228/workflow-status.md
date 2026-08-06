@@ -46,3 +46,9 @@
 - prev: PLAN_FIX_REQUIRED
 - step: planner
 - next: PLAN_REVIEW_NEEDED
+
+## 2026-08-06T07:34:47Z
+
+- prev: CONFLICT_RESOLVED_REVIEW_NEEDED
+- step: approve-conflict-resolution
+- next: TEST_COMPLETE
