@@ -411,7 +411,8 @@ def test_poll_github_issues_ingests_lowest_ticket_id_first(tmp_path):
          patch("run_daemon.call_issue_intake", return_value=True) as mock_intake, \
          patch("run_daemon.fetch_origin_main", return_value=(True, "fetched origin/main")), \
          patch("run_daemon.create_ticket_branch_and_worktree", return_value=(True, "ok")), \
-         patch("run_daemon.clear_stale_run_dir", return_value=False):
+         patch("run_daemon.clear_stale_run_dir", return_value=False), \
+         patch("run_daemon._resolve_max_intakes_per_poll", return_value=1):
         poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir)
 
     issue_number, ticket_id, _, _ = mock_intake.call_args[0]
@@ -440,7 +441,8 @@ def test_poll_github_issues_reconciles_existing_worktree_without_re_intake(tmp_p
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
          patch("run_daemon.call_issue_intake") as mock_intake, \
          patch("run_daemon.fetch_origin_main") as mock_fetch, \
-         patch("run_daemon.create_ticket_branch_and_worktree") as mock_create:
+         patch("run_daemon.create_ticket_branch_and_worktree") as mock_create, \
+         patch("run_daemon._resolve_max_intakes_per_poll", return_value=1):
         poll_github_issues(
             runs, "ai-ready", None, worktrees_dir=worktrees_dir, state_dir=state_dir,
         )
@@ -501,20 +503,23 @@ def test_poll_github_issues_does_not_call_commit_after_intake_on_failure(tmp_pat
 
 # ── main CLI integration ──────────────────────────────────────────────────────
 
-def _boot_daemon_for_test():
-    return patch.multiple(
-        "run_daemon",
-        _check_runtime_clone=MagicMock(return_value=True),
-        _acquire_daemon_singleton=MagicMock(return_value=True),
-        reap_completed_workers=MagicMock(),
-        _cleanup_stale_workers=MagicMock(),
-        poll_ticket_pipeline=MagicMock(),
-    )
+def _boot_daemon_for_test(monkeypatch=None):
+    # Isolate from a live operator shell that may export multi-project runtime env.
+    patches = {
+        "_check_runtime_clone": MagicMock(return_value=True),
+        "_acquire_daemon_singleton": MagicMock(return_value=True),
+        "reap_completed_workers": MagicMock(),
+        "_cleanup_stale_workers": MagicMock(),
+        "poll_ticket_pipeline": MagicMock(),
+    }
+    return patch.multiple("run_daemon", **patches)
 
 
-def test_main_poll_issues_flag_calls_poll_before_run_once(tmp_path):
+def test_main_poll_issues_flag_calls_poll_before_run_once(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     runs.mkdir()
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    monkeypatch.delenv("PROJECT_NAME", raising=False)
 
     with _boot_daemon_for_test():
         with patch("run_daemon.poll_github_issues") as mock_poll:
@@ -523,18 +528,20 @@ def test_main_poll_issues_flag_calls_poll_before_run_once(tmp_path):
                     "--exec-cmd", "test-cmd",
                     "--once",
                     "--poll-issues",
+                    "--issue-repo", "owner/repo",
                     "--runs-dir", str(runs),
                 ])
 
     assert rc == 0
     mock_run.assert_called_once()
     # positional args: (runs_dir, label, repo)
-    assert mock_poll.call_args[0][:3] == (runs, "ai-ready", None)
+    assert mock_poll.call_args[0][:3] == (runs, "ai-ready", "owner/repo")
 
 
-def test_main_without_poll_issues_does_not_call_poll(tmp_path):
+def test_main_without_poll_issues_does_not_call_poll(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     runs.mkdir()
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
 
     with _boot_daemon_for_test():
         with patch("run_daemon.poll_github_issues") as mock_poll:
@@ -545,9 +552,10 @@ def test_main_without_poll_issues_does_not_call_poll(tmp_path):
     mock_run.assert_called_once()
 
 
-def test_main_issue_label_passed_to_poll(tmp_path):
+def test_main_issue_label_passed_to_poll(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     runs.mkdir()
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
 
     with _boot_daemon_for_test():
         with patch("run_daemon.poll_github_issues") as mock_poll:
@@ -557,6 +565,7 @@ def test_main_issue_label_passed_to_poll(tmp_path):
                     "--once",
                     "--poll-issues",
                     "--issue-label", "my-label",
+                    "--issue-repo", "owner/repo",
                     "--runs-dir", str(runs),
                 ])
 
@@ -564,9 +573,10 @@ def test_main_issue_label_passed_to_poll(tmp_path):
     assert label == "my-label"
 
 
-def test_main_issue_repo_passed_to_poll(tmp_path):
+def test_main_issue_repo_passed_to_poll(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     runs.mkdir()
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
 
     with _boot_daemon_for_test():
         with patch("run_daemon.poll_github_issues") as mock_poll:
