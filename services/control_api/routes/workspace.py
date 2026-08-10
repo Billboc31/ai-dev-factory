@@ -1,10 +1,13 @@
-"""Workspace routes — authenticated proxy to the Supervisor workspace endpoints (T225/T227).
+"""Workspace routes — authenticated proxy to the Supervisor workspace endpoints (T225/T227/T229).
 
 Endpoints:
     POST /projects/{project_id}/workspace/chat
     POST /projects/{project_id}/workspace/actions/confirm
     POST /projects/{project_id}/workspace/issues/confirm
     GET  /projects/{project_id}/workspace/deployments/{deployment_id}
+    POST /projects/{project_id}/workspace/deploy
+    GET  /projects/{project_id}/workspace/deploy/history
+    GET  /projects/{project_id}/workspace/deploy/{deployment_id}
 
 Every request is forwarded to the Supervisor. This module must not invoke any
 AI provider, GitHub API, or internal operational service directly.
@@ -138,3 +141,52 @@ def workspace_get_deployment(
         project_id, deployment_id,
     )
     return _forward_get(f"/workspace/projects/{project_id}/deployments/{deployment_id}")
+
+
+# ── T229 one-click project deploy proxy routes ────────────────────────────────
+#
+# /deploy/history must be registered before /deploy/{deployment_id} so that
+# FastAPI does not resolve the literal "history" as a deployment_id.
+
+@project_router.post("/{project_id}/workspace/deploy")
+def workspace_project_deploy(
+    project_id: str,
+    project_root: Path = Depends(resolve_project),
+):
+    from fastapi.responses import JSONResponse as _JSONResponse
+    logger.info("workspace: forwarding deploy project_id=%s", project_id)
+    url = f"{_supervisor_url()}/workspace/projects/{project_id}/deploy"
+    try:
+        resp = httpx.post(url, timeout=30.0)
+    except httpx.ConnectError as exc:
+        logger.error("workspace: supervisor unreachable at %s: %s", url, exc)
+        raise HTTPException(status_code=503, detail="Supervisor is not reachable")
+    except httpx.TimeoutException:
+        raise HTTPException(status_code=504, detail="Supervisor request timed out")
+    try:
+        body = resp.json()
+    except Exception:
+        body = {"detail": resp.text}
+    return _JSONResponse(status_code=resp.status_code, content=body)
+
+
+@project_router.get("/{project_id}/workspace/deploy/history")
+def workspace_project_deploy_history(
+    project_id: str,
+    project_root: Path = Depends(resolve_project),
+) -> dict:
+    logger.info("workspace: forwarding deploy history project_id=%s", project_id)
+    return _forward_get(f"/workspace/projects/{project_id}/deploy/history")
+
+
+@project_router.get("/{project_id}/workspace/deploy/{deployment_id}")
+def workspace_project_deploy_status(
+    project_id: str,
+    deployment_id: str,
+    project_root: Path = Depends(resolve_project),
+) -> dict:
+    logger.info(
+        "workspace: forwarding deploy status project_id=%s deployment_id=%s",
+        project_id, deployment_id,
+    )
+    return _forward_get(f"/workspace/projects/{project_id}/deploy/{deployment_id}")

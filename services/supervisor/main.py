@@ -15,7 +15,9 @@ import signal
 import subprocess
 import sys
 import threading
+import time
 import uuid
+from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -2908,6 +2910,14 @@ _workspace_redeploy_locks_mutex = threading.Lock()
 _deployment_jobs: dict[str, dict] = {}
 _deployment_jobs_lock = threading.Lock()
 
+# T229 — one-click project deploy (separate from AI-chat-triggered redeploy_project)
+_deploy_sessions: dict[str, dict] = {}
+_deploy_sessions_lock = threading.Lock()
+_deploy_locks: dict[str, threading.Lock] = {}
+_deploy_locks_mutex = threading.Lock()
+_deploy_log_handlers: dict[str, object] = {}
+_deploy_log_handlers_mutex = threading.Lock()
+
 # Recovery session state — keyed by ticket_id / proposal_id / session_id
 _active_sessions: dict[str, RecoverySession] = {}   # ticket_id → session
 _proposals: dict[str, object] = {}                   # proposal_id → RecoveryProposal
@@ -2943,6 +2953,248 @@ def _git_has_local_changes(repo_path: str) -> bool:
         text=True,
     )
     return bool(result.stdout.strip())
+
+
+# ── T229 deploy helpers ───────────────────────────────────────────────────────
+
+_DEPLOY_TYPE_ALLOWLIST = frozenset({"docker-compose"})
+
+
+def _validate_project_deploy_block(project_block: dict) -> dict:
+    """Validate and normalize a project's deploy block.
+
+    Returns the normalized config dict.
+    Raises ValueError with a descriptive message on invalid config.
+    Returns {"not_deployable": True} if the deploy block is absent.
+    """
+    deploy = project_block.get("deploy")
+    if deploy is None:
+        return {"not_deployable": True}
+
+    deploy_type = deploy.get("type")
+    if deploy_type not in _DEPLOY_TYPE_ALLOWLIST:
+        raise ValueError(
+            f"unsupported deploy type: {deploy_type!r}; allowed: {sorted(_DEPLOY_TYPE_ALLOWLIST)}"
+        )
+
+    repo_path_str = project_block.get("repository_path", "")
+    compose_file_raw = deploy.get("compose_file", "docker-compose.yml")
+
+    try:
+        repo_root = Path(repo_path_str).resolve()
+        resolved_compose = (repo_root / compose_file_raw).resolve()
+        resolved_compose.relative_to(repo_root)
+    except ValueError as exc:
+        raise ValueError(
+            f"compose_file path escapes repository root: {compose_file_raw!r}"
+        ) from exc
+
+    preview_url = deploy.get("preview_url")
+    healthcheck_url = deploy.get("healthcheck_url")
+
+    for label, url in [("preview_url", preview_url), ("healthcheck_url", healthcheck_url)]:
+        if url is not None and not url.startswith(("http://", "https://")):
+            raise ValueError(f"{label} is not a valid HTTP(S) URL: {url!r}")
+
+    return {
+        "type": deploy_type,
+        "repo_path": str(repo_root),
+        "compose_file": str(resolved_compose),
+        "preview_url": preview_url,
+        "healthcheck_url": healthcheck_url,
+        "healthcheck_timeout_s": int(deploy.get("healthcheck_timeout_s", 60)),
+        "healthcheck_interval_s": int(deploy.get("healthcheck_interval_s", 5)),
+        "allow_dirty": bool(deploy.get("allow_dirty", False)),
+        "startup_wait_s": int(deploy.get("startup_wait_s", 2)),
+    }
+
+
+def _get_project_deploy_lock(project_id: str) -> threading.Lock:
+    with _deploy_locks_mutex:
+        return _deploy_locks.setdefault(project_id, threading.Lock())
+
+
+def _deploy_artifact_dir(repo_path: str) -> Path:
+    return Path(repo_path) / ".ai-dev-factory"
+
+
+def _write_deploy_log_line(repo_path: str, line: str) -> None:
+    import logging.handlers as _lh
+    with _deploy_log_handlers_mutex:
+        handler = _deploy_log_handlers.get(repo_path)
+        if handler is None:
+            log_path = _deploy_artifact_dir(repo_path) / "project-deploy.log"
+            log_path.parent.mkdir(parents=True, exist_ok=True)
+            handler = _lh.RotatingFileHandler(
+                str(log_path), maxBytes=5 * 1024 * 1024, backupCount=2, encoding="utf-8"
+            )
+            handler.setFormatter(logging.Formatter("%(message)s"))
+            _deploy_log_handlers[repo_path] = handler
+    record = logging.makeLogRecord({"msg": line.rstrip("\n"), "levelno": logging.INFO, "levelname": "INFO"})
+    handler.emit(record)
+
+
+def _write_deploy_state(repo_path: str, session: dict) -> None:
+    artifact_dir = _deploy_artifact_dir(repo_path)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    record = {
+        "deployment_id": session.get("deployment_id"),
+        "status": session.get("status"),
+        "stage": session.get("stage"),
+        "started_at": session.get("started_at"),
+        "completed_at": session.get("completed_at"),
+        "deployed_sha": session.get("deployed_sha"),
+        "preview_url": session.get("preview_url"),
+        "error": session.get("error"),
+    }
+    state_path = artifact_dir / "project-deploy-state.json"
+    tmp_path = state_path.with_suffix(".json.tmp")
+    tmp_path.write_text(json.dumps(record, indent=2), encoding="utf-8")
+    os.replace(tmp_path, state_path)
+
+
+def _update_deploy_history(repo_path: str, session: dict) -> None:
+    artifact_dir = _deploy_artifact_dir(repo_path)
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    history_path = artifact_dir / "project-deploy-history.json"
+    try:
+        existing = json.loads(history_path.read_text(encoding="utf-8"))
+        if not isinstance(existing, list):
+            existing = []
+    except (OSError, json.JSONDecodeError):
+        existing = []
+
+    record = {
+        "deployment_id": session.get("deployment_id"),
+        "status": session.get("status"),
+        "started_at": session.get("started_at"),
+        "completed_at": session.get("completed_at"),
+        "deployed_sha": session.get("deployed_sha"),
+        "preview_url": session.get("preview_url"),
+    }
+    existing.insert(0, record)
+    existing = existing[:10]
+
+    tmp_path = history_path.with_suffix(".json.tmp")
+    tmp_path.write_text(json.dumps(existing, indent=2), encoding="utf-8")
+    os.replace(tmp_path, history_path)
+
+
+def _run_project_deploy_job(
+    deployment_id: str,
+    project_id: str,
+    deploy_config: dict,
+    lock: threading.Lock,
+) -> None:
+    """Background deploy job. Holds *lock* on entry; always releases in finally."""
+    repo_path = deploy_config["repo_path"]
+    compose_file = deploy_config["compose_file"]
+    preview_url = deploy_config["preview_url"]
+    healthcheck_url = deploy_config["healthcheck_url"]
+    healthcheck_timeout_s = deploy_config["healthcheck_timeout_s"]
+    healthcheck_interval_s = deploy_config["healthcheck_interval_s"]
+    startup_wait_s = deploy_config["startup_wait_s"]
+
+    with _deploy_sessions_lock:
+        session = _deploy_sessions[deployment_id]
+        log_tail: deque = session["log_tail"]
+
+    def _set_stage(stage: str) -> None:
+        with _deploy_sessions_lock:
+            _deploy_sessions[deployment_id]["stage"] = stage
+
+    def _append_log(line: str) -> None:
+        log_tail.append(line.rstrip("\n"))
+        try:
+            _write_deploy_log_line(repo_path, line)
+        except Exception:
+            pass
+
+    def _fail(error: str) -> None:
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with _deploy_sessions_lock:
+            _deploy_sessions[deployment_id].update({
+                "stage": "FAILED",
+                "status": "failed",
+                "completed_at": now,
+                "error": error[:500],
+            })
+
+    try:
+        # Stage BUILDING
+        _set_stage("BUILDING")
+        logger.info("deploy %s: stage=BUILDING project=%s compose=%s", deployment_id, project_id, compose_file)
+        try:
+            proc = subprocess.Popen(
+                ["docker", "compose", "-f", compose_file, "up", "-d", "--build"],
+                cwd=repo_path,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+        except FileNotFoundError:
+            _fail("docker executable not found")
+            return
+
+        for line in proc.stdout:
+            _append_log(line)
+        proc.wait()
+        if proc.returncode != 0:
+            _fail(f"docker compose build exited with code {proc.returncode}")
+            return
+
+        # Stage STARTING
+        _set_stage("STARTING")
+        logger.info("deploy %s: stage=STARTING wait=%ss", deployment_id, startup_wait_s)
+        time.sleep(startup_wait_s)
+
+        # Stage HEALTHCHECK (optional)
+        if healthcheck_url:
+            _set_stage("HEALTHCHECK")
+            logger.info("deploy %s: stage=HEALTHCHECK url=%s timeout=%ss", deployment_id, healthcheck_url, healthcheck_timeout_s)
+            import httpx as _httpx
+            deadline = time.monotonic() + healthcheck_timeout_s
+            success = False
+            while time.monotonic() < deadline:
+                try:
+                    resp = _httpx.get(healthcheck_url, timeout=5)
+                    if 200 <= resp.status_code < 300:
+                        success = True
+                        break
+                    _append_log(f"healthcheck: HTTP {resp.status_code}")
+                except Exception as hc_exc:
+                    _append_log(f"healthcheck error: {hc_exc}")
+                time.sleep(healthcheck_interval_s)
+            if not success:
+                _fail(f"healthcheck timed out after {healthcheck_timeout_s}s")
+                return
+
+        # Stage SUCCEEDED
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        with _deploy_sessions_lock:
+            _deploy_sessions[deployment_id].update({
+                "stage": "SUCCEEDED",
+                "status": "succeeded",
+                "completed_at": now,
+                "preview_url": preview_url,
+            })
+        logger.info("deploy %s: stage=SUCCEEDED project=%s", deployment_id, project_id)
+
+    except Exception as exc:
+        logger.exception("deploy %s: unexpected exception project=%s", deployment_id, project_id)
+        _fail(str(exc))
+
+    finally:
+        with _deploy_sessions_lock:
+            final_session = dict(_deploy_sessions.get(deployment_id, {}))
+            final_session.pop("log_tail", None)
+        try:
+            _write_deploy_state(repo_path, final_session)
+            _update_deploy_history(repo_path, final_session)
+        except Exception:
+            logger.exception("deploy %s: failed to write persistence files", deployment_id)
+        lock.release()
+
 
 _WORKSPACE_CAPABILITIES: dict[str, dict] = {
     "restart_daemon": {
@@ -4005,6 +4257,167 @@ def workspace_get_deployment(project_id: str, deployment_id: str):
     if job is None or job.get("project_id") != project_id:
         return _JSONResponse(status_code=404, content={"detail": "deployment not found"})
     return job
+
+
+# ── T229 one-click project deploy endpoints ───────────────────────────────────
+#
+# Route order matters: /deploy/history must be registered before /deploy/{id}
+# so FastAPI does not match the literal "history" as a deployment_id.
+
+@app.post("/workspace/projects/{project_id}/deploy")
+def workspace_project_deploy(project_id: str):
+    from fastapi.responses import JSONResponse
+
+    config = _load_workspace_projects_config()
+    project_block = config.get("projects", {}).get(project_id)
+    if project_block is None:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "not_deployable", "code": "not_deployable"},
+        )
+
+    try:
+        deploy_config = _validate_project_deploy_block(project_block)
+    except ValueError as exc:
+        return JSONResponse(
+            status_code=422,
+            content={"detail": str(exc), "code": "invalid_deploy_config"},
+        )
+
+    if deploy_config.get("not_deployable"):
+        return JSONResponse(
+            status_code=422,
+            content={"detail": "not_deployable", "code": "not_deployable"},
+        )
+
+    lock = _get_project_deploy_lock(project_id)
+    acquired = lock.acquire(blocking=False)
+    if not acquired:
+        active_id = None
+        with _deploy_sessions_lock:
+            for did, sess in _deploy_sessions.items():
+                if sess.get("project_id") == project_id and sess.get("status") == "running":
+                    active_id = did
+                    break
+        return JSONResponse(
+            status_code=409,
+            content={
+                "detail": "DEPLOYMENT_IN_PROGRESS",
+                "code": "DEPLOYMENT_IN_PROGRESS",
+                "deployment_id": active_id,
+            },
+        )
+
+    try:
+        repo_path = deploy_config["repo_path"]
+
+        try:
+            dirty = _git_has_local_changes(repo_path)
+        except (FileNotFoundError, subprocess.TimeoutExpired) as exc:
+            lock.release()
+            return JSONResponse(
+                status_code=422,
+                content={"detail": f"git status failed: {exc}", "code": "git_error"},
+            )
+
+        if dirty and not deploy_config["allow_dirty"]:
+            lock.release()
+            return JSONResponse(
+                status_code=422,
+                content={"detail": "uncommitted changes detected", "code": "dirty_working_tree"},
+            )
+
+        try:
+            sha_result = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo_path,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            deployed_sha = sha_result.stdout.strip() if sha_result.returncode == 0 else None
+        except Exception:
+            deployed_sha = None
+
+        deployment_id = str(uuid.uuid4())
+        now = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        session: dict = {
+            "deployment_id": deployment_id,
+            "project_id": project_id,
+            "stage": "PENDING",
+            "status": "running",
+            "started_at": now,
+            "completed_at": None,
+            "deployed_sha": deployed_sha,
+            "log_tail": deque(maxlen=50),
+            "preview_url": None,
+            "error": None,
+        }
+        with _deploy_sessions_lock:
+            _deploy_sessions[deployment_id] = session
+
+        threading.Thread(
+            target=_run_project_deploy_job,
+            args=(deployment_id, project_id, deploy_config, lock),
+            daemon=True,
+        ).start()
+
+        logger.info(
+            "deploy: started deployment_id=%s project=%s sha=%s",
+            deployment_id, project_id, deployed_sha,
+        )
+        return JSONResponse(status_code=202, content={"deployment_id": deployment_id})
+
+    except Exception as exc:
+        lock.release()
+        logger.exception("deploy: session creation failed project=%s", project_id)
+        return JSONResponse(status_code=500, content={"detail": str(exc)})
+
+
+@app.get("/workspace/projects/{project_id}/deploy/history")
+def workspace_project_deploy_history(project_id: str):
+    from fastapi.responses import JSONResponse
+
+    config = _load_workspace_projects_config()
+    project_block = config.get("projects", {}).get(project_id)
+    if project_block is None:
+        return JSONResponse(status_code=404, content={"detail": f"project {project_id!r} not found"})
+
+    repo_path = project_block.get("repository_path", "")
+    history_path = Path(repo_path) / ".ai-dev-factory" / "project-deploy-history.json"
+    try:
+        records = json.loads(history_path.read_text(encoding="utf-8"))
+        if not isinstance(records, list):
+            records = []
+    except (OSError, json.JSONDecodeError):
+        records = []
+
+    return {"history": records[:5]}
+
+
+@app.get("/workspace/projects/{project_id}/deploy/{deployment_id}")
+def workspace_project_deploy_status(project_id: str, deployment_id: str):
+    from fastapi.responses import JSONResponse
+
+    with _deploy_sessions_lock:
+        session = _deploy_sessions.get(deployment_id)
+
+    if session is None:
+        return JSONResponse(status_code=404, content={"detail": "deployment not found"})
+    if session["project_id"] != project_id:
+        return JSONResponse(status_code=403, content={"detail": "deployment project mismatch"})
+
+    return {
+        "deployment_id": session["deployment_id"],
+        "stage": session["stage"],
+        "status": session["status"],
+        "log_tail": list(session["log_tail"]),
+        "preview_url": session["preview_url"],
+        "error": session["error"],
+        "started_at": session["started_at"],
+        "completed_at": session["completed_at"],
+        "deployed_sha": session["deployed_sha"],
+    }
 
 
 @app.post("/workspace/projects/{project_id}/issues/confirm")

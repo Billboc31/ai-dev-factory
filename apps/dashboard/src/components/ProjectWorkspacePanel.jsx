@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { Rnd } from 'react-rnd'
-import { postWorkspaceMessage, confirmWorkspaceAction, confirmWorkspaceIssue, getDeploymentStatus } from '../api/workspace'
+import { postWorkspaceMessage, confirmWorkspaceAction, confirmWorkspaceIssue, getDeploymentStatus, deployProject, getDeployStatus } from '../api/workspace'
+import usePolling from '../hooks/usePolling'
+import DeployHistoryPanel from './DeployHistoryPanel'
 
 const STAGE_LABELS = {
   PULLING: 'Pulling…',
@@ -293,6 +295,15 @@ function IssueConfirmCard({ message, onConfirm, loading }) {
   )
 }
 
+const DEPLOY_STAGE_LABELS = {
+  PENDING: 'Pending…',
+  BUILDING: 'Building…',
+  STARTING: 'Starting…',
+  HEALTHCHECK: 'Healthcheck…',
+  SUCCEEDED: 'Succeeded',
+  FAILED: 'Failed',
+}
+
 export default function ProjectWorkspacePanel({ projectId, isOpen, onClose, layout, setMode, setPosition, setSize }) {
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -302,6 +313,41 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose, layo
   const messagesEndRef = useRef(null)
   const inputRef = useRef(null)
   const resizeStartRef = useRef(null)
+
+  // T229 — one-click deploy state
+  const [deployState, setDeployState] = useState(null)
+  // deployState shape:
+  //   { deploymentId, stage, status, logTail, previewUrl, error } | null
+  // status: 'running' | 'succeeded' | 'failed'
+  // notDeployable: true when project has no deploy config
+  const [deployNotDeployable, setDeployNotDeployable] = useState(false)
+  const [deployLoading, setDeployLoading] = useState(false)
+  const [deployError, setDeployError] = useState(null)
+
+  const isDeployRunning = deployState?.status === 'running'
+  const pollDelay = isDeployRunning ? 2000 : null
+
+  usePolling(async () => {
+    if (!deployState?.deploymentId || !projectId) return
+    try {
+      const res = await getDeployStatus(projectId, deployState.deploymentId)
+      const d = res.data
+      setDeployState(prev => ({
+        ...prev,
+        stage: d.stage,
+        status: d.status,
+        logTail: d.log_tail ?? [],
+        previewUrl: d.preview_url ?? null,
+        error: d.error ?? null,
+      }))
+    } catch (err) {
+      setDeployState(prev => ({
+        ...prev,
+        status: 'failed',
+        error: err.response?.data?.detail || err.message,
+      }))
+    }
+  }, pollDelay, deployState?.deploymentId)
 
   const lastMsg = messages[messages.length - 1]
   const showUnblockButton =
@@ -313,6 +359,10 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose, layo
     setMessages([])
     setInput('')
     setError(null)
+    setDeployState(null)
+    setDeployNotDeployable(false)
+    setDeployLoading(false)
+    setDeployError(null)
   }, [projectId])
 
   useEffect(() => {
@@ -330,6 +380,28 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose, layo
   }, [])
 
   const conversationHistory = messages.map(m => ({ role: m.role, content: m.content }))
+
+  const handleDeploy = async () => {
+    if (!projectId || deployLoading || isDeployRunning) return
+    setDeployLoading(true)
+    setDeployError(null)
+    setDeployNotDeployable(false)
+    try {
+      const res = await deployProject(projectId)
+      const deploymentId = res.data.deployment_id
+      setDeployState({ deploymentId, stage: 'PENDING', status: 'running', logTail: [], previewUrl: null, error: null })
+    } catch (err) {
+      const detail = err.response?.data?.detail || err.response?.data?.code || err.message
+      const code = err.response?.data?.code || detail
+      if (code === 'not_deployable' || detail === 'not_deployable') {
+        setDeployNotDeployable(true)
+      } else {
+        setDeployError(detail || 'Deploy failed')
+      }
+    } finally {
+      setDeployLoading(false)
+    }
+  }
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -647,6 +719,72 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose, layo
           {error}
         </div>
       )}
+
+      {/* T229 — one-click deploy section */}
+      <div className="border-t border-gray-200 px-3 py-2 shrink-0 space-y-2">
+        {deployNotDeployable ? (
+          <p className="text-xs text-gray-500 bg-gray-50 border border-gray-200 rounded px-2 py-1.5">
+            This project has no deployment configuration.
+          </p>
+        ) : (
+          <>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleDeploy}
+                disabled={!projectId || deployLoading || isDeployRunning}
+                className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs rounded disabled:opacity-50 shrink-0"
+              >
+                {deployLoading ? 'Starting…' : 'Deploy project'}
+              </button>
+              {deployState && (
+                <span className={`text-xs font-mono px-1.5 py-0.5 rounded ${
+                  deployState.status === 'succeeded' ? 'bg-green-100 text-green-700' :
+                  deployState.status === 'failed' ? 'bg-red-100 text-red-700' :
+                  'bg-yellow-100 text-yellow-700'
+                }`}>
+                  {DEPLOY_STAGE_LABELS[deployState.stage] || deployState.stage}
+                </span>
+              )}
+              {deployState?.status === 'succeeded' && deployState.previewUrl && (
+                <a
+                  href={deployState.previewUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-blue-600 underline truncate max-w-[10rem]"
+                >
+                  {deployState.previewUrl}
+                </a>
+              )}
+            </div>
+
+            {(deployState?.status === 'succeeded' || deployState?.status === 'failed') && (
+              <button
+                onClick={handleDeploy}
+                disabled={deployLoading}
+                className="text-xs text-indigo-600 hover:underline"
+              >
+                Retry deploy
+              </button>
+            )}
+
+            {deployState?.error && (
+              <p className="text-xs text-red-600">{deployState.error}</p>
+            )}
+
+            {deployError && (
+              <p className="text-xs text-red-600">{deployError}</p>
+            )}
+
+            {deployState?.logTail?.length > 0 && (
+              <pre className="text-xs bg-gray-900 text-gray-100 rounded p-2 max-h-32 overflow-y-auto font-mono whitespace-pre-wrap break-all">
+                {deployState.logTail.join('\n')}
+              </pre>
+            )}
+          </>
+        )}
+      </div>
+
+      <DeployHistoryPanel projectId={projectId} />
 
       <form onSubmit={handleSubmit} className="border-t border-gray-200 p-3 flex gap-2 shrink-0">
         <input
