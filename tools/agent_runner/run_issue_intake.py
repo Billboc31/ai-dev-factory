@@ -132,20 +132,40 @@ def get_current_branch() -> str | None:
     return result.stdout.strip() or None
 
 
-def fetch_issue(issue_number: int, repo: str | None) -> dict[str, str]:
-    cmd = ["gh", "issue", "view", str(issue_number), "--json", "title,body"]
+def _resolve_github_repo(repo: str | None) -> str:
+    """Return ``owner/name`` for the target GitHub repository."""
     if repo:
-        cmd += ["--repo", repo]
-    result = _run(cmd)
+        return repo
+    result = _run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
+    name = (result.stdout or "").strip()
+    if result.returncode == 0 and name:
+        return name
+    origin = _run(["git", "remote", "get-url", "origin"])
+    url = (origin.stdout or "").strip()
+    m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", url)
+    if not m:
+        raise IntakeError(
+            "cannot resolve GitHub repo — pass --repo owner/name "
+            f"(gh rc={result.returncode}, git remote rc={origin.returncode})"
+        )
+    return f"{m.group(1)}/{m.group(2)}"
+
+
+def fetch_issue(issue_number: int, repo: str | None) -> dict[str, str]:
+    """Fetch issue title/body via GitHub REST (avoids GraphQL rate limits)."""
+    owner_repo = _resolve_github_repo(repo)
+    result = _run(["gh", "api", f"repos/{owner_repo}/issues/{issue_number}"])
     if result.returncode != 0:
-        stderr = result.stderr.strip()
+        stderr = (result.stderr or result.stdout or "").strip()
         hint = " (run 'gh auth login' if not authenticated)" if "auth" in stderr.lower() else ""
-        raise IntakeError(f"gh issue view failed{hint}: {stderr}")
+        raise IntakeError(f"gh api issue fetch failed{hint}: {stderr}")
     try:
         data = json.loads(result.stdout)
     except json.JSONDecodeError as exc:
         raise IntakeError(f"gh output is not valid JSON: {exc}") from exc
-    return {"title": data.get("title", ""), "body": data.get("body", "")}
+    if not isinstance(data, dict) or "title" not in data:
+        raise IntakeError(f"unexpected gh api payload for issue #{issue_number}")
+    return {"title": data.get("title") or "", "body": data.get("body") or ""}
 
 
 def branch_name(ticket_id: str, slug: str) -> str:

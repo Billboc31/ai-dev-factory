@@ -1557,21 +1557,74 @@ def clear_stale_run_dir(worktree_path: Path, ticket_id: str) -> bool:
 
 
 def fetch_ready_issues(label: str, repo: str | None) -> list[dict]:
-    """Call `gh issue list` and return open issues with the given label. Returns [] on any failure."""
-    cmd = ["gh", "issue", "list", "--label", label, "--json", "number,title", "--state", "open"]
+    """Return open issues with the given label via the GitHub REST API.
+
+    Prefer ``gh api`` (REST / core quota) over ``gh issue list`` (GraphQL): the
+    factory polls every few seconds and GraphQL rate limits are exhausted quickly,
+    which previously made new projects appear to never intake issues.
+    """
     if repo:
-        cmd += ["--repo", repo]
-    try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if result.returncode != 0:
-            _log(f"gh issue list failed (rc={result.returncode}) — skipping issue polling")
+        owner_repo = repo
+    else:
+        try:
+            remote = subprocess.run(
+                ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+                capture_output=True, text=True, check=False,
+            )
+            owner_repo = (remote.stdout or "").strip()
+            if remote.returncode != 0 or not owner_repo:
+                # Fallback: parse origin URL without GraphQL
+                origin = subprocess.run(
+                    ["git", "remote", "get-url", "origin"],
+                    capture_output=True, text=True, check=False,
+                )
+                url = (origin.stdout or "").strip()
+                # git@github.com:Owner/repo.git or https://github.com/Owner/repo.git
+                m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", url)
+                owner_repo = f"{m.group(1)}/{m.group(2)}" if m else ""
+            if not owner_repo:
+                _log("cannot resolve GitHub repo for issue polling — skipping")
+                return []
+        except FileNotFoundError:
+            _log("gh/git not found — skipping issue polling")
             return []
-        return json.loads(result.stdout) if result.stdout.strip() else []
+
+    # Paginate REST search/list; filter by label client-side for exact match.
+    issues: list[dict] = []
+    page = 1
+    try:
+        while page <= 5:  # hard cap — intake is incremental
+            cmd = [
+                "gh", "api",
+                f"repos/{owner_repo}/issues?state=open&per_page=100&page={page}",
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                err = (result.stderr or result.stdout or "").strip()[:300]
+                _log(
+                    f"gh api issues failed (rc={result.returncode})"
+                    f"{f': {err}' if err else ''} — skipping issue polling"
+                )
+                return []
+            batch = json.loads(result.stdout) if result.stdout.strip() else []
+            if not isinstance(batch, list) or not batch:
+                break
+            for item in batch:
+                if item.get("pull_request"):
+                    continue
+                names = [lbl.get("name", "") for lbl in item.get("labels") or []]
+                if label not in names:
+                    continue
+                issues.append({"number": item["number"], "title": item.get("title") or ""})
+            if len(batch) < 100:
+                break
+            page += 1
+        return issues
     except FileNotFoundError:
         _log("gh not found — skipping issue polling")
         return []
     except json.JSONDecodeError:
-        _log("gh returned invalid JSON — skipping issue polling")
+        _log("gh api returned invalid JSON — skipping issue polling")
         return []
 
 
