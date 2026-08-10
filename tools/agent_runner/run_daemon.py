@@ -1823,13 +1823,13 @@ def poll_github_issues(
             try:
                 inserted = _record_intake_once(db_path, int(number), ticket_id, branch)
                 if not inserted:
-                    # DB row survived a lost/reset file index — treat as a
-                    # duplicate rather than double-processing.
+                    # File index was empty but DB already had the row (lost index).
+                    # Intake for this cycle already succeeded — do not bump
+                    # skipped_existing (that counter is for pre-filter skips only).
                     _log(
-                        f"issue #{number}: DB intake row already exists — "
-                        f"treating as skipped_existing"
+                        f"issue #{number}: DB intake row already existed — "
+                        f"index repaired for {ticket_id}"
                     )
-                    skipped_existing += 1
             except Exception as exc:
                 _log(f"SQLite intake upsert failed for {ticket_id}: {exc}")
             try:
