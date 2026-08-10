@@ -39,3 +39,20 @@
 [2026-08-10T20:35:48Z] snapshot: runtime-prompt=runs/T229/prompts/planner-attempt-2.md
 [2026-08-10T20:37:10Z] compose: preferring on-disk runs/T229/plan.md over chatty stdout (agent Write beat meta-report)
 [2026-08-10T20:37:10Z] auto-run: step=planner done rc=0
+[2026-08-10T20:37:18Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-08-10T20:37:18Z] auto-run: running step=planner
+[2026-08-10T20:37:18Z] auto-run: fix context: previous_output=runs/T229/plan.md
+[2026-08-10T20:37:18Z] auto-run: fix context: review=runs/T229/reviews/plan-review-01.md
+[2026-08-10T20:37:18Z] auto-run: fix context: fix_instructions=runs/T229/fixes/plan-fix-01.md
+[2026-08-10T20:37:18Z] auto-run: fix context: context_file=runs/T229/fixes/context-20260810T203718Z.md
+[2026-08-10T20:37:18Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-08-10T20:37:18Z] prompt: generic fallback — injecting runs/T229/ticket.md
+[2026-08-10T20:37:18Z] compose: global-context=docs/ai/global-context.md
+[2026-08-10T20:37:18Z] compose: role=ai/roles/planner.md
+[2026-08-10T20:37:18Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-08-10T20:37:18Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-08-10T20:37:18Z] compose: skill=ai/skills/documentation.md
+[2026-08-10T20:37:18Z] compose: task (canonical prompt)
+[2026-08-10T20:37:18Z] compose: extra-context=runs/T229/fixes/context-20260810T203718Z.md
+[2026-08-10T20:37:18Z] snapshot: runtime-prompt=runs/T229/prompts/planner-attempt-3.md
+[2026-08-10T20:39:29Z] auto-run: step=planner done rc=0
