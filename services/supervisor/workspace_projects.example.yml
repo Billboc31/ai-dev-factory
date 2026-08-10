@@ -20,6 +20,19 @@ projects:
         service: frontend            # Docker Compose service name for the frontend.
     preview_url: http://localhost:3000   # Optional. Returned on successful deployment.
 
+    # T229 — one-click project deploy block (optional).
+    # When present, the "Deploy project" button appears in the AI Workspace panel.
+    # When absent, the panel shows a "no deployment configuration" banner.
+    deploy:
+      type: docker-compose           # Only supported value. Required.
+      compose_file: docker-compose.yml   # Relative to repository_path. Must stay within the repo root.
+      preview_url: http://localhost:3000  # URL shown on success. Optional.
+      healthcheck_url: http://localhost:3000/health  # Polled until 2xx or timeout. Optional.
+      healthcheck_timeout_s: 60      # How long to wait for the healthcheck. Default: 60.
+      healthcheck_interval_s: 5      # Poll interval for the healthcheck. Default: 5.
+      allow_dirty: false             # false → reject if the working tree is dirty. Default: false.
+      startup_wait_s: 2              # Seconds to wait after build before healthcheck. Default: 2.
+
   # Minimal example — backend only, no preview URL.
   my-api:
     repository_path: /home/dev/my-api
@@ -28,3 +41,13 @@ projects:
     redeploy:
       backend:
         service: api
+
+  # Minimal deploy-only example — no redeploy block needed.
+  my-simple-app:
+    repository_path: /home/dev/my-simple-app
+    default_branch: main
+    allow_dirty: false
+    deploy:
+      type: docker-compose
+      compose_file: docker-compose.yml
+      preview_url: http://localhost:8080
