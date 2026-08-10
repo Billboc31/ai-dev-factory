@@ -41,8 +41,152 @@ function DockRightIcon() {
   )
 }
 
+const RECOVERY_STAGE_COLORS = {
+  DIAGNOSING: 'bg-gray-200 text-gray-700',
+  PLAN_READY: 'bg-blue-200 text-blue-700',
+  AWAITING_CONFIRMATION: 'bg-yellow-200 text-yellow-800',
+  APPLYING_FIX: 'bg-orange-200 text-orange-700',
+  RETRYING_STAGE: 'bg-orange-200 text-orange-700',
+  VERIFYING: 'bg-blue-200 text-blue-700',
+  RECOVERED: 'bg-green-200 text-green-700',
+  NEEDS_USER_INPUT: 'bg-yellow-200 text-yellow-800',
+  BUG_REPORTED: 'bg-purple-200 text-purple-700',
+  FAILED: 'bg-red-200 text-red-700',
+}
+
+function RecoveryStageIndicator({ stage }) {
+  if (!stage) return null
+  const colors = RECOVERY_STAGE_COLORS[stage] || 'bg-gray-200 text-gray-700'
+  return (
+    <span className={`inline-block px-2 py-0.5 rounded text-xs font-mono font-medium ${colors}`}>
+      {stage}
+    </span>
+  )
+}
+
+function RecoveryReportCard({ report }) {
+  if (!report) return null
+  return (
+    <details className="mt-2 text-xs">
+      <summary className="cursor-pointer font-medium text-gray-700">Recovery Report</summary>
+      <div className="mt-1 space-y-1 pl-2 border-l-2 border-gray-200">
+        <p><span className="font-medium">Root cause:</span> {report.root_cause}</p>
+        {report.new_ticket_state && (
+          <p><span className="font-medium">New state:</span> {report.new_ticket_state}</p>
+        )}
+        {report.ops_performed?.length > 0 && (
+          <div>
+            <p className="font-medium">Operations:</p>
+            <ul className="pl-2 space-y-0.5">
+              {report.ops_performed.map((op, i) => (
+                <li key={i} className={op.success ? 'text-green-700' : 'text-red-600'}>
+                  {op.success ? '✓' : '✗'} <code>{op.op_name}</code>: {op.detail}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {report.bug_issue_url && (
+          <p>
+            <span className="font-medium">Bug issue: </span>
+            <a
+              href={report.bug_issue_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="underline text-purple-700 break-all"
+            >
+              {report.bug_issue_url}
+            </a>
+          </p>
+        )}
+        {report.error && (
+          <p className="text-red-600"><span className="font-medium">Error:</span> {report.error}</p>
+        )}
+      </div>
+    </details>
+  )
+}
+
+function RecoveryConfirmCard({ message, onConfirm, loading }) {
+  const action = message.proposedAction
+  if (!action || action.capability !== 'recover_ticket') return null
+  if (message.confirmed) {
+    return (
+      <div className="mt-2 space-y-1">
+        <div className="flex items-center gap-2">
+          <RecoveryStageIndicator stage={message.recoveryStage} />
+        </div>
+        <RecoveryReportCard report={message.recoveryReport} />
+        {message.confirmError && (
+          <p className="text-red-600 text-xs">{message.confirmError}</p>
+        )}
+      </div>
+    )
+  }
+  return (
+    <div className="mt-2 p-2 bg-yellow-50 border border-yellow-200 rounded text-xs">
+      <div className="flex items-center gap-2 mb-1">
+        <p className="font-medium text-yellow-800">Recovery plan</p>
+        <RecoveryStageIndicator stage="PLAN_READY" />
+      </div>
+      <p className="text-yellow-700 mb-1">
+        Ticket: <code>{action.ticket_id}</code> &mdash; Blocker: <code>{action.blocker_class}</code>
+      </p>
+      {action.operations?.length > 0 ? (
+        <table className="w-full text-xs border-collapse mb-2">
+          <thead>
+            <tr className="text-left text-yellow-900 border-b border-yellow-200">
+              <th className="pr-2 py-0.5">Operation</th>
+              <th className="pr-2 py-0.5">Risk</th>
+              <th className="py-0.5">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+            {action.operations.map((op, i) => (
+              <tr key={i} className="border-b border-yellow-100">
+                <td className="pr-2 py-0.5 font-mono">{op.name}</td>
+                <td className={`pr-2 py-0.5 font-medium ${
+                  op.risk_level === 'HIGH' ? 'text-red-600' :
+                  op.risk_level === 'MEDIUM' ? 'text-orange-600' : 'text-green-600'
+                }`}>{op.risk_level}</td>
+                <td className="py-0.5 text-yellow-700">{op.description}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      ) : (
+        <div className="mb-2 p-2 bg-yellow-100 border border-yellow-300 rounded text-yellow-800 text-xs">
+          <p className="font-semibold mb-0.5">Human action required</p>
+          {action.blocker_class === 'MISSING_APPROVAL' && (
+            <p>This ticket is waiting for a human review or approval. Check the PR or the ticket artifacts for the pending approval gate, then return here to retry.</p>
+          )}
+          {action.blocker_class === 'USER_DECISION_REQUIRED' && (
+            <p>Recovery cannot proceed automatically. A product or scope decision is needed from you before the pipeline can continue.</p>
+          )}
+          {action.blocker_class !== 'MISSING_APPROVAL' && action.blocker_class !== 'USER_DECISION_REQUIRED' && (
+            <p>No automated operations are available for this blocker type (<code>{action.blocker_class}</code>). Manual intervention is required.</p>
+          )}
+        </div>
+      )}
+      {message.confirmError && (
+        <p className="text-red-600 mb-1">{message.confirmError}</p>
+      )}
+      {action.operations?.length > 0 && (
+        <button
+          onClick={() => onConfirm(message)}
+          disabled={loading}
+          className="px-3 py-1 bg-yellow-500 hover:bg-yellow-600 text-white rounded text-xs disabled:opacity-50"
+        >
+          Confirm Recovery
+        </button>
+      )}
+    </div>
+  )
+}
+
 function ActionConfirmCard({ message, onConfirm, loading }) {
   if (!message.proposedAction) return null
+  if (message.proposedAction.capability === 'recover_ticket') return null
 
   const isRedeploy = message.proposedAction.capability === 'redeploy_project'
 
@@ -159,6 +303,12 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose, layo
   const inputRef = useRef(null)
   const resizeStartRef = useRef(null)
 
+  const lastMsg = messages[messages.length - 1]
+  const showUnblockButton =
+    !loading &&
+    lastMsg?.role === 'assistant' &&
+    (lastMsg?.recoveryStage === 'NEEDS_USER_INPUT' || lastMsg?.recoveryStage === 'FAILED')
+
   useEffect(() => {
     setMessages([])
     setInput('')
@@ -204,6 +354,7 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose, layo
           proposedAction: data.proposed_action,
           issueDraft: data.issue_draft,
           confirmationRequired: data.confirmation_required,
+          recoveryStage: data.recovery_stage || null,
           id: id + 1,
         },
       ])
@@ -220,7 +371,8 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose, layo
     setLoading(true)
     try {
       const res = await confirmWorkspaceAction(projectId, actionId)
-      const deploymentId = res.data.deployment_id
+      const data = res.data
+      const deploymentId = data.deployment_id
       if (deploymentId) {
         setMessages(prev =>
           prev.map(m =>
@@ -245,17 +397,17 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose, layo
           }
           try {
             const statusRes = await getDeploymentStatus(projectId, deploymentId)
-            const data = statusRes.data
+            const statusData = statusRes.data
             setMessages(prev =>
               prev.map(m =>
                 m.id === msg.id
-                  ? { ...m, deploymentStage: data.stage || data.status }
+                  ? { ...m, deploymentStage: statusData.stage || statusData.status }
                   : m
               )
             )
-            if (data.status === 'SUCCEEDED') {
-              const sha = data.deployed_sha ? ` (sha: ${data.deployed_sha})` : ''
-              const url = data.preview_url ? ` — ${data.preview_url}` : ''
+            if (statusData.status === 'SUCCEEDED') {
+              const sha = statusData.deployed_sha ? ` (sha: ${statusData.deployed_sha})` : ''
+              const url = statusData.preview_url ? ` — ${statusData.preview_url}` : ''
               setMessages(prev =>
                 prev.map(m =>
                   m.id === msg.id
@@ -263,11 +415,11 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose, layo
                     : m
                 )
               )
-            } else if (data.status === 'FAILED') {
+            } else if (statusData.status === 'FAILED') {
               setMessages(prev =>
                 prev.map(m =>
                   m.id === msg.id
-                    ? { ...m, confirmError: `${data.error_stage}: ${data.error_excerpt}` }
+                    ? { ...m, confirmError: `${statusData.error_stage}: ${statusData.error_excerpt}` }
                     : m
                 )
               )
@@ -290,7 +442,13 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose, layo
       setMessages(prev =>
         prev.map(m =>
           m.id === msg.id
-            ? { ...m, confirmed: true, confirmResult: res.data.result || 'Done.' }
+            ? {
+                ...m,
+                confirmed: true,
+                confirmResult: data.result || 'Done.',
+                recoveryReport: data.recovery_report || null,
+                recoveryStage: data.recovery_report?.stage || null,
+              }
             : m
         )
       )
@@ -305,6 +463,11 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose, layo
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleUnblockTicket = () => {
+    setInput('Unblock this ticket')
+    setTimeout(() => inputRef.current?.focus(), 0)
   }
 
   const handleConfirmIssue = async (msg) => {
@@ -434,8 +597,24 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose, layo
               }`}
             >
               <p className="whitespace-pre-wrap break-words">{msg.content}</p>
-              {msg.role === 'assistant' && msg.intent === 'actionable' && (
-                <ActionConfirmCard message={msg} onConfirm={handleConfirmAction} loading={loading} />
+              {msg.role === 'assistant' && msg.recoveryStage && !msg.proposedAction && (
+                <div className="mt-1">
+                  <RecoveryStageIndicator stage={msg.recoveryStage} />
+                </div>
+              )}
+              {msg.role === 'assistant' && msg.intent === 'actionable' && msg.proposedAction?.capability === 'recover_ticket' && (
+                <RecoveryConfirmCard
+                  message={msg}
+                  onConfirm={handleConfirmAction}
+                  loading={loading}
+                />
+              )}
+              {msg.role === 'assistant' && msg.intent === 'actionable' && msg.proposedAction?.capability !== 'recover_ticket' && (
+                <ActionConfirmCard
+                  message={msg}
+                  onConfirm={handleConfirmAction}
+                  loading={loading}
+                />
               )}
               {msg.role === 'assistant' && msg.intent === 'functional_dev' && (
                 <IssueConfirmCard message={msg} onConfirm={handleConfirmIssue} loading={loading} />
@@ -448,6 +627,16 @@ export default function ProjectWorkspacePanel({ projectId, isOpen, onClose, layo
             <div className="bg-gray-100 rounded-lg px-3 py-2 text-xs text-gray-500">
               Thinking…
             </div>
+          </div>
+        )}
+        {showUnblockButton && (
+          <div className="flex justify-start">
+            <button
+              onClick={handleUnblockTicket}
+              className="px-3 py-1.5 bg-yellow-100 hover:bg-yellow-200 text-yellow-800 border border-yellow-300 rounded text-xs"
+            >
+              Unblock ticket
+            </button>
           </div>
         )}
         <div ref={messagesEndRef} />

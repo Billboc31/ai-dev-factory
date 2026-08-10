@@ -43,6 +43,26 @@ if str(_SUPERVISOR_DIR) not in sys.path:
     sys.path.insert(0, str(_SUPERVISOR_DIR))
 
 from path_mapper import ContainerToHostMapper  # noqa: E402
+from recovery import (  # noqa: E402
+    BlockerClass,
+    RecoveryResult,
+    RecoverySession,
+    RecoveryStage,
+    ProposalStatus,
+    MAX_RECOVERY_ITERATIONS,
+    ALLOWLISTED_RECOVERY_OPS,
+    apply_recovery_op,
+    build_recovery_plan,
+    classify_blocker,
+    compute_bug_signature,
+    compute_state_fingerprint,
+    create_bug_issue,
+    search_existing_bug_issues,
+    verify_ticket_progress,
+    _artifact_paths_for_ticket,
+    _ticket_run_dir,
+    _TERMINAL_TICKET_STATES,
+)
 
 mapper = ContainerToHostMapper()
 
@@ -2888,6 +2908,13 @@ _workspace_redeploy_locks_mutex = threading.Lock()
 _deployment_jobs: dict[str, dict] = {}
 _deployment_jobs_lock = threading.Lock()
 
+# Recovery session state — keyed by ticket_id / proposal_id / session_id
+_active_sessions: dict[str, RecoverySession] = {}   # ticket_id → session
+_proposals: dict[str, object] = {}                   # proposal_id → RecoveryProposal
+_results: dict[str, RecoveryResult] = {}             # session_id → RecoveryResult
+_session_lock = threading.Lock()
+
+
 def _load_workspace_projects_config() -> dict:
     """Load workspace_projects.yml; return {} on missing file or parse error."""
     config_path = os.environ.get(
@@ -2917,7 +2944,6 @@ def _git_has_local_changes(repo_path: str) -> bool:
     )
     return bool(result.stdout.strip())
 
-
 _WORKSPACE_CAPABILITIES: dict[str, dict] = {
     "restart_daemon": {
         "description": "Restart the project daemon",
@@ -2933,6 +2959,10 @@ _WORKSPACE_CAPABILITIES: dict[str, dict] = {
     },
     "redeploy_project": {
         "description": "Pull the latest code and rebuild/restart selected services",
+        "confirmation_required": True,
+    },
+    "recover_ticket": {
+        "description": "Diagnose and recover a blocked ticket",
         "confirmation_required": True,
     },
 }
@@ -2964,6 +2994,7 @@ ALLOWED_CAPABILITIES:
   Params: pull (bool, default true), components (array, values: "backend", "frontend").
   proposed_action format: {"capability": "redeploy_project", "description": "...",
     "params": {"pull": true, "components": ["backend", "frontend"]}}
+- recover_ticket: Diagnose and recover a blocked ticket (use when user says "unblock", "stuck", "blocked ticket", or similar)
 
 RESPONSE FORMAT — respond with a valid JSON object and nothing else:
 {
@@ -3023,7 +3054,373 @@ def _workspace_project_context(project_id: str) -> str:
                 except OSError:
                     parts.append(f'  - ticket "{tf.stem}": (unreadable)')
 
+    # Active ticket and recovery state
+    active_ticket_id = _resolve_active_ticket_id(project_id)
+    if active_ticket_id:
+        parts.append(f"active_ticket_id: {active_ticket_id}")
+        if project_root_str:
+            project_root = Path(mapper.map(project_root_str))
+            state_file = project_root / "runs" / active_ticket_id / "state.json"
+            try:
+                state_data = json.loads(state_file.read_text(encoding="utf-8"))
+                parts.append(f"ticket_state: {state_data.get('state', 'unknown')}")
+                if state_data.get("blocked_stage"):
+                    parts.append(f"blocked_stage: {state_data['blocked_stage']}")
+            except (OSError, json.JSONDecodeError):
+                pass
+        with _session_lock:
+            if active_ticket_id in _active_sessions:
+                parts.append(f"recovery_in_progress: true")
+
     return "\n".join(parts)
+
+
+def _resolve_active_ticket_id(project_id: str) -> str | None:
+    """Return the ticket_id of the currently active (non-terminal) ticket, or None."""
+    runs_dir = _project_runs_dir(project_id)
+    if not runs_dir.exists():
+        return None
+
+    # Prefer a ticket with a daemon.lock (actively running)
+    for ticket_dir in runs_dir.iterdir():
+        if not ticket_dir.is_dir():
+            continue
+        if (ticket_dir / "daemon.lock").exists():
+            state_file = ticket_dir / "state.json"
+            try:
+                state_data = json.loads(state_file.read_text(encoding="utf-8"))
+                if state_data.get("state") not in _TERMINAL_TICKET_STATES:
+                    return ticket_dir.name
+            except (OSError, json.JSONDecodeError):
+                pass
+
+    # Fall back to most recently updated non-terminal ticket
+    candidates: list[tuple[float, str]] = []
+    for ticket_dir in runs_dir.iterdir():
+        if not ticket_dir.is_dir():
+            continue
+        state_file = ticket_dir / "state.json"
+        try:
+            state_data = json.loads(state_file.read_text(encoding="utf-8"))
+            if state_data.get("state") not in _TERMINAL_TICKET_STATES:
+                candidates.append((state_file.stat().st_mtime, ticket_dir.name))
+        except (OSError, json.JSONDecodeError):
+            pass
+
+    if candidates:
+        candidates.sort(reverse=True)
+        return candidates[0][1]
+    return None
+
+
+def _read_ticket_artifacts(project_root: Path, ticket_id: str) -> dict[str, bool]:
+    """Return a mapping of artifact name → exists (bool) for the ticket."""
+    artifact_paths = _artifact_paths_for_ticket(project_root, ticket_id)
+    return {name: path.exists() for name, path in artifact_paths.items()}
+
+
+def _read_ticket_logs(project_root: Path, ticket_id: str) -> str:
+    """Return the last 4000 chars of the runtime log for the ticket."""
+    log_file = _ticket_run_dir(project_root, ticket_id) / "runtime.log"
+    try:
+        return log_file.read_text(encoding="utf-8", errors="replace")[-4000:]
+    except OSError:
+        return ""
+
+
+def _prepare_recovery(project_id: str, project_root: Path) -> dict:
+    """Diagnose the blocked ticket and build a recovery proposal.
+
+    Returns a proposed_action dict on success, or {"error": "<code>"} on failure.
+    Performs zero disk mutations.
+    """
+    import uuid as _uuid
+    from recovery import RecoveryProposal  # local import to avoid circular at module level
+
+    ticket_id = _resolve_active_ticket_id(project_id)
+    if ticket_id is None:
+        return {"error": "NO_ACTIVE_TICKET"}
+
+    # Atomic check-and-create
+    with _session_lock:
+        if ticket_id in _active_sessions:
+            existing = _active_sessions[ticket_id]
+            return {"error": "RECOVERY_IN_PROGRESS", "session_id": existing.session_id}
+        session = RecoverySession(
+            session_id=str(_uuid.uuid4()),
+            proposal_id=None,
+            ticket_id=ticket_id,
+            stage=RecoveryStage.DIAGNOSING,
+            iteration_count=0,
+            operations_log=[],
+        )
+        _active_sessions[ticket_id] = session
+
+    try:
+        # Read state — no mutations
+        run_dir = _ticket_run_dir(project_root, ticket_id)
+        state_file = run_dir / "state.json"
+        try:
+            state_data = json.loads(state_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            state_data = {}
+
+        artifacts = _read_ticket_artifacts(project_root, ticket_id)
+        logs = _read_ticket_logs(project_root, ticket_id)
+
+        blocker = classify_blocker(state_data, artifacts, logs)
+        ops = build_recovery_plan(blocker, state_data)
+        fingerprint = compute_state_fingerprint(ticket_id, project_root, ops)
+
+        # Empty plan: blocker requires human action, no automated ops possible.
+        # Release the session immediately so the user can re-trigger without
+        # hitting RECOVERY_IN_PROGRESS after addressing the blocker.
+        if not ops:
+            with _session_lock:
+                _active_sessions.pop(ticket_id, None)
+            logger.info(
+                "recovery: no ops for session=%s ticket=%s blocker=%s — returning NEEDS_USER_INPUT",
+                session.session_id, ticket_id, blocker.value,
+            )
+            return {
+                "capability": "recover_ticket",
+                "action_id": None,
+                "ticket_id": ticket_id,
+                "blocker_class": blocker.value,
+                "operations": [],
+                "current_state": state_data.get("state", ""),
+                "blocked_stage": fingerprint.blocked_stage,
+                "stage": RecoveryStage.NEEDS_USER_INPUT.value,
+            }
+
+        proposal_id = str(_uuid.uuid4())
+        proposal = RecoveryProposal(
+            proposal_id=proposal_id,
+            project_id=project_id,
+            ticket_id=ticket_id,
+            blocker_class=blocker,
+            operations=ops,
+            state_fingerprint=fingerprint,
+            created_at=datetime.datetime.now(datetime.timezone.utc),
+            status=ProposalStatus.AWAITING_CONFIRMATION,
+        )
+
+        with _session_lock:
+            _proposals[proposal_id] = proposal
+            session.proposal_id = proposal_id
+            session.stage = RecoveryStage.PLAN_READY
+
+        logger.info(
+            "recovery: prepared session=%s ticket=%s blocker=%s ops=%d",
+            session.session_id, ticket_id, blocker.value, len(ops),
+        )
+
+        return {
+            "capability": "recover_ticket",
+            "action_id": proposal_id,
+            "ticket_id": ticket_id,
+            "blocker_class": blocker.value,
+            "operations": [
+                {"name": op.name, "description": op.description, "risk_level": op.risk_level, "params": op.params}
+                for op in ops
+            ],
+            "current_state": state_data.get("state", ""),
+            "blocked_stage": fingerprint.blocked_stage,
+        }
+
+    except Exception as exc:
+        logger.error("recovery: prepare failed ticket=%s: %s", ticket_id, exc, exc_info=True)
+        with _session_lock:
+            _active_sessions.pop(ticket_id, None)
+        return {"error": "PREPARE_FAILED", "detail": str(exc)}
+
+
+def _execute_recovery(proposal_id: str, project_root: Path) -> dict:
+    """Revalidate the proposal and execute recovery operations.
+
+    Returns a recovery_report dict or {"error": "<code>"} dict.
+    Callers should return HTTP 409 when error == "PROPOSAL_STALE".
+    """
+    from recovery import RecoveryProposal  # local import
+
+    proposal = _proposals.get(proposal_id)
+    if proposal is None:
+        return {"error": "PROPOSAL_NOT_FOUND"}
+    if proposal.status != ProposalStatus.AWAITING_CONFIRMATION:
+        return {"error": "PROPOSAL_NOT_FOUND"}
+
+    ticket_id = proposal.ticket_id
+
+    with _session_lock:
+        session = _active_sessions.get(ticket_id)
+        if session is None:
+            return {"error": "SESSION_NOT_FOUND"}
+
+    # Revalidate fingerprint
+    new_fingerprint = compute_state_fingerprint(ticket_id, project_root, list(proposal.operations))
+    if new_fingerprint.version != proposal.state_fingerprint.version:
+        proposal.status = ProposalStatus.INVALIDATED
+        session.stage = RecoveryStage.FAILED
+        with _session_lock:
+            _active_sessions.pop(ticket_id, None)
+        _results[session.session_id] = RecoveryResult(
+            session_id=session.session_id,
+            proposal_id=proposal_id,
+            ticket_id=ticket_id,
+            stage=RecoveryStage.FAILED,
+            root_cause="Ticket state changed after preparation",
+            ops_performed=[],
+            new_ticket_state=new_fingerprint.ticket_state,
+            bug_issue_url=None,
+            error="PROPOSAL_STALE",
+        )
+        return {
+            "error": "PROPOSAL_STALE",
+            "detail": "Ticket state changed after preparation. Re-run diagnosis.",
+        }
+
+    with _session_lock:
+        proposal.status = ProposalStatus.EXECUTING
+    session.stage = RecoveryStage.APPLYING_FIX
+
+    bug_issue_url: str | None = None
+    last_error: str | None = None
+
+    try:
+        # Execute operations from the immutable stored proposal
+        has_retry_op = any(op.name == "retry_stage" for op in proposal.operations)
+        all_ops_succeeded = True
+
+        for op in proposal.operations:
+            # Double-check allowlist (defence in depth)
+            if op.name not in ALLOWLISTED_RECOVERY_OPS:
+                raise ValueError(f"op {op.name!r} not in allowlist")
+
+            op_result = apply_recovery_op(op, project_root, proposal.project_id, ticket_id)
+            session.operations_log.append({
+                "op_name": op_result.op_name,
+                "success": op_result.success,
+                "detail": op_result.detail,
+                "mutated": op_result.mutated,
+            })
+
+            if not op_result.success:
+                all_ops_succeeded = False
+                session.iteration_count += 1
+                last_error = op_result.detail
+                if session.iteration_count >= MAX_RECOVERY_ITERATIONS:
+                    session.stage = RecoveryStage.FAILED
+                    break
+
+        # If any op failed, treat the recovery as failed regardless of iteration count
+        if session.stage != RecoveryStage.FAILED and not all_ops_succeeded:
+            session.stage = RecoveryStage.FAILED
+
+        if has_retry_op and session.stage != RecoveryStage.FAILED:
+            session.stage = RecoveryStage.RETRYING_STAGE
+
+        if session.stage not in (RecoveryStage.FAILED,):
+            session.stage = RecoveryStage.VERIFYING
+            expected_next = proposal.state_fingerprint.ticket_state
+            advanced, current_state = verify_ticket_progress(ticket_id, project_root, expected_next)
+
+            if advanced:
+                session.stage = RecoveryStage.RECOVERED
+            else:
+                # State did not advance
+                needs_user = proposal.blocker_class in (
+                    BlockerClass.MISSING_APPROVAL,
+                    BlockerClass.USER_DECISION_REQUIRED,
+                    BlockerClass.WORKING_TREE_CONFLICT,
+                )
+                session.stage = RecoveryStage.NEEDS_USER_INPUT if needs_user else RecoveryStage.FAILED
+
+        # Bug issue creation for PRODUCT_BUG blocker — independent of ticket progress
+        # and stage (evidence must be preserved even when ops fail or stage is FAILED).
+        if proposal.blocker_class == BlockerClass.PRODUCT_BUG:
+            sig = compute_bug_signature(
+                project_id=proposal.project_id,
+                blocker_class=proposal.blocker_class,
+                failed_stage=proposal.state_fingerprint.blocked_stage,
+                error_code=None,
+                affected_component=None,
+            )
+            project_root_str = _lookup_project_root_from_control_api(proposal.project_id)
+            repo = None
+            if project_root_str:
+                try:
+                    r = subprocess.run(
+                        ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+                        cwd=str(project_root),
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    if r.returncode == 0:
+                        repo = r.stdout.strip()
+                except Exception:
+                    pass
+            if repo:
+                existing_url = search_existing_bug_issues(repo, sig)
+                if existing_url:
+                    bug_issue_url = existing_url
+                else:
+                    error_summary = last_error or "See operations log"
+                    try:
+                        bug_issue_url = create_bug_issue(repo, session, proposal, error_summary)
+                    except Exception as exc:
+                        logger.error("recovery: create_bug_issue failed: %s", exc)
+                if bug_issue_url:
+                    session.stage = RecoveryStage.BUG_REPORTED
+
+        # Determine final state
+        final_state_file = _ticket_run_dir(project_root, ticket_id) / "state.json"
+        try:
+            final_state = json.loads(final_state_file.read_text(encoding="utf-8")).get("state")
+        except (OSError, json.JSONDecodeError):
+            final_state = None
+
+        result = RecoveryResult(
+            session_id=session.session_id,
+            proposal_id=proposal_id,
+            ticket_id=ticket_id,
+            stage=session.stage,
+            root_cause=proposal.blocker_class.value,
+            ops_performed=list(session.operations_log),
+            new_ticket_state=final_state,
+            bug_issue_url=bug_issue_url,
+            error=last_error,
+        )
+
+    except ValueError as exc:
+        session.stage = RecoveryStage.FAILED
+        result = RecoveryResult(
+            session_id=session.session_id,
+            proposal_id=proposal_id,
+            ticket_id=ticket_id,
+            stage=RecoveryStage.FAILED,
+            root_cause=proposal.blocker_class.value,
+            ops_performed=list(session.operations_log),
+            new_ticket_state=None,
+            bug_issue_url=None,
+            error=str(exc),
+        )
+    finally:
+        proposal.status = ProposalStatus.COMPLETED if session.stage not in (RecoveryStage.FAILED,) else ProposalStatus.INVALIDATED
+        with _session_lock:
+            _active_sessions.pop(ticket_id, None)
+        _results[session.session_id] = result
+
+    return {
+        "recovery_report": {
+            "session_id": result.session_id,
+            "ticket_id": result.ticket_id,
+            "stage": result.stage.value,
+            "root_cause": result.root_cause,
+            "ops_performed": result.ops_performed,
+            "new_ticket_state": result.new_ticket_state,
+            "bug_issue_url": result.bug_issue_url,
+            "error": result.error,
+        }
+    }
 
 
 def _call_workspace_ai(project_context: str, messages: list[dict]) -> dict:
@@ -3280,6 +3677,35 @@ def workspace_chat(project_id: str, body: WorkspaceChatRequest):
                         "has_dirty_warning": has_dirty_warning,
                     }
                     result["confirmation_required"] = True
+        elif capability == "recover_ticket":
+            # Run diagnosis immediately; proposal_id becomes the action_id
+            project_root_str = _lookup_project_root_from_control_api(project_id)
+            if not project_root_str:
+                result["reply"] += "\n\n(Project not found; cannot diagnose.)"
+                result["proposed_action"] = None
+                result["intent"] = "informational"
+                result["confirmation_required"] = False
+            else:
+                project_root = Path(mapper.map(project_root_str))
+                prep = _prepare_recovery(project_id, project_root)
+                if "error" in prep:
+                    err = prep["error"]
+                    result["reply"] += f"\n\n(Recovery unavailable: {err}.)"
+                    result["proposed_action"] = None
+                    result["intent"] = "informational"
+                    result["confirmation_required"] = False
+                else:
+                    proposal_id = prep["action_id"]
+                    result["proposed_action"] = prep
+                    result["confirmation_required"] = True
+                    with _workspace_lock:
+                        _pending_workspace_actions[proposal_id] = {
+                            "project_id": project_id,
+                            "capability": "recover_ticket",
+                            "proposal_id": proposal_id,
+                            "description": proposed_action.get("description", "Diagnose and recover blocked ticket"),
+                            "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+                        }
         else:
             action_id = str(uuid.uuid4())
             with _workspace_lock:
@@ -3369,6 +3795,21 @@ def workspace_action_confirm(project_id: str, body: WorkspaceActionConfirmReques
         ).start()
 
         return {"ok": True, "deployment_id": deployment_id, "status": "RUNNING"}
+
+    elif capability == "recover_ticket":
+        proposal_id = action.get("proposal_id", body.action_id)
+        project_root_str = _lookup_project_root_from_control_api(project_id)
+        if not project_root_str:
+            return JSONResponse(status_code=404, content={"detail": f"project {project_id!r} not found"})
+        project_root = Path(mapper.map(project_root_str))
+        exec_result = _execute_recovery(proposal_id, project_root)
+        with _workspace_lock:
+            _pending_workspace_actions.pop(body.action_id, None)
+        if exec_result.get("error") == "PROPOSAL_STALE":
+            return JSONResponse(status_code=409, content=exec_result)
+        if exec_result.get("error"):
+            return JSONResponse(status_code=500, content={"detail": exec_result["error"]})
+        return {"ok": True, "capability": capability, **exec_result}
 
     ok, message = _execute_workspace_capability(project_id, capability)
 
@@ -3624,3 +4065,25 @@ def workspace_issue_confirm(project_id: str, body: WorkspaceIssueConfirmRequest)
 
     logger.info("workspace: issue created url=%s project_id=%s", issue_url, project_id)
     return {"ok": True, "issue_url": issue_url, "issue_number": issue_number}
+
+
+@app.get("/api/recovery/{session_id}")
+def recovery_result(session_id: str):
+    """Poll for a recovery session result. Returns 404 while in progress, 200 when terminal."""
+    from fastapi.responses import JSONResponse
+
+    result = _results.get(session_id)
+    if result is None:
+        return JSONResponse(status_code=404, content={"detail": "session in progress or not found"})
+
+    return {
+        "session_id": result.session_id,
+        "proposal_id": result.proposal_id,
+        "ticket_id": result.ticket_id,
+        "stage": result.stage.value,
+        "root_cause": result.root_cause,
+        "ops_performed": result.ops_performed,
+        "new_ticket_state": result.new_ticket_state,
+        "bug_issue_url": result.bug_issue_url,
+        "error": result.error,
+    }

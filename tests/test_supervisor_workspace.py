@@ -233,3 +233,32 @@ def test_ai_error_returns_generic_message(client):
     assert "unavailable" in body["reply"].lower()
     assert "x-api-key" not in body["reply"]
     assert "sk-" not in body["reply"]
+
+
+# ---------------------------------------------------------------------------
+# P4 — Existing capabilities unaffected after recover_ticket registration
+# ---------------------------------------------------------------------------
+
+def test_existing_capabilities_route_unaffected(client):
+    """Adding recover_ticket must not break routing for pre-existing capabilities."""
+    import services.supervisor.main as sup_main
+
+    pre_existing = ["restart_daemon", "rerun_dependency_analysis", "resume_execution"]
+    for cap in pre_existing:
+        assert cap in sup_main._WORKSPACE_CAPABILITIES, f"{cap!r} missing from _WORKSPACE_CAPABILITIES"
+
+    # Each pre-existing capability can be proposed by AI and stored as a pending action.
+    for cap in pre_existing:
+        ai_ret = _ai_response(
+            intent="actionable",
+            proposed_action={"capability": cap, "description": f"Test {cap}"},
+            confirmation_required=True,
+        )
+        resp = _post_chat(client, "proj1", f"trigger {cap}", ai_ret)
+        assert resp.status_code == 200, f"chat failed for capability {cap!r}"
+        body = resp.json()
+        assert body.get("proposed_action") is not None, f"no proposed_action for {cap!r}"
+        assert body["proposed_action"]["capability"] == cap
+        assert "action_id" in body["proposed_action"], f"no action_id for {cap!r}"
+
+    sup_main._pending_workspace_actions.clear()
