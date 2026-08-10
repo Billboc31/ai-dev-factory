@@ -37,6 +37,7 @@ def captured_spawn(tmp_path, monkeypatch):
         return _FakeProc()
 
     monkeypatch.setattr(sup.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(sup, "_resolve_issue_repo", lambda root: "Billboc31/test-ai-dev")
     monkeypatch.setattr(sup, "_lookup_project_root_from_control_api", lambda pid: str(tmp_path / pid))
     monkeypatch.setattr(sup, "_project_runtime_root", lambda pid: tmp_path / pid / "runtime")
     monkeypatch.setattr(sup, "_project_runs_dir", lambda pid: tmp_path / pid / "runs")
@@ -77,6 +78,7 @@ def test_project_daemon_receives_project_id_and_pg_env(captured_spawn, monkeypat
 
     # Pin GitHub intake to the managed project's origin (not ambient cwd/gh defaults).
     assert "--issue-repo" in cmd
+    assert cmd[cmd.index("--issue-repo") + 1] == "Billboc31/test-ai-dev"
 
     # PROJECT_NAME is overridden to the target project (not the supervisor's).
     assert env["PROJECT_NAME"] == "test-ai-dev"

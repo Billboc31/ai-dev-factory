@@ -368,7 +368,7 @@ def test_poll_github_issues_assigns_correct_next_ticket_id(tmp_path):
 
 
 def test_poll_github_issues_multiple_issues_sequential_ids(tmp_path):
-    # poll_github_issues processes one issue per daemon cycle (candidates[:1])
+    # Cap at 1 so only the first candidate is processed in this cycle.
     runs = _make_runs(tmp_path)
     worktrees_dir = tmp_path / "worktrees"
     issues = [
@@ -379,11 +379,12 @@ def test_poll_github_issues_multiple_issues_sequential_ids(tmp_path):
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
          patch("run_daemon.call_issue_intake", return_value=True), \
          patch("run_daemon.fetch_origin_main", return_value=(True, "fetched origin/main")), \
-         patch("run_daemon.create_ticket_branch_and_worktree", return_value=(True, "ok")):
+         patch("run_daemon.create_ticket_branch_and_worktree", return_value=(True, "ok")), \
+         patch("run_daemon._resolve_max_intakes_per_poll", return_value=1):
         poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir)
 
     index = load_issue_index(runs)
-    # Only the first candidate is processed per cycle
+    # Only the first candidate is processed per cycle when the cap is 1
     assert index["1"] == "T001"
     assert "2" not in index
 
