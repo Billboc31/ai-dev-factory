@@ -11,3 +11,14 @@
 [2026-08-10T20:58:03Z] snapshot: runtime-prompt=runs/T230/prompts/planner-attempt-1.md
 [2026-08-10T21:02:56Z] compose: preferring on-disk runs/T230/plan.md over chatty stdout (agent Write beat meta-report)
 [2026-08-10T21:02:56Z] auto-run: step=planner done rc=0
+[2026-08-10T21:02:59Z] planner checkpoint: committed
+[2026-08-10T21:02:59Z] planner checkpoint: pushed
+[2026-08-10T21:02:59Z] planner validation success
+[2026-08-10T21:02:59Z] auto-run: transition INIT → PLAN_REVIEW_NEEDED
+[2026-08-10T21:02:59Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-08-10T21:02:59Z] commit-checkpoint: unstaged runtime garbage: ['runs/T230/runtime.log', 'runs/T230/workflow-status.md']
+[2026-08-10T21:02:59Z] commit-checkpoint: sha=8fa6ef21 files=1 title='docs(T230/workflow): planner — update 1 file(s)'
+[2026-08-10T21:02:59Z] auto-run: auto-push triggered
+[2026-08-10T21:02:59Z] push: tolerating runtime dirty files (not blocking): ['runs/T230/runtime.log', 'runs/T230/workflow-status.md']
+[2026-08-10T21:02:59Z] push: pushing branch=ticket/T230-batch-ui-show-per-ticket-pipeline-status-while-bat
+[2026-08-10T21:03:01Z] push: done branch=ticket/T230-batch-ui-show-per-ticket-pipeline-status-while-bat
