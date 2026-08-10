@@ -56,3 +56,14 @@
 [2026-08-10T20:37:18Z] compose: extra-context=runs/T229/fixes/context-20260810T203718Z.md
 [2026-08-10T20:37:18Z] snapshot: runtime-prompt=runs/T229/prompts/planner-attempt-3.md
 [2026-08-10T20:39:29Z] auto-run: step=planner done rc=0
+[2026-08-10T20:39:32Z] planner checkpoint: committed
+[2026-08-10T20:39:32Z] planner checkpoint: pushed
+[2026-08-10T20:39:32Z] planner validation success
+[2026-08-10T20:39:32Z] auto-run: transition PLAN_FIX_REQUIRED → PLAN_REVIEW_NEEDED
+[2026-08-10T20:39:32Z] auto-run: auto-commit triggered (step=planner, include_code=True)
+[2026-08-10T20:39:32Z] commit-checkpoint: unstaged runtime garbage: ['runs/T229/runtime.log', 'runs/T229/workflow-status.md']
+[2026-08-10T20:39:32Z] commit-checkpoint: sha=b51fbf1b files=1 title='docs(T229/workflow): planner — update 1 file(s)'
+[2026-08-10T20:39:32Z] auto-run: auto-push triggered
+[2026-08-10T20:39:32Z] push: tolerating runtime dirty files (not blocking): ['runs/T229/runtime.log', 'runs/T229/workflow-status.md']
+[2026-08-10T20:39:32Z] push: pushing branch=ticket/T229-add-one-click-project-deployment-for-end-to-end-va
+[2026-08-10T20:39:34Z] push: done branch=ticket/T229-add-one-click-project-deployment-for-end-to-end-va
