@@ -133,22 +133,27 @@ def get_current_branch() -> str | None:
 
 
 def _resolve_github_repo(repo: str | None) -> str:
-    """Return ``owner/name`` for the target GitHub repository."""
+    """Return ``owner/name`` for the target GitHub repository.
+
+    Prefer ``git -C`` on the process cwd (intake is launched with
+    ``cwd=<project_root|worktree>``) over ``gh repo view``, which follows
+    GraphQL + ambient gh defaults and can resolve the wrong repo.
+    """
     if repo:
         return repo
+    origin = _run(["git", "remote", "get-url", "origin"])
+    url = (origin.stdout or "").strip()
+    m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", url)
+    if m:
+        return f"{m.group(1)}/{m.group(2)}"
     result = _run(["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
     name = (result.stdout or "").strip()
     if result.returncode == 0 and name:
         return name
-    origin = _run(["git", "remote", "get-url", "origin"])
-    url = (origin.stdout or "").strip()
-    m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", url)
-    if not m:
-        raise IntakeError(
-            "cannot resolve GitHub repo — pass --repo owner/name "
-            f"(gh rc={result.returncode}, git remote rc={origin.returncode})"
-        )
-    return f"{m.group(1)}/{m.group(2)}"
+    raise IntakeError(
+        "cannot resolve GitHub repo — pass --repo owner/name "
+        f"(git remote rc={origin.returncode}, gh rc={result.returncode})"
+    )
 
 
 def fetch_issue(issue_number: int, repo: str | None) -> dict[str, str]:

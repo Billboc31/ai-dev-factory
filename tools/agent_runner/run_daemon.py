@@ -2759,13 +2759,32 @@ def main(argv: list[str]) -> int:
     _interval_display = f"{args.interval}s (CLI override)" if args.interval is not None else "resolved per-cycle from GITHUB_POLL_INTERVAL_SECONDS"
     _log(f"  interval       = {_interval_display}  dry-run={args.dry_run}")
     _log(f"  max-workers    = {args.max_workers}")
+    _log(f"  PROJECT_NAME   = {os.environ.get('PROJECT_NAME', '<unset>')}")
+    _log(f"  RUNTIME_DB     = {os.environ.get('RUNTIME_DB_BACKEND', 'sqlite')}")
     if args.project:
         _log(f"  project_id     = {args.project}")
+
+    # Pin issue-repo before the first poll so cwd mistakes cannot redirect intake
+    # to another GitHub repository (classic new-project footgun).
+    if args.poll_issues and not args.issue_repo:
+        resolved_repo = _resolve_github_owner_repo(REPO_ROOT)
+        if not resolved_repo:
+            _log(
+                "FATAL: --poll-issues needs --issue-repo owner/name "
+                f"or a resolvable git origin under REPO_ROOT={REPO_ROOT}"
+            )
+            return 2
+        args.issue_repo = resolved_repo
+        _log(f"  issue-repo     = {args.issue_repo} (auto from origin)")
+    elif args.issue_repo:
+        _log(f"  issue-repo     = {args.issue_repo}")
+
     try:
         _boot_db = _ensure_db()
         _boot_mode = _get_dispatcher_mode(_boot_db) if _boot_db else "off"
-    except Exception:
-        _boot_mode = "off"
+    except Exception as exc:
+        _log(f"FATAL: runtime DB unavailable at boot: {exc}")
+        return 2
     _log(f"  dispatcher_mode = {_boot_mode}")
     try:
         _boot_pipeline = _is_auto_pipeline_enabled(_boot_db) if _boot_db else True

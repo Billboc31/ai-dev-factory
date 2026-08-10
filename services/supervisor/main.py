@@ -11,6 +11,7 @@ import datetime
 import json
 import logging
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -239,6 +240,20 @@ _daemon_exec_cmd: str = os.environ.get(
 
 # ── Daemon spawn helper ───────────────────────────────────────────────────────
 
+def _resolve_issue_repo(project_root: Path) -> str | None:
+    """Resolve ``owner/name`` from the managed project's git origin."""
+    try:
+        origin = subprocess.run(
+            ["git", "-C", str(project_root), "remote", "get-url", "origin"],
+            capture_output=True, text=True, check=False, timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    url = (origin.stdout or "").strip()
+    m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", url)
+    return f"{m.group(1)}/{m.group(2)}" if m else None
+
+
 def _spawn_daemon(exec_cmd: str) -> tuple[int | None, str | None, str | None]:
     """Spawn the daemon. Returns (pid, started_at, error_str)."""
     global _daemon_proc
@@ -246,6 +261,7 @@ def _spawn_daemon(exec_cmd: str) -> tuple[int | None, str | None, str | None]:
     log = _log_path()
     log.parent.mkdir(parents=True, exist_ok=True)
     _legacy_project = os.environ.get("PROJECT_NAME")
+    project_root = _project_root()
     cmd = [
         sys.executable,
         str(_run_daemon_path()),
@@ -256,7 +272,11 @@ def _spawn_daemon(exec_cmd: str) -> tuple[int | None, str | None, str | None]:
         "--auto-push",
         "--auto-include-code",
         "--worktrees-dir", str(_worktrees_dir()),
+        "--project-root", str(project_root),
     ]
+    issue_repo = _resolve_issue_repo(project_root)
+    if issue_repo:
+        cmd += ["--issue-repo", issue_repo]
     if _legacy_project:
         cmd += ["--project", _legacy_project]
     tools_dir = _project_root_dir / "tools" / "agent_runner"
@@ -2114,6 +2134,14 @@ def project_daemon_start(project_id: str, body: ProjectDaemonStartRequest = None
         # Scope this daemon's runtime DB rows to its project (Postgres backend).
         "--project", project_id,
     ]
+    issue_repo = _resolve_issue_repo(project_root)
+    if issue_repo:
+        cmd += ["--issue-repo", issue_repo]
+    else:
+        logger.warning(
+            "supervisor: could not resolve --issue-repo from %s — daemon will try origin at boot",
+            project_root,
+        )
     tools_dir = _project_root_dir / "tools" / "agent_runner"
     if str(tools_dir) not in sys.path:
         sys.path.insert(0, str(tools_dir))
@@ -3525,6 +3553,9 @@ def _execute_workspace_capability(project_id: str, capability: str) -> tuple[boo
             "--project-root", str(project_root),
             "--project", project_id,
         ]
+        issue_repo = _resolve_issue_repo(project_root)
+        if issue_repo:
+            cmd += ["--issue-repo", issue_repo]
         tools_dir = _project_root_dir / "tools" / "agent_runner"
         if str(tools_dir) not in sys.path:
             sys.path.insert(0, str(tools_dir))
