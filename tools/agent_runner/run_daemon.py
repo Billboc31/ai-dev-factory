@@ -2689,7 +2689,10 @@ def main(argv: list[str]) -> int:
     REPO_ROOT = _resolve_repo_root(args)
 
     if args.project:
-        os.environ.setdefault("PROJECT_NAME", args.project)
+        # Force-scope DB rows to this project. setdefault is wrong: a parent
+        # process (supervisor/shell) often already exported PROJECT_NAME=ai-dev-factory,
+        # which made iptvflix intakes write into the wrong project_id and skip batches.
+        os.environ["PROJECT_NAME"] = args.project
 
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
     if runtime_root:
