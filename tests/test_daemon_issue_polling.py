@@ -10,6 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "tools" / "agent_runner"))
 
 from run_daemon import (
+    REPO_ROOT,
     call_issue_intake,
     clear_stale_run_dir,
     extract_ticket_id_from_title,
@@ -164,57 +165,67 @@ def test_slugify_title_no_trailing_hyphens():
 # ── fetch_ready_issues ────────────────────────────────────────────────────────
 
 def test_fetch_ready_issues_returns_parsed_issues(tmp_path):
-    payload = json.dumps([{"number": 42, "title": "My feature"}])
+    payload = json.dumps([
+        {"number": 42, "title": "My feature", "labels": [{"name": "ai-ready"}]},
+    ])
     mock_result = MagicMock(returncode=0, stdout=payload)
     with patch("run_daemon.subprocess.run", return_value=mock_result):
-        result = fetch_ready_issues("ai-ready", None)
+        result = fetch_ready_issues("ai-ready", "owner/repo")
     assert result == [{"number": 42, "title": "My feature"}]
 
 
-def test_fetch_ready_issues_passes_repo_flag():
+def test_fetch_ready_issues_uses_rest_api_path_for_repo():
     mock_result = MagicMock(returncode=0, stdout="[]")
     with patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
         fetch_ready_issues("ai-ready", "owner/repo")
     cmd = mock_sub.call_args[0][0]
-    assert "--repo" in cmd
-    assert "owner/repo" in cmd
+    assert cmd[:2] == ["gh", "api"]
+    assert "repos/owner/repo/issues" in cmd[2]
 
 
-def test_fetch_ready_issues_omits_repo_flag_when_none():
-    mock_result = MagicMock(returncode=0, stdout="[]")
-    with patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
+def test_fetch_ready_issues_resolves_repo_from_git_origin_when_none():
+    git_remote = MagicMock(returncode=0, stdout="git@github.com:Acme/demo.git\n")
+    gh_api = MagicMock(returncode=0, stdout="[]")
+    with patch("run_daemon.subprocess.run", side_effect=[git_remote, gh_api]) as mock_sub:
         fetch_ready_issues("ai-ready", None)
-    cmd = mock_sub.call_args[0][0]
-    assert "--repo" not in cmd
+    cmds = [c.args[0] for c in mock_sub.call_args_list]
+    assert cmds[0][:3] == ["git", "-C", str(REPO_ROOT)]
+    assert "repos/Acme/demo/issues" in cmds[1][2]
 
 
 def test_fetch_ready_issues_returns_empty_on_gh_failure():
     mock_result = MagicMock(returncode=1, stdout="", stderr="not logged in")
     with patch("run_daemon.subprocess.run", return_value=mock_result):
-        result = fetch_ready_issues("ai-ready", None)
+        result = fetch_ready_issues("ai-ready", "owner/repo")
     assert result == []
 
 
 def test_fetch_ready_issues_returns_empty_when_gh_not_found():
     with patch("run_daemon.subprocess.run", side_effect=FileNotFoundError):
-        result = fetch_ready_issues("ai-ready", None)
+        result = fetch_ready_issues("ai-ready", "owner/repo")
     assert result == []
 
 
 def test_fetch_ready_issues_returns_empty_on_empty_output():
     mock_result = MagicMock(returncode=0, stdout="")
     with patch("run_daemon.subprocess.run", return_value=mock_result):
-        result = fetch_ready_issues("ai-ready", None)
+        result = fetch_ready_issues("ai-ready", "owner/repo")
     assert result == []
 
 
-def test_fetch_ready_issues_passes_label_flag():
-    mock_result = MagicMock(returncode=0, stdout="[]")
-    with patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
-        fetch_ready_issues("my-label", None)
-    cmd = mock_sub.call_args[0][0]
-    assert "--label" in cmd
-    assert "my-label" in cmd
+def test_fetch_ready_issues_filters_by_label_client_side():
+    payload = json.dumps([
+        {"number": 1, "title": "A", "labels": [{"name": "ai-ready"}]},
+        {"number": 2, "title": "B", "labels": [{"name": "other"}]},
+        {"number": 3, "title": "C", "labels": [{"name": "ai-ready"}]},
+    ])
+    mock_result = MagicMock(returncode=0, stdout=payload)
+    with patch("run_daemon.subprocess.run", return_value=mock_result):
+        result = fetch_ready_issues("ai-ready", "owner/repo")
+    assert result == [
+        {"number": 1, "title": "A"},
+        {"number": 3, "title": "C"},
+    ]
 
 
 # ── call_issue_intake ─────────────────────────────────────────────────────────

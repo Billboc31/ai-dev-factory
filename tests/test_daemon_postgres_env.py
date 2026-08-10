@@ -75,6 +75,9 @@ def test_project_daemon_receives_project_id_and_pg_env(captured_spawn, monkeypat
     assert "--project" in cmd
     assert cmd[cmd.index("--project") + 1] == "test-ai-dev"
 
+    # Pin GitHub intake to the managed project's origin (not ambient cwd/gh defaults).
+    assert "--issue-repo" in cmd
+
     # PROJECT_NAME is overridden to the target project (not the supervisor's).
     assert env["PROJECT_NAME"] == "test-ai-dev"
 
