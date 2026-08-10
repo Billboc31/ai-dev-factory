@@ -1,7 +1,7 @@
 {
   "ticket_id": "T229",
-  "state": "PLAN_FIX_REQUIRED",
+  "state": "PLAN_REVIEW_NEEDED",
   "branch": "ticket/T229-add-one-click-project-deployment-for-end-to-end-va",
   "issue_number": 305,
-  "updated_at": "2026-08-10T20:35:00Z"
+  "updated_at": "2026-08-10T20:39:32Z"
 }
