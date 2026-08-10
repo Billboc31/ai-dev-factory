@@ -195,7 +195,11 @@ def _cached_db_path() -> "Path | None":
 
 
 def _ensure_db() -> "Path | None":
-    """Return an initialized DB path, resolving and initialising at most once per process."""
+    """Return an initialized DB path, resolving and initialising at most once per process.
+
+    Postgres mode never degrades silently: init failure raises so the daemon
+    exits instead of running without batches / intake index / settings.
+    """
     global _DB_INITIALIZED
     db_path = _cached_db_path()
     if not db_path:
@@ -206,9 +210,35 @@ def _ensure_db() -> "Path | None":
             _rdb_init(db_path)
             _DB_INITIALIZED = True
         except Exception as exc:
+            backend = os.environ.get("RUNTIME_DB_BACKEND", "sqlite").strip().lower()
+            if backend == "postgres":
+                _log(
+                    f"FATAL: Postgres runtime DB init failed: {exc} "
+                    "(install psycopg in this Python env; never falls back to SQLite)"
+                )
+                raise RuntimeError(f"Postgres runtime DB init failed: {exc}") from exc
             _log(f"SQLite init failed: {exc}")
             return None
     return db_path
+
+
+def _resolve_github_owner_repo(repo_root: Path | None = None) -> str:
+    """Return ``owner/name`` from ``git remote origin`` of the project checkout.
+
+    Always uses ``git -C <repo_root>`` so process cwd cannot pollute intake
+    (manual launches often start outside the managed project).
+    """
+    root = repo_root if repo_root is not None else REPO_ROOT
+    try:
+        origin = subprocess.run(
+            ["git", "-C", str(root), "remote", "get-url", "origin"],
+            capture_output=True, text=True, check=False,
+        )
+    except FileNotFoundError:
+        return ""
+    url = (origin.stdout or "").strip()
+    m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", url)
+    return f"{m.group(1)}/{m.group(2)}" if m else ""
 
 
 def _acquire_daemon_singleton(lock_dir: Path) -> bool:
@@ -1563,26 +1593,12 @@ def fetch_ready_issues(label: str, repo: str | None) -> list[dict]:
     factory polls every few seconds and GraphQL rate limits are exhausted quickly,
     which previously made new projects appear to never intake issues.
     """
-    if repo:
-        owner_repo = repo
-    else:
-        try:
-            # Always resolve from the daemon project checkout — not process cwd
-            # (manual/supervisor launches sometimes start with cwd elsewhere).
-            origin = subprocess.run(
-                ["git", "-C", str(REPO_ROOT), "remote", "get-url", "origin"],
-                capture_output=True, text=True, check=False,
-            )
-            url = (origin.stdout or "").strip()
-            m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", url)
-            owner_repo = f"{m.group(1)}/{m.group(2)}" if m else ""
-            if not owner_repo:
-                _log("cannot resolve GitHub repo for issue polling — skipping")
-                return []
-            _log(f"issue poll repo resolved from origin: {owner_repo}")
-        except FileNotFoundError:
-            _log("git not found — skipping issue polling")
-            return []
+    owner_repo = (repo or "").strip() or _resolve_github_owner_repo(REPO_ROOT)
+    if not owner_repo:
+        _log("cannot resolve GitHub repo for issue polling — skipping")
+        return []
+    if not repo:
+        _log(f"issue poll repo resolved from origin: {owner_repo}")
 
     # Paginate REST search/list; filter by label client-side for exact match.
     issues: list[dict] = []
@@ -2670,7 +2686,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--poll-project-map", action="store_true", help="Run issue mapper at each daemon cycle to refresh the project dependency map")
     parser.add_argument("--use-project-map", action="store_true", help="Use project map next_recommended for scheduling instead of FIFO (fallback to FIFO if map absent)")
     parser.add_argument("--project-root", default=None, help="Git root of the managed project (default: cwd when AI_DEV_FACTORY_RUNTIME_ROOT is set)")
-    parser.add_argument("--project", default=None, help="Project id for runtime DB scoping (also sets PROJECT_NAME when unset)")
+    parser.add_argument(
+        "--project",
+        default=None,
+        help="Project id for runtime DB scoping (always overrides inherited PROJECT_NAME)",
+    )
     return parser.parse_args(argv)
 
 
