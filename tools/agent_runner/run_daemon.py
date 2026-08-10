@@ -1567,26 +1567,21 @@ def fetch_ready_issues(label: str, repo: str | None) -> list[dict]:
         owner_repo = repo
     else:
         try:
-            remote = subprocess.run(
-                ["gh", "repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+            # Always resolve from the daemon project checkout — not process cwd
+            # (manual/supervisor launches sometimes start with cwd elsewhere).
+            origin = subprocess.run(
+                ["git", "-C", str(REPO_ROOT), "remote", "get-url", "origin"],
                 capture_output=True, text=True, check=False,
             )
-            owner_repo = (remote.stdout or "").strip()
-            if remote.returncode != 0 or not owner_repo:
-                # Fallback: parse origin URL without GraphQL
-                origin = subprocess.run(
-                    ["git", "remote", "get-url", "origin"],
-                    capture_output=True, text=True, check=False,
-                )
-                url = (origin.stdout or "").strip()
-                # git@github.com:Owner/repo.git or https://github.com/Owner/repo.git
-                m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", url)
-                owner_repo = f"{m.group(1)}/{m.group(2)}" if m else ""
+            url = (origin.stdout or "").strip()
+            m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", url)
+            owner_repo = f"{m.group(1)}/{m.group(2)}" if m else ""
             if not owner_repo:
                 _log("cannot resolve GitHub repo for issue polling — skipping")
                 return []
+            _log(f"issue poll repo resolved from origin: {owner_repo}")
         except FileNotFoundError:
-            _log("gh/git not found — skipping issue polling")
+            _log("git not found — skipping issue polling")
             return []
 
     # Paginate REST search/list; filter by label client-side for exact match.
