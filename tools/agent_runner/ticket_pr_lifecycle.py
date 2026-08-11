@@ -101,6 +101,157 @@ def rebase_onto_ref(integration_branch: str) -> str:
     return f"origin/{branch}"
 
 
+def _list_unmerged_paths(*, cwd: str | Path | None = None) -> list[str]:
+    result = subprocess.run(
+        ["git", "diff", "--name-only", "--diff-filter=U"],
+        cwd=str(cwd) if cwd else None,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode not in (0, 1):
+        return []
+    return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+
+
+def rebase_ticket_onto_integration(
+    ticket_id: str,
+    run_dir: Path,
+    *,
+    cwd: str | Path | None = None,
+    repo: str | None = None,
+    push: bool = False,
+) -> tuple[bool, list[str]]:
+    """Rebase the ticket branch onto the latest integration branch (usually main).
+
+    Batch intake creates branches early; main often moves before planner/coder/
+    tester run. Rebasing before those steps avoids stale plans, duplicate
+    migrations, and edits against outdated shared files.
+
+    Returns ``(ok, conflicted_files)``. On conflict, leaves the rebase in
+    progress so the conflict-resolver can continue, and records
+    ``CONFLICT_RESOLUTION_NEEDED`` in ``state.json``.
+    """
+    work = Path(cwd) if cwd else Path.cwd()
+    integration = resolve_integration_branch(ticket_id, run_dir, repo)
+    rebase_ref = rebase_onto_ref(integration)
+
+    fetch = subprocess.run(
+        ["git", "fetch", "origin", integration],
+        cwd=str(work),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if fetch.returncode != 0:
+        err = (fetch.stderr or fetch.stdout or "").strip()
+        _log(f"{ticket_id}: integration rebase: git fetch failed: {err}")
+        return False, []
+
+    # Already up to date?
+    mb = subprocess.run(
+        ["git", "merge-base", "HEAD", rebase_ref],
+        cwd=str(work),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    tip = subprocess.run(
+        ["git", "rev-parse", rebase_ref],
+        cwd=str(work),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if (
+        mb.returncode == 0
+        and tip.returncode == 0
+        and mb.stdout.strip()
+        and mb.stdout.strip() == tip.stdout.strip()
+    ):
+        _log(f"{ticket_id}: integration rebase: already based on {rebase_ref}")
+        return True, []
+
+    _log(f"{ticket_id}: integration rebase onto {rebase_ref}")
+    rebase = subprocess.run(
+        ["git", "rebase", rebase_ref],
+        cwd=str(work),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if rebase.returncode == 0:
+        # Optional: renumber migrations if both sides landed without textual conflict
+        try:
+            from migration_index_fix import fix_duplicate_migration_indexes
+
+            fix = fix_duplicate_migration_indexes(
+                work, integration_ref=rebase_ref, cwd=work,
+            )
+            if fix.changed:
+                _log(f"{ticket_id}: integration rebase migration fix: {fix.summary}")
+                for src, dst in fix.renames:
+                    subprocess.run(
+                        ["git", "add", "-A", "--", src, dst],
+                        cwd=str(work),
+                        capture_output=True,
+                        check=False,
+                    )
+                # Stage journals/snapshots under any migrations/ tree
+                for path in work.rglob("migrations"):
+                    if path.is_dir() and "node_modules" not in path.parts:
+                        subprocess.run(
+                            ["git", "add", "-A", "--", str(path)],
+                            cwd=str(work),
+                            capture_output=True,
+                            check=False,
+                        )
+                subprocess.run(
+                    [
+                        "git", "commit", "-m",
+                        f"chore({ticket_id}): renumber migrations after rebase onto {integration}",
+                    ],
+                    cwd=str(work),
+                    capture_output=True,
+                    check=False,
+                )
+        except Exception as exc:
+            _log(f"{ticket_id}: integration rebase migration fix skipped: {exc}")
+
+        if push:
+            push_result = subprocess.run(
+                ["git", "push", "--force-with-lease", "origin", "HEAD"],
+                cwd=str(work),
+                capture_output=True,
+                text=True,
+                check=False,
+            )
+            if push_result.returncode != 0:
+                err = (push_result.stderr or push_result.stdout or "").strip()
+                _log(f"{ticket_id}: integration rebase push failed: {err}")
+                return False, []
+        _log(f"{ticket_id}: integration rebase onto {rebase_ref} ok")
+        return True, []
+
+    conflicted = _list_unmerged_paths(cwd=work)
+    _log(
+        f"{ticket_id}: integration rebase onto {rebase_ref} conflicted "
+        f"({len(conflicted)} files) — handing off to conflict resolver"
+    )
+    state = _load_state_json(run_dir)
+    pre = state.get("state") or "PLAN_APPROVED"
+    state["pre_conflict_state"] = pre
+    state["state"] = "CONFLICT_RESOLUTION_NEEDED"
+    state["conflict_detected_at"] = _now_iso()
+    state["conflicted_files"] = conflicted
+    state["updated_at"] = _now_iso()
+    state.pop("conflict_clear_reason", None)
+    state.pop("conflict_cleared_at", None)
+    # Keep rebase in progress — conflict-resolver resumes it.
+    _save_state_json(run_dir, state)
+    return False, conflicted
+
+
 def ensure_pr_base_branch(
     ticket_id: str,
     run_dir: Path,
@@ -756,6 +907,7 @@ __all__ = [
     "handle_test_complete",
     "needs_pr_finalization",
     "rebase_onto_ref",
+    "rebase_ticket_onto_integration",
     "resolve_integration_branch",
     "_checkpoint_and_push_before_pr",
     "_fix_migration_indexes_before_pr",

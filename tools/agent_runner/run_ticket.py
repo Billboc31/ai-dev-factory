@@ -98,6 +98,11 @@ DEFAULT_OUTPUTS: dict[str, str] = {
     "tester": "tests/test-report.md",
 }
 
+# Batch intake creates branches early. Rebase onto latest main before any step
+# that reads/writes the product worktree so plans, code and tests are not stale.
+# Skip review: it must judge the commits already on the ticket branch.
+REBASE_BEFORE_STEPS: frozenset[str] = frozenset({"planner", "coder", "tester"})
+
 # Allowed paths for --include-code staging — never extended to "." or "*"
 COMMIT_SCOPE: tuple[str, ...] = (
     "tools/",
@@ -1324,6 +1329,39 @@ def auto_run(ticket_id: str, exec_cmd: str, auto_commit: bool = False, auto_push
     step, is_deterministic, possible_next = transition
     print(f"[auto] state={current_state} step={step}")
     _log_runtime(ticket_id, f"auto-run: running step={step}")
+
+    # Rebase onto latest main before planner/coder/tester (not review).
+    if step in REBASE_BEFORE_STEPS:
+        try:
+            import ticket_pr_lifecycle as pr  # noqa: WPS433
+
+            run_dir = Path("runs") / ticket_id
+            ok, conflicted = pr.rebase_ticket_onto_integration(
+                ticket_id,
+                run_dir,
+                push=auto_push,
+            )
+            if not ok:
+                if conflicted:
+                    _log_runtime(
+                        ticket_id,
+                        f"auto-run: pre-{step} rebase conflicted — "
+                        f"CONFLICT_RESOLUTION_NEEDED ({len(conflicted)} files)",
+                    )
+                    print(
+                        f"error: pre-{step} rebase onto main hit conflicts — "
+                        f"state=CONFLICT_RESOLUTION_NEEDED ({step} not started)",
+                        file=sys.stderr,
+                    )
+                    return 2
+                _log_runtime(ticket_id, f"auto-run: pre-{step} rebase failed")
+                print(f"error: pre-{step} rebase onto main failed", file=sys.stderr)
+                return 2
+            _log_runtime(ticket_id, f"auto-run: pre-{step} rebase onto integration ok")
+        except Exception as exc:
+            _log_runtime(ticket_id, f"auto-run: pre-{step} rebase error: {exc}")
+            print(f"error: pre-{step} rebase failed: {exc}", file=sys.stderr)
+            return 2
 
     extra_context_file: Path | None = None
     if current_state in {"PLAN_FIX_REQUIRED", "IMPLEMENTATION_FIX_REQUIRED"}:
