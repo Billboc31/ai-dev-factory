@@ -455,6 +455,55 @@ def _checkpoint_and_push_before_pr(ticket_id: str, cwd: str | None = None) -> bo
         return False
 
 
+def _fix_migration_indexes_before_pr(
+    ticket_id: str,
+    run_dir: Path,
+    cwd: str | None = None,
+) -> bool:
+    """Renumber ticket migrations that collide with the integration branch.
+
+    Returns True when files were rewritten (a follow-up checkpoint is needed).
+    """
+    from migration_index_fix import fix_duplicate_migration_indexes
+
+    work = Path(cwd).resolve() if cwd else Path.cwd()
+    integration = resolve_integration_branch(ticket_id, run_dir)
+    ref = rebase_onto_ref(integration)
+    fetch = subprocess.run(
+        ["git", "fetch", "origin", integration],
+        cwd=str(work),
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if fetch.returncode != 0:
+        _log(
+            f"{ticket_id}: pre-PR migration fix: git fetch failed "
+            f"(rc={fetch.returncode}) — continuing without renumber"
+        )
+        return False
+
+    result = fix_duplicate_migration_indexes(work, integration_ref=ref, cwd=work)
+    if not result.changed:
+        _log(f"{ticket_id}: pre-PR migration fix: {result.summary}")
+        return False
+
+    _log(f"{ticket_id}: pre-PR migration fix applied — {result.summary}")
+    try:
+        checkpoint_transition(
+            ticket_id,
+            f"chore({ticket_id}): renumber migrations onto {integration}",
+            push=True,
+            include_code=True,
+            cwd=cwd,
+        )
+        _log(f"{ticket_id}: pre-PR migration fix checkpoint ok")
+    except (CheckpointError, DirtyTreeError) as exc:
+        _log(f"{ticket_id}: pre-PR migration fix checkpoint failed: {exc}")
+        return False
+    return True
+
+
 def auto_merge_pr(ticket_id: str, run_dir: Path, repo: str | None) -> bool:
     """Merge the ticket PR automatically if all guards pass. Returns True if merged."""
     state = _load_state_json(run_dir)
@@ -668,6 +717,7 @@ def handle_test_complete(
 ) -> None:
     """Orchestrate PR lifecycle for a ticket at TEST_COMPLETE."""
     _log(f"{ticket_id}: TEST_COMPLETE PR lifecycle")
+    _fix_migration_indexes_before_pr(ticket_id, run_dir, cwd=worktree_cwd)
     if not _checkpoint_and_push_before_pr(ticket_id, cwd=worktree_cwd):
         _log(f"{ticket_id}: pre-PR push failed — PR skipped")
         return
@@ -708,6 +758,7 @@ __all__ = [
     "rebase_onto_ref",
     "resolve_integration_branch",
     "_checkpoint_and_push_before_pr",
+    "_fix_migration_indexes_before_pr",
     "_load_state_json",
     "_pr_body",
     "_save_state_json",

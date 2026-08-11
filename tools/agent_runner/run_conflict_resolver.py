@@ -20,11 +20,16 @@ import datetime
 import importlib.util
 import json
 import os
-import re
 import subprocess
 import sys
-from collections import defaultdict
 from pathlib import Path
+
+from migration_index_fix import (
+    duplicate_migration_path_groups as _mig_duplicate_groups,
+    find_duplicate_migration_indexes as _mig_find_duplicates,
+    fix_duplicate_migration_indexes,
+    migrations_only_conflict_paths,
+)
 
 
 os.environ.setdefault("PYTHONDONTWRITEBYTECODE", "1")
@@ -273,50 +278,149 @@ def _has_conflict_markers(path: str) -> bool:
     return False
 
 
-_MIGRATION_SQL_NAME = re.compile(r"^(\d{4})_.+\.sql$")
-
-
 def _find_duplicate_migration_indexes(root: Path | None = None) -> list[str]:
-    """Detect two Drizzle/ORM SQL migrations sharing the same numeric prefix.
-
-    Classic parallel-coding failure: main has ``0004_wild_legion.sql`` and the
-    ticket kept ``0004_careless_moon_knight.sql`` instead of renumbering to
-    ``0005_…``. That is not a successful conflict resolution.
-
-    Returns human-readable error lines (empty when OK).
-    """
-    groups = _duplicate_migration_path_groups(root)
-    errors: list[str] = []
-    for files in groups:
-        index = _MIGRATION_SQL_NAME.match(Path(files[0]).name)
-        idx = index.group(1) if index else "?"
-        listed = ", ".join(sorted(files))
-        errors.append(
-            f"duplicate migration index {idx}: {listed} "
-            f"— renumber the ticket migration to the next free index"
-        )
-    return errors
+    """Detect two Drizzle/ORM SQL migrations sharing the same numeric prefix."""
+    return _mig_find_duplicates(root or Path.cwd())
 
 
 def _duplicate_migration_path_groups(root: Path | None = None) -> list[list[str]]:
-    """Return groups of migration SQL paths that share the same numeric index."""
+    """Return groups of migration SQL relative paths that share an index."""
     base = root or Path.cwd()
-    by_dir_index: dict[tuple[str, str], list[str]] = defaultdict(list)
-    for path in base.rglob("*.sql"):
-        if "migrations" not in path.parts:
+    groups = _mig_duplicate_groups(base)
+    out: list[list[str]] = []
+    for group in groups:
+        rels: list[str] = []
+        for path in group:
+            try:
+                rels.append(path.relative_to(base).as_posix())
+            except ValueError:
+                rels.append(path.as_posix())
+        out.append(rels)
+    return out
+
+
+def _stage_migration_roots(paths: list[str]) -> list[str]:
+    """Expand path list with enclosing ``migrations/`` dirs for renames."""
+    staged = list(dict.fromkeys(paths))
+    mig_roots: list[str] = []
+    for path in paths:
+        parts = Path(path).parts
+        if "migrations" not in parts:
             continue
-        if any(part in {"node_modules", ".git", "dist", "build", "target"} for part in path.parts):
+        idx = parts.index("migrations")
+        mig_roots.append(str(Path(*parts[: idx + 1])))
+    for root in dict.fromkeys(mig_roots):
+        if root not in staged:
+            staged.append(root)
+    return staged
+
+
+def _checkout_migration_side_for_rebase(path: str, *, prefer_upstream: bool) -> None:
+    """Resolve one path during rebase: upstream=``--ours``, ticket=``--theirs``."""
+    preferred = "--ours" if prefer_upstream else "--theirs"
+    fallback = "--theirs" if prefer_upstream else "--ours"
+    result = _run_git(["checkout", preferred, "--", path])
+    if result.returncode != 0:
+        _run_git(["checkout", fallback, "--", path])
+
+
+def _prepare_migrations_for_mechanical_fix(
+    ticket_id: str,
+    conflicted: list[str],
+    integration_ref: str,
+) -> None:
+    """Clear conflict markers on migration paths so the mechanical fixer can run.
+
+    During rebase, ``--ours`` is upstream (main). Keep upstream for journal /
+    snapshots / SQL already on main; keep the ticket side for new ticket SQL.
+    """
+    main_sql: set[str] = set()
+    listed = _run_git(["ls-tree", "-r", "--name-only", integration_ref, "--"])
+    if listed.returncode == 0:
+        for line in listed.stdout.splitlines():
+            line = line.strip()
+            if "/migrations/" in line and line.endswith(".sql"):
+                main_sql.add(Path(line).name)
+
+    for path in conflicted:
+        parts = Path(path).parts
+        if "migrations" not in parts:
             continue
-        match = _MIGRATION_SQL_NAME.match(path.name)
-        if not match:
-            continue
-        try:
-            rel = path.relative_to(base).as_posix()
-        except ValueError:
-            rel = path.as_posix()
-        parent = path.parent.as_posix()
-        by_dir_index[(parent, match.group(1))].append(rel)
-    return [files for files in by_dir_index.values() if len(files) >= 2]
+        if not Path(path).exists() and not _has_conflict_markers(path):
+            # Still try checkout for unmerged paths
+            pass
+        name = Path(path).name
+        if name.endswith(".sql"):
+            prefer_upstream = name in main_sql
+        else:
+            # journal / snapshots: start from upstream, fixer adjusts tags
+            prefer_upstream = True
+        _checkout_migration_side_for_rebase(path, prefer_upstream=prefer_upstream)
+        _log(
+            ticket_id,
+            f"migration pre-fix checkout "
+            f"{'ours' if prefer_upstream else 'theirs'} for {path}",
+        )
+
+
+def _apply_mechanical_migration_fix(
+    ticket_id: str,
+    conflict_dir: Path,
+    integration_ref: str,
+    conflicted: list[str] | None = None,
+) -> bool:
+    """Renumber duplicate migration indexes. Returns True when duplicates are gone."""
+    if conflicted:
+        mig_paths = [p for p in conflicted if "migrations" in Path(p).parts]
+        if mig_paths:
+            _prepare_migrations_for_mechanical_fix(
+                ticket_id, mig_paths, integration_ref,
+            )
+
+    before = _find_duplicate_migration_indexes()
+    if not before and not (conflicted and migrations_only_conflict_paths(conflicted)):
+        # No duplicate indexes; only run when we still need to clear migration markers
+        if not conflicted:
+            return False
+        mig_paths = [p for p in conflicted if "migrations" in Path(p).parts]
+        if not mig_paths:
+            return False
+        # Markers may remain on journal even without duplicate SQL names
+        if not any(_has_conflict_markers(p) for p in mig_paths):
+            return False
+
+    result = fix_duplicate_migration_indexes(
+        Path.cwd(),
+        integration_ref=integration_ref,
+        cwd=Path.cwd(),
+    )
+    note = conflict_dir / "migration-check.md"
+    note.write_text(
+        "mechanical migration index fix\n"
+        f"changed={result.changed}\n"
+        f"{result.summary}\n"
+        + "\n".join(result.messages)
+        + "\n",
+        encoding="utf-8",
+    )
+    _log(ticket_id, f"mechanical migration fix: {result.summary}")
+
+    after = _find_duplicate_migration_indexes()
+    if after:
+        _log(ticket_id, "mechanical migration fix left duplicates: " + "; ".join(after))
+        return False
+
+    paths_to_stage = list(conflicted or [])
+    for src, dst in result.renames:
+        paths_to_stage.append(src)
+        paths_to_stage.append(dst)
+    staged = _stage_migration_roots(paths_to_stage)
+    if staged:
+        add = _run_git(["add", "--"] + staged)
+        if add.returncode != 0:
+            _log(ticket_id, f"mechanical migration fix git add failed: {add.stderr.strip()}")
+            return False
+    return True
 
 
 def _scan_source_marker_conflicts(ticket_id: str) -> list[str]:
@@ -906,6 +1010,49 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
             pass_conflicted = list(conflicted_files)
             _log(ticket_id, f"[pass {pass_count}/{MAX_RESOLVER_PASSES}] start conflicted={pass_conflicted}")
 
+            # Mechanical migration renumber before LLM when possible (T011/T014 pattern).
+            mig_conflicted = [p for p in pass_conflicted if "migrations" in Path(p).parts]
+            if mig_conflicted and (
+                migrations_only_conflict_paths(pass_conflicted)
+                or _find_duplicate_migration_indexes()
+                or any(_has_conflict_markers(p) for p in mig_conflicted)
+            ):
+                if _apply_mechanical_migration_fix(
+                    ticket_id,
+                    conflict_dir,
+                    rebase_ref,
+                    conflicted=pass_conflicted,
+                ):
+                    still_markers = [
+                        f for f in pass_conflicted if _has_conflict_markers(f)
+                    ]
+                    if not still_markers and not _find_duplicate_migration_indexes():
+                        continue_result = _run_rebase_continue(ticket_id)
+                        if continue_result.returncode == 0 or (
+                            "nothing to commit" in (
+                                continue_result.stdout + continue_result.stderr
+                            ).lower()
+                        ):
+                            if continue_result.returncode != 0:
+                                _run_git(["rebase", "--skip"])
+                            conflicted_files = _advance_past_runtime_conflicts(
+                                ticket_id, run_dir, data,
+                            )
+                            if conflicted_files is None:
+                                _abort_rebase(ticket_id)
+                                _transition_state(
+                                    ticket_id, run_dir, "CONFLICT_RESOLUTION_FAILED",
+                                    backup=state_backup,
+                                )
+                                return 2
+                            _log(
+                                ticket_id,
+                                f"[pass {pass_count}] mechanical migration fix advanced "
+                                f"next_source={conflicted_files}",
+                            )
+                            continue
+                    # Fall through to LLM for remaining non-migration / marker issues.
+
             # Collect context after conflict markers exist on disk
             try:
                 context_path = collect_context(ticket_id, conflicted_files=pass_conflicted)
@@ -959,34 +1106,33 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
                 conflicted_files = still_unresolved_markers
                 continue
 
-            dup_groups = _duplicate_migration_path_groups()
-            if dup_groups:
-                dup_errors = _find_duplicate_migration_indexes()
-                msg = (
-                    f"AI resolver pass {pass_count} left duplicate migration indexes:\n"
-                    + "\n".join(dup_errors)
-                )
-                _log(ticket_id, msg)
-                _write_error_log(run_dir, msg, stderr_ai)
-                (conflict_dir / "migration-check.md").write_text(msg + "\n", encoding="utf-8")
-                offending = sorted({p for group in dup_groups for p in group})
-                conflicted_files = offending
-                continue
+            if _find_duplicate_migration_indexes():
+                if _apply_mechanical_migration_fix(
+                    ticket_id,
+                    conflict_dir,
+                    rebase_ref,
+                    conflicted=pass_conflicted,
+                ):
+                    _log(ticket_id, f"[pass {pass_count}] mechanical fix cleared duplicate migrations")
+                else:
+                    dup_errors = _find_duplicate_migration_indexes()
+                    msg = (
+                        f"AI resolver pass {pass_count} left duplicate migration indexes:\n"
+                        + "\n".join(dup_errors)
+                    )
+                    _log(ticket_id, msg)
+                    _write_error_log(run_dir, msg, stderr_ai)
+                    (conflict_dir / "migration-check.md").write_text(msg + "\n", encoding="utf-8")
+                    offending = sorted(
+                        {p for group in _duplicate_migration_path_groups() for p in group}
+                    )
+                    conflicted_files = offending
+                    continue
 
             # Stage only the conflicted files (not git add -A).
             # For ORM migrations, stage the whole migrations/ dir so renames
             # (0004_ticket → 0005_ticket) and journal/snapshot updates are included.
-            staged = list(dict.fromkeys(pass_conflicted))
-            mig_roots: list[str] = []
-            for path in pass_conflicted:
-                parts = Path(path).parts
-                if "migrations" not in parts:
-                    continue
-                idx = parts.index("migrations")
-                mig_roots.append(str(Path(*parts[: idx + 1])))
-            for root in dict.fromkeys(mig_roots):
-                if root not in staged:
-                    staged.append(root)
+            staged = _stage_migration_roots(pass_conflicted)
             add = _run_git(["add", "--"] + staged)
             if add.returncode != 0:
                 msg = f"git add failed: {add.stderr.strip()}"
