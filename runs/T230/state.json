@@ -1,7 +1,7 @@
 {
   "ticket_id": "T230",
-  "state": "PLAN_REVIEW_NEEDED",
+  "state": "PLAN_FIX_REQUIRED",
   "branch": "ticket/T230-batch-ui-show-per-ticket-pipeline-status-while-bat",
   "issue_number": 317,
-  "updated_at": "2026-08-10T21:02:59Z"
+  "updated_at": "2026-08-11T06:51:48Z"
 }
