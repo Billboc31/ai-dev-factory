@@ -410,3 +410,17 @@ def test_collect_dependency_ticket_ids_excludes_self(evaluator):
     )
     assert deps == ["T002", "T004"]
     assert "T005" not in deps
+
+
+def test_remap_spurious_issue_number_deps_rewrites_missing_ticket(evaluator):
+    """#19 ingested as T010 must not block forever as phantom T019."""
+    mapping = {19: "T010", 20: "T011"}
+    assert evaluator.remap_spurious_issue_number_deps(
+        ["T019", "T010"],
+        issue_to_ticket=mapping,
+    ) == ["T010"]
+    # Real ticket ids that exist in intake are left alone.
+    assert evaluator.remap_spurious_issue_number_deps(
+        ["T011"],
+        issue_to_ticket=mapping,
+    ) == ["T011"]

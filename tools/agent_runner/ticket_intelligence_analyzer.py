@@ -222,10 +222,14 @@ You are a Ticket Intelligence Analyzer for an AI-assisted software development s
 Analyze the ticket content and computed signals below, then return ONLY a valid JSON object.
 Do not include any explanation, markdown, or text outside the JSON object.
 
-For ``dependency_hints``: list only ticket IDs this ticket truly cannot start without
-(explicit ``## Depends on`` section or clear prose dependency). Use ``[]`` when none.
+For ``dependency_hints``: list only **existing factory ticket IDs** (e.g. ``T010``)
+this ticket truly cannot start without (explicit ``## Depends on`` / ``## Dependencies``
+section or clear prose dependency). Use ``[]`` when none.
 Never include illustrative/example ticket IDs from code blocks, sample graphs, or
 mock UI data.
+**Never invent a ticket id from a GitHub issue number** — ``#19`` / ``issue 19`` is
+NOT ``T019``. Issue numbers and ticket IDs are independent sequences; only emit
+ids like ``T010`` when that ticket is the real dependency.
 
 ## Ticket Content
 
