@@ -5,8 +5,10 @@ import {
   getBatchGraph,
   getBatchPhases,
   getBatchInsights,
+  getBatchPipelineStatus,
 } from '../api/batches'
 import BatchAnalysisSummaryPanel from '../components/BatchAnalysisSummaryPanel'
+import BatchPipelineStatusPanel from '../components/BatchPipelineStatusPanel'
 import BatchDependencyGraph, { colorClassForKey } from '../components/BatchDependencyGraph'
 import BatchPhasesPanel from '../components/BatchPhasesPanel'
 import DispatcherInsightsPanel from '../components/DispatcherInsightsPanel'
@@ -278,6 +280,7 @@ export default function BatchDetailPage() {
   const [graph, setGraph] = useState(null)
   const [phases, setPhases] = useState([])
   const [insights, setInsights] = useState(null)
+  const [pipelineStatus, setPipelineStatus] = useState(null)
   const [error, setError] = useState(null)
   const [loading, setLoading] = useState(true)
   const [lastUpdated, setLastUpdated] = useState(null)
@@ -288,12 +291,14 @@ export default function BatchDetailPage() {
       getBatchGraph(projectId, batchId),
       getBatchPhases(projectId, batchId),
       getBatchInsights(projectId, batchId),
+      getBatchPipelineStatus(projectId, batchId),
     ])
-      .then(([detailRes, graphRes, phasesRes, insightsRes]) => {
+      .then(([detailRes, graphRes, phasesRes, insightsRes, pipelineRes]) => {
         setDetail(detailRes.data)
         setGraph(graphRes.data)
         setPhases(phasesRes.data?.phases || [])
         setInsights(insightsRes.data)
+        setPipelineStatus(pipelineRes.data)
         setLastUpdated(new Date())
         setError(null)
       })
@@ -323,6 +328,10 @@ export default function BatchDetailPage() {
           Updated at {lastUpdated.toLocaleTimeString()}
         </p>
       )}
+
+      <section className="mb-6">
+        <BatchPipelineStatusPanel data={pipelineStatus} />
+      </section>
 
       <section className="mb-6">
         <BatchAnalysisSummaryPanel summary={detail.analysis_summary} />

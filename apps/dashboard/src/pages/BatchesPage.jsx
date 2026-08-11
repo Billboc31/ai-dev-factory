@@ -228,6 +228,11 @@ export default function BatchesPage() {
                   <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusBadgeClass(batch.status)}`}>
                     {batch.status}
                   </span>
+                  {batch.pipeline_summary && (
+                    <p className="text-xs italic text-gray-500 mt-0.5">
+                      {batch.pipeline_summary}
+                    </p>
+                  )}
                 </td>
                 <td className="p-3 text-xs">{batch.ticket_count}</td>
                 <td className="p-3 text-xs text-gray-600">
