@@ -104,12 +104,18 @@ def test_create_or_update_pr_targets_integration_branch(tmp_path):
 
 def test_ensure_pr_base_branch_retargests_when_needed(tmp_path):
     run_dir = _make_run_dir(tmp_path, pr_number=34)
-    mock_view = MagicMock(returncode=0, stdout='{"baseRefName":"ai-dev-factory/bootstrap-agent-layout"}')
+    mock_view = MagicMock(
+        returncode=0,
+        stdout=json.dumps({"base": {"ref": "ai-dev-factory/bootstrap-agent-layout"}}),
+    )
     mock_edit = MagicMock(returncode=0, stdout="")
-    with patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_view, mock_edit]) as mock_sub:
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_view, mock_edit]) as mock_sub:
         assert ensure_pr_base_branch("T001", run_dir, "owner/repo") is True
     edit_args = mock_sub.call_args_list[1][0][0]
-    assert edit_args == ["gh", "pr", "edit", "34", "--base", "main", "--repo", "owner/repo"]
+    assert edit_args[:3] == ["gh", "api", "repos/owner/repo/pulls/34"]
+    assert "PATCH" in edit_args
+    assert "base=main" in edit_args
 
 
 def test_rebase_onto_ref_normalizes_branch():
@@ -317,17 +323,19 @@ def test_create_or_update_pr_does_not_mark_archived_on_other_error(tmp_path):
 
 def test_auto_merge_pr_merges_open_pr(tmp_path):
     run_dir = _make_run_dir(tmp_path, pr_number=42)
-    mock_view = MagicMock(returncode=0, stdout=json.dumps({"state": "OPEN", "mergeable": "MERGEABLE"}))
-    mock_merge = MagicMock(returncode=0, stdout="", stderr="")
-    with patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_view, mock_merge]) as mock_sub:
-        result = auto_merge_pr("T001", run_dir, None)
+    mock_view = MagicMock(
+        returncode=0,
+        stdout=json.dumps({"state": "open", "merged": False, "mergeable": True, "mergeable_state": "clean"}),
+    )
+    mock_merge = MagicMock(returncode=0, stdout=json.dumps({"merged": True}), stderr="")
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_view, mock_merge]) as mock_sub:
+        result = auto_merge_pr("T001", run_dir, "owner/repo")
     assert result is True
     merge_cmd = mock_sub.call_args_list[1][0][0]
-    assert "pr" in merge_cmd
-    assert "merge" in merge_cmd
-    assert "42" in merge_cmd
-    assert "--squash" in merge_cmd
-    assert "--delete-branch" in merge_cmd
+    assert merge_cmd[:3] == ["gh", "api", "repos/owner/repo/pulls/42/merge"]
+    assert "PUT" in merge_cmd
+    assert "merge_method=squash" in merge_cmd
     saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved.get("pr_merged") is True
     assert saved.get("daemon_archived") is True
@@ -351,9 +359,13 @@ def test_auto_merge_pr_skips_when_already_merged(tmp_path):
 
 def test_auto_merge_pr_detects_already_merged_pr(tmp_path):
     run_dir = _make_run_dir(tmp_path, pr_number=42)
-    mock_view = MagicMock(returncode=0, stdout=json.dumps({"state": "MERGED", "mergeable": "MERGEABLE"}))
-    with patch("ticket_pr_lifecycle.subprocess.run", return_value=mock_view):
-        result = auto_merge_pr("T001", run_dir, None)
+    mock_view = MagicMock(
+        returncode=0,
+        stdout=json.dumps({"state": "closed", "merged": True, "mergeable": True}),
+    )
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", return_value=mock_view):
+        result = auto_merge_pr("T001", run_dir, "owner/repo")
     assert result is True
     saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved.get("pr_merged") is True
@@ -362,17 +374,25 @@ def test_auto_merge_pr_detects_already_merged_pr(tmp_path):
 
 def test_auto_merge_pr_skips_closed_pr(tmp_path):
     run_dir = _make_run_dir(tmp_path, pr_number=42)
-    mock_view = MagicMock(returncode=0, stdout=json.dumps({"state": "CLOSED", "mergeable": "MERGEABLE"}))
-    with patch("ticket_pr_lifecycle.subprocess.run", return_value=mock_view):
-        result = auto_merge_pr("T001", run_dir, None)
+    mock_view = MagicMock(
+        returncode=0,
+        stdout=json.dumps({"state": "closed", "merged": False, "mergeable": True}),
+    )
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", return_value=mock_view):
+        result = auto_merge_pr("T001", run_dir, "owner/repo")
     assert result is False
 
 
 def test_auto_merge_pr_skips_conflicting_pr(tmp_path):
     run_dir = _make_run_dir(tmp_path, pr_number=42)
-    mock_view = MagicMock(returncode=0, stdout=json.dumps({"state": "OPEN", "mergeable": "CONFLICTING"}))
-    with patch("ticket_pr_lifecycle.subprocess.run", return_value=mock_view):
-        result = auto_merge_pr("T001", run_dir, None)
+    mock_view = MagicMock(
+        returncode=0,
+        stdout=json.dumps({"state": "open", "merged": False, "mergeable": False, "mergeable_state": "dirty"}),
+    )
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", return_value=mock_view):
+        result = auto_merge_pr("T001", run_dir, "owner/repo")
     assert result is False
     saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved.get("pr_merged") is None
@@ -380,10 +400,14 @@ def test_auto_merge_pr_skips_conflicting_pr(tmp_path):
 
 def test_auto_merge_pr_returns_false_when_gh_merge_fails(tmp_path):
     run_dir = _make_run_dir(tmp_path, pr_number=42)
-    mock_view = MagicMock(returncode=0, stdout=json.dumps({"state": "OPEN", "mergeable": "MERGEABLE"}))
+    mock_view = MagicMock(
+        returncode=0,
+        stdout=json.dumps({"state": "open", "merged": False, "mergeable": True, "mergeable_state": "clean"}),
+    )
     mock_merge = MagicMock(returncode=1, stdout="", stderr="merge blocked by required review")
-    with patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_view, mock_merge]):
-        result = auto_merge_pr("T001", run_dir, None)
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_view, mock_merge]):
+        result = auto_merge_pr("T001", run_dir, "owner/repo")
     assert result is False
     saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved.get("pr_merged") is None
@@ -392,31 +416,38 @@ def test_auto_merge_pr_returns_false_when_gh_merge_fails(tmp_path):
 
 def test_auto_merge_pr_returns_false_when_gh_not_found(tmp_path):
     run_dir = _make_run_dir(tmp_path, pr_number=42)
-    with patch("ticket_pr_lifecycle.subprocess.run", side_effect=FileNotFoundError):
-        result = auto_merge_pr("T001", run_dir, None)
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", side_effect=FileNotFoundError):
+        result = auto_merge_pr("T001", run_dir, "owner/repo")
     assert result is False
 
 
 def test_auto_merge_pr_passes_repo_flag(tmp_path):
     run_dir = _make_run_dir(tmp_path, pr_number=42)
-    mock_view = MagicMock(returncode=0, stdout=json.dumps({"state": "OPEN", "mergeable": "MERGEABLE"}))
-    mock_merge = MagicMock(returncode=0, stdout="", stderr="")
-    with patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_view, mock_merge]) as mock_sub:
+    mock_view = MagicMock(
+        returncode=0,
+        stdout=json.dumps({"state": "open", "merged": False, "mergeable": True, "mergeable_state": "clean"}),
+    )
+    mock_merge = MagicMock(returncode=0, stdout=json.dumps({"merged": True}), stderr="")
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_view, mock_merge]) as mock_sub:
         auto_merge_pr("T001", run_dir, "owner/repo")
     view_cmd = mock_sub.call_args_list[0][0][0]
     merge_cmd = mock_sub.call_args_list[1][0][0]
-    assert "--repo" in view_cmd and "owner/repo" in view_cmd
-    assert "--repo" in merge_cmd and "owner/repo" in merge_cmd
+    assert "repos/owner/repo/pulls/42" in view_cmd[2]
+    assert "repos/owner/repo/pulls/42/merge" in merge_cmd[2]
 
 
 def test_auto_merge_pr_does_not_mark_finalized_on_gh_view_failure(tmp_path):
     run_dir = _make_run_dir(tmp_path, pr_number=42)
-    mock_view = MagicMock(returncode=1, stdout="", stderr="gh API error")
-    with patch("ticket_pr_lifecycle.subprocess.run", return_value=mock_view):
-        result = auto_merge_pr("T001", run_dir, None)
+    mock_view = MagicMock(returncode=1, stdout="", stderr="boom")
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", return_value=mock_view):
+        result = auto_merge_pr("T001", run_dir, "owner/repo")
     assert result is False
     saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved.get("pr_merged") is None
+    assert saved.get("daemon_archived") is None
 
 
 # ── handle_test_complete conflict detection (T162) ────────────────────────────

@@ -113,36 +113,41 @@ def ensure_pr_base_branch(
     pr_number = state.get("pr_number")
     if not pr_number:
         return False
+    owner_repo = _resolve_owner_repo(repo)
+    if not owner_repo:
+        _log(f"{ticket_id}: ensure_pr_base: cannot resolve owner/repo")
+        return False
     target = base_branch or resolve_integration_branch(ticket_id, run_dir, repo)
-    view_cmd = ["gh", "pr", "view", str(pr_number), "--json", "baseRefName"]
-    if repo:
-        view_cmd += ["--repo", repo]
     try:
-        view = subprocess.run(view_cmd, capture_output=True, text=True, check=False)
+        view = _gh_api(f"repos/{owner_repo}/pulls/{pr_number}")
     except FileNotFoundError:
         _log(f"{ticket_id}: ensure_pr_base: gh not found")
         return False
     if view.returncode != 0:
-        _log(f"{ticket_id}: ensure_pr_base: gh pr view failed: {view.stderr.strip()}")
+        err = (view.stderr or view.stdout or "").strip()
+        _log(f"{ticket_id}: ensure_pr_base: gh api pr view failed: {err}")
         return False
     try:
-        current_base = json.loads(view.stdout).get("baseRefName") or ""
+        payload = json.loads(view.stdout)
+        current_base = ((payload.get("base") or {}).get("ref")) or ""
     except json.JSONDecodeError:
-        _log(f"{ticket_id}: ensure_pr_base: invalid JSON from gh pr view")
+        _log(f"{ticket_id}: ensure_pr_base: invalid JSON from gh api")
         return False
     if current_base == target:
         return True
-    edit_cmd = ["gh", "pr", "edit", str(pr_number), "--base", target]
-    if repo:
-        edit_cmd += ["--repo", repo]
     try:
-        edit = subprocess.run(edit_cmd, capture_output=True, text=True, check=False)
+        edit = _gh_api(
+            f"repos/{owner_repo}/pulls/{pr_number}",
+            method="PATCH",
+            fields={"base": target},
+        )
     except FileNotFoundError:
         return False
     if edit.returncode != 0:
+        err = (edit.stderr or edit.stdout or "").strip()
         _log(
             f"{ticket_id}: ensure_pr_base: failed to retarget PR #{pr_number} "
-            f"{current_base!r} → {target!r}: {edit.stderr.strip()}"
+            f"{current_base!r} → {target!r}: {err}"
         )
         return False
     _log(f"{ticket_id}: PR #{pr_number} base retargeted {current_base!r} → {target!r}")
@@ -463,50 +468,59 @@ def auto_merge_pr(ticket_id: str, run_dir: Path, repo: str | None) -> bool:
         _log(f"{ticket_id}: auto-merge: already merged — skipping")
         return False
 
-    check_cmd = ["gh", "pr", "view", str(pr_number), "--json", "state,mergeable"]
-    if repo:
-        check_cmd += ["--repo", repo]
+    owner_repo = _resolve_owner_repo(repo)
+    if not owner_repo:
+        _log(f"{ticket_id}: auto-merge: cannot resolve owner/repo — skipping")
+        return False
+
     try:
-        result = subprocess.run(check_cmd, capture_output=True, text=True, check=False)
+        result = _gh_api(f"repos/{owner_repo}/pulls/{pr_number}")
         if result.returncode != 0:
-            _log(f"{ticket_id}: auto-merge: gh pr view failed (rc={result.returncode}): {result.stderr.strip()}")
+            err = (result.stderr or result.stdout or "").strip()
+            _log(f"{ticket_id}: auto-merge: gh api pr view failed (rc={result.returncode}): {err}")
             return False
         pr_data = json.loads(result.stdout)
     except FileNotFoundError:
         _log(f"{ticket_id}: auto-merge: gh not found")
         return False
     except json.JSONDecodeError:
-        _log(f"{ticket_id}: auto-merge: invalid JSON from gh pr view")
+        _log(f"{ticket_id}: auto-merge: invalid JSON from gh api")
         return False
 
-    pr_state = pr_data.get("state")
-    if pr_state == "MERGED":
+    # REST: state is open/closed; merged is a boolean (GraphQL used state=MERGED).
+    if pr_data.get("merged"):
         _log(f"{ticket_id}: auto-merge: PR #{pr_number} already merged — marking state")
         state["pr_merged"] = True
         state["daemon_archived"] = True
         _save_state_json(run_dir, state)
         _sync_runtime_db(ticket_id, run_dir, repo=repo)
         return True
-    if pr_state != "OPEN":
-        _log(f"{ticket_id}: auto-merge: PR #{pr_number} state={pr_state!r} — not OPEN, skipping")
+    if (pr_data.get("state") or "").lower() != "open":
+        _log(
+            f"{ticket_id}: auto-merge: PR #{pr_number} state={pr_data.get('state')!r} "
+            "— not open, skipping"
+        )
         return False
 
     mergeable = pr_data.get("mergeable")
-    if mergeable == "CONFLICTING":
+    mergeable_state = (pr_data.get("mergeable_state") or "").lower()
+    if mergeable is False or mergeable_state == "dirty":
         _log(f"{ticket_id}: auto-merge: PR #{pr_number} has conflicts — skipping")
         return False
 
-    merge_cmd = ["gh", "pr", "merge", str(pr_number), "--squash", "--delete-branch"]
-    if repo:
-        merge_cmd += ["--repo", repo]
     try:
-        merge_result = subprocess.run(merge_cmd, capture_output=True, text=True, check=False)
+        merge_result = _gh_api(
+            f"repos/{owner_repo}/pulls/{pr_number}/merge",
+            method="PUT",
+            fields={"merge_method": "squash"},
+        )
     except FileNotFoundError:
         _log(f"{ticket_id}: auto-merge: gh not found")
         return False
 
     if merge_result.returncode != 0:
-        _log(f"{ticket_id}: auto-merge: gh pr merge failed (rc={merge_result.returncode}): {merge_result.stderr.strip()}")
+        err = (merge_result.stderr or merge_result.stdout or "").strip()
+        _log(f"{ticket_id}: auto-merge: gh api merge failed (rc={merge_result.returncode}): {err}")
         return False
 
     _log(f"{ticket_id}: auto-merge: PR #{pr_number} merged successfully")
@@ -524,38 +538,39 @@ def detect_pr_conflict(
     repo: str | None = None,
 ) -> bool:
     """Return True and write conflict metadata to state.json if the PR is CONFLICTING."""
-    check_cmd = ["gh", "pr", "view", str(pr_number), "--json", "mergeable"]
-    if repo:
-        check_cmd += ["--repo", repo]
+    owner_repo = _resolve_owner_repo(repo)
+    if not owner_repo:
+        _log(f"{ticket_id}: conflict detection: cannot resolve owner/repo")
+        return False
     try:
-        result = subprocess.run(check_cmd, capture_output=True, text=True, check=False)
+        result = _gh_api(f"repos/{owner_repo}/pulls/{pr_number}")
     except FileNotFoundError:
         _log(f"{ticket_id}: conflict detection: gh not found")
         return False
     if result.returncode != 0:
-        _log(f"{ticket_id}: conflict detection: gh pr view failed (rc={result.returncode}): {result.stderr.strip()}")
+        err = (result.stderr or result.stdout or "").strip()
+        _log(f"{ticket_id}: conflict detection: gh api pr view failed (rc={result.returncode}): {err}")
         return False
     try:
         pr_data = json.loads(result.stdout)
     except json.JSONDecodeError:
-        _log(f"{ticket_id}: conflict detection: invalid JSON from gh pr view")
+        _log(f"{ticket_id}: conflict detection: invalid JSON from gh api")
         return False
 
-    if pr_data.get("mergeable") != "CONFLICTING":
+    mergeable = pr_data.get("mergeable")
+    mergeable_state = (pr_data.get("mergeable_state") or "").lower()
+    if not (mergeable is False or mergeable_state == "dirty"):
         return False
 
-    files_cmd = ["gh", "pr", "view", str(pr_number), "--json", "files"]
-    if repo:
-        files_cmd += ["--repo", repo]
     conflicted_files: list[str] = []
     try:
-        files_result = subprocess.run(files_cmd, capture_output=True, text=True, check=False)
+        files_result = _gh_api(f"repos/{owner_repo}/pulls/{pr_number}/files?per_page=100")
         if files_result.returncode == 0:
             files_data = json.loads(files_result.stdout)
             raw_files = [
-                f["path"] for f in files_data.get("files", [])
-                if isinstance(f, dict) and "path" in f
-                and not f["path"].startswith(f"runs/{ticket_id}/")
+                f["filename"] for f in files_data
+                if isinstance(f, dict) and "filename" in f
+                and not str(f["filename"]).startswith(f"runs/{ticket_id}/")
             ]
             # Drop build/deps noise (backend/target, node_modules, …) so accidental
             # tracked artifacts cannot inflate conflict loops (see timizer T060/T066).
@@ -603,11 +618,11 @@ def clear_pr_conflict_if_resolved(
     if state.get("state") not in ("CONFLICT_RESOLUTION_NEEDED", "CONFLICT_RESOLUTION_FAILED"):
         return False
 
-    check_cmd = ["gh", "pr", "view", str(pr_number), "--json", "mergeable"]
-    if repo:
-        check_cmd += ["--repo", repo]
+    owner_repo = _resolve_owner_repo(repo)
+    if not owner_repo:
+        return False
     try:
-        result = subprocess.run(check_cmd, capture_output=True, text=True, check=False)
+        result = _gh_api(f"repos/{owner_repo}/pulls/{pr_number}")
     except FileNotFoundError:
         return False
     if result.returncode != 0:
@@ -618,12 +633,12 @@ def clear_pr_conflict_if_resolved(
         return False
 
     mergeable = pr_data.get("mergeable")
-    if mergeable == "CONFLICTING":
+    mergeable_state = (pr_data.get("mergeable_state") or "").lower()
+    if mergeable is False or mergeable_state == "dirty":
         return False
-    if mergeable not in ("MERGEABLE", "UNKNOWN"):
+    if mergeable is None and mergeable_state in ("unknown", ""):
         # Still computing — leave conflict state alone.
-        if mergeable is None:
-            return False
+        return False
 
     restored = state.get("pre_conflict_state") or "TEST_COMPLETE"
     if restored in ("CONFLICT_RESOLUTION_NEEDED", "CONFLICT_RESOLUTION_FAILED", "CONFLICT_RESOLVING"):
@@ -634,11 +649,13 @@ def clear_pr_conflict_if_resolved(
     state.pop("conflict_pr_number", None)
     state["updated_at"] = _now_iso()
     state["conflict_cleared_at"] = _now_iso()
-    state["conflict_clear_reason"] = f"PR #{pr_number} mergeable={mergeable!r}"
+    state["conflict_clear_reason"] = (
+        f"PR #{pr_number} mergeable={mergeable!r} mergeable_state={mergeable_state!r}"
+    )
     _save_state_json(run_dir, state)
     _log(
-        f"{ticket_id}: PR #{pr_number} is {mergeable} — cleared conflict loop, "
-        f"restored state={restored!r}"
+        f"{ticket_id}: PR #{pr_number} is mergeable={mergeable!r}/{mergeable_state!r} "
+        f"— cleared conflict loop, restored state={restored!r}"
     )
     return True
 
