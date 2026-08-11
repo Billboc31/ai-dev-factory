@@ -267,6 +267,60 @@ def collect_dependency_ticket_ids(
     return deps
 
 
+def remap_spurious_issue_number_deps(
+    deps: list[str],
+    *,
+    project_id: str | None = None,
+    issue_to_ticket: dict[int, str] | None = None,
+) -> list[str]:
+    """Rewrite ``TN`` hints that are really GitHub issue ``#N`` → real ticket id.
+
+    Intelligence sometimes emits ``T019`` because the ticket body says
+    ``Requires … from #19``, but issue numbers and ticket ids are independent
+    (issue #19 may be ``T010``). When ``TN`` is not a known ingested ticket and
+    issue ``N`` maps to another ticket, substitute that ticket id.
+    """
+    if not deps:
+        return deps
+
+    mapping = dict(issue_to_ticket or {})
+    if not mapping and project_id:
+        try:
+            db_path = runtime_db.resolve_db_path_for_project(project_id)
+            rows = runtime_db.list_issue_intake(db_path) or []
+            for row in rows:
+                try:
+                    issue_no = int(row.get("issue_number"))
+                except (TypeError, ValueError):
+                    continue
+                ticket = str(row.get("ticket_id") or "").strip().upper()
+                if ticket:
+                    mapping[issue_no] = ticket
+        except Exception:
+            mapping = {}
+
+    if not mapping:
+        return deps
+
+    known_tickets = set(mapping.values())
+    remapped: list[str] = []
+    seen: set[str] = set()
+    for dep in deps:
+        dep_id = dep.strip().upper()
+        match = re.fullmatch(r"T(\d+)", dep_id, re.IGNORECASE)
+        resolved = dep_id
+        if match and dep_id not in known_tickets:
+            issue_no = int(match.group(1))
+            alias = mapping.get(issue_no)
+            if alias:
+                resolved = alias
+        if resolved in seen:
+            continue
+        remapped.append(resolved)
+        seen.add(resolved)
+    return remapped
+
+
 def read_ticket_markdown(
     project_root: Path,
     ticket_id: str,
@@ -318,6 +372,7 @@ def _check_dependencies(
         dependency_analysis=dependency_analysis,
         ticket_id=ticket_id,
     )
+    deps = remap_spurious_issue_number_deps(deps, project_id=project_id)
     if not deps:
         return "passed", []
 
