@@ -303,11 +303,17 @@ def test_run_step_execute_external_command_passes_env_with_no_bytecode():
         proc = MagicMock()
         proc.pid = 1
         proc.returncode = 0
-        proc.communicate.return_value = ("", "")
+        proc.poll.return_value = 0
+        proc.stdin = MagicMock()
+        proc.stdout = MagicMock()
+        proc.stdout.read.return_value = ""
+        proc.stderr = MagicMock()
+        proc.stderr.read.return_value = ""
+        proc.wait.return_value = 0
         return proc
 
     with patch.object(mod.subprocess, "Popen", side_effect=fake_popen):
-        mod.execute_external_command("echo hi", "prompt")
+        mod.execute_external_command("echo hi", "prompt", idle_timeout=0)
     assert captured_env.get("PYTHONDONTWRITEBYTECODE") == "1"
 
 
@@ -319,28 +325,82 @@ def test_run_step_execute_external_command_timeout_kills_process_group(monkeypat
     spec.loader.exec_module(mod)  # type: ignore[union-attr]
 
     killed: list[tuple[int, int]] = []
+    clock = {"t": 0.0}
 
     def fake_popen(args, **kwargs):
         assert kwargs.get("start_new_session") is True
         proc = MagicMock()
         proc.pid = 4242
         proc.returncode = None
+        proc.poll.return_value = None  # never exits until killed
+        proc.stdin = MagicMock()
+        proc.stdout = MagicMock()
+        proc.stdout.read.return_value = ""
+        proc.stderr = MagicMock()
+        proc.stderr.read.return_value = ""
 
-        def communicate(input=None, timeout=None):
-            if timeout is not None:
-                raise mod.subprocess.TimeoutExpired(cmd=args, timeout=timeout)
-            return ("partial", "err")
+        def wait(timeout=None):
+            proc.returncode = -9
+            return -9
 
-        proc.communicate.side_effect = communicate
+        proc.wait.side_effect = wait
         return proc
 
     monkeypatch.setattr(mod.subprocess, "Popen", fake_popen)
     monkeypatch.setattr(mod.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(mod.time, "monotonic", lambda: clock.__setitem__("t", clock["t"] + 1.0) or clock["t"])
+    monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(mod, "worktree_activity_mtime", lambda _root=None: 0.0)
 
-    stdout, stderr, rc = mod.execute_external_command("sleep 99", "prompt", timeout=1)
+    stdout, stderr, rc = mod.execute_external_command(
+        "sleep 99", "prompt", timeout=1, idle_timeout=0,
+    )
     assert rc == 124
     assert killed == [(4242, mod.signal.SIGKILL)]
     assert "[timeout]" in stderr
+    assert "exceeded" in stderr
+    assert mod.classify_runtime_failure(rc, stdout, stderr) == "process_timeout"
+
+
+def test_run_step_execute_external_command_idle_timeout_kills(monkeypatch, tmp_path: Path):
+    spec = importlib.util.spec_from_file_location(
+        "_test_run_step_idle", TOOLS_DIR / "run_step.py"
+    )
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+
+    killed: list[tuple[int, int]] = []
+    clock = {"t": 0.0}
+
+    def fake_popen(args, **kwargs):
+        proc = MagicMock()
+        proc.pid = 5151
+        proc.returncode = None
+        proc.poll.return_value = None
+        proc.stdin = MagicMock()
+        proc.stdout = MagicMock()
+        proc.stdout.read.return_value = ""
+        proc.stderr = MagicMock()
+        proc.stderr.read.return_value = ""
+        proc.wait.side_effect = lambda timeout=None: setattr(proc, "returncode", -9) or -9
+        return proc
+
+    monkeypatch.setattr(mod.subprocess, "Popen", fake_popen)
+    monkeypatch.setattr(mod.os, "killpg", lambda pid, sig: killed.append((pid, sig)))
+    monkeypatch.setattr(mod.time, "monotonic", lambda: clock.__setitem__("t", clock["t"] + 1.0) or clock["t"])
+    monkeypatch.setattr(mod.time, "sleep", lambda _s: None)
+    monkeypatch.setattr(mod, "worktree_activity_mtime", lambda _root=None: 1.0)
+
+    stdout, stderr, rc = mod.execute_external_command(
+        "sleep 99",
+        "prompt",
+        timeout=0,  # unlimited wall
+        idle_timeout=3,
+        activity_root=tmp_path,
+    )
+    assert rc == 124
+    assert killed == [(5151, mod.signal.SIGKILL)]
+    assert "idle" in stderr
     assert mod.classify_runtime_failure(rc, stdout, stderr) == "process_timeout"
 
 
@@ -358,6 +418,41 @@ def test_run_step_resolve_exec_timeout_env(monkeypatch):
     monkeypatch.setenv("AGENT_EXEC_TIMEOUT_SECONDS", "90")
     assert mod.resolve_exec_timeout_seconds() == 90
     assert mod.resolve_exec_timeout_seconds(explicit=30) == 30
+
+
+def test_run_step_resolve_idle_timeout_env(monkeypatch):
+    spec = importlib.util.spec_from_file_location(
+        "_test_run_step_idle_env", TOOLS_DIR / "run_step.py"
+    )
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+
+    monkeypatch.delenv("AGENT_IDLE_TIMEOUT_SECONDS", raising=False)
+    assert mod.resolve_idle_timeout_seconds() == 1200
+    monkeypatch.setenv("AGENT_IDLE_TIMEOUT_SECONDS", "0")
+    assert mod.resolve_idle_timeout_seconds() is None
+    monkeypatch.setenv("AGENT_IDLE_TIMEOUT_SECONDS", "180")
+    assert mod.resolve_idle_timeout_seconds() == 180
+    assert mod.resolve_idle_timeout_seconds(explicit=0) is None
+
+
+def test_worktree_activity_mtime_skips_noise(tmp_path: Path):
+    spec = importlib.util.spec_from_file_location(
+        "_test_run_step_mtime", TOOLS_DIR / "run_step.py"
+    )
+    mod = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
+    spec.loader.exec_module(mod)  # type: ignore[union-attr]
+
+    (tmp_path / "apps").mkdir()
+    real = tmp_path / "apps" / "service.ts"
+    real.write_text(" cons", encoding="utf-8")
+    noise_dir = tmp_path / "node_modules"
+    noise_dir.mkdir()
+    (noise_dir / "pkg.js").write_text("x", encoding="utf-8")
+    (tmp_path / "runtime.log").write_text("log", encoding="utf-8")
+
+    mtime = mod.worktree_activity_mtime(tmp_path)
+    assert mtime == real.stat().st_mtime
 
 
 def test_daemon_manager_spawn_propagates_no_bytecode_env(tmp_path: Path):
