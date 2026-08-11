@@ -114,11 +114,13 @@ def _eval_dependencies(
     repo: str | None = None,
     intelligence: dict | None = None,
     dependency_analysis: dict | None = None,
+    ticket_id: str | None = None,
 ) -> dict:
     deps = collect_dependency_ticket_ids(
         ticket_content or "",
         intelligence,
         dependency_analysis=dependency_analysis,
+        ticket_id=ticket_id,
     )
     if not deps:
         return {
@@ -344,6 +346,7 @@ def evaluate_eligibility(
         project_id=project_id,
         intelligence=intelligence,
         dependency_analysis=dependency_analysis,
+        ticket_id=ticket_id,
     )
     entry_prerequisites_live = (
         intelligence_check["status"] == "passed"

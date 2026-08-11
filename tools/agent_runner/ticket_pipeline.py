@@ -53,9 +53,61 @@ def needs_intelligence(row: dict | None) -> bool:
     if row is None:
         return True
     status = row.get("analysis_status") or ""
-    if status in {"queued", "running", "completed"}:
+    if status in {"queued", "completed"}:
         return False
+    if status == "running":
+        # Zombie "running" rows (daemon/worker killed mid-flight) must be
+        # reclaimed — otherwise batches stay frozen forever.
+        return _intelligence_running_is_stale(row)
     return True
+
+
+def _intelligence_running_is_stale(row: dict, *, max_age_seconds: int = 1800) -> bool:
+    """True when a ``running`` intelligence row is older than ``max_age_seconds``."""
+    import datetime as _dt
+
+    raw = row.get("started_at") or row.get("updated_at") or ""
+    if not raw:
+        return True
+    try:
+        started = _dt.datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=_dt.timezone.utc)
+    except ValueError:
+        return True
+    age = (_dt.datetime.now(_dt.timezone.utc) - started).total_seconds()
+    return age >= max_age_seconds
+
+
+def reset_stale_intelligence(db_path, ticket_id: str) -> bool:
+    """Flip a stale ``running`` intelligence row back to ``not_started``.
+
+    Returns True when a row was reset (caller should re-claim / re-run).
+    """
+    try:
+        intel = runtime_db.get_ticket_intelligence(db_path, ticket_id)
+    except Exception:
+        return False
+    if not intel or intel.get("analysis_status") != "running":
+        return False
+    if not _intelligence_running_is_stale(intel):
+        return False
+    try:
+        runtime_db.upsert_ticket_intelligence(
+            db_path,
+            ticket_id,
+            analysis_status="not_started",
+            started_at=None,
+        )
+        logger.info("pipeline: reset stale running intelligence for %s", ticket_id)
+        return True
+    except Exception as exc:
+        logger.warning(
+            "pipeline: failed to reset stale intelligence for %s: %s",
+            ticket_id,
+            exc,
+        )
+        return False
 
 
 def needs_readiness(
@@ -246,6 +298,12 @@ def process_ticket(
     except Exception:
         intel = None
 
+    if reset_stale_intelligence(db_path, ticket_id):
+        try:
+            intel = runtime_db.get_ticket_intelligence(db_path, ticket_id)
+        except Exception:
+            intel = None
+
     if needs_intelligence(intel):
         logger.info("pipeline: running intelligence for %s", ticket_id)
         analyzer.run_analysis(
@@ -279,6 +337,7 @@ __all__ = [
     "maybe_run_readiness_after_intelligence",
     "needs_intelligence",
     "needs_readiness",
+    "reset_stale_intelligence",
     "ticket_needs_readiness",
     "process_ticket",
     "record_intake_once",

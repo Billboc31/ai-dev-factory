@@ -10,6 +10,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "tools" / "agent_runner"))
 
 from run_daemon import (
+    REPO_ROOT,
     call_issue_intake,
     clear_stale_run_dir,
     extract_ticket_id_from_title,
@@ -164,57 +165,67 @@ def test_slugify_title_no_trailing_hyphens():
 # ── fetch_ready_issues ────────────────────────────────────────────────────────
 
 def test_fetch_ready_issues_returns_parsed_issues(tmp_path):
-    payload = json.dumps([{"number": 42, "title": "My feature"}])
+    payload = json.dumps([
+        {"number": 42, "title": "My feature", "labels": [{"name": "ai-ready"}]},
+    ])
     mock_result = MagicMock(returncode=0, stdout=payload)
     with patch("run_daemon.subprocess.run", return_value=mock_result):
-        result = fetch_ready_issues("ai-ready", None)
+        result = fetch_ready_issues("ai-ready", "owner/repo")
     assert result == [{"number": 42, "title": "My feature"}]
 
 
-def test_fetch_ready_issues_passes_repo_flag():
+def test_fetch_ready_issues_uses_rest_api_path_for_repo():
     mock_result = MagicMock(returncode=0, stdout="[]")
     with patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
         fetch_ready_issues("ai-ready", "owner/repo")
     cmd = mock_sub.call_args[0][0]
-    assert "--repo" in cmd
-    assert "owner/repo" in cmd
+    assert cmd[:2] == ["gh", "api"]
+    assert "repos/owner/repo/issues" in cmd[2]
 
 
-def test_fetch_ready_issues_omits_repo_flag_when_none():
-    mock_result = MagicMock(returncode=0, stdout="[]")
-    with patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
+def test_fetch_ready_issues_resolves_repo_from_git_origin_when_none():
+    git_remote = MagicMock(returncode=0, stdout="git@github.com:Acme/demo.git\n")
+    gh_api = MagicMock(returncode=0, stdout="[]")
+    with patch("run_daemon.subprocess.run", side_effect=[git_remote, gh_api]) as mock_sub:
         fetch_ready_issues("ai-ready", None)
-    cmd = mock_sub.call_args[0][0]
-    assert "--repo" not in cmd
+    cmds = [c.args[0] for c in mock_sub.call_args_list]
+    assert cmds[0][:3] == ["git", "-C", str(REPO_ROOT)]
+    assert "repos/Acme/demo/issues" in cmds[1][2]
 
 
 def test_fetch_ready_issues_returns_empty_on_gh_failure():
     mock_result = MagicMock(returncode=1, stdout="", stderr="not logged in")
     with patch("run_daemon.subprocess.run", return_value=mock_result):
-        result = fetch_ready_issues("ai-ready", None)
+        result = fetch_ready_issues("ai-ready", "owner/repo")
     assert result == []
 
 
 def test_fetch_ready_issues_returns_empty_when_gh_not_found():
     with patch("run_daemon.subprocess.run", side_effect=FileNotFoundError):
-        result = fetch_ready_issues("ai-ready", None)
+        result = fetch_ready_issues("ai-ready", "owner/repo")
     assert result == []
 
 
 def test_fetch_ready_issues_returns_empty_on_empty_output():
     mock_result = MagicMock(returncode=0, stdout="")
     with patch("run_daemon.subprocess.run", return_value=mock_result):
-        result = fetch_ready_issues("ai-ready", None)
+        result = fetch_ready_issues("ai-ready", "owner/repo")
     assert result == []
 
 
-def test_fetch_ready_issues_passes_label_flag():
-    mock_result = MagicMock(returncode=0, stdout="[]")
-    with patch("run_daemon.subprocess.run", return_value=mock_result) as mock_sub:
-        fetch_ready_issues("my-label", None)
-    cmd = mock_sub.call_args[0][0]
-    assert "--label" in cmd
-    assert "my-label" in cmd
+def test_fetch_ready_issues_filters_by_label_client_side():
+    payload = json.dumps([
+        {"number": 1, "title": "A", "labels": [{"name": "ai-ready"}]},
+        {"number": 2, "title": "B", "labels": [{"name": "other"}]},
+        {"number": 3, "title": "C", "labels": [{"name": "ai-ready"}]},
+    ])
+    mock_result = MagicMock(returncode=0, stdout=payload)
+    with patch("run_daemon.subprocess.run", return_value=mock_result):
+        result = fetch_ready_issues("ai-ready", "owner/repo")
+    assert result == [
+        {"number": 1, "title": "A"},
+        {"number": 3, "title": "C"},
+    ]
 
 
 # ── call_issue_intake ─────────────────────────────────────────────────────────
@@ -357,7 +368,7 @@ def test_poll_github_issues_assigns_correct_next_ticket_id(tmp_path):
 
 
 def test_poll_github_issues_multiple_issues_sequential_ids(tmp_path):
-    # poll_github_issues processes one issue per daemon cycle (candidates[:1])
+    # Cap at 1 so only the first candidate is processed in this cycle.
     runs = _make_runs(tmp_path)
     worktrees_dir = tmp_path / "worktrees"
     issues = [
@@ -368,11 +379,12 @@ def test_poll_github_issues_multiple_issues_sequential_ids(tmp_path):
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
          patch("run_daemon.call_issue_intake", return_value=True), \
          patch("run_daemon.fetch_origin_main", return_value=(True, "fetched origin/main")), \
-         patch("run_daemon.create_ticket_branch_and_worktree", return_value=(True, "ok")):
+         patch("run_daemon.create_ticket_branch_and_worktree", return_value=(True, "ok")), \
+         patch("run_daemon._resolve_max_intakes_per_poll", return_value=1):
         poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir)
 
     index = load_issue_index(runs)
-    # Only the first candidate is processed per cycle
+    # Only the first candidate is processed per cycle when the cap is 1
     assert index["1"] == "T001"
     assert "2" not in index
 
@@ -399,7 +411,8 @@ def test_poll_github_issues_ingests_lowest_ticket_id_first(tmp_path):
          patch("run_daemon.call_issue_intake", return_value=True) as mock_intake, \
          patch("run_daemon.fetch_origin_main", return_value=(True, "fetched origin/main")), \
          patch("run_daemon.create_ticket_branch_and_worktree", return_value=(True, "ok")), \
-         patch("run_daemon.clear_stale_run_dir", return_value=False):
+         patch("run_daemon.clear_stale_run_dir", return_value=False), \
+         patch("run_daemon._resolve_max_intakes_per_poll", return_value=1):
         poll_github_issues(runs, "ai-ready", None, worktrees_dir=worktrees_dir)
 
     issue_number, ticket_id, _, _ = mock_intake.call_args[0]
@@ -428,7 +441,8 @@ def test_poll_github_issues_reconciles_existing_worktree_without_re_intake(tmp_p
     with patch("run_daemon.fetch_ready_issues", return_value=issues), \
          patch("run_daemon.call_issue_intake") as mock_intake, \
          patch("run_daemon.fetch_origin_main") as mock_fetch, \
-         patch("run_daemon.create_ticket_branch_and_worktree") as mock_create:
+         patch("run_daemon.create_ticket_branch_and_worktree") as mock_create, \
+         patch("run_daemon._resolve_max_intakes_per_poll", return_value=1):
         poll_github_issues(
             runs, "ai-ready", None, worktrees_dir=worktrees_dir, state_dir=state_dir,
         )
@@ -489,20 +503,23 @@ def test_poll_github_issues_does_not_call_commit_after_intake_on_failure(tmp_pat
 
 # ── main CLI integration ──────────────────────────────────────────────────────
 
-def _boot_daemon_for_test():
-    return patch.multiple(
-        "run_daemon",
-        _check_runtime_clone=MagicMock(return_value=True),
-        _acquire_daemon_singleton=MagicMock(return_value=True),
-        reap_completed_workers=MagicMock(),
-        _cleanup_stale_workers=MagicMock(),
-        poll_ticket_pipeline=MagicMock(),
-    )
+def _boot_daemon_for_test(monkeypatch=None):
+    # Isolate from a live operator shell that may export multi-project runtime env.
+    patches = {
+        "_check_runtime_clone": MagicMock(return_value=True),
+        "_acquire_daemon_singleton": MagicMock(return_value=True),
+        "reap_completed_workers": MagicMock(),
+        "_cleanup_stale_workers": MagicMock(),
+        "poll_ticket_pipeline": MagicMock(),
+    }
+    return patch.multiple("run_daemon", **patches)
 
 
-def test_main_poll_issues_flag_calls_poll_before_run_once(tmp_path):
+def test_main_poll_issues_flag_calls_poll_before_run_once(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     runs.mkdir()
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
+    monkeypatch.delenv("PROJECT_NAME", raising=False)
 
     with _boot_daemon_for_test():
         with patch("run_daemon.poll_github_issues") as mock_poll:
@@ -511,18 +528,20 @@ def test_main_poll_issues_flag_calls_poll_before_run_once(tmp_path):
                     "--exec-cmd", "test-cmd",
                     "--once",
                     "--poll-issues",
+                    "--issue-repo", "owner/repo",
                     "--runs-dir", str(runs),
                 ])
 
     assert rc == 0
     mock_run.assert_called_once()
     # positional args: (runs_dir, label, repo)
-    assert mock_poll.call_args[0][:3] == (runs, "ai-ready", None)
+    assert mock_poll.call_args[0][:3] == (runs, "ai-ready", "owner/repo")
 
 
-def test_main_without_poll_issues_does_not_call_poll(tmp_path):
+def test_main_without_poll_issues_does_not_call_poll(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     runs.mkdir()
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
 
     with _boot_daemon_for_test():
         with patch("run_daemon.poll_github_issues") as mock_poll:
@@ -533,9 +552,10 @@ def test_main_without_poll_issues_does_not_call_poll(tmp_path):
     mock_run.assert_called_once()
 
 
-def test_main_issue_label_passed_to_poll(tmp_path):
+def test_main_issue_label_passed_to_poll(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     runs.mkdir()
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
 
     with _boot_daemon_for_test():
         with patch("run_daemon.poll_github_issues") as mock_poll:
@@ -545,6 +565,7 @@ def test_main_issue_label_passed_to_poll(tmp_path):
                     "--once",
                     "--poll-issues",
                     "--issue-label", "my-label",
+                    "--issue-repo", "owner/repo",
                     "--runs-dir", str(runs),
                 ])
 
@@ -552,9 +573,10 @@ def test_main_issue_label_passed_to_poll(tmp_path):
     assert label == "my-label"
 
 
-def test_main_issue_repo_passed_to_poll(tmp_path):
+def test_main_issue_repo_passed_to_poll(tmp_path, monkeypatch):
     runs = tmp_path / "runs"
     runs.mkdir()
+    monkeypatch.delenv("AI_DEV_FACTORY_RUNTIME_ROOT", raising=False)
 
     with _boot_daemon_for_test():
         with patch("run_daemon.poll_github_issues") as mock_poll:

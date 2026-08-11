@@ -397,3 +397,16 @@ def test_is_entry_prerequisite_reason_rejects_later_stage_blockers(evaluator):
     assert not evaluator._is_entry_prerequisite_reason("Plan review pending")
     assert not evaluator._is_entry_prerequisite_reason("Blocked by execution rule deny-all")
     assert not evaluator._is_entry_prerequisite_reason("Awaiting ready_to_take promotion")
+
+
+def test_collect_dependency_ticket_ids_excludes_self(evaluator):
+    intel = {"dependency_hints": ["T002", "T005"]}
+    analysis = {"depends_on": ["T002", "T004"]}
+    deps = evaluator.collect_dependency_ticket_ids(
+        "",
+        intel,
+        dependency_analysis=analysis,
+        ticket_id="T005",
+    )
+    assert deps == ["T002", "T004"]
+    assert "T005" not in deps

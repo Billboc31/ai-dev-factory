@@ -201,13 +201,18 @@ def collect_dependency_ticket_ids(
     intelligence: dict | None = None,
     *,
     dependency_analysis: dict | None = None,
+    ticket_id: str | None = None,
 ) -> list[str]:
     """Union ticket-body deps with intelligence hints and analyzer ``depends_on``.
 
     Markdown is parsed first (so it takes precedence on metadata); intelligence
     hints and the dependency analyzer's ``depends_on`` rows are merged on top,
     deduplicated, in source order.
+
+    ``ticket_id`` (when set) is never treated as its own dependency — bad
+    intelligence hints occasionally self-reference and would block forever.
     """
+    self_id = (ticket_id or "").strip().upper()
     deps = _extract_dependencies(ticket_content or "")
     seen = set(deps)
     illustrative_only = _ticket_ids_only_in_fenced_blocks(ticket_content or "")
@@ -215,21 +220,23 @@ def collect_dependency_ticket_ids(
     def _add_ticket_id(candidate: object) -> None:
         if not isinstance(candidate, str):
             return
-        ticket_id = candidate.strip().upper()
-        if not ticket_id:
+        dep_id = candidate.strip().upper()
+        if not dep_id:
             return
-        if not re.fullmatch(r"T\d+", ticket_id, re.IGNORECASE):
+        if not re.fullmatch(r"T\d+", dep_id, re.IGNORECASE):
             return
-        if ticket_id in seen:
+        if self_id and dep_id == self_id:
             return
-        deps.append(ticket_id)
-        seen.add(ticket_id)
+        if dep_id in seen:
+            return
+        deps.append(dep_id)
+        seen.add(dep_id)
 
     def _add_external_hint(candidate: object) -> None:
         if not isinstance(candidate, str):
             return
-        ticket_id = candidate.strip().upper()
-        if ticket_id in illustrative_only:
+        hint_id = candidate.strip().upper()
+        if hint_id in illustrative_only:
             return
         _add_ticket_id(candidate)
 
@@ -302,10 +309,14 @@ def _check_dependencies(
     project_id: str | None = None,
     intelligence: dict | None = None,
     dependency_analysis: dict | None = None,
+    ticket_id: str | None = None,
 ) -> tuple[str, list[str]]:
     """Returns (status, blocking_reasons). Empty deps → ``passed``."""
     deps = collect_dependency_ticket_ids(
-        ticket_content, intelligence, dependency_analysis=dependency_analysis,
+        ticket_content,
+        intelligence,
+        dependency_analysis=dependency_analysis,
+        ticket_id=ticket_id,
     )
     if not deps:
         return "passed", []
@@ -460,6 +471,7 @@ def run_evaluation(
             project_id=project_id,
             intelligence=intelligence_row,
             dependency_analysis=dependency_analysis_row,
+            ticket_id=ticket_id,
         )
         approval_status, approval_warnings, approval_required, approval_present = (
             _collect_future_approval_warnings(intelligence_row, project_root, ticket_id)

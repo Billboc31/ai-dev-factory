@@ -171,10 +171,18 @@ def _recommended_host_command(
     # Poll interval is resolved per-cycle from the GITHUB_POLL_INTERVAL_SECONDS
     # runtime setting so admins can change it from the settings UI without
     # editing this command. Pass an explicit ``--interval N`` to pin the value.
+    project_flags = ""
+    if project_id:
+        project_flags += f" --project {project_id}"
+    if project_root:
+        project_flags += f" --project-root {project_root}"
+    runtime_export = f"export AI_DEV_FACTORY_RUNTIME_ROOT={runtime_root_display}"
+    if project_id:
+        runtime_export += f" && export PROJECT_NAME={project_id}"
     return (
         f"cd {host_clone} && "
         f"source .venv/bin/activate && "
-        f"export AI_DEV_FACTORY_RUNTIME_ROOT={runtime_root_display} && "
+        f"{runtime_export} && "
         f"python tools/agent_runner/run_daemon.py "
         f'--exec-cmd "{exec_cmd}" '
         f"--poll-issues "
@@ -182,6 +190,7 @@ def _recommended_host_command(
         f"--auto-commit "
         f"--auto-push "
         f"--auto-include-code"
+        f"{project_flags}"
         f"{max_workers_suffix}"
     )
 

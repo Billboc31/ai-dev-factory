@@ -600,7 +600,69 @@ def test_scrub_ticket_runtime_dir_resets_whole_runtime_prefix(tmp_path, monkeypa
     monkeypatch.setattr(rcr, "_run_git", _fake_git)
     rcr._scrub_ticket_runtime_dir("T010")
     assert ["checkout", "HEAD", "--", "runs/T010/"] in calls
-    assert ["clean", "-fd", "--", "runs/T010"] in calls
+    assert [
+        "clean", "-fd", "-e", "retry-state.json", "--", "runs/T010",
+    ] in calls
+
+
+def test_quarantine_moves_untracked_blockers(tmp_path, monkeypatch):
+    import run_conflict_resolver as rcr
+
+    ticket_id = "T010"
+    junk = tmp_path / "apps" / "api" / "migrations" / "0002_dup.sql"
+    junk.parent.mkdir(parents=True)
+    junk.write_text("-- dup\n", encoding="utf-8")
+
+    def _fake_git(args):
+        if args[:2] == ["status", "--porcelain"]:
+            return subprocess.CompletedProcess(
+                args, 0,
+                stdout="?? apps/api/migrations/0002_dup.sql\n",
+                stderr="",
+            )
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(rcr, "_run_git", _fake_git)
+    remaining = rcr._quarantine_untracked_blocking_paths(
+        ticket_id, ["apps/api/migrations/0002_dup.sql", "README.md"],
+    )
+    assert remaining == ["README.md"]
+    assert not junk.exists()
+    quarantined = (
+        tmp_path / "runs" / ticket_id / "conflict" / "quarantine"
+        / "apps" / "api" / "migrations" / "0002_dup.sql"
+    )
+    assert quarantined.exists()
+
+
+def test_prepare_clean_tree_quarantines_untracked_then_succeeds(tmp_path, monkeypatch):
+    import run_conflict_resolver as rcr
+
+    ticket_id = "T010"
+    (tmp_path / "runs" / ticket_id).mkdir(parents=True)
+    junk = tmp_path / "apps" / "api" / "migrations" / "0002_dup.sql"
+    junk.parent.mkdir(parents=True)
+    junk.write_text("-- dup\n", encoding="utf-8")
+
+    def _fake_git(args):
+        if args[:3] == ["status", "--porcelain", "--"]:
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        if args[:2] == ["status", "--porcelain"]:
+            if junk.exists():
+                return subprocess.CompletedProcess(
+                    args, 0,
+                    stdout="?? apps/api/migrations/0002_dup.sql\n",
+                    stderr="",
+                )
+            return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(rcr, "_run_git", _fake_git)
+    monkeypatch.setattr(rcr, "_scrub_ticket_runtime_dir", lambda _tid: None)
+    assert rcr._prepare_clean_tree_for_rebase(ticket_id) is True
+    assert not junk.exists()
 
 
 def test_prepare_clean_tree_for_rebase_fails_when_runtime_still_dirty(tmp_path, monkeypatch):

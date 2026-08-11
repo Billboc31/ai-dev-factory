@@ -137,6 +137,7 @@ _claim_readiness = _tp_mod.claim_readiness
 _record_intake_once = _tp_mod.record_intake_once
 _ticket_needs_intelligence = _tp_mod.needs_intelligence
 _ticket_needs_readiness = _tp_mod.ticket_needs_readiness
+_reset_stale_intelligence = _tp_mod.reset_stale_intelligence
 del _tp_spec, _tp_mod
 
 _te_spec = importlib.util.spec_from_file_location(
@@ -195,7 +196,11 @@ def _cached_db_path() -> "Path | None":
 
 
 def _ensure_db() -> "Path | None":
-    """Return an initialized DB path, resolving and initialising at most once per process."""
+    """Return an initialized DB path, resolving and initialising at most once per process.
+
+    Postgres mode never degrades silently: init failure raises so the daemon
+    exits instead of running without batches / intake index / settings.
+    """
     global _DB_INITIALIZED
     db_path = _cached_db_path()
     if not db_path:
@@ -206,9 +211,35 @@ def _ensure_db() -> "Path | None":
             _rdb_init(db_path)
             _DB_INITIALIZED = True
         except Exception as exc:
+            backend = os.environ.get("RUNTIME_DB_BACKEND", "sqlite").strip().lower()
+            if backend == "postgres":
+                _log(
+                    f"FATAL: Postgres runtime DB init failed: {exc} "
+                    "(install psycopg in this Python env; never falls back to SQLite)"
+                )
+                raise RuntimeError(f"Postgres runtime DB init failed: {exc}") from exc
             _log(f"SQLite init failed: {exc}")
             return None
     return db_path
+
+
+def _resolve_github_owner_repo(repo_root: Path | None = None) -> str:
+    """Return ``owner/name`` from ``git remote origin`` of the project checkout.
+
+    Always uses ``git -C <repo_root>`` so process cwd cannot pollute intake
+    (manual launches often start outside the managed project).
+    """
+    root = repo_root if repo_root is not None else REPO_ROOT
+    try:
+        origin = subprocess.run(
+            ["git", "-C", str(root), "remote", "get-url", "origin"],
+            capture_output=True, text=True, check=False,
+        )
+    except FileNotFoundError:
+        return ""
+    url = (origin.stdout or "").strip()
+    m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", url)
+    return f"{m.group(1)}/{m.group(2)}" if m else ""
 
 
 def _acquire_daemon_singleton(lock_dir: Path) -> bool:
@@ -1363,6 +1394,28 @@ def _maybe_auto_launch_conflict_resolution(
         )
         return False
 
+    # Cooldown after FAILED so a quick clean-tree failure cannot relaunch every
+    # poll cycle (even when retry-state is preserved).
+    if current == "CONFLICT_RESOLUTION_FAILED":
+        updated_at = str(state.get("updated_at") or "")
+        try:
+            # Accept trailing Z
+            ts = updated_at.replace("Z", "+00:00")
+            failed_at = datetime.datetime.fromisoformat(ts)
+            if failed_at.tzinfo is None:
+                failed_at = failed_at.replace(tzinfo=datetime.timezone.utc)
+            age = (
+                datetime.datetime.now(datetime.timezone.utc) - failed_at
+            ).total_seconds()
+            if age < 60:
+                _log(
+                    f"{ticket_id}: conflict FAILED cooldown "
+                    f"({int(age)}s/60s) — skipping relaunch",
+                )
+                return False
+        except ValueError:
+            pass
+
     if not _acquire_lock(run_dir):
         _log(f"skipping {ticket_id}: conflict resolver already running (lock held)")
         return False
@@ -1557,21 +1610,55 @@ def clear_stale_run_dir(worktree_path: Path, ticket_id: str) -> bool:
 
 
 def fetch_ready_issues(label: str, repo: str | None) -> list[dict]:
-    """Call `gh issue list` and return open issues with the given label. Returns [] on any failure."""
-    cmd = ["gh", "issue", "list", "--label", label, "--json", "number,title", "--state", "open"]
-    if repo:
-        cmd += ["--repo", repo]
+    """Return open issues with the given label via the GitHub REST API.
+
+    Prefer ``gh api`` (REST / core quota) over ``gh issue list`` (GraphQL): the
+    factory polls every few seconds and GraphQL rate limits are exhausted quickly,
+    which previously made new projects appear to never intake issues.
+    """
+    owner_repo = (repo or "").strip() or _resolve_github_owner_repo(REPO_ROOT)
+    if not owner_repo:
+        _log("cannot resolve GitHub repo for issue polling — skipping")
+        return []
+    if not repo:
+        _log(f"issue poll repo resolved from origin: {owner_repo}")
+
+    # Paginate REST search/list; filter by label client-side for exact match.
+    issues: list[dict] = []
+    page = 1
     try:
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if result.returncode != 0:
-            _log(f"gh issue list failed (rc={result.returncode}) — skipping issue polling")
-            return []
-        return json.loads(result.stdout) if result.stdout.strip() else []
+        while page <= 5:  # hard cap — intake is incremental
+            cmd = [
+                "gh", "api",
+                f"repos/{owner_repo}/issues?state=open&per_page=100&page={page}",
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, check=False)
+            if result.returncode != 0:
+                err = (result.stderr or result.stdout or "").strip()[:300]
+                _log(
+                    f"gh api issues failed (rc={result.returncode})"
+                    f"{f': {err}' if err else ''} — skipping issue polling"
+                )
+                return []
+            batch = json.loads(result.stdout) if result.stdout.strip() else []
+            if not isinstance(batch, list) or not batch:
+                break
+            for item in batch:
+                if item.get("pull_request"):
+                    continue
+                names = [lbl.get("name", "") for lbl in item.get("labels") or []]
+                if label not in names:
+                    continue
+                issues.append({"number": item["number"], "title": item.get("title") or ""})
+            if len(batch) < 100:
+                break
+            page += 1
+        return issues
     except FileNotFoundError:
         _log("gh not found — skipping issue polling")
         return []
     except json.JSONDecodeError:
-        _log("gh returned invalid JSON — skipping issue polling")
+        _log("gh api returned invalid JSON — skipping issue polling")
         return []
 
 
@@ -1759,13 +1846,13 @@ def poll_github_issues(
             try:
                 inserted = _record_intake_once(db_path, int(number), ticket_id, branch)
                 if not inserted:
-                    # DB row survived a lost/reset file index — treat as a
-                    # duplicate rather than double-processing.
+                    # File index was empty but DB already had the row (lost index).
+                    # Intake for this cycle already succeeded — do not bump
+                    # skipped_existing (that counter is for pre-filter skips only).
                     _log(
-                        f"issue #{number}: DB intake row already exists — "
-                        f"treating as skipped_existing"
+                        f"issue #{number}: DB intake row already existed — "
+                        f"index repaired for {ticket_id}"
                     )
-                    skipped_existing += 1
             except Exception as exc:
                 _log(f"SQLite intake upsert failed for {ticket_id}: {exc}")
             try:
@@ -2206,6 +2293,11 @@ def poll_ticket_pipeline(
 
     for ticket_id in ticket_ids:
         try:
+            if _reset_stale_intelligence(db_path, ticket_id):
+                _log(f"pipeline: reclaimed stale intelligence for {ticket_id}")
+        except Exception as exc:
+            _log(f"pipeline: stale intelligence reclaim failed for {ticket_id}: {exc}")
+        try:
             intel = _rdb_get_ticket_intelligence(db_path, ticket_id)
         except Exception:
             intel = None
@@ -2622,7 +2714,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--poll-project-map", action="store_true", help="Run issue mapper at each daemon cycle to refresh the project dependency map")
     parser.add_argument("--use-project-map", action="store_true", help="Use project map next_recommended for scheduling instead of FIFO (fallback to FIFO if map absent)")
     parser.add_argument("--project-root", default=None, help="Git root of the managed project (default: cwd when AI_DEV_FACTORY_RUNTIME_ROOT is set)")
-    parser.add_argument("--project", default=None, help="Project id for runtime DB scoping (also sets PROJECT_NAME when unset)")
+    parser.add_argument(
+        "--project",
+        default=None,
+        help="Project id for runtime DB scoping (always overrides inherited PROJECT_NAME)",
+    )
     return parser.parse_args(argv)
 
 
@@ -2636,7 +2732,10 @@ def main(argv: list[str]) -> int:
     REPO_ROOT = _resolve_repo_root(args)
 
     if args.project:
-        os.environ.setdefault("PROJECT_NAME", args.project)
+        # Force-scope DB rows to this project. setdefault is wrong: a parent
+        # process (supervisor/shell) often already exported PROJECT_NAME=ai-dev-factory,
+        # which made iptvflix intakes write into the wrong project_id and skip batches.
+        os.environ["PROJECT_NAME"] = args.project
 
     runtime_root = os.environ.get("AI_DEV_FACTORY_RUNTIME_ROOT")
     if runtime_root:
@@ -2688,13 +2787,32 @@ def main(argv: list[str]) -> int:
     _interval_display = f"{args.interval}s (CLI override)" if args.interval is not None else "resolved per-cycle from GITHUB_POLL_INTERVAL_SECONDS"
     _log(f"  interval       = {_interval_display}  dry-run={args.dry_run}")
     _log(f"  max-workers    = {args.max_workers}")
+    _log(f"  PROJECT_NAME   = {os.environ.get('PROJECT_NAME', '<unset>')}")
+    _log(f"  RUNTIME_DB     = {os.environ.get('RUNTIME_DB_BACKEND', 'sqlite')}")
     if args.project:
         _log(f"  project_id     = {args.project}")
+
+    # Pin issue-repo before the first poll so cwd mistakes cannot redirect intake
+    # to another GitHub repository (classic new-project footgun).
+    if args.poll_issues and not args.issue_repo:
+        resolved_repo = _resolve_github_owner_repo(REPO_ROOT)
+        if not resolved_repo:
+            _log(
+                "FATAL: --poll-issues needs --issue-repo owner/name "
+                f"or a resolvable git origin under REPO_ROOT={REPO_ROOT}"
+            )
+            return 2
+        args.issue_repo = resolved_repo
+        _log(f"  issue-repo     = {args.issue_repo} (auto from origin)")
+    elif args.issue_repo:
+        _log(f"  issue-repo     = {args.issue_repo}")
+
     try:
         _boot_db = _ensure_db()
         _boot_mode = _get_dispatcher_mode(_boot_db) if _boot_db else "off"
-    except Exception:
-        _boot_mode = "off"
+    except Exception as exc:
+        _log(f"FATAL: runtime DB unavailable at boot: {exc}")
+        return 2
     _log(f"  dispatcher_mode = {_boot_mode}")
     try:
         _boot_pipeline = _is_auto_pipeline_enabled(_boot_db) if _boot_db else True
