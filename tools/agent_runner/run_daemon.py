@@ -1393,6 +1393,28 @@ def _maybe_auto_launch_conflict_resolution(
         )
         return False
 
+    # Cooldown after FAILED so a quick clean-tree failure cannot relaunch every
+    # poll cycle (even when retry-state is preserved).
+    if current == "CONFLICT_RESOLUTION_FAILED":
+        updated_at = str(state.get("updated_at") or "")
+        try:
+            # Accept trailing Z
+            ts = updated_at.replace("Z", "+00:00")
+            failed_at = datetime.datetime.fromisoformat(ts)
+            if failed_at.tzinfo is None:
+                failed_at = failed_at.replace(tzinfo=datetime.timezone.utc)
+            age = (
+                datetime.datetime.now(datetime.timezone.utc) - failed_at
+            ).total_seconds()
+            if age < 60:
+                _log(
+                    f"{ticket_id}: conflict FAILED cooldown "
+                    f"({int(age)}s/60s) — skipping relaunch",
+                )
+                return False
+        except ValueError:
+            pass
+
     if not _acquire_lock(run_dir):
         _log(f"skipping {ticket_id}: conflict resolver already running (lock held)")
         return False

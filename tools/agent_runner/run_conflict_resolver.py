@@ -360,25 +360,32 @@ def _runtime_tree_porcelain(ticket_id: str) -> str:
 
 
 def _scrub_ticket_runtime_dir(ticket_id: str) -> None:
-    """Reset tracked runtime artifacts and drop *all* untracked files under
-    ``runs/{ticket}/`` so they cannot block ``git rebase`` / ``--continue``.
+    """Reset tracked runtime artifacts and drop scratch under ``runs/{ticket}/``.
 
-    Live workflow state is held in-memory (``state_backup``) and rewritten after
-    each transition — leaving an untracked ``state.json`` on disk will make
-    later commits that recreate ``runs/{ticket}/`` fail with "would be
-    overwritten by merge".
+    Preserves ``retry-state.json`` so the daemon conflict auto-run budget is not
+    wiped on every resolver launch (that previously reset the counter to 1/3
+    forever and thrashed FAILED tickets).
     """
     import shutil
 
     prefix = _runtime_path_prefix(ticket_id)
     _run_git(["checkout", "HEAD", "--", prefix])
-    # Wipe untracked scratch under this ticket's runs tree entirely.
-    _run_git(["clean", "-fd", "--", prefix.rstrip("/")])
+    # Wipe untracked scratch under this ticket's runs tree, but keep the
+    # auto-retry budget file the daemon writes before spawning us.
+    _run_git(
+        [
+            "clean", "-fd",
+            "-e", "retry-state.json",
+            "--", prefix.rstrip("/"),
+        ]
+    )
     untracked = _run_git(["ls-files", "--others", "--exclude-standard", prefix])
     if untracked.returncode == 0:
         for rel in untracked.stdout.splitlines():
             rel = rel.strip()
             if not rel:
+                continue
+            if rel.endswith("/retry-state.json") or rel.endswith("retry-state.json"):
                 continue
             path = Path(rel)
             if path.is_file():
@@ -386,6 +393,54 @@ def _scrub_ticket_runtime_dir(ticket_id: str) -> None:
             elif path.is_dir():
                 shutil.rmtree(path, ignore_errors=True)
     _run_git(["checkout", "HEAD", "--", prefix])
+
+
+def _untracked_paths_from_porcelain(porcelain: str) -> set[str]:
+    """Return paths that are purely untracked (``??``) in porcelain output."""
+    out: set[str] = set()
+    for line in porcelain.splitlines():
+        if not line.startswith("??"):
+            continue
+        path = line[3:].strip().split(" -> ")[-1]
+        if path:
+            out.add(path)
+    return out
+
+
+def _quarantine_untracked_blocking_paths(ticket_id: str, paths: list[str]) -> list[str]:
+    """Move *untracked* blockers aside so rebase can start.
+
+    Accidental generated files (duplicate Drizzle migrations, leftover SQL) often
+    sit as ``??`` and previously hard-failed the resolver before any rebase.
+    Tracked modifications still block — those are real source edits.
+    Returns paths that remain blocking after quarantine.
+    """
+    import shutil
+
+    if not paths:
+        return []
+    status = _run_git(["status", "--porcelain"])
+    porcelain = status.stdout if status.returncode == 0 else ""
+    untracked = _untracked_paths_from_porcelain(porcelain)
+    qroot = Path(_runtime_path_prefix(ticket_id)) / "conflict" / "quarantine"
+    remaining: list[str] = []
+    for path in paths:
+        if path not in untracked:
+            remaining.append(path)
+            continue
+        src = Path(path)
+        if not src.exists():
+            continue
+        dest = qroot / path
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists():
+            if dest.is_file():
+                dest.unlink()
+            else:
+                shutil.rmtree(dest, ignore_errors=True)
+        shutil.move(str(src), str(dest))
+        _log(ticket_id, f"quarantined untracked blocker before rebase: {path} → {dest}")
+    return remaining
 
 
 def _try_resume_clean_rebase(ticket_id: str, run_dir: Path) -> bool:
@@ -440,6 +495,10 @@ def _prepare_clean_tree_for_rebase(ticket_id: str) -> bool:
     The in-memory ``state.json`` backup lives outside git — reset the tracked
     ``runs/{ticket}/`` tree so ``runtime.log``, deleted locks, and workflow
     state edits do not block the rebase.
+
+    Purely untracked blockers (e.g. duplicate generated migrations) are
+    quarantined under ``runs/{ticket}/conflict/quarantine/`` instead of failing
+    the whole resolution episode.
     """
     _scrub_ticket_runtime_dir(ticket_id)
 
@@ -457,8 +516,18 @@ def _prepare_clean_tree_for_rebase(ticket_id: str) -> bool:
         return False
     blocking = _blocking_dirty_paths(remaining.stdout, ticket_id)
     if blocking:
-        _log(ticket_id, f"blocking dirty paths before rebase: {blocking}")
-        return False
+        still_blocking = _quarantine_untracked_blocking_paths(ticket_id, blocking)
+        if still_blocking:
+            _log(ticket_id, f"blocking dirty paths before rebase: {still_blocking}")
+            return False
+        # Quarantine may have cleared everything — re-check once.
+        remaining = _run_git(["status", "--porcelain"])
+        if remaining.returncode != 0:
+            return False
+        blocking = _blocking_dirty_paths(remaining.stdout, ticket_id)
+        if blocking:
+            _log(ticket_id, f"blocking dirty paths before rebase: {blocking}")
+            return False
     return True
 
 
