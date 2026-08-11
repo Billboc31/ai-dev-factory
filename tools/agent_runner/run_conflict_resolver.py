@@ -20,8 +20,10 @@ import datetime
 import importlib.util
 import json
 import os
+import re
 import subprocess
 import sys
+from collections import defaultdict
 from pathlib import Path
 
 
@@ -269,6 +271,52 @@ def _has_conflict_markers(path: str) -> bool:
         elif has_start and has_mid and line.startswith(">>>>>>> "):
             return True
     return False
+
+
+_MIGRATION_SQL_NAME = re.compile(r"^(\d{4})_.+\.sql$")
+
+
+def _find_duplicate_migration_indexes(root: Path | None = None) -> list[str]:
+    """Detect two Drizzle/ORM SQL migrations sharing the same numeric prefix.
+
+    Classic parallel-coding failure: main has ``0004_wild_legion.sql`` and the
+    ticket kept ``0004_careless_moon_knight.sql`` instead of renumbering to
+    ``0005_…``. That is not a successful conflict resolution.
+
+    Returns human-readable error lines (empty when OK).
+    """
+    groups = _duplicate_migration_path_groups(root)
+    errors: list[str] = []
+    for files in groups:
+        index = _MIGRATION_SQL_NAME.match(Path(files[0]).name)
+        idx = index.group(1) if index else "?"
+        listed = ", ".join(sorted(files))
+        errors.append(
+            f"duplicate migration index {idx}: {listed} "
+            f"— renumber the ticket migration to the next free index"
+        )
+    return errors
+
+
+def _duplicate_migration_path_groups(root: Path | None = None) -> list[list[str]]:
+    """Return groups of migration SQL paths that share the same numeric index."""
+    base = root or Path.cwd()
+    by_dir_index: dict[tuple[str, str], list[str]] = defaultdict(list)
+    for path in base.rglob("*.sql"):
+        if "migrations" not in path.parts:
+            continue
+        if any(part in {"node_modules", ".git", "dist", "build", "target"} for part in path.parts):
+            continue
+        match = _MIGRATION_SQL_NAME.match(path.name)
+        if not match:
+            continue
+        try:
+            rel = path.relative_to(base).as_posix()
+        except ValueError:
+            rel = path.as_posix()
+        parent = path.parent.as_posix()
+        by_dir_index[(parent, match.group(1))].append(rel)
+    return [files for files in by_dir_index.values() if len(files) >= 2]
 
 
 def _scan_source_marker_conflicts(ticket_id: str) -> list[str]:
@@ -911,8 +959,34 @@ def resolve_conflicts(ticket_id: str, exec_cmd: str) -> int:
                 conflicted_files = still_unresolved_markers
                 continue
 
-            # Stage only the conflicted files (not git add -A)
-            staged = list(pass_conflicted)
+            dup_groups = _duplicate_migration_path_groups()
+            if dup_groups:
+                dup_errors = _find_duplicate_migration_indexes()
+                msg = (
+                    f"AI resolver pass {pass_count} left duplicate migration indexes:\n"
+                    + "\n".join(dup_errors)
+                )
+                _log(ticket_id, msg)
+                _write_error_log(run_dir, msg, stderr_ai)
+                (conflict_dir / "migration-check.md").write_text(msg + "\n", encoding="utf-8")
+                offending = sorted({p for group in dup_groups for p in group})
+                conflicted_files = offending
+                continue
+
+            # Stage only the conflicted files (not git add -A).
+            # For ORM migrations, stage the whole migrations/ dir so renames
+            # (0004_ticket → 0005_ticket) and journal/snapshot updates are included.
+            staged = list(dict.fromkeys(pass_conflicted))
+            mig_roots: list[str] = []
+            for path in pass_conflicted:
+                parts = Path(path).parts
+                if "migrations" not in parts:
+                    continue
+                idx = parts.index("migrations")
+                mig_roots.append(str(Path(*parts[: idx + 1])))
+            for root in dict.fromkeys(mig_roots):
+                if root not in staged:
+                    staged.append(root)
             add = _run_git(["add", "--"] + staged)
             if add.returncode != 0:
                 msg = f"git add failed: {add.stderr.strip()}"

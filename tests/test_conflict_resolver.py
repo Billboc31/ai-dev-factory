@@ -798,3 +798,70 @@ def test_has_conflict_markers_ignores_source_that_mentions_markers(tmp_path):
     assert rcr._has_conflict_markers("tools/agent_runner/run_conflict_resolver.py") is False
     assert rcr._has_conflict_markers("tests/test_conflict_resolver.py") is False
 
+
+
+def test_duplicate_migration_indexes_detected(tmp_path, monkeypatch):
+    import run_conflict_resolver as rcr
+
+    mig = tmp_path / "apps" / "api" / "migrations"
+    mig.mkdir(parents=True)
+    (mig / "0004_wild_legion.sql").write_text("ALTER TABLE movies;\n")
+    (mig / "0004_careless_moon_knight.sql").write_text("CREATE TABLE profiles;\n")
+    (mig / "0005_ok.sql").write_text("CREATE TABLE x;\n")
+
+    monkeypatch.chdir(tmp_path)
+    errors = rcr._find_duplicate_migration_indexes()
+    groups = rcr._duplicate_migration_path_groups()
+    assert len(groups) == 1
+    assert len(groups[0]) == 2
+    assert any("0004" in e and "wild_legion" in e and "careless_moon_knight" in e for e in errors)
+
+
+def test_duplicate_migration_indexes_ok_when_unique(tmp_path, monkeypatch):
+    import run_conflict_resolver as rcr
+
+    mig = tmp_path / "apps" / "api" / "migrations"
+    mig.mkdir(parents=True)
+    (mig / "0004_wild_legion.sql").write_text("ALTER TABLE movies;\n")
+    (mig / "0005_careless_moon_knight.sql").write_text("CREATE TABLE profiles;\n")
+
+    monkeypatch.chdir(tmp_path)
+    assert rcr._find_duplicate_migration_indexes() == []
+    assert rcr._duplicate_migration_path_groups() == []
+
+
+def test_conflict_context_includes_orm_migration_playbook(tmp_path, monkeypatch):
+    import conflict_context_collector as ccc
+
+    run_dir = tmp_path / "runs" / "T014"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(
+        json.dumps(
+            {
+                "ticket_id": "T014",
+                "state": "CONFLICT_RESOLVING",
+                "conflicted_files": [
+                    "apps/api/migrations/0004_careless_moon_knight.sql",
+                    "apps/api/migrations/meta/_journal.json",
+                ],
+            }
+        )
+    )
+    (tmp_path / "apps" / "api" / "migrations").mkdir(parents=True)
+    (tmp_path / "apps" / "api" / "migrations" / "0004_careless_moon_knight.sql").write_text(
+        "CREATE TABLE profiles;\n"
+    )
+    (tmp_path / "apps" / "api" / "migrations" / "meta").mkdir(parents=True)
+    (tmp_path / "apps" / "api" / "migrations" / "meta" / "_journal.json").write_text("{}\n")
+
+    monkeypatch.chdir(tmp_path)
+    path = ccc.collect_context(
+        "T014",
+        conflicted_files=[
+            "apps/api/migrations/0004_careless_moon_knight.sql",
+            "apps/api/migrations/meta/_journal.json",
+        ],
+    )
+    body = path.read_text()
+    assert "ORM / Drizzle migration conflict playbook" in body
+    assert "Never leave two" in body or "Never" in body
