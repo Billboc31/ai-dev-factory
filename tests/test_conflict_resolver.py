@@ -645,14 +645,11 @@ def test_prepare_clean_tree_quarantines_untracked_then_succeeds(tmp_path, monkey
     junk.parent.mkdir(parents=True)
     junk.write_text("-- dup\n", encoding="utf-8")
 
-    porcelain_calls = {"n": 0}
-
     def _fake_git(args):
         if args[:3] == ["status", "--porcelain", "--"]:
             return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
         if args[:2] == ["status", "--porcelain"]:
-            porcelain_calls["n"] += 1
-            if porcelain_calls["n"] == 1:
+            if junk.exists():
                 return subprocess.CompletedProcess(
                     args, 0,
                     stdout="?? apps/api/migrations/0002_dup.sql\n",
