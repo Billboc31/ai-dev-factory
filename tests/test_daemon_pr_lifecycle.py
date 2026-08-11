@@ -505,3 +505,75 @@ def test_create_or_update_pr_finds_pr_by_ticket_prefix_fallback(tmp_path):
     edit_cmd = mock_sub.call_args_list[2][0][0]
     assert "pulls/77" in edit_cmd[2]
     assert "PATCH" in edit_cmd
+
+
+def test_rebase_ticket_onto_integration_skips_when_already_based(tmp_path, monkeypatch):
+    from ticket_pr_lifecycle import rebase_ticket_onto_integration
+
+    run_dir = tmp_path / "runs" / "T012"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text("{}")
+
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append(list(cmd))
+        class R:
+            returncode = 0
+            stdout = "abc123\n"
+            stderr = ""
+        # merge-base and rev-parse both return same sha → already based
+        return R()
+
+    monkeypatch.setattr("ticket_pr_lifecycle.subprocess.run", fake_run)
+    monkeypatch.setattr("ticket_pr_lifecycle.resolve_integration_branch", lambda *a, **k: "main")
+    monkeypatch.setattr("ticket_pr_lifecycle._log", lambda *a, **k: None)
+
+    ok, conflicted = rebase_ticket_onto_integration("T012", run_dir, cwd=tmp_path)
+    assert ok is True
+    assert conflicted == []
+    assert not any(c[:2] == ["git", "rebase"] and len(c) >= 3 and c[2] == "origin/main" for c in calls)
+
+
+def test_rebase_ticket_onto_integration_records_conflict_state(tmp_path, monkeypatch):
+    from ticket_pr_lifecycle import rebase_ticket_onto_integration
+    import json
+
+    run_dir = tmp_path / "runs" / "T012"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(json.dumps({"state": "PLAN_APPROVED"}))
+
+    def fake_run(cmd, **kwargs):
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        if cmd[:2] == ["git", "fetch"]:
+            return R()
+        if cmd[:2] == ["git", "merge-base"]:
+            R.stdout = "base\n"
+            return R()
+        if cmd[:2] == ["git", "rev-parse"]:
+            R2 = type("R", (), {"returncode": 0, "stdout": "main-tip\n", "stderr": ""})()
+            return R2
+        if cmd[:2] == ["git", "rebase"]:
+            return type("R", (), {"returncode": 1, "stdout": "", "stderr": "conflict"})()
+        if cmd[:3] == ["git", "diff", "--name-only"]:
+            return type(
+                "R",
+                (),
+                {"returncode": 0, "stdout": "apps/web/src/lib/api.ts\napps/api/src/index.ts\n", "stderr": ""},
+            )()
+        return R()
+
+    monkeypatch.setattr("ticket_pr_lifecycle.subprocess.run", fake_run)
+    monkeypatch.setattr("ticket_pr_lifecycle.resolve_integration_branch", lambda *a, **k: "main")
+    monkeypatch.setattr("ticket_pr_lifecycle._log", lambda *a, **k: None)
+
+    ok, conflicted = rebase_ticket_onto_integration("T012", run_dir, cwd=tmp_path)
+    assert ok is False
+    assert conflicted == ["apps/web/src/lib/api.ts", "apps/api/src/index.ts"]
+    state = json.loads((run_dir / "state.json").read_text())
+    assert state["state"] == "CONFLICT_RESOLUTION_NEEDED"
+    assert state["pre_conflict_state"] == "PLAN_APPROVED"
+    assert state["conflicted_files"] == conflicted
