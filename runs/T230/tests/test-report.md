@@ -1,0 +1,1 @@
+This is the frontend test run I already analyzed — exit code 1 is due to the three pre-existing failing test files (DaemonActivityFeed, ProjectWorkspacePanel, RuntimeDashboardPage) that have zero diff from `main`. The T230-specific `BatchPipelineStatusPanel.test.jsx` passed all 5 tests cleanly. No action needed.
