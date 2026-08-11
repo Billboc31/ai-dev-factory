@@ -51,3 +51,24 @@
 [2026-08-11T06:54:29Z] push: tolerating runtime dirty files (not blocking): ['runs/T230/runtime.log', 'runs/T230/workflow-status.md']
 [2026-08-11T06:54:29Z] push: pushing branch=ticket/T230-batch-ui-show-per-ticket-pipeline-status-while-bat
 [2026-08-11T06:54:31Z] push: done branch=ticket/T230-batch-ui-show-per-ticket-pipeline-status-while-bat
+[2026-08-11T07:13:19Z] auto-run start: state=IMPLEMENTATION_APPROVED
+[2026-08-11T07:13:19Z] auto-run: running step=tester
+[2026-08-11T07:13:19Z] prompt: resolved=prompts/generic/tester.md source=generic
+[2026-08-11T07:13:19Z] prompt: generic fallback — injecting runs/T230/ticket.md
+[2026-08-11T07:13:19Z] compose: global-context=docs/ai/global-context.md
+[2026-08-11T07:13:19Z] compose: role=ai/roles/tester.md
+[2026-08-11T07:13:19Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-08-11T07:13:19Z] compose: skill=ai/skills/testing.md
+[2026-08-11T07:13:19Z] compose: skill=ai/skills/debugging.md
+[2026-08-11T07:13:19Z] compose: task (canonical prompt)
+[2026-08-11T07:13:19Z] snapshot: runtime-prompt=runs/T230/prompts/tester-attempt-1.md
+[2026-08-11T07:19:21Z] auto-run: step=tester done rc=0
+[2026-08-11T07:19:21Z] auto-run: transition IMPLEMENTATION_APPROVED → TEST_COMPLETE
+[2026-08-11T07:19:21Z] auto-run: auto-commit triggered (step=tester, include_code=True)
+[2026-08-11T07:19:22Z] commit-checkpoint: unstaged runtime garbage: ['runs/T230/daemon.lock', 'runs/T230/runtime.log', 'runs/T230/workflow-status.md']
+[2026-08-11T07:19:22Z] commit-checkpoint: sha=3875c335 files=3 title='test(T230/workflow): tester — update 3 file(s)'
+[2026-08-11T07:19:22Z] auto-run: auto-push triggered
+[2026-08-11T07:19:22Z] push: tolerating runtime dirty files (not blocking): ['runs/T230/daemon.lock', 'runs/T230/runtime.log', 'runs/T230/workflow-status.md']
+[2026-08-11T07:19:22Z] push: pushing branch=ticket/T230-batch-ui-show-per-ticket-pipeline-status-while-bat
+[2026-08-11T07:19:24Z] push: done branch=ticket/T230-batch-ui-show-per-ticket-pipeline-status-while-bat
+[2026-08-11T07:19:24Z] auto-run: TEST_COMPLETE — running PR lifecycle
