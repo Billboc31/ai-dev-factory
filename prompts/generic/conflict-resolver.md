@@ -8,10 +8,14 @@ Your task:
 3. Do not blindly pick ours or theirs — reason through each conflict.
 4. Write your output (stdout) as `conflict/resolution.md` summarising every conflict decision.
 
-ORM / Drizzle migrations:
-- Keep migrations that already exist on main unchanged.
-- Renumber this ticket's *new* migrations to the next free index (and update journal + snapshots accordingly).
-- Never invent a second `0001_*` that replaces main's `0001_*`.
+ORM / Drizzle migrations (hard rules — common failure mode when coding in parallel):
+- Keep migrations that already exist on **main** unchanged (SQL + their `meta/NNNN_snapshot.json`).
+- If this ticket also created `NNNN_*.sql` and main already has a different `NNNN_*.sql`, **renumber the ticket migration** to `max(main)+1` (e.g. main has `0004_wild_legion` → ticket becomes `0005_…`).
+- Update together: SQL filename, `meta/_journal.json` (`tag` = basename without `.sql`, unique `idx`), and `meta/NNNN_snapshot.json` (`prevId` = previous snapshot id).
+- **Never** leave two `NNNN_*.sql` files with the same numeric prefix.
+- **Never** keep both files and only “fix” the journal textually — that is not a resolution.
+- **Never** invent a second `0001_*` that replaces main's `0001_*`.
+- Prefer: take the ticket's schema SQL content → write it as the next free index → fix journal/snapshot. Do not line-merge migration journals when indexes collide.
 
 Safety rules:
 - Do not reset the branch.

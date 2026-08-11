@@ -22,9 +22,43 @@ _MAX_SECTION_CHARS = 200_000
 _MAX_FILE_CHARS = 80_000
 _MAX_CONTEXT_CHARS = 1_500_000
 
+_ORM_MIGRATION_PLAYBOOK = """## ORM / Drizzle migration conflict playbook
+
+When main and this ticket both added a migration at the **same numeric index**
+(e.g. `0004_wild_legion.sql` on main + `0004_careless_moon_knight.sql` on the ticket):
+
+1. Keep main's existing `NNNN_*.sql` and its `meta/NNNN_snapshot.json` unchanged.
+2. Renumber **this ticket's new** migration(s) to the next free index (`max(main)+1`).
+3. Update together: SQL filename, `meta/_journal.json` (`tag` = basename without
+   `.sql`, unique `idx`), and `meta/NNNN_snapshot.json` (`prevId` = previous snapshot id).
+4. **Never** leave two `NNNN_*.sql` files with the same `NNNN`.
+5. **Never** “resolve” by keeping both `0004_*` files and only editing the journal text.
+6. Prefer copying the ticket schema SQL into the next free index over line-merging journals.
+
+Fail the resolution if two SQL migrations still share the same numeric prefix.
+"""
+
 
 def _now_iso() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _is_orm_migration_path(path: str) -> bool:
+    """True for Drizzle/ORM migration SQL, journal, or snapshot paths."""
+    if not path:
+        return False
+    normalized = path.replace("\\", "/").lstrip("./")
+    parts = normalized.split("/")
+    if "migrations" not in parts:
+        return False
+    name = parts[-1]
+    if name.endswith(".sql"):
+        return True
+    if name == "_journal.json":
+        return True
+    if name.endswith("_snapshot.json") and "meta" in parts:
+        return True
+    return False
 
 
 def _run(args: list[str], cwd: str | None = None) -> tuple[str, int]:
@@ -105,6 +139,16 @@ def collect_context(
         f"- skipped_runtime_noise: {len(skipped)} path(s)"
         + (f" (e.g. {', '.join(skipped[:5])}{'…' if len(skipped) > 5 else ''})" if skipped else "")
     )
+
+    if any(_is_orm_migration_path(p) for p in conflicted_files):
+        sections.append(_ORM_MIGRATION_PLAYBOOK.strip())
+
+    migration_check = run_dir / "conflict" / "migration-check.md"
+    if migration_check.exists():
+        sections.append(
+            "## Previous migration check failure\n\n"
+            + migration_check.read_text(encoding="utf-8").strip()
+        )
 
     ticket_path = run_dir / "ticket.md"
     if ticket_path.exists():
