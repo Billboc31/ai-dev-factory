@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -177,9 +178,25 @@ def _gh_pr_view(
     *,
     repo: str | None = None,
 ) -> dict | None:
-    cmd = ["gh", "pr", "view", str(pr_number), "--json", "state,mergedAt"]
-    if repo:
-        cmd += ["--repo", repo]
+    """Fetch PR state via REST (``gh api``), not GraphQL ``gh pr view``."""
+    owner_repo = (repo or "").strip()
+    if not owner_repo or "/" not in owner_repo:
+        try:
+            origin = subprocess.run(
+                ["git", "-C", str(project_root), "remote", "get-url", "origin"],
+                capture_output=True,
+                text=True,
+                timeout=_GH_TIMEOUT,
+                check=False,
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return None
+        url = (origin.stdout or "").strip()
+        m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", url)
+        if not m:
+            return None
+        owner_repo = f"{m.group(1)}/{m.group(2)}"
+    cmd = ["gh", "api", f"repos/{owner_repo}/pulls/{pr_number}"]
     try:
         proc = subprocess.run(
             cmd,
@@ -194,9 +211,16 @@ def _gh_pr_view(
     if proc.returncode != 0 or not proc.stdout.strip():
         return None
     try:
-        return json.loads(proc.stdout)
+        data = json.loads(proc.stdout)
     except json.JSONDecodeError:
         return None
+    # Normalize REST → GraphQL-ish shape expected by _merge_result_from_github_payload.
+    merged = bool(data.get("merged"))
+    state = "MERGED" if merged else str(data.get("state") or "").upper()
+    return {
+        "state": state,
+        "mergedAt": data.get("merged_at"),
+    }
 
 
 def _merge_result_from_github_payload(
