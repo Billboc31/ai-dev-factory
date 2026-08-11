@@ -298,6 +298,12 @@ def process_ticket(
     except Exception:
         intel = None
 
+    if reset_stale_intelligence(db_path, ticket_id):
+        try:
+            intel = runtime_db.get_ticket_intelligence(db_path, ticket_id)
+        except Exception:
+            intel = None
+
     if needs_intelligence(intel):
         logger.info("pipeline: running intelligence for %s", ticket_id)
         analyzer.run_analysis(

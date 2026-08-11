@@ -137,6 +137,7 @@ _claim_readiness = _tp_mod.claim_readiness
 _record_intake_once = _tp_mod.record_intake_once
 _ticket_needs_intelligence = _tp_mod.needs_intelligence
 _ticket_needs_readiness = _tp_mod.ticket_needs_readiness
+_reset_stale_intelligence = _tp_mod.reset_stale_intelligence
 del _tp_spec, _tp_mod
 
 _te_spec = importlib.util.spec_from_file_location(
@@ -2291,6 +2292,11 @@ def poll_ticket_pipeline(
     submitted_ready = 0
 
     for ticket_id in ticket_ids:
+        try:
+            if _reset_stale_intelligence(db_path, ticket_id):
+                _log(f"pipeline: reclaimed stale intelligence for {ticket_id}")
+        except Exception as exc:
+            _log(f"pipeline: stale intelligence reclaim failed for {ticket_id}: {exc}")
         try:
             intel = _rdb_get_ticket_intelligence(db_path, ticket_id)
         except Exception:
