@@ -754,6 +754,24 @@ BatchStatusLiteral = Literal[
 ]
 
 
+class TicketPipelineRow(BaseModel):
+    ticket_id: str
+    issue_number: int | None = None
+    title: str | None = None
+    intelligence_status: str
+    readiness_status: str | None = None
+    runtime_state: str | None = None
+    is_blocking: bool
+    blocking_reason: str | None = None
+
+
+class BatchPipelineStatusResponse(BaseModel):
+    batch_id: str
+    batch_status: str
+    waiting_summary: str
+    tickets: list[TicketPipelineRow] = []
+
+
 class BatchSummary(BaseModel):
     batch_id: str
     status: BatchStatusLiteral | str
@@ -769,6 +787,7 @@ class BatchSummary(BaseModel):
     next_dependency_analysis_retry_at: str | None = None
     progress: dict[str, int] = {}
     current_phase: int | None = None
+    pipeline_summary: str | None = None
 
 
 class BatchListResponse(BaseModel):

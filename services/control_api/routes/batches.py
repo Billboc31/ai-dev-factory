@@ -30,8 +30,10 @@ from ..models.schemas import (
     BatchListResponse,
     BatchPhase,
     BatchPhasesResponse,
+    BatchPipelineStatusResponse,
     BatchSummary,
     BatchTicketDetail,
+    TicketPipelineRow,
 )
 from ..services.container_paths import to_container_path
 from ..services.runtime_resolver import resolve_worktrees_dir
@@ -286,14 +288,16 @@ def _build_summary(
     batch_row: dict,
 ) -> BatchSummary:
     batch_id = batch_row.get("batch_id") or ""
+    batch_status = batch_row.get("status") or ""
     ticket_ids = _safe(runtime_db.list_backlog_batch_ticket_ids, db_path, batch_id) or []
     runtime_map = _ticket_runtime_map(db_path)
     analyses = _dependency_analysis_for_batch(db_path, batch_id, ticket_ids)
     progress = _compute_progress(runtime_map, ticket_ids)
     current_phase = _current_phase(analyses, ticket_ids, runtime_map)
+    pipeline_summary = _compute_pipeline_summary(db_path, batch_status, ticket_ids)
     return BatchSummary(
         batch_id=batch_id,
-        status=batch_row.get("status") or "",
+        status=batch_status,
         ticket_count=len(ticket_ids),
         created_at=batch_row.get("created_at"),
         frozen_at=batch_row.get("frozen_at"),
@@ -310,12 +314,142 @@ def _build_summary(
         ),
         progress=progress,
         current_phase=current_phase,
+        pipeline_summary=pipeline_summary,
     )
 
 
 def _build_summaries(db_path) -> list[BatchSummary]:
     rows = _safe(runtime_db.list_backlog_batches, db_path) or []
     return [_build_summary(db_path, row) for row in rows]
+
+
+# ── pipeline status helpers (T230) ────────────────────────────────────────────
+
+def _compute_ticket_blocking(
+    batch_status: str,
+    intelligence_status: str,
+    readiness_status: str | None,
+) -> tuple[bool, str | None]:
+    if batch_status == "frozen":
+        if intelligence_status == "completed":
+            return False, None
+        labels = {
+            "not_started": "Intelligence not started",
+            "queued": "Intelligence queued",
+            "running": "Intelligence running",
+            "failed": "Intelligence failed",
+        }
+        return True, labels.get(intelligence_status, f"Intelligence {intelligence_status}")
+    if batch_status == "readiness_running":
+        effective = readiness_status or "not_started"
+        if effective == "completed":
+            return False, None
+        labels = {
+            "not_started": "Readiness not started",
+            "queued": "Readiness queued",
+            "running": "Readiness running",
+            "failed": "Readiness failed — cannot dispatch",
+        }
+        return True, labels.get(effective, f"Readiness {effective}")
+    return False, None
+
+
+def _compute_waiting_summary(batch_status: str, tickets: list[TicketPipelineRow]) -> str:
+    blocking_ids = sorted(t.ticket_id for t in tickets if t.is_blocking)
+    if batch_status == "collecting":
+        return f"Collecting — {len(tickets)} member(s) so far"
+    if batch_status == "frozen":
+        if blocking_ids:
+            return f"Waiting on Ticket Intelligence: {', '.join(blocking_ids)}"
+        return "Ready for dependency analysis"
+    if batch_status == "dependency_analysis_running":
+        return "Dependency analysis running"
+    if batch_status == "dependency_analysis_failed":
+        return "Dependency analysis failed — retry pending"
+    if batch_status == "readiness_running":
+        if blocking_ids:
+            return f"Waiting on readiness: {', '.join(blocking_ids)}"
+        return "Readiness complete — awaiting dispatch"
+    if batch_status == "dispatching":
+        return "Dispatching tickets"
+    if batch_status == "completed":
+        return "Batch completed"
+    return batch_status
+
+
+def _compute_pipeline_summary(
+    db_path,
+    batch_status: str,
+    ticket_ids: list[str],
+) -> str | None:
+    terminal = {"completed", "dependency_analysis_failed"}
+    if batch_status in terminal:
+        return None
+    if batch_status == "collecting":
+        return f"Collecting — {len(ticket_ids)} member(s) so far"
+    if batch_status == "frozen":
+        pending = 0
+        for ticket_id in ticket_ids:
+            row = _safe(runtime_db.get_ticket_intelligence, db_path, ticket_id)
+            status = (row or {}).get("analysis_status", "not_started")
+            if status != "completed":
+                pending += 1
+        if pending:
+            return f"Waiting on Ticket Intelligence ({pending} pending)"
+        return "Ready for dependency analysis"
+    if batch_status == "dependency_analysis_running":
+        return "Dependency analysis running"
+    if batch_status == "readiness_running":
+        pending = 0
+        for ticket_id in ticket_ids:
+            row = _safe(runtime_db.get_ticket_readiness, db_path, ticket_id)
+            status = (row or {}).get("readiness_status", "not_started")
+            if status != "completed":
+                pending += 1
+        if pending:
+            return f"Waiting on readiness ({pending} pending)"
+        return "Readiness complete — awaiting dispatch"
+    if batch_status == "dispatching":
+        return "Dispatching tickets"
+    return None
+
+
+def _build_pipeline_status(
+    db_path,
+    project_root: Path,
+    batch_id: str,
+    ticket_ids: list[str],
+    batch_status: str,
+    *,
+    worktrees_dir: Path | None,
+) -> BatchPipelineStatusResponse:
+    runtime_map = _ticket_runtime_map(db_path)
+    ticket_rows: list[TicketPipelineRow] = []
+    for ticket_id in ticket_ids:
+        intel_row = _safe(runtime_db.get_ticket_intelligence, db_path, ticket_id) or {}
+        readiness_row = _safe(runtime_db.get_ticket_readiness, db_path, ticket_id) or {}
+        intelligence_status = intel_row.get("analysis_status") or "not_started"
+        readiness_status = readiness_row.get("readiness_status") or None
+        runtime_state = (runtime_map.get(ticket_id, {}).get("state")) or None
+        is_blocking, blocking_reason = _compute_ticket_blocking(
+            batch_status, intelligence_status, readiness_status
+        )
+        ticket_rows.append(TicketPipelineRow(
+            ticket_id=ticket_id,
+            title=_read_ticket_title(project_root, ticket_id, worktrees_dir=worktrees_dir),
+            intelligence_status=intelligence_status,
+            readiness_status=readiness_status,
+            runtime_state=runtime_state,
+            is_blocking=is_blocking,
+            blocking_reason=blocking_reason,
+        ))
+    waiting_summary = _compute_waiting_summary(batch_status, ticket_rows)
+    return BatchPipelineStatusResponse(
+        batch_id=batch_id,
+        batch_status=batch_status,
+        waiting_summary=waiting_summary,
+        tickets=ticket_rows,
+    )
 
 
 def _build_ticket_details(
@@ -906,6 +1040,23 @@ def get_batch_insights(batch_id: str, request: Request) -> BatchInsightsResponse
     )
 
 
+@router.get("/{batch_id}/pipeline-status", response_model=BatchPipelineStatusResponse)
+def get_batch_pipeline_status(batch_id: str, request: Request) -> BatchPipelineStatusResponse:
+    db_path = _require_db(_db_path(request))
+    batch_row = _safe(runtime_db.get_backlog_batch, db_path, batch_id)
+    if not batch_row:
+        raise HTTPException(status_code=404, detail="batch not found")
+    ticket_ids = _safe(runtime_db.list_backlog_batch_ticket_ids, db_path, batch_id) or []
+    return _build_pipeline_status(
+        db_path,
+        _root(request),
+        batch_id=batch_id,
+        ticket_ids=ticket_ids,
+        batch_status=batch_row.get("status") or "",
+        worktrees_dir=getattr(request.app.state, "worktrees_dir", None),
+    )
+
+
 @router.post("/{batch_id}/freeze", response_model=BatchActionResponse)
 def post_freeze(batch_id: str, request: Request) -> BatchActionResponse:
     db_path = _require_db(_db_path(request))
@@ -1060,6 +1211,38 @@ def get_batch_insights_project(
         project_root,
         batch_id=batch_id,
         project_id=project_id,
+        worktrees_dir=worktrees,
+    )
+
+
+@project_router.get(
+    "/{project_id}/dispatcher/batches/{batch_id}/pipeline-status",
+    response_model=BatchPipelineStatusResponse,
+)
+def get_batch_pipeline_status_project(
+    project_id: str,
+    batch_id: str,
+    request: Request,
+    project_root: Path = Depends(resolve_project),
+    project_runtime_root: Path | None = Depends(resolve_project_runtime_root),
+) -> BatchPipelineStatusResponse:
+    db_path = _require_db(_resolve_db_for_project(request, project_id))
+    batch_row = _safe(runtime_db.get_backlog_batch, db_path, batch_id)
+    if not batch_row:
+        raise HTTPException(status_code=404, detail="batch not found")
+    ticket_ids = _safe(runtime_db.list_backlog_batch_ticket_ids, db_path, batch_id) or []
+    worktrees = _worktrees_dir_for(
+        request,
+        project_root,
+        project_id=project_id,
+        project_runtime_root=project_runtime_root,
+    )
+    return _build_pipeline_status(
+        db_path,
+        project_root,
+        batch_id=batch_id,
+        ticket_ids=ticket_ids,
+        batch_status=batch_row.get("status") or "",
         worktrees_dir=worktrees,
     )
 

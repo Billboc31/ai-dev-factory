@@ -35,3 +35,6 @@ export const recomputeBatchDependencies = (projectId, batchId) =>
 
 export const cancelBatch = (projectId, batchId) =>
   client.post(`${base(projectId)}/${batchId}/cancel`)
+
+export const getBatchPipelineStatus = (projectId, batchId) =>
+  client.get(`${base(projectId)}/${batchId}/pipeline-status`)
