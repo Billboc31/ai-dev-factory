@@ -71,15 +71,18 @@ def test_create_or_update_pr_creates_new_pr(tmp_path):
     run_dir = _make_run_dir(tmp_path, issue_number=21)
     mock_list = MagicMock(returncode=0, stdout="[]")
     mock_fallback = MagicMock(returncode=0, stdout="[]")
-    mock_create = MagicMock(returncode=0, stdout="https://github.com/owner/repo/pull/42\n")
-    with patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_list, mock_fallback, mock_create]) as mock_sub:
-        create_or_update_pr("T001", run_dir, None)
+    mock_create = MagicMock(
+        returncode=0,
+        stdout=json.dumps({"number": 42, "html_url": "https://github.com/owner/repo/pull/42"}),
+    )
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_list, mock_fallback, mock_create]) as mock_sub:
+        create_or_update_pr("T001", run_dir, "owner/repo")
     create_args = mock_sub.call_args_list[2][0][0]
-    assert "gh" in create_args
-    assert "pr" in create_args
-    assert "create" in create_args
-    assert "--base" in create_args
-    assert INTEGRATION_BRANCH in create_args
+    assert create_args[:3] == ["gh", "api", "repos/owner/repo/pulls"]
+    assert "--method" in create_args and "POST" in create_args
+    assert any(a.startswith("base=") for a in create_args)
+    assert any(a == f"base={INTEGRATION_BRANCH}" or a.endswith(f"={INTEGRATION_BRANCH}") for a in create_args)
     saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved["pr_number"] == 42
 
@@ -88,12 +91,15 @@ def test_create_or_update_pr_targets_integration_branch(tmp_path):
     run_dir = _make_run_dir(tmp_path)
     mock_list = MagicMock(returncode=0, stdout="[]")
     mock_fallback = MagicMock(returncode=0, stdout="[]")
-    mock_create = MagicMock(returncode=0, stdout="https://github.com/owner/repo/pull/5\n")
-    with patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_list, mock_fallback, mock_create]) as mock_sub:
+    mock_create = MagicMock(
+        returncode=0,
+        stdout=json.dumps({"number": 5, "html_url": "https://github.com/owner/repo/pull/5"}),
+    )
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_list, mock_fallback, mock_create]) as mock_sub:
         create_or_update_pr("T001", run_dir, "owner/repo")
     create_args = mock_sub.call_args_list[2][0][0]
-    base_idx = create_args.index("--base")
-    assert create_args[base_idx + 1] == "main"
+    assert "base=main" in create_args
 
 
 def test_ensure_pr_base_branch_retargests_when_needed(tmp_path):
@@ -118,12 +124,12 @@ def test_resolve_integration_branch_defaults_to_main(tmp_path):
 def test_create_or_update_pr_updates_existing_pr(tmp_path):
     run_dir = _make_run_dir(tmp_path, pr_number=55)
     mock_edit = MagicMock(returncode=0, stdout="")
-    with patch("ticket_pr_lifecycle.subprocess.run", return_value=mock_edit) as mock_sub:
-        create_or_update_pr("T001", run_dir, None)
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", return_value=mock_edit) as mock_sub:
+        create_or_update_pr("T001", run_dir, "owner/repo")
     cmd = mock_sub.call_args[0][0]
-    assert "pr" in cmd
-    assert "edit" in cmd
-    assert "55" in cmd
+    assert cmd[:3] == ["gh", "api", "repos/owner/repo/pulls/55"]
+    assert "PATCH" in cmd
     saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved.get("pr_synced") is True
 
@@ -139,11 +145,15 @@ def test_create_or_update_pr_finds_existing_pr_by_head(tmp_path):
     run_dir = _make_run_dir(tmp_path)
     mock_list = MagicMock(returncode=0, stdout=json.dumps([{"number": 33}]))
     mock_edit = MagicMock(returncode=0, stdout="")
-    with patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_list, mock_edit]) as mock_sub:
-        create_or_update_pr("T001", run_dir, None)
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_list, mock_edit]) as mock_sub:
+        create_or_update_pr("T001", run_dir, "owner/repo")
+    list_cmd = mock_sub.call_args_list[0][0][0]
+    assert "repos/owner/repo/pulls?" in list_cmd[2]
+    assert "head=owner:ticket/T001-my-feature" in list_cmd[2]
     edit_cmd = mock_sub.call_args_list[1][0][0]
-    assert "edit" in edit_cmd
-    assert "33" in edit_cmd
+    assert "pulls/33" in edit_cmd[2]
+    assert "PATCH" in edit_cmd
 
 
 def test_create_or_update_pr_skips_when_no_branch(tmp_path):
@@ -161,14 +171,15 @@ def test_create_or_update_pr_skips_when_no_branch(tmp_path):
 
 def test_check_and_close_issue_closes_merged_pr(tmp_path):
     run_dir = _make_run_dir(tmp_path, pr_number=42, issue_number=21)
-    mock_view = MagicMock(returncode=0, stdout=json.dumps({"state": "MERGED"}))
+    mock_view = MagicMock(returncode=0, stdout=json.dumps({"merged": True, "state": "closed"}))
     mock_close = MagicMock(returncode=0, stdout="")
     mock_label = MagicMock(returncode=0, stdout="")
-    with patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_view, mock_close, mock_label]) as mock_sub:
-        check_and_close_issue("T001", run_dir, None)
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_view, mock_close, mock_label]) as mock_sub:
+        check_and_close_issue("T001", run_dir, "owner/repo")
     close_cmd = mock_sub.call_args_list[1][0][0]
-    assert "issue" in close_cmd
-    assert "close" in close_cmd
+    assert close_cmd[:3] == ["gh", "api", "repos/owner/repo/issues/21"]
+    assert "PATCH" in close_cmd
     saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved.get("issue_closed") is True
 
@@ -182,9 +193,10 @@ def test_check_and_close_issue_skips_when_already_closed(tmp_path):
 
 def test_check_and_close_issue_skips_open_pr(tmp_path):
     run_dir = _make_run_dir(tmp_path, pr_number=42, issue_number=21)
-    mock_view = MagicMock(returncode=0, stdout=json.dumps({"state": "OPEN"}))
-    with patch("ticket_pr_lifecycle.subprocess.run", return_value=mock_view) as mock_sub:
-        check_and_close_issue("T001", run_dir, None)
+    mock_view = MagicMock(returncode=0, stdout=json.dumps({"merged": False, "state": "open"}))
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", return_value=mock_view) as mock_sub:
+        check_and_close_issue("T001", run_dir, "owner/repo")
     assert mock_sub.call_count == 1
 
 
@@ -278,10 +290,11 @@ def test_create_or_update_pr_marks_archived_on_no_diff_error(tmp_path):
     mock_fallback = MagicMock(returncode=0, stdout="[]")
     mock_create = MagicMock(
         returncode=1, stdout="",
-        stderr="No commits between main and ticket/T001-my-feature",
+        stderr='{"message":"Validation Failed","errors":[{"message":"No commits between main and ticket/T001-my-feature"}]}',
     )
-    with patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_list, mock_fallback, mock_create]):
-        create_or_update_pr("T001", run_dir, None)
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_list, mock_fallback, mock_create]):
+        create_or_update_pr("T001", run_dir, "owner/repo")
     saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved.get("pr_skipped_no_diff") is True
     assert saved.get("daemon_archived") is True
@@ -292,8 +305,9 @@ def test_create_or_update_pr_does_not_mark_archived_on_other_error(tmp_path):
     mock_list = MagicMock(returncode=0, stdout="[]")
     mock_fallback = MagicMock(returncode=0, stdout="[]")
     mock_create = MagicMock(returncode=1, stdout="", stderr="some other gh error")
-    with patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_list, mock_fallback, mock_create]):
-        create_or_update_pr("T001", run_dir, None)
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_list, mock_fallback, mock_create]):
+        create_or_update_pr("T001", run_dir, "owner/repo")
     saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved.get("pr_skipped_no_diff") is None
     assert saved.get("daemon_archived") is None
@@ -449,13 +463,14 @@ def test_create_or_update_pr_finds_pr_by_ticket_prefix_fallback(tmp_path):
     mock_branch_list = MagicMock(returncode=0, stdout="[]")
     mock_prefix_list = MagicMock(
         returncode=0,
-        stdout=json.dumps([{"number": 77, "headRefName": "ticket/T001-renamed-title"}]),
+        stdout=json.dumps([{"number": 77, "head": {"ref": "ticket/T001-renamed-title"}}]),
     )
     mock_edit = MagicMock(returncode=0, stdout="")
-    with patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_branch_list, mock_prefix_list, mock_edit]) as mock_sub:
-        create_or_update_pr("T001", run_dir, None)
+    with patch("ticket_pr_lifecycle._resolve_owner_repo", return_value="owner/repo"), \
+         patch("ticket_pr_lifecycle.subprocess.run", side_effect=[mock_branch_list, mock_prefix_list, mock_edit]) as mock_sub:
+        create_or_update_pr("T001", run_dir, "owner/repo")
     saved = json.loads((run_dir / "state.json").read_text(encoding="utf-8"))
     assert saved["pr_number"] == 77
     edit_cmd = mock_sub.call_args_list[2][0][0]
-    assert "edit" in edit_cmd
-    assert "77" in edit_cmd
+    assert "pulls/77" in edit_cmd[2]
+    assert "PATCH" in edit_cmd
