@@ -337,6 +337,7 @@ __all__ = [
     "maybe_run_readiness_after_intelligence",
     "needs_intelligence",
     "needs_readiness",
+    "reset_stale_intelligence",
     "ticket_needs_readiness",
     "process_ticket",
     "record_intake_once",
