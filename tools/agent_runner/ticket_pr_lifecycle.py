@@ -49,6 +49,42 @@ def _now_iso() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+def _resolve_owner_repo(repo: str | None) -> str | None:
+    """Return ``owner/name`` for REST calls (avoids GraphQL ``gh pr`` / ``gh issue``)."""
+    if repo and "/" in repo.strip():
+        return repo.strip()
+    try:
+        origin = subprocess.run(
+            ["git", "remote", "get-url", "origin"],
+            capture_output=True, text=True, check=False,
+        )
+    except FileNotFoundError:
+        return None
+    url = (origin.stdout or "").strip()
+    m = re.search(r"github\.com[:/]([^/]+)/([^/.]+)", url)
+    return f"{m.group(1)}/{m.group(2)}" if m else None
+
+
+def _gh_api(
+    path: str,
+    *,
+    method: str | None = None,
+    fields: dict[str, str] | None = None,
+    raw_fields: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
+    """Run ``gh api`` (REST / core quota). ``fields`` use ``-f``; ``raw_fields`` use ``-F``."""
+    cmd = ["gh", "api", path]
+    if method:
+        cmd += ["--method", method]
+    if fields:
+        for key, value in fields.items():
+            cmd += ["-f", f"{key}={value}"]
+    if raw_fields:
+        for key, value in raw_fields.items():
+            cmd += ["-F", f"{key}={value}"]
+    return subprocess.run(cmd, capture_output=True, text=True, check=False)
+
+
 def resolve_integration_branch(
     ticket_id: str,
     run_dir: Path,
@@ -201,7 +237,11 @@ def _pr_body(ticket_id: str, issue_number: int | None) -> str:
 
 
 def create_or_update_pr(ticket_id: str, run_dir: Path, repo: str | None) -> None:
-    """Create or update the GitHub PR for a ticket at TEST_COMPLETE. Non-blocking on gh failure."""
+    """Create or update the GitHub PR for a ticket at TEST_COMPLETE. Non-blocking on gh failure.
+
+    Uses REST via ``gh api`` (core quota) — ``gh pr create/list`` hit GraphQL and
+    routinely fail when the factory has already burned the GraphQL budget on polls.
+    """
     state = _load_state_json(run_dir)
     branch = state.get("branch")
     issue_number = state.get("issue_number")
@@ -214,41 +254,44 @@ def create_or_update_pr(ticket_id: str, run_dir: Path, repo: str | None) -> None
     if pr_number is not None and state.get("pr_synced"):
         return
 
+    owner_repo = _resolve_owner_repo(repo)
+    if not owner_repo:
+        _log(f"{ticket_id}: create_or_update_pr: cannot resolve owner/repo — skipping")
+        return
+
     title = _pr_title(ticket_id, run_dir)
     body = _pr_body(ticket_id, issue_number)
+    owner = owner_repo.split("/", 1)[0]
 
     if pr_number is None:
-        list_cmd = ["gh", "pr", "list", "--head", branch, "--json", "number", "--state", "open"]
-        if repo:
-            list_cmd += ["--repo", repo]
         try:
-            list_result = subprocess.run(list_cmd, capture_output=True, text=True, check=False)
+            list_result = _gh_api(
+                f"repos/{owner_repo}/pulls?state=open&head={owner}:{branch}&per_page=5"
+            )
             if list_result.returncode == 0 and list_result.stdout.strip():
                 existing = json.loads(list_result.stdout)
-                if existing:
+                if isinstance(existing, list) and existing:
                     pr_number = existing[0]["number"]
                     _log(f"{ticket_id}: found existing PR #{pr_number} — will update")
                     state["pr_number"] = pr_number
                     _save_state_json(run_dir, state)
         except (json.JSONDecodeError, FileNotFoundError, OSError):
-            _log(f"{ticket_id}: gh pr list failed — proceeding with create")
+            _log(f"{ticket_id}: gh api pr list failed — proceeding with create")
 
     if pr_number is None:
         prefix = f"ticket/{ticket_id}-"
-        fallback_cmd = ["gh", "pr", "list", "--state", "open", "--json", "number,headRefName", "--limit", "100"]
-        if repo:
-            fallback_cmd += ["--repo", repo]
         try:
-            fb_result = subprocess.run(fallback_cmd, capture_output=True, text=True, check=False)
+            fb_result = _gh_api(f"repos/{owner_repo}/pulls?state=open&per_page=100")
             if fb_result.returncode == 0 and fb_result.stdout.strip():
                 all_prs = json.loads(fb_result.stdout)
                 matching = [
                     p for p in all_prs
-                    if isinstance(p, dict) and str(p.get("headRefName", "")).startswith(prefix)
+                    if isinstance(p, dict)
+                    and str((p.get("head") or {}).get("ref") or "").startswith(prefix)
                 ]
                 if matching:
                     pr_number = matching[0]["number"]
-                    head_ref = matching[0].get("headRefName", "")
+                    head_ref = (matching[0].get("head") or {}).get("ref", "")
                     _log(
                         f"{ticket_id}: found PR #{pr_number} via branch prefix {prefix!r} "
                         f"(headRef={head_ref!r}) — branch may have been renamed"
@@ -259,44 +302,51 @@ def create_or_update_pr(ticket_id: str, run_dir: Path, repo: str | None) -> None
             pass
 
     if pr_number is not None:
-        edit_cmd = ["gh", "pr", "edit", str(pr_number), "--body", body]
-        if repo:
-            edit_cmd += ["--repo", repo]
         try:
-            result = subprocess.run(edit_cmd, capture_output=True, text=True, check=False)
+            result = _gh_api(
+                f"repos/{owner_repo}/pulls/{pr_number}",
+                method="PATCH",
+                fields={"body": body},
+            )
             if result.returncode == 0:
                 state["pr_synced"] = True
                 _save_state_json(run_dir, state)
                 _log(f"{ticket_id}: PR #{pr_number} updated")
             else:
-                _log(f"{ticket_id}: gh pr edit failed (rc={result.returncode}): {result.stderr.strip()}")
+                err = (result.stderr or result.stdout or "").strip()
+                _log(f"{ticket_id}: gh api pr edit failed (rc={result.returncode}): {err}")
         except FileNotFoundError:
             _log(f"{ticket_id}: gh not found — cannot update PR #{pr_number}")
     else:
         base_branch = resolve_integration_branch(ticket_id, run_dir, repo)
-        create_cmd = [
-            "gh", "pr", "create", "--head", branch,
-            "--base", base_branch,
-            "--title", title, "--body", body,
-        ]
-        if repo:
-            create_cmd += ["--repo", repo]
         try:
-            result = subprocess.run(create_cmd, capture_output=True, text=True, check=False)
+            result = _gh_api(
+                f"repos/{owner_repo}/pulls",
+                method="POST",
+                fields={
+                    "title": title,
+                    "head": branch,
+                    "base": base_branch,
+                    "body": body,
+                },
+            )
             if result.returncode == 0:
-                pr_url = result.stdout.strip()
-                m = re.search(r"/pull/(\d+)", pr_url)
-                if m:
-                    pr_number = int(m.group(1))
-                    state["pr_number"] = pr_number
+                try:
+                    payload = json.loads(result.stdout)
+                except json.JSONDecodeError:
+                    payload = {}
+                pr_number = payload.get("number")
+                pr_url = payload.get("html_url") or ""
+                if pr_number:
+                    state["pr_number"] = int(pr_number)
                     state["pr_synced"] = True
                     _save_state_json(run_dir, state)
                     _log(f"{ticket_id}: PR #{pr_number} created: {pr_url}")
                 else:
-                    _log(f"{ticket_id}: PR created but number not parsed from: {pr_url!r}")
+                    _log(f"{ticket_id}: PR created but number missing in response: {result.stdout[:200]!r}")
             else:
-                stderr = result.stderr.strip()
-                _log(f"{ticket_id}: gh pr create failed (rc={result.returncode}): {stderr}")
+                stderr = (result.stderr or result.stdout or "").strip()
+                _log(f"{ticket_id}: gh api pr create failed (rc={result.returncode}): {stderr}")
                 if "No commits between" in stderr:
                     state["pr_skipped_no_diff"] = True
                     state["daemon_archived"] = True
@@ -320,20 +370,24 @@ def check_and_close_issue(ticket_id: str, run_dir: Path, repo: str | None) -> No
     if not pr_number:
         return
 
-    check_cmd = ["gh", "pr", "view", str(pr_number), "--json", "state"]
-    if repo:
-        check_cmd += ["--repo", repo]
+    owner_repo = _resolve_owner_repo(repo)
+    if not owner_repo:
+        _log(f"{ticket_id}: check_and_close_issue: cannot resolve owner/repo — skipping")
+        return
+
     try:
-        result = subprocess.run(check_cmd, capture_output=True, text=True, check=False)
+        result = _gh_api(f"repos/{owner_repo}/pulls/{pr_number}")
         if result.returncode != 0:
-            _log(f"{ticket_id}: gh pr view failed (rc={result.returncode}): {result.stderr.strip()}")
+            err = (result.stderr or result.stdout or "").strip()
+            _log(f"{ticket_id}: gh api pr view failed (rc={result.returncode}): {err}")
             return
         pr_data = json.loads(result.stdout)
     except (json.JSONDecodeError, FileNotFoundError):
-        _log(f"{ticket_id}: gh pr view failed or gh not found")
+        _log(f"{ticket_id}: gh api pr view failed or gh not found")
         return
 
-    if pr_data.get("state") != "MERGED":
+    # REST: state is open/closed; merged is a boolean (GraphQL used state=MERGED).
+    if not pr_data.get("merged"):
         return
 
     _log(f"{ticket_id}: PR #{pr_number} merged — handling issue closure")
@@ -341,29 +395,34 @@ def check_and_close_issue(ticket_id: str, run_dir: Path, repo: str | None) -> No
     if not issue_number:
         return
 
-    close_cmd = ["gh", "issue", "close", str(issue_number)]
-    if repo:
-        close_cmd += ["--repo", repo]
     try:
-        close_result = subprocess.run(close_cmd, capture_output=True, text=True, check=False)
+        close_result = _gh_api(
+            f"repos/{owner_repo}/issues/{issue_number}",
+            method="PATCH",
+            fields={"state": "closed", "state_reason": "completed"},
+        )
         if close_result.returncode == 0:
             _log(f"{ticket_id}: issue #{issue_number} closed")
         else:
-            _log(f"{ticket_id}: gh issue close failed (rc={close_result.returncode}): {close_result.stderr.strip()}")
+            err = (close_result.stderr or close_result.stdout or "").strip()
+            _log(f"{ticket_id}: gh api issue close failed (rc={close_result.returncode}): {err}")
     except FileNotFoundError:
         _log(f"{ticket_id}: gh not found — cannot close issue #{issue_number}")
 
-    label_cmd = ["gh", "issue", "edit", str(issue_number), "--remove-label", "ai-ready"]
-    if repo:
-        label_cmd += ["--repo", repo]
     try:
-        label_result = subprocess.run(label_cmd, capture_output=True, text=True, check=False)
+        label_result = _gh_api(
+            f"repos/{owner_repo}/issues/{issue_number}/labels/ai-ready",
+            method="DELETE",
+        )
         if label_result.returncode == 0:
-            _log(f"{ticket_id}: label 'ai-ready' removed from issue #{issue_number}")
-        else:
-            _log(f"{ticket_id}: gh issue edit label failed (rc={label_result.returncode}): {label_result.stderr.strip()}")
+            _log(f"{ticket_id}: removed ai-ready label from issue #{issue_number}")
+        elif label_result.returncode != 0:
+            err = (label_result.stderr or label_result.stdout or "").strip()
+            # 404 = label already gone — fine
+            if "Not Found" not in err and "404" not in err:
+                _log(f"{ticket_id}: remove ai-ready failed (rc={label_result.returncode}): {err}")
     except FileNotFoundError:
-        _log(f"{ticket_id}: gh not found — cannot remove label from issue #{issue_number}")
+        pass
 
     state["issue_closed"] = True
     _save_state_json(run_dir, state)
