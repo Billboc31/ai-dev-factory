@@ -11,12 +11,37 @@ import shlex
 import signal
 import subprocess
 import sys
+import threading
+import time
 from pathlib import Path
 
 # Default wall-clock limit for --exec-cmd agent invocations. Override with
 # AGENT_EXEC_TIMEOUT_SECONDS (0 = unlimited). Prevents perpetual hangs when an
 # agent waits forever on empty background shell task outputs.
 _DEFAULT_EXEC_TIMEOUT_SECONDS = 7200
+
+# If the worktree shows no meaningful file activity for this long while the
+# agent is still alive, kill the process group. Catches Claude CLI hangs on
+# finished-but-unreaped shell tools (T006: ~1h stuck on a completed postgres
+# probe). Override with AGENT_IDLE_TIMEOUT_SECONDS (0 = disable idle watchdog).
+_DEFAULT_IDLE_TIMEOUT_SECONDS = 1200
+
+_IDLE_SKIP_DIR_NAMES = frozenset({
+    ".git",
+    "node_modules",
+    "__pycache__",
+    ".venv",
+    "venv",
+    ".pnpm-store",
+    ".turbo",
+    "dist",
+    "build",
+    "coverage",
+})
+_IDLE_SKIP_NAME_PARTS = frozenset({
+    "daemon.lock",
+    "runtime.log",
+})
 
 
 # Step processes (planner/coder/reviewer/tester) spawn an external agent
@@ -350,10 +375,88 @@ def resolve_exec_timeout_seconds(explicit: int | None = None) -> int | None:
     return _DEFAULT_EXEC_TIMEOUT_SECONDS
 
 
+def resolve_idle_timeout_seconds(explicit: int | None = None) -> int | None:
+    """Return idle watchdog seconds, or None if disabled.
+
+    Priority: explicit arg > ``AGENT_IDLE_TIMEOUT_SECONDS`` > default (1200).
+    A value ``<= 0`` disables the idle watchdog.
+    """
+    if explicit is not None:
+        return None if explicit <= 0 else explicit
+    raw = os.environ.get("AGENT_IDLE_TIMEOUT_SECONDS")
+    if raw is not None and raw.strip() != "":
+        try:
+            value = int(raw)
+        except ValueError as exc:
+            raise RunnerError(
+                f"AGENT_IDLE_TIMEOUT_SECONDS must be an integer, got {raw!r}"
+            ) from exc
+        return None if value <= 0 else value
+    return _DEFAULT_IDLE_TIMEOUT_SECONDS
+
+
+def _should_skip_idle_path(path: Path) -> bool:
+    name = path.name
+    if name in _IDLE_SKIP_NAME_PARTS:
+        return True
+    if name.endswith(".lock") or name.endswith(".log"):
+        return True
+    return False
+
+
+def worktree_activity_mtime(root: Path | None = None) -> float:
+    """Max mtime of meaningful files under ``root`` (cwd by default).
+
+    Skips heavy/noise dirs (node_modules, .git, …) and runtime lock/log files
+    so daemon heartbeats do not look like agent progress.
+    """
+    base = Path(root) if root is not None else Path.cwd()
+    newest = 0.0
+    if not base.is_dir():
+        return newest
+    stack = [base]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    name = entry.name
+                    if name in _IDLE_SKIP_DIR_NAMES:
+                        continue
+                    try:
+                        if entry.is_dir(follow_symlinks=False):
+                            stack.append(Path(entry.path))
+                            continue
+                        if not entry.is_file(follow_symlinks=False):
+                            continue
+                        path = Path(entry.path)
+                        if _should_skip_idle_path(path):
+                            continue
+                        newest = max(newest, entry.stat(follow_symlinks=False).st_mtime)
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return newest
+
+
+def _kill_process_group(proc: subprocess.Popen[str]) -> None:
+    try:
+        os.killpg(proc.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError, OSError):
+        try:
+            proc.kill()
+        except OSError:
+            pass
+
+
 def execute_external_command(
     command_text: str,
     prompt_content: str,
     timeout: int | None = None,
+    *,
+    idle_timeout: int | None = None,
+    activity_root: Path | None = None,
 ) -> tuple[str, str, int]:
     command = shlex.split(command_text)
     if not command:
@@ -367,6 +470,8 @@ def execute_external_command(
     env["PYTHONDONTWRITEBYTECODE"] = "1"
 
     effective_timeout = resolve_exec_timeout_seconds(timeout)
+    effective_idle = resolve_idle_timeout_seconds(idle_timeout)
+    root = Path(activity_root) if activity_root is not None else Path.cwd()
 
     # Own process group so a timeout can kill Claude *and* its hung shell
     # waiters (grandchildren), which subprocess.run alone would leave behind.
@@ -380,21 +485,96 @@ def execute_external_command(
         env=env,
         start_new_session=True,
     )
-    try:
-        stdout, stderr = proc.communicate(input=prompt_content, timeout=effective_timeout)
-        return stdout, stderr, proc.returncode or 0
-    except subprocess.TimeoutExpired:
+    assert proc.stdin is not None
+    assert proc.stdout is not None
+    assert proc.stderr is not None
+
+    stdout_chunks: list[str] = []
+    stderr_chunks: list[str] = []
+    last_output_len = 0
+
+    def _reader(pipe, bucket: list[str]) -> None:
         try:
-            os.killpg(proc.pid, signal.SIGKILL)
-        except (ProcessLookupError, PermissionError, OSError):
+            while True:
+                chunk = pipe.read(4096)
+                if not chunk:
+                    break
+                bucket.append(chunk)
+        except OSError:
+            pass
+
+    out_thread = threading.Thread(target=_reader, args=(proc.stdout, stdout_chunks), daemon=True)
+    err_thread = threading.Thread(target=_reader, args=(proc.stderr, stderr_chunks), daemon=True)
+    out_thread.start()
+    err_thread.start()
+
+    try:
+        proc.stdin.write(prompt_content)
+        proc.stdin.close()
+    except OSError:
+        pass
+
+    started = time.monotonic()
+    last_activity = started
+    last_mtime = worktree_activity_mtime(root)
+    timed_out = False
+    idle_timed_out = False
+    poll_seconds = 2.0
+
+    try:
+        while True:
+            rc = proc.poll()
+            if rc is not None:
+                break
+
+            now = time.monotonic()
+            if effective_timeout is not None and (now - started) >= effective_timeout:
+                timed_out = True
+                _kill_process_group(proc)
+                break
+
+            output_len = sum(len(c) for c in stdout_chunks) + sum(len(c) for c in stderr_chunks)
+            if output_len > last_output_len:
+                last_output_len = output_len
+                last_activity = now
+
+            if effective_idle is not None:
+                current_mtime = worktree_activity_mtime(root)
+                if current_mtime > last_mtime:
+                    last_mtime = current_mtime
+                    last_activity = now
+                elif (now - last_activity) >= effective_idle:
+                    idle_timed_out = True
+                    _kill_process_group(proc)
+                    break
+
+            time.sleep(poll_seconds)
+    finally:
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            _kill_process_group(proc)
             try:
-                proc.kill()
-            except OSError:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
                 pass
-        stdout, stderr = proc.communicate()
-        limit = effective_timeout if effective_timeout is not None else 0
-        msg = f"[timeout] external command exceeded {limit}s\n"
-        return stdout or "", (stderr or "") + msg, 124
+        out_thread.join(timeout=5)
+        err_thread.join(timeout=5)
+
+    stdout = "".join(stdout_chunks)
+    stderr = "".join(stderr_chunks)
+    if timed_out or idle_timed_out:
+        if idle_timed_out:
+            limit = effective_idle if effective_idle is not None else 0
+            msg = (
+                f"[timeout] external command idle for {limit}s "
+                f"(no worktree/file or stdout activity)\n"
+            )
+        else:
+            limit = effective_timeout if effective_timeout is not None else 0
+            msg = f"[timeout] external command exceeded {limit}s\n"
+        return stdout, stderr + msg, 124
+    return stdout, stderr, proc.returncode or 0
 
 
 def _now_iso() -> str:
@@ -746,7 +926,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=None,
         help=(
             "Wall-clock timeout in seconds for --exec-cmd "
-            "(default: AGENT_EXEC_TIMEOUT_SECONDS or 7200; 0 = unlimited)"
+            "(default: AGENT_EXEC_TIMEOUT_SECONDS or 7200; 0 = unlimited). "
+            "Idle hangs are also cut by AGENT_IDLE_TIMEOUT_SECONDS (default 1200)."
         ),
     )
     parser.add_argument("--output-path", help="Override output path when using --exec-cmd (relative to repo root)")
