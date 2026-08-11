@@ -22,3 +22,21 @@
 [2026-08-10T21:02:59Z] push: tolerating runtime dirty files (not blocking): ['runs/T230/runtime.log', 'runs/T230/workflow-status.md']
 [2026-08-10T21:02:59Z] push: pushing branch=ticket/T230-batch-ui-show-per-ticket-pipeline-status-while-bat
 [2026-08-10T21:03:01Z] push: done branch=ticket/T230-batch-ui-show-per-ticket-pipeline-status-while-bat
+[2026-08-11T06:52:36Z] auto-run start: state=PLAN_FIX_REQUIRED
+[2026-08-11T06:52:36Z] auto-run: running step=planner
+[2026-08-11T06:52:36Z] auto-run: fix context: previous_output=runs/T230/plan.md
+[2026-08-11T06:52:36Z] auto-run: fix context: review=runs/T230/reviews/plan-review-01.md
+[2026-08-11T06:52:36Z] auto-run: fix context: fix_instructions=runs/T230/fixes/plan-fix-01.md
+[2026-08-11T06:52:36Z] auto-run: fix context: context_file=runs/T230/fixes/context-20260811T065236Z.md
+[2026-08-11T06:52:36Z] prompt: resolved=prompts/generic/planner.md source=generic
+[2026-08-11T06:52:36Z] prompt: generic fallback — injecting runs/T230/ticket.md
+[2026-08-11T06:52:36Z] compose: global-context=docs/ai/global-context.md
+[2026-08-11T06:52:36Z] compose: role=ai/roles/planner.md
+[2026-08-11T06:52:36Z] compose: skill=ai/skills/workflow-discipline.md
+[2026-08-11T06:52:36Z] compose: skill=ai/skills/architecture-discipline.md
+[2026-08-11T06:52:36Z] compose: skill=ai/skills/documentation.md
+[2026-08-11T06:52:36Z] compose: task (canonical prompt)
+[2026-08-11T06:52:36Z] compose: extra-context=runs/T230/fixes/context-20260811T065236Z.md
+[2026-08-11T06:52:36Z] snapshot: runtime-prompt=runs/T230/prompts/planner-attempt-2.md
+[2026-08-11T06:54:26Z] compose: preferring on-disk runs/T230/plan.md over chatty stdout (agent Write beat meta-report)
+[2026-08-11T06:54:26Z] auto-run: step=planner done rc=0
