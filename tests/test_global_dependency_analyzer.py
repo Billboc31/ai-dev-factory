@@ -1037,3 +1037,49 @@ def test_realistic_test_ai_dev_backlog(db, runs_dir, monkeypatch):
     assert resolver_step_note is not None
     assert "'role'" in resolver_step_note
     assert "'ticket_id'" not in resolver_step_note
+
+
+def test_coherence_serializes_migration_writers_into_distinct_phases():
+    tickets = [
+        {
+            "ticket_id": "T020",
+            "depends_on": [],
+            "blocks": [],
+            "parallel_group": None,
+            "conflicting_tickets": [],
+            "execution_phase": "2",
+        },
+        {
+            "ticket_id": "T023",
+            "depends_on": [],
+            "blocks": [],
+            "parallel_group": None,
+            "conflicting_tickets": [],
+            "execution_phase": "2",
+        },
+        {
+            "ticket_id": "T030",
+            "depends_on": [],
+            "blocks": [],
+            "parallel_group": None,
+            "conflicting_tickets": [],
+            "execution_phase": "2",
+        },
+    ]
+    texts = {
+        "T020": "Add drizzle migration for release lifecycle under apps/api/migrations/.",
+        "T023": "Add drizzle migration for plex source type.",
+        "T030": "Build a React settings page with no schema changes.",
+    }
+    out_tickets, out_rels, notes = gda._enforce_coherence(
+        tickets,
+        [],
+        {"T020": 2, "T023": 2, "T030": 2},
+        texts,
+    )
+    by_id = {t["ticket_id"]: t for t in out_tickets}
+    assert by_id["T020"]["execution_phase"] != by_id["T023"]["execution_phase"]
+    assert any(n.startswith("migration_writers_serialized=") for n in notes)
+    assert by_id["T020"]["parallel_group"] == "schema-migration-exclusive"
+    assert by_id["T023"]["parallel_group"] == "schema-migration-exclusive"
+    assert any(r["type"] == "CONFLICTING_SCOPE" for r in out_rels)

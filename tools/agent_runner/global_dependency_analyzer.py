@@ -124,6 +124,11 @@ The final JSON output MUST satisfy these invariants:
    ``execution_phase(A) != execution_phase(B)``.
 4. Foundation position: foundation/bootstrap tickets occupy the earliest
    phase(s).
+5. Schema migration exclusivity: tickets that add/change DB migrations
+   (Drizzle, ``migrations/``, ``_journal.json``, schema migrations) must not
+   share an ``execution_phase``. Mark each pair ``CONFLICTING_SCOPE`` and
+   assign sequential phases (prefer ``parallel_group``
+   ``schema-migration-exclusive``).
 
 ## Explain your reasoning
 
@@ -717,6 +722,29 @@ def _transitively_depends(a: str, b: str, deps: dict[str, set[str]]) -> bool:
     return False
 
 
+def _text_suggests_migration_writer(text: str | None) -> bool:
+    """True when ticket prose indicates a DB migration / schema hotspot."""
+    try:
+        from migration_index_fix import text_suggests_schema_hotspot
+
+        return text_suggests_schema_hotspot(text)
+    except ImportError:
+        if not text:
+            return False
+        lowered = text.lower()
+        return any(
+            token in lowered
+            for token in (
+                "drizzle",
+                "migrations/",
+                "_journal.json",
+                "schema migration",
+                "db migration",
+                "database migration",
+            )
+        )
+
+
 def _resolve_conflict_pair(
     a: str,
     b: str,
@@ -762,6 +790,8 @@ def _enforce_coherence(
     - Detects and breaks dependency cycles (drops back-edges).
     - Splits same-phase conflicting pairs using a priority ladder:
       dependency direction → role ordering → original LLM phase → ticket id.
+    - Serializes tickets whose prose indicates DB migration / schema hotspot
+      work (mutual ``CONFLICTING_SCOPE`` + distinct phases).
     """
     ticket_texts = ticket_texts or {}
     notes: list[str] = []
@@ -804,6 +834,42 @@ def _enforce_coherence(
         conflicting_map[tid] = {
             c for c in t["conflicting_tickets"] if c in ticket_set and c != tid
         }
+
+    # Schema/migration writers cannot share an execution phase — treat as
+    # CONFLICTING_SCOPE so the existing conflict splitter serializes them.
+    migration_writers = sorted(
+        tid
+        for tid in ticket_ids
+        if _text_suggests_migration_writer(ticket_texts.get(tid, ""))
+    )
+    if len(migration_writers) >= 2:
+        notes.append(f"migration_writers_serialized={migration_writers}")
+        for i, a in enumerate(migration_writers):
+            for b in migration_writers[i + 1 :]:
+                conflicting_map[a].add(b)
+                conflicting_map[b].add(a)
+        by_id = {t["ticket_id"]: t for t in norm_tickets}
+        for tid in migration_writers:
+            entry = by_id.get(tid)
+            if not entry:
+                continue
+            merged = set(entry.get("conflicting_tickets") or [])
+            merged.update(conflicting_map[tid])
+            entry["conflicting_tickets"] = sorted(merged)
+            if not entry.get("parallel_group"):
+                entry["parallel_group"] = "schema-migration-exclusive"
+        existing_pairs = {
+            (rel["from"], rel["to"])
+            for rel in norm_relationships
+            if rel.get("type") == "CONFLICTING_SCOPE"
+        }
+        for i, a in enumerate(migration_writers):
+            for b in migration_writers[i + 1 :]:
+                if (a, b) not in existing_pairs and (b, a) not in existing_pairs:
+                    norm_relationships.append(
+                        {"from": a, "to": b, "type": "CONFLICTING_SCOPE"}
+                    )
+                    existing_pairs.add((a, b))
 
     forced_min: dict[str, int] = {}
     phases = _compute_phases(deps, ticket_ids, forced_min)

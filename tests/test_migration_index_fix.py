@@ -228,3 +228,22 @@ def test_pr_lifecycle_calls_migration_fix(tmp_path: Path, monkeypatch):
     assert changed is True
     assert calls == ["fix:origin/main"]
     assert any("renumber migrations" in m for m in checkpoints)
+
+
+def test_text_suggests_schema_hotspot():
+    from migration_index_fix import text_suggests_schema_hotspot
+
+    assert text_suggests_schema_hotspot("Add drizzle migration under apps/api/migrations/")
+    assert text_suggests_schema_hotspot("Update _journal.json for the new schema")
+    assert not text_suggests_schema_hotspot("Build a React settings page")
+
+
+def test_migrations_only_conflict_paths_helper():
+    from migration_index_fix import migrations_only_conflict_paths
+
+    assert migrations_only_conflict_paths(
+        ["apps/api/migrations/0008_x.sql", "apps/api/migrations/meta/_journal.json"]
+    )
+    assert not migrations_only_conflict_paths(
+        ["apps/api/migrations/0008_x.sql", "apps/api/src/services/catalog-sync-service.ts"]
+    )

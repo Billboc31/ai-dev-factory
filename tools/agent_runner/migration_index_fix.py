@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import subprocess
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -435,12 +437,260 @@ def migrations_only_conflict_paths(paths: list[str]) -> bool:
     return True
 
 
+# Signals that a ticket is likely to write Drizzle/ORM migrations (schema hotspot).
+SCHEMA_HOTSPOT_RE = re.compile(
+    r"(?is)"
+    r"(?:\bdrizzle\b|"
+    r"\bmigrations?/(?:meta/)?|"
+    r"\b_journal\.json\b|"
+    r"\bschema\s+migration\b|"
+    r"\b(?:db|database|sql)\s+migration\b|"
+    r"\balembic\b|"
+    r"\badd(?:ing)?\s+(?:a\s+)?migration\b|"
+    r"\bnew\s+migration\b|"
+    r"apps/api/migrations\b)"
+)
+
+
+def text_suggests_schema_hotspot(text: str | None) -> bool:
+    """True when ticket/plan prose suggests the ticket will touch migrations."""
+    if not text or not str(text).strip():
+        return False
+    return SCHEMA_HOTSPOT_RE.search(str(text)) is not None
+
+
+def worktree_has_migration_changes(
+    cwd: Path,
+    *,
+    integration_ref: str = "origin/main",
+) -> bool:
+    """True when the worktree differs from ``integration_ref`` under ``migrations/``."""
+    work = Path(cwd)
+    for args in (
+        ["diff", "--name-only", f"{integration_ref}...HEAD"],
+        ["diff", "--name-only", "--cached"],
+        ["ls-files", "--others", "--exclude-standard"],
+    ):
+        result = _run_git(args, cwd=work)
+        if result.returncode != 0:
+            continue
+        for line in result.stdout.splitlines():
+            parts = Path(line.strip()).parts
+            if "migrations" in parts:
+                return True
+    return False
+
+
+def _list_unmerged_paths(*, cwd: Path) -> list[str]:
+    result = _run_git(
+        ["diff", "--name-only", "--diff-filter=U", "-z"],
+        cwd=cwd,
+    )
+    if result.returncode != 0:
+        # Fallback without -z
+        result = _run_git(
+            ["diff", "--name-only", "--diff-filter=U"],
+            cwd=cwd,
+        )
+        if result.returncode != 0:
+            return []
+        return [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    raw = result.stdout
+    if "\0" in raw:
+        return [p for p in raw.split("\0") if p]
+    return [line.strip() for line in raw.splitlines() if line.strip()]
+
+
+def _rebase_in_progress(*, cwd: Path) -> bool:
+    merge = _run_git(["rev-parse", "--git-path", "rebase-merge"], cwd=cwd)
+    apply = _run_git(["rev-parse", "--git-path", "rebase-apply"], cwd=cwd)
+    for proc in (merge, apply):
+        if proc.returncode != 0:
+            continue
+        path = Path(proc.stdout.strip())
+        if not path.is_absolute():
+            path = cwd / path
+        if path.exists():
+            return True
+    return False
+
+
+def _checkout_migration_side(
+    path: str,
+    *,
+    prefer_upstream: bool,
+    cwd: Path,
+) -> None:
+    preferred = "--ours" if prefer_upstream else "--theirs"
+    fallback = "--theirs" if prefer_upstream else "--ours"
+    result = _run_git(["checkout", preferred, "--", path], cwd=cwd)
+    if result.returncode != 0:
+        _run_git(["checkout", fallback, "--", path], cwd=cwd)
+
+
+def prepare_migrations_for_mechanical_fix(
+    conflicted: list[str],
+    integration_ref: str,
+    *,
+    cwd: Path,
+    log: Callable[[str], None] | None = None,
+) -> None:
+    """Clear conflict markers on migration paths so the mechanical fixer can run.
+
+    During rebase, ``--ours`` is upstream (main). Keep upstream for journal /
+    snapshots / SQL already on main; keep the ticket side for new ticket SQL.
+    """
+    work = Path(cwd)
+    main_sql: set[str] = set()
+    listed = _run_git(["ls-tree", "-r", "--name-only", integration_ref, "--"], cwd=work)
+    if listed.returncode == 0:
+        for line in listed.stdout.splitlines():
+            line = line.strip()
+            if "/migrations/" in line.replace("\\", "/") and line.endswith(".sql"):
+                main_sql.add(Path(line).name)
+
+    for path in conflicted:
+        parts = Path(path).parts
+        if "migrations" not in parts:
+            continue
+        name = Path(path).name
+        if name.endswith(".sql"):
+            prefer_upstream = name in main_sql
+        else:
+            prefer_upstream = True
+        _checkout_migration_side(path, prefer_upstream=prefer_upstream, cwd=work)
+        if log:
+            side = "ours" if prefer_upstream else "theirs"
+            log(f"migration pre-fix checkout {side} for {path}")
+
+
+def _stage_migration_paths(paths: list[str], *, cwd: Path) -> list[str]:
+    staged = list(dict.fromkeys(paths))
+    for path in paths:
+        parts = Path(path).parts
+        if "migrations" not in parts:
+            continue
+        idx = parts.index("migrations")
+        root = str(Path(*parts[: idx + 1]))
+        if root not in staged:
+            staged.append(root)
+    return staged
+
+
+def heal_migrations_only_rebase_conflict(
+    *,
+    ticket_id: str,
+    conflicted: list[str],
+    integration_ref: str,
+    cwd: Path | str,
+    log: Callable[[str], None] | None = None,
+    max_passes: int = 8,
+) -> tuple[bool, list[str]]:
+    """Mechanically resolve migrations-only rebase conflicts and continue.
+
+    Returns ``(ok, remaining_conflicted)``. ``ok=True`` means the rebase finished
+    (or was already clean). On failure, returns the current unmerged paths and
+    leaves the rebase in progress for the conflict-resolver / human.
+    """
+    work = Path(cwd)
+    _log = log or (lambda _msg: None)
+    current = list(conflicted)
+    if not current:
+        current = _list_unmerged_paths(cwd=work)
+    if not current:
+        return (not _rebase_in_progress(cwd=work)), []
+
+    for pass_idx in range(1, max_passes + 1):
+        if not migrations_only_conflict_paths(current):
+            _log(
+                f"{ticket_id}: migration heal pass {pass_idx}: "
+                f"non-migration conflicts remain ({len(current)})"
+            )
+            return False, current
+
+        _log(
+            f"{ticket_id}: migration heal pass {pass_idx}/{max_passes}: "
+            f"migrations-only ({len(current)} paths)"
+        )
+        prepare_migrations_for_mechanical_fix(
+            current, integration_ref, cwd=work, log=lambda m: _log(f"{ticket_id}: {m}"),
+        )
+        result = fix_duplicate_migration_indexes(
+            work, integration_ref=integration_ref, cwd=work,
+        )
+        _log(f"{ticket_id}: migration heal: {result.summary}")
+
+        paths_to_stage = list(current)
+        for src, dst in result.renames:
+            paths_to_stage.append(src)
+            paths_to_stage.append(dst)
+        staged = _stage_migration_paths(paths_to_stage, cwd=work)
+        if staged:
+            add = _run_git(["add", "--"] + staged, cwd=work)
+            if add.returncode != 0:
+                _log(
+                    f"{ticket_id}: migration heal git add failed: "
+                    f"{(add.stderr or add.stdout or '').strip()}"
+                )
+                return False, current
+
+        env = dict(os.environ)
+        env["GIT_EDITOR"] = "true"
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        cont = subprocess.run(
+            ["git", "rebase", "--continue"],
+            cwd=str(work),
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+        )
+        combined = ((cont.stdout or "") + (cont.stderr or "")).lower()
+        if cont.returncode != 0 and "nothing to commit" in combined:
+            skip = _run_git(["rebase", "--skip"], cwd=work)
+            if skip.returncode != 0:
+                _log(
+                    f"{ticket_id}: migration heal rebase --skip failed: "
+                    f"{(skip.stderr or skip.stdout or '').strip()}"
+                )
+                return False, _list_unmerged_paths(cwd=work) or current
+        elif cont.returncode != 0:
+            current = _list_unmerged_paths(cwd=work)
+            if current and migrations_only_conflict_paths(current):
+                continue
+            _log(
+                f"{ticket_id}: migration heal rebase --continue failed: "
+                f"{(cont.stderr or cont.stdout or '').strip()}"
+            )
+            return False, current or conflicted
+
+        if not _rebase_in_progress(cwd=work):
+            _log(f"{ticket_id}: migration heal: rebase completed")
+            return True, []
+
+        current = _list_unmerged_paths(cwd=work)
+        if not current:
+            # Still rebasing but no conflicts yet — keep continuing empty?
+            # Leave for caller if somehow stuck.
+            if not _rebase_in_progress(cwd=work):
+                return True, []
+            continue
+
+    _log(f"{ticket_id}: migration heal exhausted {max_passes} passes")
+    return False, _list_unmerged_paths(cwd=work) or conflicted
+
+
 __all__ = [
     "MIGRATION_SQL_NAME",
+    "SCHEMA_HOTSPOT_RE",
     "MigrationFixResult",
     "duplicate_migration_path_groups",
     "find_duplicate_migration_indexes",
     "fix_duplicate_migration_indexes",
+    "heal_migrations_only_rebase_conflict",
     "list_migration_sql_files",
     "migrations_only_conflict_paths",
+    "prepare_migrations_for_mechanical_fix",
+    "text_suggests_schema_hotspot",
+    "worktree_has_migration_changes",
 ]
