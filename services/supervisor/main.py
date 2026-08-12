@@ -3310,6 +3310,157 @@ class WorkspaceIssueConfirmRequest(BaseModel):
     draft_id: str
 
 
+def _control_api_base_url() -> str:
+    return os.environ.get(
+        "AI_DEV_FACTORY_CONTROL_API_URL",
+        os.environ.get("CONTROL_API_URL", "http://127.0.0.1:8080"),
+    )
+
+
+def _fetch_control_api_tickets(project_id: str) -> list[dict]:
+    """Ticket summaries from the control API (worktree-aware)."""
+    import urllib.request
+
+    url = f"{_control_api_base_url().rstrip('/')}/projects/{project_id}/tickets"
+    try:
+        with urllib.request.urlopen(url, timeout=5) as resp:
+            data = json.loads(resp.read().decode())
+        if isinstance(data, list):
+            return [t for t in data if isinstance(t, dict) and t.get("ticket_id")]
+    except Exception as exc:
+        logger.debug("workspace: control API tickets fetch failed: %s", exc)
+    return []
+
+
+def _iter_worktree_ticket_states(project_id: str) -> list[dict]:
+    """Load ``state.json`` rows from ``runtime/<project>/worktrees/T*/runs/T*/``."""
+    worktrees = _project_worktrees_dir(project_id)
+    if not worktrees.is_dir():
+        return []
+    out: list[dict] = []
+    for wt_dir in sorted(worktrees.iterdir()):
+        if not wt_dir.is_dir() or not wt_dir.name.startswith("T"):
+            continue
+        ticket_id = wt_dir.name
+        state_file = wt_dir / "runs" / ticket_id / "state.json"
+        if not state_file.is_file():
+            continue
+        try:
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        data.setdefault("ticket_id", ticket_id)
+        data["_state_path"] = str(state_file)
+        out.append(data)
+    return out
+
+
+def _ticket_state_file(project_id: str, ticket_id: str) -> Path | None:
+    """Preferred state.json path for a ticket (worktree first, then legacy runs/)."""
+    wt = _project_worktrees_dir(project_id) / ticket_id / "runs" / ticket_id / "state.json"
+    if wt.is_file():
+        return wt
+    legacy = _project_runs_dir(project_id) / ticket_id / "state.json"
+    if legacy.is_file():
+        return legacy
+    return None
+
+
+def _summarize_tickets_for_workspace(project_id: str) -> list[str]:
+    """Human-readable ticket summary lines for the workspace AI prompt."""
+    lines: list[str] = []
+
+    api_tickets = _fetch_control_api_tickets(project_id)
+    worktree_tickets = _iter_worktree_ticket_states(project_id)
+
+    by_id: dict[str, dict] = {}
+    for row in worktree_tickets:
+        by_id[row["ticket_id"]] = {
+            "ticket_id": row["ticket_id"],
+            "state": row.get("state"),
+            "branch": row.get("branch"),
+            "issue_number": row.get("issue_number"),
+            "daemon_archived": bool(row.get("daemon_archived") or row.get("issue_closed")),
+            "pr_number": row.get("pr_number"),
+            "conflict_detected_at": row.get("conflict_detected_at"),
+            "conflicted_files": row.get("conflicted_files"),
+            "pre_conflict_state": row.get("pre_conflict_state"),
+        }
+    for row in api_tickets:
+        tid = row["ticket_id"]
+        merged = by_id.get(tid, {"ticket_id": tid})
+        for key in (
+            "state", "branch", "issue_number", "daemon_archived", "pr_number",
+            "conflict_detected_at", "conflicted_files", "pre_conflict_state",
+            "conflict_status", "retry_info",
+        ):
+            if row.get(key) is not None and merged.get(key) in (None, "", [], False):
+                merged[key] = row.get(key)
+            elif key in row and merged.get(key) is None:
+                merged[key] = row.get(key)
+        # Prefer live worktree state when both exist
+        if tid not in by_id or row.get("state"):
+            if "state" not in merged or not by_id.get(tid):
+                merged["state"] = row.get("state") or merged.get("state")
+        by_id[tid] = merged
+
+    # Legacy markdown tickets folder (older projects)
+    project_root_str = _lookup_project_root_from_control_api(project_id)
+    if project_root_str:
+        tickets_dir = Path(mapper.map(project_root_str)) / "tickets"
+        if tickets_dir.is_dir():
+            for tf in sorted(tickets_dir.glob("*.md")):
+                by_id.setdefault(tf.stem, {"ticket_id": tf.stem, "state": "unknown"})
+
+    if not by_id:
+        lines.append("tickets: 0 found (checked worktrees, control API, and project tickets/)")
+        return lines
+
+    active: list[dict] = []
+    done: list[dict] = []
+    for ticket in by_id.values():
+        state = (ticket.get("state") or "").strip().upper()
+        archived = bool(ticket.get("daemon_archived"))
+        if archived or state in _TERMINAL_TICKET_STATES:
+            done.append(ticket)
+        else:
+            active.append(ticket)
+
+    lines.append(
+        f"tickets: {len(by_id)} total "
+        f"({len(active)} active/non-terminal, {len(done)} done/archived)"
+    )
+
+    def _fmt(ticket: dict) -> str:
+        tid = ticket.get("ticket_id")
+        state = ticket.get("state") or "unknown"
+        bits = [f'{tid}: state={state}']
+        if ticket.get("issue_number") is not None:
+            bits.append(f"issue=#{ticket['issue_number']}")
+        if ticket.get("pr_number") is not None:
+            bits.append(f"pr=#{ticket['pr_number']}")
+        if ticket.get("daemon_archived"):
+            bits.append("archived")
+        conflicted = ticket.get("conflicted_files")
+        if ticket.get("conflict_detected_at") or conflicted or ticket.get("conflict_status"):
+            n = len(conflicted) if isinstance(conflicted, list) else "?"
+            bits.append(f"conflict(files={n})")
+        if ticket.get("branch"):
+            bits.append(f"branch={ticket['branch']}")
+        return "  - " + "; ".join(bits)
+
+    # Prefer listing active tickets fully; cap done list
+    for ticket in sorted(active, key=lambda t: t.get("ticket_id") or ""):
+        lines.append(_fmt(ticket))
+    if done:
+        lines.append(f"  (done/archived sample, up to 8 of {len(done)})")
+        for ticket in sorted(done, key=lambda t: t.get("ticket_id") or "")[:8]:
+            lines.append(_fmt(ticket))
+    return lines
+
+
 def _workspace_project_context(project_id: str) -> str:
     """Build a compact project context string for the AI system prompt."""
     parts: list[str] = [f"project_id: {project_id}"]
@@ -3325,75 +3476,84 @@ def _workspace_project_context(project_id: str) -> str:
     if project_root_str:
         project_root = Path(mapper.map(project_root_str))
         parts.append(f"project_root: {project_root}")
+    runtime_root = _project_runtime_root(project_id)
+    parts.append(f"runtime_root: {runtime_root}")
+    parts.append(f"worktrees_dir: {_project_worktrees_dir(project_id)}")
 
-        tickets_dir = project_root / "tickets"
-        if tickets_dir.exists():
-            ticket_files = sorted(tickets_dir.glob("*.md"))
-            parts.append(f"tickets: {len(ticket_files)} total")
-            for tf in ticket_files[:10]:
-                try:
-                    first = tf.read_text(encoding="utf-8", errors="replace").splitlines()[0][:80]
-                    parts.append(f'  - ticket "{tf.stem}": {first}')
-                except OSError:
-                    parts.append(f'  - ticket "{tf.stem}": (unreadable)')
+    parts.extend(_summarize_tickets_for_workspace(project_id))
 
     # Active ticket and recovery state
     active_ticket_id = _resolve_active_ticket_id(project_id)
     if active_ticket_id:
         parts.append(f"active_ticket_id: {active_ticket_id}")
-        if project_root_str:
-            project_root = Path(mapper.map(project_root_str))
-            state_file = project_root / "runs" / active_ticket_id / "state.json"
+        state_file = _ticket_state_file(project_id, active_ticket_id)
+        if state_file is not None:
             try:
                 state_data = json.loads(state_file.read_text(encoding="utf-8"))
                 parts.append(f"ticket_state: {state_data.get('state', 'unknown')}")
                 if state_data.get("blocked_stage"):
                     parts.append(f"blocked_stage: {state_data['blocked_stage']}")
+                if state_data.get("conflict_detected_at") or state_data.get("conflicted_files"):
+                    parts.append(
+                        "conflict_hint: "
+                        f"detected_at={state_data.get('conflict_detected_at')}, "
+                        f"files={state_data.get('conflicted_files')}"
+                    )
             except (OSError, json.JSONDecodeError):
                 pass
         with _session_lock:
             if active_ticket_id in _active_sessions:
-                parts.append(f"recovery_in_progress: true")
+                parts.append("recovery_in_progress: true")
 
     return "\n".join(parts)
 
 
 def _resolve_active_ticket_id(project_id: str) -> str | None:
     """Return the ticket_id of the currently active (non-terminal) ticket, or None."""
-    runs_dir = _project_runs_dir(project_id)
-    if not runs_dir.exists():
-        return None
-
-    # Prefer a ticket with a daemon.lock (actively running)
-    for ticket_dir in runs_dir.iterdir():
-        if not ticket_dir.is_dir():
+    # Prefer worktree runs (canonical for multi-project runtime layout).
+    candidates: list[tuple[float, str]] = []
+    for row in _iter_worktree_ticket_states(project_id):
+        ticket_id = row.get("ticket_id") or ""
+        if not ticket_id:
             continue
-        if (ticket_dir / "daemon.lock").exists():
+        if bool(row.get("daemon_archived") or row.get("issue_closed")):
+            continue
+        state = (row.get("state") or "").strip().upper()
+        if state in _TERMINAL_TICKET_STATES:
+            continue
+        state_path = Path(row.get("_state_path") or "")
+        mtime = state_path.stat().st_mtime if state_path.is_file() else 0.0
+        lock = state_path.parent / "daemon.lock" if state_path else None
+        if lock is not None and lock.exists():
+            return ticket_id
+        candidates.append((mtime, ticket_id))
+
+    # Legacy flat runs/<ticket>/state.json
+    runs_dir = _project_runs_dir(project_id)
+    if runs_dir.exists():
+        for ticket_dir in runs_dir.iterdir():
+            if not ticket_dir.is_dir() or not ticket_dir.name.startswith("T"):
+                continue
+            if (ticket_dir / "daemon.lock").exists():
+                state_file = ticket_dir / "state.json"
+                try:
+                    state_data = json.loads(state_file.read_text(encoding="utf-8"))
+                    if state_data.get("state") not in _TERMINAL_TICKET_STATES:
+                        return ticket_dir.name
+                except (OSError, json.JSONDecodeError):
+                    pass
             state_file = ticket_dir / "state.json"
             try:
                 state_data = json.loads(state_file.read_text(encoding="utf-8"))
                 if state_data.get("state") not in _TERMINAL_TICKET_STATES:
-                    return ticket_dir.name
+                    candidates.append((state_file.stat().st_mtime, ticket_dir.name))
             except (OSError, json.JSONDecodeError):
                 pass
 
-    # Fall back to most recently updated non-terminal ticket
-    candidates: list[tuple[float, str]] = []
-    for ticket_dir in runs_dir.iterdir():
-        if not ticket_dir.is_dir():
-            continue
-        state_file = ticket_dir / "state.json"
-        try:
-            state_data = json.loads(state_file.read_text(encoding="utf-8"))
-            if state_data.get("state") not in _TERMINAL_TICKET_STATES:
-                candidates.append((state_file.stat().st_mtime, ticket_dir.name))
-        except (OSError, json.JSONDecodeError):
-            pass
-
-    if candidates:
-        candidates.sort(reverse=True)
-        return candidates[0][1]
-    return None
+    if not candidates:
+        return None
+    candidates.sort(reverse=True)
+    return candidates[0][1]
 
 
 def _read_ticket_artifacts(project_root: Path, ticket_id: str) -> dict[str, bool]:
