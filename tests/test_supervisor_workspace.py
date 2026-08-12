@@ -305,6 +305,45 @@ def test_workspace_ai_falls_back_to_http_when_cli_missing(monkeypatch, tmp_path)
     assert result["reply"] == "ok via http"
 
 
+def test_workspace_context_lists_worktree_tickets(monkeypatch, tmp_path):
+    """Context must discover tickets under runtime/<project>/worktrees, not only tickets/."""
+    monkeypatch.setenv("AI_DEV_FACTORY_RUNTIME_BASE_ROOT", str(tmp_path / "runtime"))
+    monkeypatch.setenv("RUNTIME_BASE_ROOT", str(tmp_path / "runtime"))
+    # Avoid control-API network in unit test
+    monkeypatch.setenv("AI_DEV_FACTORY_CONTROL_API_URL", "http://127.0.0.1:9")
+
+    import services.supervisor.main as sup_main
+
+    project_id = "iptvflix"
+    wt = tmp_path / "runtime" / project_id / "worktrees" / "T024" / "runs" / "T024"
+    wt.mkdir(parents=True)
+    (wt / "state.json").write_text(
+        json.dumps({
+            "ticket_id": "T024",
+            "state": "PLAN_APPROVED",
+            "issue_number": 49,
+            "branch": "ticket/T024-test",
+        }),
+        encoding="utf-8",
+    )
+
+    with patch(
+        "services.supervisor.main._lookup_project_root_from_control_api",
+        return_value=str(tmp_path / "repo"),
+    ), patch(
+        "services.supervisor.main._fetch_control_api_tickets",
+        return_value=[],
+    ), patch(
+        "services.supervisor.main._runtime_base_root",
+        return_value=tmp_path / "runtime",
+    ):
+        ctx = sup_main._workspace_project_context(project_id)
+
+    assert "T024" in ctx
+    assert "PLAN_APPROVED" in ctx
+    assert "tickets: 0" not in ctx
+
+
 # ---------------------------------------------------------------------------
 # P4 — Existing capabilities unaffected after recover_ticket registration
 # ---------------------------------------------------------------------------
