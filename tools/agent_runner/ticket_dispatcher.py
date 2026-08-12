@@ -67,6 +67,20 @@ _ACTIVE_CONFLICT_STATES: frozenset[str] = frozenset({
     "RUNNING",
 })
 
+# Schema-hotspot mutex: at most one migrations writer may be mid-implementation
+# (or mid-conflict) at a time. Planning-only states do not hold the lock.
+_SCHEMA_HOTSPOT_HOLDER_STATES: frozenset[str] = frozenset({
+    "PLAN_APPROVED",
+    "CODING",
+    "IMPLEMENTATION_REVIEW_NEEDED",
+    "IMPLEMENTATION_FIX_REQUIRED",
+    "IMPLEMENTATION_APPROVED",
+    "CONFLICT_RESOLUTION_NEEDED",
+    "CONFLICT_RESOLVING",
+    "CONFLICT_RESOLVED_REVIEW_NEEDED",
+    "CONFLICT_RESOLUTION_FAILED",
+})
+
 # Batch wave gate: a phase is complete when every ticket in that phase reaches
 # one of these terminal runtime states (mirrors ``batches._DONE_STATES``).
 _PHASE_DONE_STATES: frozenset[str] = frozenset({
@@ -649,6 +663,183 @@ def _apply_conflict_filter(
     return filtered_recs, blocked
 
 
+def _read_plan_markdown(
+    project_root: Path,
+    ticket_id: str,
+    *,
+    worktrees_dir: Path | None = None,
+    worktree_path: str | None = None,
+) -> str:
+    candidates: list[Path] = []
+    if worktree_path:
+        candidates.append(Path(worktree_path) / "runs" / ticket_id / "plan.md")
+    if worktrees_dir:
+        candidates.append(Path(worktrees_dir) / ticket_id / "runs" / ticket_id / "plan.md")
+    candidates.append(project_root / "runs" / ticket_id / "plan.md")
+    for path in candidates:
+        try:
+            if path.is_file():
+                return path.read_text(encoding="utf-8")
+        except OSError:
+            continue
+    return ""
+
+
+def _ticket_is_schema_hotspot(
+    ticket_id: str,
+    runtime_row: dict,
+    *,
+    project_root: Path,
+    worktrees_dir: Path | None = None,
+    ticket_content: str | None = None,
+) -> bool:
+    """Detect tickets that will (or already do) write DB migrations."""
+    try:
+        from migration_index_fix import (
+            text_suggests_schema_hotspot,
+            worktree_has_migration_changes,
+        )
+    except ImportError:
+        return False
+
+    content = ticket_content if ticket_content is not None else ""
+    if not content:
+        content = _read_ticket_content(
+            project_root,
+            ticket_id,
+            worktrees_dir=worktrees_dir,
+        )
+    plan = _read_plan_markdown(
+        project_root,
+        ticket_id,
+        worktrees_dir=worktrees_dir,
+        worktree_path=runtime_row.get("worktree_path"),
+    )
+    if text_suggests_schema_hotspot(content) or text_suggests_schema_hotspot(plan):
+        return True
+
+    wt = (runtime_row.get("worktree_path") or "").strip()
+    if wt and Path(wt).is_dir():
+        try:
+            if worktree_has_migration_changes(Path(wt)):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def _apply_schema_hotspot_mutex_filter(
+    db_path,
+    recommendations: list[dict],
+    blocked: list[dict],
+    runtime_rows: list[dict],
+    *,
+    project_root: Path,
+    worktrees_dir: Path | None = None,
+    ticket_contents: dict[str, str] | None = None,
+) -> tuple[list[dict], list[dict]]:
+    """Allow at most one schema/migrations writer among recommendations.
+
+    If another hotspot already holds an implementation/conflict state, all
+    recommended hotspots are blocked. Otherwise keep the highest-ranked
+    hotspot recommendation and block the rest.
+    """
+    if not recommendations:
+        return recommendations, blocked
+
+    ticket_contents = ticket_contents or {}
+    runtime_map: dict[str, dict] = {}
+    for row in runtime_rows:
+        ticket_id = (row.get("ticket_id") or "").strip()
+        if ticket_id:
+            runtime_map[ticket_id] = row
+
+    holders: list[str] = []
+    for ticket_id, row in runtime_map.items():
+        if bool(row.get("daemon_archived")):
+            continue
+        state = (row.get("state") or "").strip().upper()
+        if state not in _SCHEMA_HOTSPOT_HOLDER_STATES:
+            continue
+        if _ticket_is_schema_hotspot(
+            ticket_id,
+            row,
+            project_root=project_root,
+            worktrees_dir=worktrees_dir,
+            ticket_content=ticket_contents.get(ticket_id),
+        ):
+            holders.append(ticket_id)
+
+    hotspot_recs: list[str] = []
+    for rec in recommendations:
+        ticket_id = rec["ticket_id"]
+        row = runtime_map.get(ticket_id, {})
+        if _ticket_is_schema_hotspot(
+            ticket_id,
+            row,
+            project_root=project_root,
+            worktrees_dir=worktrees_dir,
+            ticket_content=ticket_contents.get(ticket_id),
+        ):
+            hotspot_recs.append(ticket_id)
+
+    if not hotspot_recs and not holders:
+        return recommendations, blocked
+
+    mutex_blocked: dict[str, str] = {}
+    keep: set[str] | None = None
+
+    if holders:
+        # Prefer the earliest holder id in the reason string for stability.
+        holder_id = sorted(holders)[0]
+        for ticket_id in hotspot_recs:
+            if ticket_id in holders:
+                # Already holding — may stay recommended if eligibility said so.
+                continue
+            mutex_blocked[ticket_id] = (
+                f"schema_hotspot_mutex: waiting on {holder_id}"
+            )
+        # If a holder is somehow still in recommendations, keep only holders
+        # among hotspots; drop other hotspots (already in mutex_blocked).
+        keep = {tid for tid in hotspot_recs if tid in holders} or None
+        if keep is None and hotspot_recs:
+            # No holder among recs — block all hotspot recs.
+            keep = set()
+    else:
+        # No active holder: keep the first recommended hotspot (already ranked).
+        winner = hotspot_recs[0]
+        keep = {winner}
+        for ticket_id in hotspot_recs[1:]:
+            mutex_blocked[ticket_id] = (
+                f"schema_hotspot_mutex: waiting on {winner}"
+            )
+
+    if keep is not None:
+        filtered_recs = [
+            rec for rec in recommendations
+            if rec["ticket_id"] not in hotspot_recs or rec["ticket_id"] in keep
+        ]
+    else:
+        filtered_recs = [
+            rec for rec in recommendations
+            if rec["ticket_id"] not in mutex_blocked
+        ]
+
+    already_blocked = {entry["ticket_id"] for entry in blocked}
+    for ticket_id, reason in sorted(mutex_blocked.items()):
+        if ticket_id in already_blocked:
+            continue
+        blocked.append({
+            "ticket_id": ticket_id,
+            "ready_to_take": False,
+            "status": "SCHEMA_HOTSPOT_BLOCKED",
+            "blocking_step": "schema_hotspot_mutex",
+            "reason": reason,
+        })
+
+    return filtered_recs, blocked
+
+
 def get_recommended_tickets(
     db_path,
     project_root: Path,
@@ -689,6 +880,7 @@ def get_recommended_tickets(
 
     recommendations: list[dict] = []
     blocked: list[dict] = []
+    ticket_contents: dict[str, str] = {}
 
     for row in rows:
         ticket_id = (row.get("ticket_id") or "").strip()
@@ -705,6 +897,7 @@ def get_recommended_tickets(
             worktrees_dir=worktrees_dir,
             project_id=project_id,
         )
+        ticket_contents[ticket_id] = ticket_content
         eligibility = _eligibility.evaluate_eligibility(
             db_path,
             project_root,
@@ -763,6 +956,17 @@ def get_recommended_tickets(
     )
     recommendations, blocked = _apply_conflict_filter(
         db_path, recommendations, blocked, rows,
+    )
+    # Rank before mutex so the kept hotspot is the best-scoring one.
+    recommendations.sort(key=_sort_key)
+    recommendations, blocked = _apply_schema_hotspot_mutex_filter(
+        db_path,
+        recommendations,
+        blocked,
+        rows,
+        project_root=project_root,
+        worktrees_dir=worktrees_dir,
+        ticket_contents=ticket_contents,
     )
 
     recommendations.sort(key=_sort_key)

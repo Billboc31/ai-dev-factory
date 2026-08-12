@@ -234,6 +234,48 @@ def rebase_ticket_onto_integration(
         return True, []
 
     conflicted = _list_unmerged_paths(cwd=work)
+
+    # Migrations-only conflicts: heal mechanically before handing off to LLM.
+    try:
+        from migration_index_fix import (
+            heal_migrations_only_rebase_conflict,
+            migrations_only_conflict_paths,
+        )
+
+        if conflicted and migrations_only_conflict_paths(conflicted):
+            _log(
+                f"{ticket_id}: integration rebase migrations-only conflict "
+                f"({len(conflicted)} files) — attempting mechanical heal"
+            )
+            healed, remaining = heal_migrations_only_rebase_conflict(
+                ticket_id=ticket_id,
+                conflicted=conflicted,
+                integration_ref=rebase_ref,
+                cwd=work,
+                log=_log,
+            )
+            if healed:
+                if push:
+                    push_result = subprocess.run(
+                        ["git", "push", "--force-with-lease", "origin", "HEAD"],
+                        cwd=str(work),
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
+                    if push_result.returncode != 0:
+                        err = (push_result.stderr or push_result.stdout or "").strip()
+                        _log(f"{ticket_id}: integration rebase push failed: {err}")
+                        return False, []
+                _log(
+                    f"{ticket_id}: integration rebase onto {rebase_ref} ok "
+                    "(migrations-only conflict healed)"
+                )
+                return True, []
+            conflicted = remaining or conflicted
+    except Exception as exc:
+        _log(f"{ticket_id}: integration rebase migration heal skipped: {exc}")
+
     _log(
         f"{ticket_id}: integration rebase onto {rebase_ref} conflicted "
         f"({len(conflicted)} files) — handing off to conflict resolver"

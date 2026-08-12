@@ -72,6 +72,15 @@ Do not shy away from adding a dependency that is architecturally obvious just
 because the ticket text is silent about it. That is the entire point of this
 analyzer.
 
+## Schema / migration writers
+
+Tickets that add or change database migrations (Drizzle, Alembic, SQL under
+`migrations/`, `_journal.json`, schema migrations) **must not share an
+`execution_phase`**. Treat every pair as `CONFLICTING_SCOPE`, put them in
+distinct sequential phases (ordered by foundation-first then ticket id), and
+prefer `parallel_group` `schema-migration-exclusive`. Non-migration tickets
+may still run in parallel with each other.
+
 ## Relationship classifications
 
 `type` must be one of:
@@ -115,6 +124,11 @@ the response:
 4. **Foundation position.** Foundation / bootstrap tickets occupy the earliest
    phase(s). They should not sit in the same phase as implementation tickets
    that consume them.
+5. **Schema migration exclusivity.** Tickets that add or change database
+   migrations (Drizzle, Alembic, SQL under `migrations/`, `_journal.json`)
+   must not share an `execution_phase`. Mark each pair as `CONFLICTING_SCOPE`,
+   put them in sequential phases, and prefer `parallel_group`
+   `schema-migration-exclusive`.
 
 If any invariant would be violated, fix the graph before returning — either
 adjust the `execution_phase`, adjust the `depends_on`, or remove the spurious

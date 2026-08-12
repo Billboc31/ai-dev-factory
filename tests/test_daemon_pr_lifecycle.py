@@ -577,3 +577,98 @@ def test_rebase_ticket_onto_integration_records_conflict_state(tmp_path, monkeyp
     assert state["state"] == "CONFLICT_RESOLUTION_NEEDED"
     assert state["pre_conflict_state"] == "PLAN_APPROVED"
     assert state["conflicted_files"] == conflicted
+
+
+def test_rebase_ticket_onto_integration_heals_migrations_only(tmp_path, monkeypatch):
+    from ticket_pr_lifecycle import rebase_ticket_onto_integration
+    import json
+
+    run_dir = tmp_path / "runs" / "T020"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(json.dumps({"state": "PLAN_APPROVED"}))
+
+    def fake_run(cmd, **kwargs):
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        if cmd[:2] == ["git", "fetch"]:
+            return R()
+        if cmd[:2] == ["git", "merge-base"]:
+            return type("R", (), {"returncode": 0, "stdout": "base\n", "stderr": ""})()
+        if cmd[:2] == ["git", "rev-parse"]:
+            return type("R", (), {"returncode": 0, "stdout": "main-tip\n", "stderr": ""})()
+        if cmd[:2] == ["git", "rebase"] and len(cmd) >= 3 and cmd[2] != "--continue":
+            return type("R", (), {"returncode": 1, "stdout": "", "stderr": "conflict"})()
+        if cmd[:3] == ["git", "diff", "--name-only"]:
+            return type(
+                "R",
+                (),
+                {
+                    "returncode": 0,
+                    "stdout": (
+                        "apps/api/migrations/0008_release.sql\n"
+                        "apps/api/migrations/meta/_journal.json\n"
+                    ),
+                    "stderr": "",
+                },
+            )()
+        return R()
+
+    monkeypatch.setattr("ticket_pr_lifecycle.subprocess.run", fake_run)
+    monkeypatch.setattr("ticket_pr_lifecycle.resolve_integration_branch", lambda *a, **k: "main")
+    monkeypatch.setattr("ticket_pr_lifecycle._log", lambda *a, **k: None)
+    monkeypatch.setattr(
+        "migration_index_fix.heal_migrations_only_rebase_conflict",
+        lambda **kwargs: (True, []),
+    )
+
+    ok, conflicted = rebase_ticket_onto_integration("T020", run_dir, cwd=tmp_path)
+    assert ok is True
+    assert conflicted == []
+    state = json.loads((run_dir / "state.json").read_text())
+    assert state["state"] == "PLAN_APPROVED"
+
+
+def test_rebase_ticket_non_migration_conflict_still_needs_resolver(tmp_path, monkeypatch):
+    from ticket_pr_lifecycle import rebase_ticket_onto_integration
+    import json
+
+    run_dir = tmp_path / "runs" / "T019"
+    run_dir.mkdir(parents=True)
+    (run_dir / "state.json").write_text(json.dumps({"state": "PLAN_APPROVED"}))
+
+    def fake_run(cmd, **kwargs):
+        class R:
+            returncode = 0
+            stdout = ""
+            stderr = ""
+        if cmd[:2] == ["git", "fetch"]:
+            return R()
+        if cmd[:2] == ["git", "merge-base"]:
+            return type("R", (), {"returncode": 0, "stdout": "base\n", "stderr": ""})()
+        if cmd[:2] == ["git", "rev-parse"]:
+            return type("R", (), {"returncode": 0, "stdout": "main-tip\n", "stderr": ""})()
+        if cmd[:2] == ["git", "rebase"]:
+            return type("R", (), {"returncode": 1, "stdout": "", "stderr": "conflict"})()
+        if cmd[:3] == ["git", "diff", "--name-only"]:
+            return type(
+                "R",
+                (),
+                {
+                    "returncode": 0,
+                    "stdout": "apps/api/src/services/catalog-sync-service.ts\n",
+                    "stderr": "",
+                },
+            )()
+        return R()
+
+    monkeypatch.setattr("ticket_pr_lifecycle.subprocess.run", fake_run)
+    monkeypatch.setattr("ticket_pr_lifecycle.resolve_integration_branch", lambda *a, **k: "main")
+    monkeypatch.setattr("ticket_pr_lifecycle._log", lambda *a, **k: None)
+
+    ok, conflicted = rebase_ticket_onto_integration("T019", run_dir, cwd=tmp_path)
+    assert ok is False
+    assert conflicted == ["apps/api/src/services/catalog-sync-service.ts"]
+    state = json.loads((run_dir / "state.json").read_text())
+    assert state["state"] == "CONFLICT_RESOLUTION_NEEDED"

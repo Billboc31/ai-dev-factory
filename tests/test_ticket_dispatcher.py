@@ -638,3 +638,71 @@ def test_same_phase_parallel_candidates_survive_phase_gate(env):
     result = dispatcher.get_recommended_tickets(db, root, mode="advisory")
     runnable = sorted(r["ticket_id"] for r in result["recommendations"])
     assert runnable == ["T002", "T003"]
+
+
+# ── Schema hotspot mutex ─────────────────────────────────────────────────────
+
+def test_schema_hotspot_mutex_keeps_one_of_two_migration_tickets(env):
+    db, root = env["db"], env["root"]
+    batch_id = "B0001"
+    _write_ticket_md(
+        root, "T020",
+        body="Add drizzle migration for release lifecycle under apps/api/migrations/.",
+    )
+    _write_ticket_md(
+        root, "T023",
+        body="Add drizzle migration for plex source type under apps/api/migrations/.",
+    )
+    _write_ticket_md(root, "T030", body="Build a React settings page UI.")
+    for ticket_id in ("T020", "T023", "T030"):
+        _seed_ticket_runtime(db, ticket_id)
+        _seed_intelligence(db, ticket_id, queue_rank=10 if ticket_id == "T023" else 5)
+        _seed_ready_candidate(db, ticket_id)
+        _seed_rules_eligible(db, ticket_id)
+    _seed_dispatching_batch(db, batch_id, ["T020", "T023", "T030"])
+    for ticket_id in ("T020", "T023", "T030"):
+        _seed_dependency_analysis(
+            db, batch_id=batch_id, ticket_id=ticket_id, execution_phase=1,
+        )
+
+    result = dispatcher.get_recommended_tickets(db, root, mode="advisory")
+    runnable = [r["ticket_id"] for r in result["recommendations"]]
+    assert "T030" in runnable
+    hotspot_runnable = [tid for tid in runnable if tid in {"T020", "T023"}]
+    assert len(hotspot_runnable) == 1
+    blocked = {b["ticket_id"]: b for b in result["blocked"]}
+    other = "T023" if hotspot_runnable[0] == "T020" else "T020"
+    assert blocked[other]["status"] == "SCHEMA_HOTSPOT_BLOCKED"
+    assert blocked[other]["blocking_step"] == "schema_hotspot_mutex"
+    assert f"waiting on {hotspot_runnable[0]}" in blocked[other]["reason"]
+
+
+def test_schema_hotspot_mutex_blocks_when_holder_already_coding(env):
+    db, root = env["db"], env["root"]
+    batch_id = "B0001"
+    _write_ticket_md(
+        root, "T020",
+        body="Add drizzle migration for release lifecycle.",
+    )
+    _write_ticket_md(
+        root, "T023",
+        body="Add drizzle migration for plex availability.",
+    )
+    _seed_ticket_runtime(db, "T020", state="IMPLEMENTATION_APPROVED")
+    _seed_ticket_runtime(db, "T023", state="INIT")
+    for ticket_id in ("T020", "T023"):
+        _seed_intelligence(db, ticket_id)
+        _seed_ready_candidate(db, ticket_id)
+        _seed_rules_eligible(db, ticket_id)
+    _seed_dispatching_batch(db, batch_id, ["T020", "T023"])
+    for ticket_id in ("T020", "T023"):
+        _seed_dependency_analysis(
+            db, batch_id=batch_id, ticket_id=ticket_id, execution_phase=1,
+        )
+
+    result = dispatcher.get_recommended_tickets(db, root, mode="advisory")
+    runnable = [r["ticket_id"] for r in result["recommendations"]]
+    assert "T023" not in runnable
+    blocked = {b["ticket_id"]: b for b in result["blocked"]}
+    assert blocked["T023"]["status"] == "SCHEMA_HOTSPOT_BLOCKED"
+    assert "waiting on T020" in blocked["T023"]["reason"]
