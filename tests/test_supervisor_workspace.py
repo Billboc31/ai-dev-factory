@@ -251,23 +251,36 @@ def test_workspace_ai_prefers_claude_code_cli(monkeypatch, tmp_path):
     import services.supervisor.main as sup_main
 
     payload = json.dumps(_ai_response(reply="ok via claude code"))
+    project_dir = tmp_path / "my-project"
+    project_dir.mkdir()
 
     class FakeProc:
         returncode = 0
         stdout = payload
         stderr = ""
 
+    seen: dict = {}
+
     def fake_run(cmd, **kwargs):
         assert cmd[0] == "claude"
         assert "--print" in cmd
         assert kwargs.get("input")
+        seen["cwd"] = kwargs.get("cwd")
         return FakeProc()
 
-    with patch("services.supervisor.main.subprocess.run", side_effect=fake_run):
-        result = sup_main._call_workspace_ai("ctx", [{"role": "user", "content": "hi"}])
+    with patch(
+        "services.supervisor.main._resolve_workspace_project_cwd",
+        return_value=project_dir,
+    ), patch("services.supervisor.main.subprocess.run", side_effect=fake_run):
+        result = sup_main._call_workspace_ai(
+            "ctx",
+            [{"role": "user", "content": "hi"}],
+            project_id="my-project",
+        )
 
     assert result["reply"] == "ok via claude code"
     assert result["intent"] == "informational"
+    assert seen["cwd"] == str(project_dir)
 
 
 def test_workspace_ai_falls_back_to_http_when_cli_missing(monkeypatch, tmp_path):

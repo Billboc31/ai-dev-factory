@@ -3706,6 +3706,24 @@ def _execute_recovery(proposal_id: str, project_root: Path) -> dict:
     }
 
 
+def _resolve_workspace_project_cwd(project_id: str) -> Path | None:
+    """Host path where Claude Code should run for this workspace project."""
+    config = _load_workspace_projects_config()
+    project_block = config.get("projects", {}).get(project_id) or {}
+    repo_path = (project_block.get("repository_path") or "").strip()
+    if repo_path:
+        path = Path(mapper.map(repo_path))
+        if path.is_dir():
+            return path
+
+    project_root_str = _lookup_project_root_from_control_api(project_id)
+    if project_root_str:
+        path = Path(mapper.map(project_root_str))
+        if path.is_dir():
+            return path
+    return None
+
+
 def _workspace_unavailable_reply(detail: str | None = None) -> dict:
     reply = "The AI assistant is temporarily unavailable. Please try again in a moment."
     if detail:
@@ -3764,7 +3782,12 @@ def _format_workspace_cli_prompt(project_context: str, messages: list[dict]) -> 
     return "\n".join(lines)
 
 
-def _call_workspace_ai_via_claude_code(project_context: str, messages: list[dict]) -> dict | None:
+def _call_workspace_ai_via_claude_code(
+    project_context: str,
+    messages: list[dict],
+    *,
+    cwd: Path | None = None,
+) -> dict | None:
     """Invoke Claude Code CLI. Returns None when CLI cannot be used."""
     raw_cmd = _workspace_exec_cmd()
     try:
@@ -3787,6 +3810,11 @@ def _call_workspace_ai_via_claude_code(project_context: str, messages: list[dict
     timeout = int(os.environ.get("WORKSPACE_AI_TIMEOUT", "120"))
     env = dict(os.environ)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    run_cwd = str(cwd) if cwd is not None else None
+    if run_cwd:
+        logger.info("workspace: Claude Code cwd=%s cmd=%s", run_cwd, command[0])
+    else:
+        logger.warning("workspace: Claude Code cwd unset — using supervisor process cwd")
 
     try:
         proc = subprocess.run(
@@ -3796,6 +3824,7 @@ def _call_workspace_ai_via_claude_code(project_context: str, messages: list[dict
             text=True,
             timeout=timeout,
             env=env,
+            cwd=run_cwd,
             check=False,
         )
     except FileNotFoundError:
@@ -3853,9 +3882,15 @@ def _call_workspace_ai_via_anthropic_http(project_context: str, messages: list[d
     return _parse_workspace_ai_text(text)
 
 
-def _call_workspace_ai(project_context: str, messages: list[dict]) -> dict:
+def _call_workspace_ai(
+    project_context: str,
+    messages: list[dict],
+    *,
+    project_id: str | None = None,
+) -> dict:
     """Call the workspace AI via Claude Code (preferred) or Anthropic HTTP fallback."""
-    result = _call_workspace_ai_via_claude_code(project_context, messages)
+    cwd = _resolve_workspace_project_cwd(project_id) if project_id else None
+    result = _call_workspace_ai_via_claude_code(project_context, messages, cwd=cwd)
     if result is not None:
         return result
 
@@ -3995,7 +4030,7 @@ def workspace_chat(project_id: str, body: WorkspaceChatRequest):
     messages.append({"role": "user", "content": body.message})
 
     context = _workspace_project_context(project_id)
-    result = _call_workspace_ai(context, messages)
+    result = _call_workspace_ai(context, messages, project_id=project_id)
 
     intent = result.get("intent", "informational")
     proposed_action = result.get("proposed_action")
