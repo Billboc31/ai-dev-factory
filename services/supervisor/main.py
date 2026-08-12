@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import signal
 import subprocess
 import sys
@@ -2917,7 +2918,9 @@ def auto_fix_loop_list(project_id: str):
 # Architecture:
 #   Frontend → Control API /projects/{id}/workspace/* (proxy)
 #            → Supervisor /workspace/projects/{id}/* (this section)
-#            → Anthropic API (httpx, ANTHROPIC_API_KEY)
+#            → Claude Code CLI (DAEMON_EXEC_CMD / WORKSPACE_EXEC_CMD), same auth
+#              as ticket workers; optional fallback to Anthropic HTTP API when
+#              ANTHROPIC_API_KEY is set
 #            → existing Supervisor capabilities for confirmed actions
 #
 # Security:
@@ -3703,8 +3706,122 @@ def _execute_recovery(proposal_id: str, project_root: Path) -> dict:
     }
 
 
-def _call_workspace_ai(project_context: str, messages: list[dict]) -> dict:
-    """Call the Anthropic API via httpx and return a parsed workspace response."""
+def _workspace_unavailable_reply(detail: str | None = None) -> dict:
+    reply = "The AI assistant is temporarily unavailable. Please try again in a moment."
+    if detail:
+        logger.error("workspace: AI call failed: %s", detail)
+    return {
+        "reply": reply,
+        "intent": "informational",
+        "proposed_action": None,
+        "issue_draft": None,
+        "confirmation_required": False,
+    }
+
+
+def _workspace_exec_cmd() -> str:
+    """Resolve Claude Code command for the AI workspace (same family as daemons)."""
+    return (
+        (os.environ.get("WORKSPACE_EXEC_CMD") or "").strip()
+        or (os.environ.get("DAEMON_EXEC_CMD") or "").strip()
+        or (_daemon_exec_cmd or "").strip()
+        or "claude --dangerously-skip-permissions --model sonnet"
+    )
+
+
+def _parse_workspace_ai_text(text: str) -> dict:
+    """Parse model stdout into the workspace JSON response shape."""
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r"\{[\s\S]*\}", text)
+        if m:
+            try:
+                return json.loads(m.group())
+            except json.JSONDecodeError:
+                pass
+    return {
+        "reply": text.strip() or "Empty response from AI provider.",
+        "intent": "informational",
+        "proposed_action": None,
+        "issue_draft": None,
+        "confirmation_required": False,
+    }
+
+
+def _format_workspace_cli_prompt(project_context: str, messages: list[dict]) -> str:
+    system = f"{_WORKSPACE_SYSTEM_PROMPT}\n\n## Live project context\n\n{project_context}"
+    lines = [system, "", "## Conversation", ""]
+    for turn in messages:
+        role = turn.get("role", "user")
+        content = turn.get("content", "")
+        lines.append(f"{role}: {content}")
+        lines.append("")
+    lines.append(
+        "Respond with ONLY the JSON object described in RESPONSE FORMAT. "
+        "No markdown fences, no prose outside the JSON."
+    )
+    return "\n".join(lines)
+
+
+def _call_workspace_ai_via_claude_code(project_context: str, messages: list[dict]) -> dict | None:
+    """Invoke Claude Code CLI. Returns None when CLI cannot be used."""
+    raw_cmd = _workspace_exec_cmd()
+    try:
+        command = shlex.split(raw_cmd)
+    except ValueError as exc:
+        logger.error("workspace: invalid WORKSPACE/DAEMON_EXEC_CMD %r: %s", raw_cmd, exc)
+        return None
+    if not command:
+        return None
+    if "--print" not in command and "-p" not in command:
+        command = command + ["--print"]
+
+    # Ensure a model is set when using the stock Claude CLI without one.
+    if command[0] in ("claude", "claude-code") and "--model" not in command:
+        model = (os.environ.get("WORKSPACE_AI_MODEL") or "").strip()
+        if model:
+            command.extend(["--model", model])
+
+    prompt = _format_workspace_cli_prompt(project_context, messages)
+    timeout = int(os.environ.get("WORKSPACE_AI_TIMEOUT", "120"))
+    env = dict(os.environ)
+    env["PYTHONDONTWRITEBYTECODE"] = "1"
+
+    try:
+        proc = subprocess.run(
+            command,
+            input=prompt,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            env=env,
+            check=False,
+        )
+    except FileNotFoundError:
+        logger.warning("workspace: Claude Code binary not found (%s)", command[0])
+        return None
+    except subprocess.TimeoutExpired:
+        return _workspace_unavailable_reply(f"Claude Code timed out after {timeout}s")
+    except Exception as exc:
+        return _workspace_unavailable_reply(str(exc))
+
+    if proc.returncode != 0:
+        detail = (proc.stderr or proc.stdout or "").strip()[:500]
+        return _workspace_unavailable_reply(
+            f"Claude Code rc={proc.returncode}: {detail or 'no output'}"
+        )
+    text = (proc.stdout or "").strip()
+    if not text:
+        return _workspace_unavailable_reply("Claude Code returned empty stdout")
+    return _parse_workspace_ai_text(text)
+
+
+def _call_workspace_ai_via_anthropic_http(project_context: str, messages: list[dict]) -> dict | None:
+    """Optional HTTP fallback when ANTHROPIC_API_KEY is configured."""
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    if not api_key:
+        return None
     try:
         import httpx as _httpx
     except ImportError:
@@ -3716,19 +3833,8 @@ def _call_workspace_ai(project_context: str, messages: list[dict]) -> dict:
             "confirmation_required": False,
         }
 
-    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
-    if not api_key:
-        return {
-            "reply": "ANTHROPIC_API_KEY is not configured; AI workspace unavailable.",
-            "intent": "informational",
-            "proposed_action": None,
-            "issue_draft": None,
-            "confirmation_required": False,
-        }
-
     model = os.environ.get("WORKSPACE_AI_MODEL", "claude-sonnet-4-6")
     system = f"{_WORKSPACE_SYSTEM_PROMPT}\n\n## Live project context\n\n{project_context}"
-
     try:
         resp = _httpx.post(
             "https://api.anthropic.com/v1/messages",
@@ -3743,27 +3849,27 @@ def _call_workspace_ai(project_context: str, messages: list[dict]) -> dict:
         resp.raise_for_status()
         text = resp.json()["content"][0]["text"]
     except Exception as exc:
-        logger.error("workspace: AI call failed: %s", exc, exc_info=True)
-        return {
-            "reply": "The AI assistant is temporarily unavailable. Please try again in a moment.",
-            "intent": "informational",
-            "proposed_action": None,
-            "issue_draft": None,
-            "confirmation_required": False,
-        }
+        return _workspace_unavailable_reply(str(exc))
+    return _parse_workspace_ai_text(text)
 
-    import re as _re
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        m = _re.search(r"\{[\s\S]*\}", text)
-        if m:
-            try:
-                return json.loads(m.group())
-            except json.JSONDecodeError:
-                pass
+
+def _call_workspace_ai(project_context: str, messages: list[dict]) -> dict:
+    """Call the workspace AI via Claude Code (preferred) or Anthropic HTTP fallback."""
+    result = _call_workspace_ai_via_claude_code(project_context, messages)
+    if result is not None:
+        return result
+
+    result = _call_workspace_ai_via_anthropic_http(project_context, messages)
+    if result is not None:
+        return result
+
     return {
-        "reply": text,
+        "reply": (
+            "AI workspace unavailable: Claude Code could not be started and "
+            "ANTHROPIC_API_KEY is not configured. Set DAEMON_EXEC_CMD (or "
+            "WORKSPACE_EXEC_CMD) to a working `claude --print …` command, "
+            "or set ANTHROPIC_API_KEY as a fallback."
+        ),
         "intent": "informational",
         "proposed_action": None,
         "issue_draft": None,

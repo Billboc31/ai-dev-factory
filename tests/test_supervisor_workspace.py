@@ -28,7 +28,10 @@ def supervisor_app(tmp_path, monkeypatch):
     """Load the supervisor app with minimal env so workspace endpoints are reachable."""
     monkeypatch.setenv("SUPERVISOR_PROJECT_ROOT", str(tmp_path))
     monkeypatch.setenv("CONTROL_API_URL", "http://localhost:9999")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv(
+        "DAEMON_EXEC_CMD",
+        "claude --dangerously-skip-permissions --model sonnet",
+    )
 
     # Prevent actual filesystem / process side-effects
     import services.supervisor.main as sup_main
@@ -233,6 +236,60 @@ def test_ai_error_returns_generic_message(client):
     assert "unavailable" in body["reply"].lower()
     assert "x-api-key" not in body["reply"]
     assert "sk-" not in body["reply"]
+
+
+def test_workspace_ai_prefers_claude_code_cli(monkeypatch, tmp_path):
+    """Workspace AI uses DAEMON_EXEC_CMD / Claude Code, not ANTHROPIC_API_KEY."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv(
+        "DAEMON_EXEC_CMD",
+        "claude --dangerously-skip-permissions --model sonnet",
+    )
+    monkeypatch.setenv("SUPERVISOR_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("CONTROL_API_URL", "http://localhost:9999")
+
+    import services.supervisor.main as sup_main
+
+    payload = json.dumps(_ai_response(reply="ok via claude code"))
+
+    class FakeProc:
+        returncode = 0
+        stdout = payload
+        stderr = ""
+
+    def fake_run(cmd, **kwargs):
+        assert cmd[0] == "claude"
+        assert "--print" in cmd
+        assert kwargs.get("input")
+        return FakeProc()
+
+    with patch("services.supervisor.main.subprocess.run", side_effect=fake_run):
+        result = sup_main._call_workspace_ai("ctx", [{"role": "user", "content": "hi"}])
+
+    assert result["reply"] == "ok via claude code"
+    assert result["intent"] == "informational"
+
+
+def test_workspace_ai_falls_back_to_http_when_cli_missing(monkeypatch, tmp_path):
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+    monkeypatch.setenv("DAEMON_EXEC_CMD", "claude --dangerously-skip-permissions")
+    monkeypatch.setenv("SUPERVISOR_PROJECT_ROOT", str(tmp_path))
+    monkeypatch.setenv("CONTROL_API_URL", "http://localhost:9999")
+
+    import services.supervisor.main as sup_main
+
+    http_payload = _ai_response(reply="ok via http")
+
+    with patch(
+        "services.supervisor.main._call_workspace_ai_via_claude_code",
+        return_value=None,
+    ), patch(
+        "services.supervisor.main._call_workspace_ai_via_anthropic_http",
+        return_value=http_payload,
+    ):
+        result = sup_main._call_workspace_ai("ctx", [{"role": "user", "content": "hi"}])
+
+    assert result["reply"] == "ok via http"
 
 
 # ---------------------------------------------------------------------------
